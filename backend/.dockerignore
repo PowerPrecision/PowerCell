@@ -1,0 +1,44 @@
+# Ignorar
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.eggs/
+*.egg-info/
+*.egg
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+test_reports/
+
+# Logs
+*.log
+
+# Temp files
+temp/
+tmp/
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db

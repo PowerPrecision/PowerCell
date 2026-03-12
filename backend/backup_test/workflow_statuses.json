@@ -1,0 +1,156 @@
+[
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e899"
+    },
+    "id": "0a08e283-232c-4b5e-9ea3-fdb7d7e43b71",
+    "name": "clientes_espera",
+    "label": "Clientes em Espera",
+    "order": 1,
+    "color": "yellow",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e89a"
+    },
+    "id": "e12ce5db-1c48-486b-8564-3e820bbbfa92",
+    "name": "fase_documental",
+    "label": "Fase Documental",
+    "order": 2,
+    "color": "blue",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e89b"
+    },
+    "id": "bdd7d94b-c665-486f-97f8-b30008656ac5",
+    "name": "fase_documental_ii",
+    "label": "Fase Documental II",
+    "order": 3,
+    "color": "blue",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e89c"
+    },
+    "id": "24545d0c-bb7f-4b15-b633-8f2d3eb6e70a",
+    "name": "enviado_bruno",
+    "label": "Enviado ao Bruno",
+    "order": 4,
+    "color": "purple",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e89d"
+    },
+    "id": "5ca84faf-4e85-41fa-b3cc-c6ebece12fc7",
+    "name": "enviado_luis",
+    "label": "Enviado ao Luís",
+    "order": 5,
+    "color": "purple",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e89e"
+    },
+    "id": "8c9f135c-063f-46dc-853b-13ac9030f4f1",
+    "name": "enviado_bcp_rui",
+    "label": "Enviado BCP Rui",
+    "order": 6,
+    "color": "purple",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e89f"
+    },
+    "id": "d5431795-e785-4ff4-a602-c79739b85828",
+    "name": "entradas_precision",
+    "label": "Entradas Precision",
+    "order": 7,
+    "color": "orange",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e8a0"
+    },
+    "id": "eb971541-660e-44f0-925e-da93bb559f39",
+    "name": "fase_bancaria",
+    "label": "Fase Bancária - Pré Aprovação",
+    "order": 8,
+    "color": "orange",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e8a1"
+    },
+    "id": "1891c802-65d4-4ac0-8331-671c1a473e92",
+    "name": "fase_visitas",
+    "label": "Fase de Visitas",
+    "order": 9,
+    "color": "blue",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e8a2"
+    },
+    "id": "d59b50d3-0544-4fe1-9ecc-c1598d8c3020",
+    "name": "ch_aprovado",
+    "label": "CH Aprovado - Avaliação",
+    "order": 10,
+    "color": "green",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e8a3"
+    },
+    "id": "87795499-a309-45ca-9b47-68d4aacc30de",
+    "name": "fase_escritura",
+    "label": "Fase de Escritura",
+    "order": 11,
+    "color": "green",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e8a4"
+    },
+    "id": "65eded80-6bcf-4211-94b3-00690259b335",
+    "name": "escritura_agendada",
+    "label": "Escritura Agendada",
+    "order": 12,
+    "color": "green",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e8a5"
+    },
+    "id": "4ba08ca5-ec32-4758-96b9-b7a974ef5025",
+    "name": "concluidos",
+    "label": "Concluídos",
+    "order": 13,
+    "color": "green",
+    "is_default": true
+  },
+  {
+    "_id": {
+      "$oid": "69a6bae2131590e4a1b2e8a6"
+    },
+    "id": "d61489ee-abc6-4ba6-bac2-317cea5b48d0",
+    "name": "desistencias",
+    "label": "Desistências",
+    "order": 14,
+    "color": "red",
+    "is_default": true
+  }
+]

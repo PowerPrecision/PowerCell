@@ -1,0 +1,150 @@
+"""
+====================================================================
+ROTAS DE CLIENTES DO UTILIZADOR - CREDITOIMO
+====================================================================
+Endpoints para gestão de "Os Meus Clientes" - clientes atribuídos
+ao utilizador actual.
+====================================================================
+"""
+import logging
+from typing import List, Optional
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from database import db
+from models.auth import UserRole
+from services.auth import get_current_user, require_roles
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/my-clients", tags=["My Clients"])
+
+
+@router.get("")
+async def get_my_clients(user: dict = Depends(require_roles([
+    UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
+    UserRole.ADMIN, UserRole.CEO
+]))):
+    """
+    Obter lista de clientes atribuídos ao utilizador actual.
+    
+    Retorna uma lista com:
+    - Nome do cliente
+    - Fase do processo
+    - Ações pendentes (tarefas, documentos a atualizar)
+    
+    Permissões:
+    - Consultor: Apenas os seus clientes (assigned_consultor_id)
+    - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_id ou criados por eles)
+    - Admin/CEO: Todos os clientes (para supervisão)
+    """
+    user_id = user["id"]
+    user_email = user.get("email", "")
+    role = user["role"]
+    
+    # Construir query baseada no papel do utilizador
+    if role == UserRole.CONSULTOR:
+        query = {"assigned_consultor_id": user_id}
+    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+        # Intermediários vêem processos atribuídos a eles OU criados por eles
+        query = {
+            "$or": [
+                {"assigned_mediador_id": user_id},
+                {"created_by": user_email}
+            ]
+        }
+    else:
+        # Admin/CEO vêem todos
+        query = {}
+    
+    # Buscar processos
+    processes = await db.processes.find(
+        query,
+        {
+            "_id": 0,
+            "id": 1,
+            "process_number": 1,
+            "client_name": 1,
+            "client_email": 1,
+            "client_phone": 1,
+            "status": 1,
+            "created_at": 1,
+            "updated_at": 1,
+            "assigned_consultor_id": 1,
+            "assigned_mediador_id": 1,
+            "next_action": 1
+        }
+    ).sort("updated_at", -1).limit(100).to_list(100)
+    
+    # Para cada processo, buscar tarefas pendentes detalhadas
+    for process in processes:
+        pending_tasks = await db.tasks.find(
+            {
+                "process_id": process["id"],
+                "status": {"$ne": "completed"}
+            },
+            {"_id": 0, "id": 1, "title": 1, "priority": 1, "due_date": 1}
+        ).sort("due_date", 1).limit(5).to_list(5)
+        
+        process["pending_tasks"] = len(pending_tasks)
+        process["pending_actions"] = [
+            {
+                "type": "task",
+                "title": t.get("title", "Tarefa sem título"),
+                "priority": t.get("priority", "medium"),
+                "due_date": t.get("due_date")
+            }
+            for t in pending_tasks
+        ]
+    
+    return {"clients": processes, "total": len(processes)}
+
+
+@router.get("/stats")
+async def get_my_clients_stats(user: dict = Depends(require_roles([
+    UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
+    UserRole.ADMIN, UserRole.CEO
+]))):
+    """
+    Obter estatísticas dos clientes do utilizador.
+    """
+    user_id = user["id"]
+    role = user["role"]
+    
+    # Construir query baseada no papel do utilizador
+    if role == UserRole.CONSULTOR:
+        query = {"assigned_consultor_id": user_id}
+    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+        query = {
+            "$or": [
+                {"assigned_mediador_id": user_id},
+                {"created_by": user.get("email", "")}
+            ]
+        }
+    else:
+        query = {}
+    
+    # Contar por status
+    pipeline = [
+        {"$match": query},
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]
+    
+    status_counts = await db.processes.aggregate(pipeline).to_list(20)
+    
+    # Total de clientes
+    total = sum(s["count"] for s in status_counts)
+    
+    # Tarefas pendentes
+    process_ids = [p["id"] async for p in db.processes.find(query, {"_id": 0, "id": 1})]
+    pending_tasks = await db.tasks.count_documents({
+        "process_id": {"$in": process_ids},
+        "status": {"$ne": "completed"}
+    }) if process_ids else 0
+    
+    return {
+        "total_clients": total,
+        "by_status": {s["_id"]: s["count"] for s in status_counts},
+        "pending_tasks": pending_tasks
+    }

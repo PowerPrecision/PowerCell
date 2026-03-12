@@ -1,0 +1,17 @@
+{
+  "exported_at": "2026-03-05T15:39:50.642840+00:00",
+  "source_db": "powerprecision_dev",
+  "collections": {
+    "system_config": 1,
+    "properties": 0,
+    "history": 1,
+    "processes": 151,
+    "users": 10,
+    "settings": 1,
+    "system_error_logs": 1,
+    "tasks": 0,
+    "refresh_tokens": 51,
+    "workflow_statuses": 14,
+    "backup_history": 1
+  }
+}

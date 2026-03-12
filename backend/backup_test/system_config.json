@@ -1,0 +1,99 @@
+[
+  {
+    "_id": "main",
+    "storage": {
+      "provider": "onedrive",
+      "aws_access_key_id": null,
+      "aws_secret_access_key": null,
+      "aws_bucket_name": null,
+      "aws_region": null,
+      "onedrive_client_id": "trello-sync-1",
+      "onedrive_client_secret": "trello-sync-1",
+      "onedrive_tenant_id": "trello-sync-1",
+      "onedrive_redirect_uri": "https://file-refresh-ui.preview.emergentagent.com/api/onedrive/callback",
+      "onedrive_shared_url": null,
+      "google_client_id": null,
+      "google_client_secret": null,
+      "google_redirect_uri": null,
+      "google_folder_id": null,
+      "dropbox_app_key": null,
+      "dropbox_app_secret": null,
+      "dropbox_access_token": null
+    },
+    "email": {
+      "provider": "smtp",
+      "smtp_server": "mail.precisioncredito.pt",
+      "smtp_port": 465,
+      "smtp_user": null,
+      "smtp_password": "F2B412ROWP6M",
+      "smtp_use_ssl": true,
+      "imap_server": null,
+      "imap_port": 993,
+      "imap_user": null,
+      "imap_password": null,
+      "smtp_server_2": null,
+      "smtp_port_2": 465,
+      "smtp_user_2": null,
+      "smtp_password_2": null,
+      "smtp_use_ssl_2": true,
+      "imap_server_2": null,
+      "imap_port_2": 993,
+      "imap_user_2": null,
+      "imap_password_2": null
+    },
+    "ai": {
+      "provider": "emergent",
+      "api_key": "sk-emergent-8EfF9FcC7A59dD1Ef5",
+      "model": "gpt-4o-mini",
+      "max_tokens": 4000
+    },
+    "trello": {
+      "enabled": true,
+      "api_key": "real_api_key_123",
+      "api_token": "ATTAbc123456789_new_token",
+      "board_id": "MyXVV27F",
+      "webhook_base_url": "https://file-refresh-ui.preview.emergentagent.com"
+    },
+    "settings": {
+      "company_name": "Power Real Estate",
+      "company_subtitle": "& Precision Crédito",
+      "logo_url": null,
+      "primary_color": "#0F766E",
+      "secondary_color": "#FCD34D",
+      "timezone": "Europe/Lisbon",
+      "language": "pt-PT",
+      "currency": "EUR",
+      "date_format": "dd/MM/yyyy"
+    },
+    "credit_services": {
+      "primary_provider": "hcpro",
+      "enabled_providers": [
+        "hcpro",
+        "bcp"
+      ],
+      "auto_assign_mediator": true,
+      "default_interest_rate": null,
+      "max_loan_to_value": 90.0,
+      "min_income_ratio": 35.0,
+      "default_term_years": 30,
+      "simulation_validity_days": 30,
+      "hcpro_url": null,
+      "hcpro_user": null,
+      "hcpro_password": null,
+      "decisoes_url": null,
+      "decisoes_user": null,
+      "decisoes_password": null,
+      "doutorfinancas_url": null,
+      "doutorfinancas_user": null,
+      "doutorfinancas_password": null,
+      "custom_portal_name": null,
+      "custom_portal_url": null,
+      "custom_portal_user": null,
+      "custom_portal_password": null,
+      "secondary_provider": null
+    },
+    "setup_completed": false,
+    "created_at": "2026-03-03T11:05:54.374449+00:00",
+    "updated_at": "2026-03-04T16:23:51.078801+00:00"
+  }
+]

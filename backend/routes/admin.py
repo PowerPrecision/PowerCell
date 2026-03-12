@@ -1,0 +1,1724 @@
+import uuid
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from database import db
+from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
+from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
+from services.auth import hash_password, require_roles
+
+
+router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+# ============== WORKFLOW STATUS ROUTES ==============
+
+@router.get("/workflow-statuses", response_model=List[WorkflowStatusResponse])
+async def get_workflow_statuses(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.GESTOR_DOCUMENTOS, UserRole.INDEXACAO, UserRole.INTERMEDIARIO, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))):
+    """Get all workflow statuses ordered by order field"""
+    statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    return [WorkflowStatusResponse(**s) for s in statuses]
+
+
+@router.post("/workflow-statuses", response_model=WorkflowStatusResponse)
+async def create_workflow_status(data: WorkflowStatusCreate, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    """Create a new workflow status"""
+    existing = await db.workflow_statuses.find_one({"name": data.name})
+    if existing:
+        raise HTTPException(status_code=400, detail="Estado já existe")
+    
+    status_doc = {
+        "id": str(uuid.uuid4()),
+        "name": data.name,
+        "label": data.label,
+        "order": data.order,
+        "color": data.color,
+        "description": data.description,
+        "is_default": False
+    }
+    
+    await db.workflow_statuses.insert_one(status_doc)
+    return WorkflowStatusResponse(**{k: v for k, v in status_doc.items() if k != "_id"})
+
+
+@router.put("/workflow-statuses/{status_id}", response_model=WorkflowStatusResponse)
+async def update_workflow_status(status_id: str, data: WorkflowStatusUpdate, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    """Update a workflow status"""
+    status = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
+    if not status:
+        raise HTTPException(status_code=404, detail="Estado não encontrado")
+    
+    update_data = {}
+    if data.label is not None:
+        update_data["label"] = data.label
+    if data.order is not None:
+        update_data["order"] = data.order
+    if data.color is not None:
+        update_data["color"] = data.color
+    if data.description is not None:
+        update_data["description"] = data.description
+    
+    if update_data:
+        await db.workflow_statuses.update_one({"id": status_id}, {"$set": update_data})
+    
+    updated = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
+    return WorkflowStatusResponse(**updated)
+
+
+@router.delete("/workflow-statuses/{status_id}")
+async def delete_workflow_status(status_id: str, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    """Delete a workflow status"""
+    status = await db.workflow_statuses.find_one({"id": status_id})
+    if not status:
+        raise HTTPException(status_code=404, detail="Estado não encontrado")
+    
+    if status.get("is_default"):
+        raise HTTPException(status_code=400, detail="Não pode eliminar estados padrão")
+    
+    process_count = await db.processes.count_documents({"status": status["name"]})
+    if process_count > 0:
+        raise HTTPException(status_code=400, detail=f"Existem {process_count} processos com este estado")
+    
+    await db.workflow_statuses.delete_one({"id": status_id})
+    return {"message": "Estado eliminado"}
+
+
+# ============== USER MANAGEMENT ROUTES ==============
+
+@router.get("/users", response_model=List[UserResponse])
+async def get_users(role: Optional[str] = None, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))):
+    """Lista utilizadores. Acessível a Admin, CEO, Diretor, Consultor e Intermediário."""
+    query = {}
+    if role:
+        query["role"] = role
+    
+    users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
+    return [UserResponse(**u) for u in users]
+
+
+@router.post("/users", response_model=UserResponse)
+async def create_user(data: UserCreate, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    existing = await db.users.find_one({"email": data.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email já registado")
+    
+    # Cliente não é um utilizador do sistema - é um processo
+    if data.role == UserRole.CLIENTE:
+        raise HTTPException(status_code=400, detail="Cliente não pode ser criado como utilizador. O cliente é representado pelo processo.")
+    
+    if data.role not in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS, UserRole.CEO, UserRole.ADMIN]:
+        raise HTTPException(status_code=400, detail="Role inválido")
+    
+    user_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    user_doc = {
+        "id": user_id,
+        "email": data.email,
+        "password": hash_password(data.password),
+        "name": data.name,
+        "phone": data.phone,
+        "role": data.role,
+        "is_active": True,
+        "onedrive_folder": data.onedrive_folder or data.name,
+        "created_at": now
+    }
+    
+    await db.users.insert_one(user_doc)
+    
+    # Associar automaticamente processos do Trello que têm este utilizador atribuído
+    # Verifica se o nome do utilizador corresponde a algum membro atribuído no Trello
+    name_lower = data.name.lower()
+    name_parts = [p for p in name_lower.split() if len(p) >= 3]
+    
+    # Procurar processos com trello_members que corresponda ao nome
+    query = {"trello_members": {"$exists": True, "$ne": []}}
+    processes_to_update = await db.processes.find(query, {"_id": 0, "id": 1, "trello_members": 1}).to_list(1000)
+    
+    updated_count = 0
+    for proc in processes_to_update:
+        members = proc.get("trello_members", [])
+        # Verificar se o nome do utilizador está na lista de membros
+        for member in members:
+            member_lower = member.lower()
+            # Verificar se alguma parte do nome corresponde
+            if any(part in member_lower for part in name_parts):
+                # Determinar qual campo atualizar baseado no role
+                if data.role in [UserRole.CONSULTOR]:
+                    await db.processes.update_one(
+                        {"id": proc["id"]},
+                        {"$set": {"assigned_consultor_id": user_id}}
+                    )
+                    updated_count += 1
+                elif data.role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+                    await db.processes.update_one(
+                        {"id": proc["id"]},
+                        {"$set": {"assigned_mediador_id": user_id}}
+                    )
+                    updated_count += 1
+                break  # Já encontrou match, passar ao próximo processo
+    
+    if updated_count > 0:
+        import logging
+        logging.getLogger(__name__).info(f"Utilizador {data.name} criado e associado a {updated_count} processos automaticamente")
+    
+    return UserResponse(
+        id=user_id,
+        email=data.email,
+        name=data.name,
+        phone=data.phone,
+        role=data.role,
+        created_at=now,
+        onedrive_folder=data.onedrive_folder or data.name
+    )
+
+
+@router.put("/users/{user_id}", response_model=UserResponse)
+async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    
+    update_data = {}
+    if data.name is not None:
+        update_data["name"] = data.name
+    if data.phone is not None:
+        update_data["phone"] = data.phone
+    if data.role is not None:
+        if data.role not in [UserRole.CLIENTE, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS, UserRole.CEO, UserRole.ADMIN]:
+            raise HTTPException(status_code=400, detail="Role inválido")
+        update_data["role"] = data.role
+    if data.is_active is not None:
+        # Proteger admin de ser desactivado
+        target_user = await db.users.find_one({"id": user_id})
+        if target_user and target_user.get("role") == "admin" and data.is_active == False:
+            raise HTTPException(status_code=400, detail="Não é possível desactivar o utilizador administrador")
+        update_data["is_active"] = data.is_active
+    if data.onedrive_folder is not None:
+        update_data["onedrive_folder"] = data.onedrive_folder
+    # Processar alteração de password (apenas admin pode alterar password de outros)
+    if data.password is not None and data.password.strip():
+        update_data["password"] = hash_password(data.password)
+    
+    if update_data:
+        await db.users.update_one({"id": user_id}, {"$set": update_data})
+    
+    updated = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    return UserResponse(**updated)
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: str, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    if user_id == user["id"]:
+        raise HTTPException(status_code=400, detail="Não pode eliminar a própria conta")
+    
+    result = await db.users.delete_one({"id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    return {"message": "Utilizador eliminado"}
+
+
+# ============== IMPERSONATE (VER COMO OUTRO UTILIZADOR) ==============
+
+@router.post("/impersonate/{user_id}")
+async def impersonate_user(user_id: str, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    """
+    Permite ao admin ver o sistema como outro utilizador.
+    Gera um token temporário com os dados do utilizador alvo.
+    
+    O token inclui informação sobre o admin original para auditoria.
+    """
+    from services.auth import create_access_token
+    
+    # Verificar que o utilizador alvo existe
+    target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    
+    # Não permitir impersonate de outro admin
+    if target_user["role"] == UserRole.ADMIN and user_id != user["id"]:
+        raise HTTPException(status_code=403, detail="Não pode personificar outro administrador")
+    
+    # Criar token com dados do utilizador alvo, mas marcar como impersonated
+    token_data = {
+        "sub": target_user["id"],
+        "email": target_user["email"],
+        "role": target_user["role"],
+        "name": target_user["name"],
+        # Informação de auditoria
+        "impersonated_by": user["id"],
+        "impersonated_by_name": user["name"],
+        "is_impersonated": True
+    }
+    
+    access_token = create_access_token(token_data)
+    
+    # Log da acção
+    await db.history.insert_one({
+        "id": str(uuid.uuid4()),
+        "process_id": None,
+        "user_id": user["id"],
+        "user_name": user["name"],
+        "action": f"Admin impersonou utilizador: {target_user['name']} ({target_user['email']})",
+        "field": "impersonate",
+        "old_value": None,
+        "new_value": target_user["id"],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": target_user["id"],
+            "email": target_user["email"],
+            "name": target_user["name"],
+            "role": target_user["role"],
+            "is_impersonated": True,
+            "impersonated_by": user["name"]
+        }
+    }
+
+
+@router.post("/stop-impersonate")
+async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))):
+    """
+    Terminar sessão de impersonate e voltar à conta original.
+    Requer o token do admin original.
+    """
+    from services.auth import create_access_token
+    
+    if not user.get("impersonated_by"):
+        raise HTTPException(status_code=400, detail="Não está em modo de personificação")
+    
+    # Buscar o admin original
+    admin_user = await db.users.find_one({"id": user["impersonated_by"]}, {"_id": 0, "password": 0})
+    if not admin_user:
+        raise HTTPException(status_code=404, detail="Administrador original não encontrado")
+    
+    # Criar novo token para o admin
+    token_data = {
+        "sub": admin_user["id"],
+        "email": admin_user["email"],
+        "role": admin_user["role"],
+        "name": admin_user["name"]
+    }
+    
+    access_token = create_access_token(token_data)
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": admin_user["id"],
+            "email": admin_user["email"],
+            "name": admin_user["name"],
+            "role": admin_user["role"]
+        }
+    }
+
+
+# ============== PROCESS NUMBER MIGRATION ==============
+
+@router.post("/migrate-process-numbers")
+async def migrate_process_numbers(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    """
+    Atribuir números sequenciais a todos os processos que não têm.
+    Os processos são ordenados por data de criação (mais antigos primeiro).
+    """
+    # Buscar processos sem número, ordenados por data de criação
+    processes_without_number = await db.processes.find(
+        {"$or": [{"process_number": {"$exists": False}}, {"process_number": None}]},
+        {"_id": 0, "id": 1, "created_at": 1, "client_name": 1}
+    ).sort("created_at", 1).to_list(10000)
+    
+    if not processes_without_number:
+        return {"message": "Todos os processos já têm número atribuído", "updated": 0}
+    
+    # Obter o maior número existente
+    max_result = await db.processes.find_one(
+        {"process_number": {"$exists": True, "$ne": None}},
+        {"process_number": 1},
+        sort=[("process_number", -1)]
+    )
+    
+    next_number = (max_result["process_number"] + 1) if max_result and max_result.get("process_number") else 1
+    
+    updated_count = 0
+    for process in processes_without_number:
+        await db.processes.update_one(
+            {"id": process["id"]},
+            {"$set": {"process_number": next_number}}
+        )
+        next_number += 1
+        updated_count += 1
+    
+    return {
+        "message": f"Números atribuídos a {updated_count} processos",
+        "updated": updated_count,
+        "first_number": next_number - updated_count,
+        "last_number": next_number - 1
+    }
+
+
+
+
+# ============== NOTIFICATION PREFERENCES ==============
+
+# Default notification preferences
+DEFAULT_NOTIFICATION_PREFS = {
+    "email_new_process": False,  # Novo processo criado
+    "email_status_change": False,  # Mudança de status de processo
+    "email_document_upload": False,  # Documento carregado
+    "email_task_assigned": False,  # Tarefa atribuída
+    "email_deadline_reminder": True,  # Lembrete de prazo (importante)
+    "email_urgent_only": True,  # Apenas urgentes
+    "email_daily_summary": True,  # Resumo diário
+    "email_weekly_report": True,  # Relatório semanal
+    "inapp_new_process": True,
+    "inapp_status_change": True,
+    "inapp_document_upload": True,
+    "inapp_task_assigned": True,
+    "inapp_comments": True,
+    "is_test_user": False,  # Se true, não recebe emails
+}
+
+
+# ============== AI TRAINING DATA (Item 4 - Outros erros/melhorias) ==============
+
+@router.get("/ai-training")
+async def get_ai_training_data(
+    category: str = None,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém os dados de treino personalizados do agente IA.
+    
+    Categorias:
+    - document_types: Tipos de documentos e como classificá-los
+    - field_mappings: Mapeamento de campos para extração
+    - client_patterns: Padrões de nomes de clientes
+    - custom_rules: Regras personalizadas
+    """
+    query = {"type": "ai_training"}
+    if category:
+        query["category"] = category
+    
+    entries = await db.ai_training.find(query, {"_id": 0}).to_list(100)
+    
+    # Agrupar por categoria
+    by_category = {}
+    for entry in entries:
+        cat = entry.get("category", "other")
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append(entry)
+    
+    return {
+        "total": len(entries),
+        "categories": list(by_category.keys()),
+        "data": by_category
+    }
+
+
+@router.post("/ai-training")
+async def add_ai_training_entry(
+    data: dict,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Adiciona uma nova entrada de treino para o agente IA.
+    
+    Body:
+    {
+        "category": "document_types",  // ou field_mappings, client_patterns, custom_rules
+        "title": "Título descritivo",
+        "content": "Conteúdo de treino / instruções para a IA",
+        "examples": ["exemplo1", "exemplo2"],  // Opcional
+        "is_active": true  // Se deve ser usado pelo agente
+    }
+    """
+    required_fields = ["category", "title", "content"]
+    for field in required_fields:
+        if field not in data:
+            raise HTTPException(status_code=400, detail=f"Campo '{field}' é obrigatório")
+    
+    valid_categories = ["document_types", "field_mappings", "client_patterns", "custom_rules", "extraction_tips"]
+    if data["category"] not in valid_categories:
+        raise HTTPException(status_code=400, detail=f"Categoria inválida. Use: {valid_categories}")
+    
+    entry = {
+        "id": str(uuid.uuid4()),
+        "type": "ai_training",
+        "category": data["category"],
+        "title": data["title"],
+        "content": data["content"],
+        "examples": data.get("examples", []),
+        "is_active": data.get("is_active", True),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user.get("email", "admin"),
+        "updated_at": None
+    }
+    
+    await db.ai_training.insert_one(entry)
+    
+    return {
+        "success": True,
+        "entry": {k: v for k, v in entry.items() if k != "_id"}
+    }
+
+
+@router.put("/ai-training/{entry_id}")
+async def update_ai_training_entry(
+    entry_id: str,
+    data: dict,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Actualiza uma entrada de treino existente.
+    """
+    existing = await db.ai_training.find_one({"id": entry_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entrada não encontrada")
+    
+    update_data = {}
+    if "title" in data:
+        update_data["title"] = data["title"]
+    if "content" in data:
+        update_data["content"] = data["content"]
+    if "examples" in data:
+        update_data["examples"] = data["examples"]
+    if "is_active" in data:
+        update_data["is_active"] = data["is_active"]
+    if "category" in data:
+        valid_categories = ["document_types", "field_mappings", "client_patterns", "custom_rules", "extraction_tips"]
+        if data["category"] not in valid_categories:
+            raise HTTPException(status_code=400, detail=f"Categoria inválida. Use: {valid_categories}")
+        update_data["category"] = data["category"]
+    
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update_data["updated_by"] = user.get("email", "admin")
+    
+    await db.ai_training.update_one(
+        {"id": entry_id},
+        {"$set": update_data}
+    )
+    
+    updated = await db.ai_training.find_one({"id": entry_id}, {"_id": 0})
+    return {"success": True, "entry": updated}
+
+
+@router.delete("/ai-training/{entry_id}")
+async def delete_ai_training_entry(
+    entry_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Remove uma entrada de treino.
+    """
+    result = await db.ai_training.delete_one({"id": entry_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Entrada não encontrada")
+    
+    return {"success": True, "message": "Entrada removida"}
+
+
+@router.get("/ai-training/prompt")
+async def get_ai_training_prompt(
+    category: str = None,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Gera o prompt de treino consolidado a partir das entradas activas.
+    Este prompt é usado pelo agente IA durante a análise de documentos.
+    """
+    query = {"type": "ai_training", "is_active": True}
+    if category:
+        query["category"] = category
+    
+    entries = await db.ai_training.find(query, {"_id": 0}).sort("category", 1).to_list(100)
+    
+    # Construir prompt por categoria
+    prompt_sections = []
+    
+    # Agrupar por categoria
+    by_category = {}
+    for entry in entries:
+        cat = entry.get("category", "other")
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append(entry)
+    
+    category_titles = {
+        "document_types": "## Tipos de Documentos",
+        "field_mappings": "## Mapeamento de Campos",
+        "client_patterns": "## Padrões de Nomes de Clientes",
+        "custom_rules": "## Regras Personalizadas",
+        "extraction_tips": "## Dicas de Extracção"
+    }
+    
+    for cat, cat_entries in by_category.items():
+        section = category_titles.get(cat, f"## {cat.title()}")
+        section += "\n"
+        
+        for entry in cat_entries:
+            section += f"\n### {entry['title']}\n"
+            section += entry["content"] + "\n"
+            
+            if entry.get("examples"):
+                section += "\nExemplos:\n"
+                for ex in entry["examples"]:
+                    section += f"- {ex}\n"
+        
+        prompt_sections.append(section)
+    
+    full_prompt = "\n\n".join(prompt_sections)
+    
+    return {
+        "prompt": full_prompt,
+        "entries_count": len(entries),
+        "categories": list(by_category.keys())
+    }
+
+
+@router.get("/notification-preferences/{user_id}")
+async def get_notification_preferences(
+    user_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém as preferências de notificação de um utilizador.
+    Admin pode ver/editar de qualquer utilizador.
+    """
+    target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    
+    # Obter preferências da DB ou usar defaults
+    prefs = await db.notification_preferences.find_one({"user_id": user_id}, {"_id": 0})
+    
+    if not prefs:
+        prefs = {**DEFAULT_NOTIFICATION_PREFS, "user_id": user_id}
+    
+    return {
+        "user_id": user_id,
+        "user_email": target_user.get("email"),
+        "user_name": target_user.get("name"),
+        "preferences": prefs
+    }
+
+
+@router.put("/notification-preferences/{user_id}")
+async def update_notification_preferences(
+    user_id: str,
+    preferences: dict,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Actualiza as preferências de notificação de um utilizador.
+    Admin pode editar de qualquer utilizador.
+    """
+    target_user = await db.users.find_one({"id": user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    
+    # Filtrar apenas campos válidos
+    valid_keys = set(DEFAULT_NOTIFICATION_PREFS.keys())
+    filtered_prefs = {k: v for k, v in preferences.items() if k in valid_keys}
+    
+    filtered_prefs["user_id"] = user_id
+    filtered_prefs["updated_at"] = datetime.now(timezone.utc).isoformat()
+    filtered_prefs["updated_by"] = user.get("email", "admin")
+    
+    await db.notification_preferences.update_one(
+        {"user_id": user_id},
+        {"$set": filtered_prefs},
+        upsert=True
+    )
+    
+    return {"success": True, "preferences": filtered_prefs}
+
+
+@router.get("/notification-preferences")
+async def get_all_notification_preferences(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """Lista preferências de todos os utilizadores."""
+    users = await db.users.find({}, {"_id": 0, "id": 1, "email": 1, "name": 1, "role": 1}).to_list(500)
+    
+    result = []
+    for u in users:
+        prefs = await db.notification_preferences.find_one({"user_id": u["id"]}, {"_id": 0})
+        if not prefs:
+            prefs = {**DEFAULT_NOTIFICATION_PREFS, "user_id": u["id"]}
+        
+        result.append({
+            "user_id": u["id"],
+            "email": u.get("email"),
+            "name": u.get("name"),
+            "role": u.get("role"),
+            "receives_email": not prefs.get("is_test_user", False) and (
+                prefs.get("email_urgent_only") or 
+                prefs.get("email_daily_summary") or
+                prefs.get("email_weekly_report")
+            ),
+            "is_test_user": prefs.get("is_test_user", False)
+        })
+    
+    return result
+
+
+@router.post("/notification-preferences/bulk-update")
+async def bulk_update_notification_preferences(
+    data: dict,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Actualiza preferências de múltiplos utilizadores de uma vez.
+    
+    Body:
+    {
+        "user_ids": ["id1", "id2"],
+        "preferences": {"is_test_user": true}
+    }
+    """
+    user_ids = data.get("user_ids", [])
+    preferences = data.get("preferences", {})
+    
+    if not user_ids:
+        raise HTTPException(status_code=400, detail="user_ids é obrigatório")
+    
+    valid_keys = set(DEFAULT_NOTIFICATION_PREFS.keys())
+    filtered_prefs = {k: v for k, v in preferences.items() if k in valid_keys}
+    filtered_prefs["updated_at"] = datetime.now(timezone.utc).isoformat()
+    filtered_prefs["updated_by"] = user.get("email", "admin")
+    
+    updated = 0
+    for uid in user_ids:
+        result = await db.notification_preferences.update_one(
+            {"user_id": uid},
+            {"$set": {**filtered_prefs, "user_id": uid}},
+            upsert=True
+        )
+        if result.modified_count > 0 or result.upserted_id:
+            updated += 1
+    
+    return {"success": True, "updated_count": updated}
+
+
+# ============== SYSTEM ERROR LOGS ==============
+
+@router.get("/system-logs")
+async def get_system_error_logs(
+    page: int = 1,
+    limit: int = 50,
+    severity: str = None,
+    component: str = None,
+    error_type: str = None,
+    resolved: bool = None,
+    days: int = 7,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém logs de erros do sistema com filtros e paginação.
+    
+    Query params:
+    - page: Página (default 1)
+    - limit: Items por página (default 50)
+    - severity: Filtrar por severidade (info, warning, error, critical)
+    - component: Filtrar por componente (scraper, auth, processes, etc.)
+    - error_type: Filtrar por tipo de erro
+    - resolved: True/False para filtrar resolvidos/não resolvidos
+    - days: Últimos N dias (default 7)
+    """
+    from services.system_error_logger import system_error_logger
+    return await system_error_logger.get_errors(
+        page=page,
+        limit=limit,
+        severity=severity,
+        component=component,
+        error_type=error_type,
+        resolved=resolved,
+        days=days
+    )
+
+
+@router.get("/system-logs/stats")
+async def get_system_logs_stats(
+    days: int = 7,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """Obtém estatísticas de erros dos últimos N dias."""
+    from services.system_error_logger import system_error_logger
+    return await system_error_logger.get_stats(days)
+
+
+@router.get("/system-logs/{error_id}")
+async def get_system_log_detail(
+    error_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """Obtém detalhes de um erro específico."""
+    from services.system_error_logger import system_error_logger
+    error = await system_error_logger.get_error_by_id(error_id)
+    if not error:
+        raise HTTPException(status_code=404, detail="Erro não encontrado")
+    return error
+
+
+@router.post("/system-logs/mark-read")
+async def mark_errors_as_read(
+    data: dict,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Marca erros como lidos.
+    
+    Body: {"error_ids": ["id1", "id2"]}
+    """
+    error_ids = data.get("error_ids", [])
+    if not error_ids:
+        raise HTTPException(status_code=400, detail="error_ids é obrigatório")
+    
+    from services.system_error_logger import system_error_logger
+    count = await system_error_logger.mark_as_read(error_ids)
+    return {"success": True, "marked_count": count}
+
+
+@router.post("/system-logs/{error_id}/resolve")
+async def resolve_system_error(
+    error_id: str,
+    data: dict = None,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Marca um erro como resolvido.
+    
+    Body (opcional): {"notes": "Corrigido em versão X"}
+    """
+    data = data or {}
+    notes = data.get("notes")
+    
+    from services.system_error_logger import system_error_logger
+    success = await system_error_logger.mark_as_resolved(
+        error_id=error_id,
+        resolved_by=user.get("email", "admin"),
+        notes=notes
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Erro não encontrado")
+    
+    return {"success": True, "message": "Erro marcado como resolvido"}
+
+
+@router.post("/system-logs/bulk-resolve")
+async def bulk_resolve_system_errors(
+    data: dict,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Marca múltiplos erros como resolvidos em massa.
+    
+    Body: {"error_ids": ["id1", "id2", ...]}
+    """
+    error_ids = data.get("error_ids", [])
+    
+    if not error_ids:
+        raise HTTPException(status_code=400, detail="Nenhum ID fornecido")
+    
+    from services.system_error_logger import system_error_logger
+    resolved_count = await system_error_logger.bulk_mark_as_resolved(
+        error_ids=error_ids,
+        resolved_by=user.get("email", "admin")
+    )
+    
+    return {
+        "success": True, 
+        "resolved_count": resolved_count,
+        "message": f"{resolved_count} erros marcados como resolvidos"
+    }
+
+
+@router.post("/system-logs/resolve-all")
+async def resolve_all_system_errors(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Marca TODOS os erros não resolvidos como resolvidos.
+    Útil para limpar o painel de erros depois de uma manutenção.
+    """
+    from services.system_error_logger import system_error_logger
+    resolved_count = await system_error_logger.resolve_all_unresolved(
+        resolved_by=user.get("email", "admin")
+    )
+    
+    return {
+        "success": True,
+        "resolved_count": resolved_count,
+        "message": f"Todos os {resolved_count} erros foram marcados como resolvidos"
+    }
+
+
+@router.delete("/system-logs/cleanup")
+async def cleanup_old_system_logs(
+    days: int = 90,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """Remove logs antigos (mais de N dias)."""
+    from services.system_error_logger import system_error_logger
+    count = await system_error_logger.cleanup_old_errors(days)
+    return {"success": True, "deleted_count": count}
+
+
+
+# ============== DATABASE INDEX MANAGEMENT ==============
+
+@router.get("/db/indexes")
+async def get_database_indexes(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Lista todos os índices de todas as colecções principais.
+    Útil para diagnóstico de problemas de índices duplicados.
+    """
+    from services.db_indexes import get_index_stats
+    stats = await get_index_stats(db)
+    return {"success": True, "indexes": stats}
+
+
+# ============== AI IMPORT LOGS (Item 3 - Outros erros/melhorias) ==============
+
+@router.get("/ai-import-logs")
+async def get_ai_import_logs(
+    page: int = 1,
+    limit: int = 50,
+    status: str = None,
+    days: int = 7,
+    client_name: str = None,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém logs de importação massiva IA para integração no menu de Logs do sistema.
+    
+    Query params:
+    - page: Página (default 1)
+    - limit: Items por página (default 50)
+    - status: Filtrar por estado (success, error, warning)
+    - days: Últimos N dias (default 7)
+    - client_name: Filtrar por nome de cliente
+    """
+    skip = (page - 1) * limit
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Query base
+    query = {"timestamp": {"$gte": cutoff_date}}
+    
+    if status == "error":
+        query["resolved"] = False
+    elif status == "success":
+        query["resolved"] = True
+    
+    if client_name:
+        query["client_name"] = {"$regex": client_name, "$options": "i"}
+    
+    # Buscar erros de importação
+    errors = await db.import_errors.find(
+        query,
+        {"_id": 0}
+    ).sort("timestamp", -1).skip(skip).limit(limit).to_list(None)
+    
+    # Contagem total
+    total = await db.import_errors.count_documents(query)
+    
+    # Estatísticas rápidas
+    stats = {
+        "total_errors": await db.import_errors.count_documents({"timestamp": {"$gte": cutoff_date}}),
+        "unresolved": await db.import_errors.count_documents({"timestamp": {"$gte": cutoff_date}, "resolved": False}),
+        "resolved": await db.import_errors.count_documents({"timestamp": {"$gte": cutoff_date}, "resolved": True}),
+    }
+    
+    # Formatar logs para UI
+    formatted_logs = []
+    for error in errors:
+        formatted_logs.append({
+            "id": error.get("id"),
+            "timestamp": error.get("timestamp"),
+            "severity": "error" if not error.get("resolved") else "info",
+            "component": "ai_bulk_import",
+            "error_type": error.get("document_type", "import_error"),
+            "message": error.get("error", ""),
+            "details": {
+                "client_name": error.get("client_name"),
+                "filename": error.get("filename"),
+                "folder_name": error.get("folder_name"),
+                "matching_details": error.get("matching_details")
+            },
+            "resolved": error.get("resolved", False),
+            "user_email": error.get("user_email")
+        })
+    
+    return {
+        "logs": formatted_logs,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit
+        },
+        "stats": stats
+    }
+
+
+@router.post("/ai-import-logs/{log_id}/resolve")
+async def resolve_ai_import_log(
+    log_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Marca um log de importação como resolvido.
+    """
+    result = await db.import_errors.update_one(
+        {"id": log_id},
+        {
+            "$set": {
+                "resolved": True,
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
+                "resolved_by": user.get("email", "admin")
+            }
+        }
+    )
+    
+    # Também actualizar na colecção ai_import_logs
+    await db.ai_import_logs.update_one(
+        {"id": log_id},
+        {
+            "$set": {
+                "resolved": True,
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
+                "resolved_by": user.get("email", "admin")
+            }
+        }
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Log não encontrado")
+    
+    return {"success": True, "message": "Log marcado como resolvido"}
+
+
+@router.post("/ai-import-logs/bulk-resolve")
+async def bulk_resolve_ai_import_logs(
+    data: dict,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Marca múltiplos logs de importação como resolvidos em massa.
+    
+    Body:
+    - log_ids: Lista de IDs a resolver
+    """
+    log_ids = data.get("log_ids", [])
+    if not log_ids:
+        raise HTTPException(status_code=400, detail="Nenhum ID fornecido")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    resolved_by = user.get("email", "admin")
+    
+    # Actualizar na colecção ai_import_logs
+    result = await db.ai_import_logs.update_many(
+        {"id": {"$in": log_ids}, "resolved": {"$ne": True}},
+        {
+            "$set": {
+                "resolved": True,
+                "resolved_at": now,
+                "resolved_by": resolved_by
+            }
+        }
+    )
+    
+    # Também actualizar na colecção import_errors (legacy)
+    await db.import_errors.update_many(
+        {"id": {"$in": log_ids}},
+        {
+            "$set": {
+                "resolved": True,
+                "resolved_at": now,
+                "resolved_by": resolved_by
+            }
+        }
+    )
+    
+    return {
+        "success": True,
+        "resolved_count": result.modified_count,
+        "message": f"{result.modified_count} logs marcados como resolvidos"
+    }
+
+
+@router.get("/ai-import-logs-v2/grouped")
+async def get_ai_import_logs_grouped(
+    days: int = 7,
+    status: str = None,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém logs de importação IA agrupados por cliente.
+    Mostra resumo de sucesso/erro por cliente.
+    
+    Query params:
+    - days: Últimos N dias (default 7)
+    - status: Filtrar por estado (success, error, all)
+    """
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Query base
+    match_stage = {"timestamp": {"$gte": cutoff_date}}
+    if status == "error":
+        match_stage["status"] = "error"
+    elif status == "success":
+        match_stage["status"] = "success"
+    
+    # Agregar por cliente
+    pipeline = [
+        {"$match": match_stage},
+        {"$sort": {"timestamp": -1}},
+        {"$group": {
+            "_id": "$client_name",
+            "total_docs": {"$sum": 1},
+            "success_count": {"$sum": {"$cond": [{"$eq": ["$status", "success"]}, 1, 0]}},
+            "error_count": {"$sum": {"$cond": [{"$eq": ["$status", "error"]}, 1, 0]}},
+            "fields_updated": {"$sum": "$fields_count"},
+            "last_import": {"$first": "$timestamp"},
+            "logs": {"$push": {
+                "id": "$id",
+                "status": "$status",
+                "filename": "$filename",
+                "document_type": "$document_type",
+                "timestamp": "$timestamp",
+                "fields_count": "$fields_count",
+                "error": "$error",
+                "resolved": "$resolved"
+            }}
+        }},
+        {"$sort": {"last_import": -1}},
+        {"$project": {
+            "client_name": "$_id",
+            "total_docs": 1,
+            "success_count": 1,
+            "error_count": 1,
+            "fields_updated": 1,
+            "last_import": 1,
+            "logs": {"$slice": ["$logs", 50]},  # Limitar a 50 logs por cliente
+            "_id": 0
+        }}
+    ]
+    
+    groups = await db.ai_import_logs.aggregate(pipeline).to_list(100)
+    
+    # Estatísticas gerais
+    stats = {
+        "total_clients": len(groups),
+        "total_docs": sum(g["total_docs"] for g in groups),
+        "total_success": sum(g["success_count"] for g in groups),
+        "total_errors": sum(g["error_count"] for g in groups),
+        "total_fields": sum(g["fields_updated"] for g in groups)
+    }
+    
+    return {
+        "groups": groups,
+        "stats": stats
+    }
+
+
+# ============== AI IMPORT LOGS V2 - Com categorização de dados ==============
+
+@router.get("/ai-import-logs-v2")
+async def get_ai_import_logs_v2(
+    page: int = 1,
+    limit: int = 50,
+    status: str = None,
+    days: int = 7,
+    client_name: str = None,
+    document_type: str = None,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém logs de importação IA com dados categorizados.
+    
+    Query params:
+    - page: Página (default 1)
+    - limit: Items por página (default 50)
+    - status: Filtrar por estado (success, error, partial, all)
+    - days: Últimos N dias (default 7)
+    - client_name: Filtrar por nome de cliente
+    - document_type: Filtrar por tipo de documento (cc, irs, recibo_vencimento, etc.)
+    
+    Returns:
+    - logs: Lista de logs com dados categorizados
+    - stats: Estatísticas de sucesso/erro
+    - pagination: Info de paginação
+    """
+    skip = (page - 1) * limit
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Query base
+    query = {"created_at": {"$gte": cutoff_date}}
+    
+    if status == "error":
+        query["status"] = "error"
+    elif status == "success":
+        query["status"] = "success"
+    elif status == "partial":
+        query["status"] = "partial"
+    
+    if client_name:
+        query["client_name"] = {"$regex": client_name, "$options": "i"}
+    
+    if document_type:
+        query["documents.document_type"] = document_type
+    
+    # Buscar logs
+    logs = await db.ai_import_logs.find(
+        query,
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(None)
+    
+    # Contagem total
+    total = await db.ai_import_logs.count_documents(query)
+    
+    # Estatísticas
+    base_query = {"created_at": {"$gte": cutoff_date}}
+    stats = {
+        "total": await db.ai_import_logs.count_documents(base_query),
+        "success": await db.ai_import_logs.count_documents({**base_query, "status": "success"}),
+        "error": await db.ai_import_logs.count_documents({**base_query, "status": "error"}),
+        "partial": await db.ai_import_logs.count_documents({**base_query, "status": "partial"}),
+        "total_documents": 0,
+        "success_documents": 0,
+        "error_documents": 0,
+    }
+    
+    # Contar documentos processados
+    pipeline = [
+        {"$match": base_query},
+        {"$group": {
+            "_id": None, 
+            "total_docs": {"$sum": "$total_documents"},
+            "success_docs": {"$sum": "$success_count"},
+            "error_docs": {"$sum": "$error_count"}
+        }}
+    ]
+    agg_result = await db.ai_import_logs.aggregate(pipeline).to_list(1)
+    if agg_result:
+        stats["total_documents"] = agg_result[0].get("total_docs", 0)
+        stats["success_documents"] = agg_result[0].get("success_docs", 0)
+        stats["error_documents"] = agg_result[0].get("error_docs", 0)
+    
+    # Taxa de sucesso
+    if stats["total_documents"] > 0:
+        stats["success_rate"] = round(stats["success_documents"] / stats["total_documents"] * 100, 1)
+    else:
+        stats["success_rate"] = 0
+    
+    return {
+        "logs": logs,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 1
+        },
+        "stats": stats
+    }
+
+
+@router.get("/ai-import-logs-v2/{log_id}")
+async def get_ai_import_log_detail(
+    log_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém detalhes de um log de importação específico.
+    Inclui dados categorizados por tabs.
+    """
+    log = await db.ai_import_logs.find_one(
+        {"id": log_id},
+        {"_id": 0}
+    )
+    
+    if not log:
+        raise HTTPException(status_code=404, detail="Log não encontrado")
+    
+    return log
+
+
+@router.post("/db/indexes/repair")
+async def repair_database_indexes(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Remove índices antigos/incorretos e recria os correctos.
+    Use quando houver erros de duplicate key em índices.
+    """
+    from services.db_indexes import cleanup_deprecated_indexes, create_indexes
+    
+    # Primeiro, limpar índices problemáticos
+    cleanup_results = await cleanup_deprecated_indexes(db)
+    
+    # Depois, garantir que os índices correctos existem
+    create_results = await create_indexes(db)
+    
+    return {
+        "success": True,
+        "cleanup": cleanup_results,
+        "indexes": create_results
+    }
+
+
+@router.delete("/db/indexes/{collection}/{index_name}")
+async def drop_specific_index(
+    collection: str,
+    index_name: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Remove um índice específico de uma colecção.
+    Use com cuidado - apenas para índices problemáticos.
+    """
+    allowed_collections = ["properties", "processes", "users", "tasks", "leads"]
+    if collection not in allowed_collections:
+        raise HTTPException(status_code=400, detail=f"Colecção não permitida. Use: {allowed_collections}")
+    
+    if index_name == "_id_":
+        raise HTTPException(status_code=400, detail="Não pode remover o índice _id_")
+    
+    try:
+        coll = db[collection]
+        existing = await coll.index_information()
+        
+        if index_name not in existing:
+            raise HTTPException(status_code=404, detail=f"Índice '{index_name}' não existe em '{collection}'")
+        
+        await coll.drop_index(index_name)
+        return {"success": True, "message": f"Índice '{index_name}' removido de '{collection}'"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao remover índice: {str(e)}")
+
+
+
+# ============== CLEANUP ENDPOINTS ==============
+
+@router.delete("/cleanup/jobs")
+async def cleanup_old_jobs(
+    days: int = Query(default=7, ge=1, le=90),
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Remove jobs de background antigos (concluídos ou falhados).
+    """
+    from datetime import timedelta
+    
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    result = await db.background_jobs.delete_many({
+        "completed_at": {"$lt": cutoff},
+        "status": {"$in": ["completed", "failed"]}
+    })
+    
+    return {"success": True, "deleted_count": result.deleted_count}
+
+
+@router.delete("/cleanup/error-logs")
+async def cleanup_old_error_logs(
+    days: int = Query(default=30, ge=1, le=365),
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Remove logs de erro antigos.
+    """
+    from datetime import timedelta
+    
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    result = await db.system_error_logs.delete_many({
+        "timestamp": {"$lt": cutoff}
+    })
+    
+    return {"success": True, "deleted_count": result.deleted_count}
+
+
+
+# ============== MONITORIZAÇÃO DE JOBS ==============
+
+@router.get("/jobs/health")
+async def get_jobs_health(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Verifica o estado dos jobs em background.
+    Detecta jobs travados (em execução há muito tempo).
+    """
+    from datetime import timedelta
+    
+    # Definir thresholds
+    stuck_threshold_minutes = 30  # Job é considerado travado após 30 minutos
+    
+    # Buscar jobs recentes
+    now = datetime.now(timezone.utc)
+    cutoff_time = now - timedelta(hours=24)  # Últimas 24 horas
+    
+    # Buscar AI import logs (jobs de importação)
+    ai_import_logs = await db.ai_import_logs.find(
+        {"start_time": {"$gte": cutoff_time.isoformat()}},
+        {"_id": 0}
+    ).sort("start_time", -1).to_list(100)
+    
+    # Analisar jobs
+    running_jobs = []
+    stuck_jobs = []
+    completed_jobs = []
+    failed_jobs = []
+    
+    for log in ai_import_logs:
+        status = log.get("status", "").lower()
+        start_time_str = log.get("start_time")
+        
+        if status in ["completed", "success", "done"]:
+            completed_jobs.append(log)
+        elif status in ["failed", "error"]:
+            failed_jobs.append(log)
+        elif status in ["processing", "running", "in_progress"]:
+            # Verificar se está travado
+            if start_time_str:
+                try:
+                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                    duration_minutes = (now - start_time).total_seconds() / 60
+                    
+                    if duration_minutes > stuck_threshold_minutes:
+                        stuck_jobs.append({
+                            **log,
+                            "duration_minutes": round(duration_minutes, 1)
+                        })
+                    else:
+                        running_jobs.append({
+                            **log,
+                            "duration_minutes": round(duration_minutes, 1)
+                        })
+                except Exception:
+                    running_jobs.append(log)
+            else:
+                running_jobs.append(log)
+    
+    # Calcular estatísticas
+    total_jobs = len(ai_import_logs)
+    success_rate = (len(completed_jobs) / total_jobs * 100) if total_jobs > 0 else 0
+    
+    return {
+        "timestamp": now.isoformat(),
+        "healthy": len(stuck_jobs) == 0,
+        "stats": {
+            "total_24h": total_jobs,
+            "running": len(running_jobs),
+            "stuck": len(stuck_jobs),
+            "completed": len(completed_jobs),
+            "failed": len(failed_jobs),
+            "success_rate": round(success_rate, 1)
+        },
+        "stuck_jobs": stuck_jobs,
+        "running_jobs": running_jobs,
+        "alerts": [
+            {
+                "type": "stuck_job",
+                "message": f"Job travado há {job.get('duration_minutes', 0)} minutos: {job.get('job_id', 'N/A')}",
+                "job_id": job.get("job_id"),
+                "severity": "warning"
+            }
+            for job in stuck_jobs
+        ]
+    }
+
+
+@router.post("/jobs/cancel/{job_id}")
+async def cancel_stuck_job(
+    job_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Cancela/marca um job travado como falhado.
+    """
+    # Actualizar log para failed
+    result = await db.ai_import_logs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "status": "cancelled",
+            "end_time": datetime.now(timezone.utc).isoformat(),
+            "cancelled_by": user.get("id"),
+            "cancelled_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": "Job cancelado com sucesso"
+    }
+
+
+
+
+
+# ============== CLIENT REGISTRATIONS MANAGEMENT ==============
+
+@router.get("/client-registrations")
+async def list_client_registrations(
+    page: int = 1,
+    limit: int = 20,
+    search: str = None,
+    status: str = None,
+    source: str = None,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Lista registos de clientes do formulário público.
+    
+    Query params:
+    - page: Página (default 1)
+    - limit: Items por página (default 20)
+    - search: Pesquisar por nome, email ou NIF
+    - status: Filtrar por estado do processo
+    - source: Filtrar por origem (public_form, manual, etc.)
+    """
+    query = {}
+    
+    if search:
+        query["$or"] = [
+            {"client_name": {"$regex": search, "$options": "i"}},
+            {"client_email": {"$regex": search, "$options": "i"}},
+            {"personal_data.nif": {"$regex": search, "$options": "i"}}
+        ]
+    
+    if status:
+        query["status"] = status
+    
+    if source:
+        query["source"] = source
+    
+    skip = (page - 1) * limit
+    
+    total = await db.processes.count_documents(query)
+    
+    processes = await db.processes.find(
+        query,
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    return {
+        "registrations": processes,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": (total + limit - 1) // limit
+    }
+
+
+@router.get("/client-registrations/{process_id}")
+async def get_client_registration(
+    process_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém detalhes de um registo de cliente.
+    """
+    process = await db.processes.find_one(
+        {"id": process_id},
+        {"_id": 0}
+    )
+    
+    if not process:
+        raise HTTPException(status_code=404, detail="Registo não encontrado")
+    
+    return {"registration": process}
+
+
+@router.put("/client-registrations/{process_id}")
+async def update_client_registration(
+    process_id: str,
+    data: dict,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Atualiza dados de um registo de cliente.
+    
+    Permite editar:
+    - Dados pessoais (personal_data)
+    - Dados do 2º titular (titular2_data)
+    - Dados do imóvel (real_estate_data)
+    - Dados financeiros (financial_data)
+    - Informações de contacto (client_name, client_email, client_phone)
+    """
+    process = await db.processes.find_one({"id": process_id})
+    
+    if not process:
+        raise HTTPException(status_code=404, detail="Registo não encontrado")
+    
+    update_data = {}
+    
+    # Campos simples
+    if "client_name" in data:
+        update_data["client_name"] = data["client_name"]
+    if "client_email" in data:
+        update_data["client_email"] = data["client_email"]
+    if "client_phone" in data:
+        update_data["client_phone"] = data["client_phone"]
+    if "second_client_name" in data:
+        update_data["second_client_name"] = data["second_client_name"]
+    
+    # Campos aninhados
+    if "personal_data" in data:
+        # Manter dados existentes e atualizar apenas os fornecidos
+        existing_personal = process.get("personal_data", {})
+        existing_personal.update(data["personal_data"])
+        update_data["personal_data"] = existing_personal
+    
+    if "titular2_data" in data:
+        existing_titular2 = process.get("titular2_data", {}) or {}
+        existing_titular2.update(data["titular2_data"])
+        update_data["titular2_data"] = existing_titular2
+    
+    if "real_estate_data" in data:
+        existing_realestate = process.get("real_estate_data", {}) or {}
+        existing_realestate.update(data["real_estate_data"])
+        update_data["real_estate_data"] = existing_realestate
+    
+    if "financial_data" in data:
+        existing_financial = process.get("financial_data", {}) or {}
+        existing_financial.update(data["financial_data"])
+        update_data["financial_data"] = existing_financial
+    
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update_data["updated_by"] = user.get("email", "admin")
+    
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": update_data}
+    )
+    
+    # Log da alteração
+    await db.history.insert_one({
+        "id": str(uuid.uuid4()),
+        "process_id": process_id,
+        "user_id": user["id"],
+        "user_name": user.get("name", "Admin"),
+        "action": "Dados do registo editados pelo admin",
+        "field": "registration_edit",
+        "old_value": None,
+        "new_value": list(update_data.keys()),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    
+    return {
+        "success": True,
+        "message": "Registo atualizado com sucesso",
+        "registration": updated
+    }
+
+
+@router.delete("/client-registrations/{process_id}")
+async def delete_client_registration(
+    process_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Elimina um registo de cliente.
+    
+    NOTA: Esta ação é irreversível e remove todos os dados do processo.
+    """
+    process = await db.processes.find_one({"id": process_id})
+    
+    if not process:
+        raise HTTPException(status_code=404, detail="Registo não encontrado")
+    
+    # Guardar log antes de eliminar
+    await db.history.insert_one({
+        "id": str(uuid.uuid4()),
+        "process_id": process_id,
+        "user_id": user["id"],
+        "user_name": user.get("name", "Admin"),
+        "action": f"Registo eliminado: {process.get('client_name', 'N/A')} ({process.get('client_email', 'N/A')})",
+        "field": "registration_delete",
+        "old_value": process.get("client_name"),
+        "new_value": None,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Eliminar processo
+    await db.processes.delete_one({"id": process_id})
+    
+    # Eliminar histórico associado
+    await db.history.delete_many({"process_id": process_id})
+    
+    # Eliminar RGPDs associados
+    await db.rgpd_requests.delete_many({"process_id": process_id})
+    
+    return {
+        "success": True,
+        "message": "Registo eliminado com sucesso"
+    }
+
+
+@router.get("/client-registrations/stats/summary")
+async def get_client_registrations_stats(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém estatísticas de registos de clientes.
+    """
+    # Total de registos
+    total = await db.processes.count_documents({})
+    
+    # Registos por origem
+    by_source = await db.processes.aggregate([
+        {"$group": {"_id": "$source", "count": {"$sum": 1}}}
+    ]).to_list(10)
+    
+    # Registos por estado
+    by_status = await db.processes.aggregate([
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}}
+    ]).to_list(50)
+    
+    # Registos hoje
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_count = await db.processes.count_documents({
+        "created_at": {"$gte": today.isoformat()}
+    })
+    
+    # Registos esta semana
+    week_start = today - timedelta(days=today.weekday())
+    week_count = await db.processes.count_documents({
+        "created_at": {"$gte": week_start.isoformat()}
+    })
+    
+    # Registos este mês
+    month_start = today.replace(day=1)
+    month_count = await db.processes.count_documents({
+        "created_at": {"$gte": month_start.isoformat()}
+    })
+    
+    return {
+        "total": total,
+        "today": today_count,
+        "this_week": week_count,
+        "this_month": month_count,
+        "by_source": {item["_id"] or "unknown": item["count"] for item in by_source},
+        "by_status": {item["_id"] or "unknown": item["count"] for item in by_status}
+    }

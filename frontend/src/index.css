@@ -1,75 +1,131 @@
+/**
+ * ====================================================================
+ * CREDITOIMO - ESTILOS GLOBAIS
+ * ====================================================================
+ * Sistema de Gestão de Processos Imobiliários e Crédito
+ * Power Real Estate & Precision Crédito
+ * 
+ * PALETA DE CORES:
+ * - Precision Crédito: Teal (#0D9488) - Principal, Confiança
+ * - Power Real Estate: Dourado (#D4AF37) - Acentos, Premium
+ * - Sucesso: Verde (#22C55E)
+ * - Alerta: Âmbar (#F59E0B)
+ * - Erro: Vermelho (#EF4444)
+ * ====================================================================
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Estilos base do corpo */
 body {
     margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
+    font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+/* Tipografia - Cabeçalhos */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Manrope', sans-serif;
+    letter-spacing: -0.02em;
 }
 
+/* Fonte monoespaçada */
+.font-mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+code {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/**
+ * VARIÁVEIS CSS - TEMA CLARO
+ * Cores baseadas em:
+ * - Precision Crédito (precision-credito.pt): Teal como cor principal
+ * - Power Real Estate (www.powerealestate.pt): Dourado como acentos
+ */
 @layer base {
     :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
+        /* Fundos */
+        --background: 180 10% 98%;             /* Fundo com tom suave teal */
+        --foreground: 222 47% 11%;             /* Texto principal escuro */
+        
+        /* Cartões e Popovers */
         --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
+        --card-foreground: 222 47% 11%;
         --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
+        --popover-foreground: 222 47% 11%;
+        
+        /* Cor Primária - Teal Precision Crédito (#0D9488) */
+        --primary: 175 84% 32%;                /* Teal principal */
+        --primary-foreground: 0 0% 100%;
+        
+        /* Cor Secundária - Teal mais claro */
+        --secondary: 175 60% 45%;              /* Teal médio */
+        --secondary-foreground: 0 0% 100%;
+        
+        /* Tons neutros */
+        --muted: 180 10% 96%;
+        --muted-foreground: 215 20% 40%;
+        
+        /* Cor de Destaque - Dourado Power Real Estate (#D4AF37) */
+        --accent: 43 74% 52%;                  /* Dourado premium */
+        --accent-foreground: 222 47% 11%;
+        
+        /* Cor de erro */
+        --destructive: 0 84% 60%;
         --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
+        
+        /* Bordas e inputs */
+        --border: 214 32% 91%;
+        --input: 214 32% 91%;
+        --ring: 224 76% 33%;
+        
+        /* Cores para gráficos */
+        --chart-1: 224 76% 33%;              /* Azul Power */
+        --chart-2: 43 74% 52%;               /* Dourado Precision */
+        --chart-3: 160 84% 39%;              /* Verde sucesso */
+        --chart-4: 217 91% 60%;              /* Azul claro */
+        --chart-5: 0 84% 60%;                /* Vermelho */
+        
+        /* Raio de borda padrão */
         --radius: 0.5rem;
+        
+        /* Cores semânticas */
+        --success: 160 84% 39%;              /* Verde */
+        --warning: 38 92% 50%;               /* Âmbar */
+        
+        /* Cores das empresas */
+        --power-blue: 224 76% 33%;           /* Power Real Estate */
+        --precision-gold: 43 74% 52%;        /* Precision Crédito */
     }
+    
+    /* TEMA ESCURO - Melhorado para legibilidade */
     .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
+        --background: 220 20% 10%;
+        --foreground: 0 0% 95%;
+        --card: 220 20% 14%;
+        --card-foreground: 0 0% 95%;
+        --popover: 220 20% 14%;
+        --popover-foreground: 0 0% 95%;
+        --primary: 175 70% 45%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 175 50% 35%;
+        --secondary-foreground: 0 0% 100%;
+        --muted: 220 15% 20%;
+        --muted-foreground: 220 10% 70%;
+        --accent: 43 80% 55%;
+        --accent-foreground: 220 20% 10%;
+        --destructive: 0 70% 50%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 220 15% 25%;
+        --input: 220 15% 20%;
+        --ring: 175 70% 45%;
     }
 }
 
@@ -82,34 +138,537 @@ code {
     }
 }
 
+/**
+ * BADGES DE ESTADO DO PROCESSO
+ * Cores alinhadas com o workflow de 14 fases
+ */
+
+/* Estados de espera - Amarelo */
+.status-clientes_espera {
+    @apply bg-amber-100 text-amber-800 border border-amber-200;
+}
+
+/* Estados documentais - Azul */
+.status-fase_documental,
+.status-fase_documental_ii {
+    @apply bg-blue-100 text-blue-800 border border-blue-200;
+}
+
+/* Estados de envio - Roxo */
+.status-enviado_bruno,
+.status-enviado_luis,
+.status-enviado_bcp_rui {
+    @apply bg-purple-100 text-purple-800 border border-purple-200;
+}
+
+/* Estados bancários - Laranja */
+.status-entradas_precision,
+.status-fase_bancaria {
+    @apply bg-orange-100 text-orange-800 border border-orange-200;
+}
+
+/* Estado de visitas - Azul */
+.status-fase_visitas {
+    @apply bg-sky-100 text-sky-800 border border-sky-200;
+}
+
+/* Estados aprovados/escritura - Verde */
+.status-ch_aprovado,
+.status-fase_escritura,
+.status-escritura_agendada,
+.status-concluidos {
+    @apply bg-emerald-100 text-emerald-800 border border-emerald-200;
+}
+
+/* Estado de desistência - Vermelho */
+.status-desistencias {
+    @apply bg-red-100 text-red-800 border border-red-200;
+}
+
+/* Estados legados (compatibilidade) */
+.status-pedido_inicial {
+    @apply bg-yellow-100 text-yellow-800 border border-yellow-200;
+}
+
+.status-em_analise {
+    @apply bg-blue-100 text-blue-800 border border-blue-200;
+}
+
+.status-fase_bancaria {
+    @apply bg-orange-100 text-orange-800 border border-orange-200;
+}
+
+.status-aprovado {
+    @apply bg-emerald-100 text-emerald-800 border border-emerald-200;
+}
+
+.status-rejeitado {
+    @apply bg-red-100 text-red-800 border border-red-200;
+}
+
+/**
+ * BADGES DE PRIORIDADE
+ */
+.priority-low {
+    @apply bg-slate-100 text-slate-700 border border-slate-200;
+}
+
+.priority-medium {
+    @apply bg-amber-100 text-amber-700 border border-amber-200;
+}
+
+.priority-high {
+    @apply bg-red-100 text-red-700 border border-red-200;
+}
+
+/**
+ * BADGES DE DOCUMENTOS A EXPIRAR
+ */
+.doc-expiring-soon {
+    @apply bg-red-50 text-red-700 border-l-4 border-red-500;
+}
+
+.doc-expiring-warning {
+    @apply bg-amber-50 text-amber-700 border-l-4 border-amber-500;
+}
+
+.doc-valid {
+    @apply bg-emerald-50 text-emerald-700 border-l-4 border-emerald-500;
+}
+
+/**
+ * CORES DAS EMPRESAS
+ */
+.power-brand {
+    @apply bg-blue-900 text-white;
+}
+
+.power-brand-light {
+    @apply bg-blue-50 text-blue-900;
+}
+
+.precision-brand {
+    @apply bg-amber-500 text-white;
+}
+
+.precision-brand-light {
+    @apply bg-amber-50 text-amber-700;
+}
+
+/**
+ * SCROLLBAR PERSONALIZADA
+ */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Scrollbar fina para listas */
+.scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.2);
+    border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* Scrollbar escondida para tabs e elementos de scroll horizontal */
+.scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari, Opera */
+}
+
+/**
+ * TRANSIÇÕES E EFEITOS
+ */
+.sidebar-transition {
+    transition: width 0.2s ease-in-out;
+}
+
+.card-hover {
+    @apply transition-shadow duration-200 hover:shadow-md;
+}
+
+.focus-ring {
+    @apply focus:ring-2 focus:ring-primary focus:ring-offset-2;
+}
+
+/**
+ * ANIMAÇÕES DO KANBAN
+ */
+.kanban-card {
+    @apply transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5;
+}
+
+.kanban-column {
+    @apply transition-colors duration-200;
+}
+
+.kanban-column-drag-over {
+    @apply bg-blue-50 ring-2 ring-blue-300;
+}
+
 @layer base {
     [data-debug-wrapper="true"] {
         display: contents !important;
     }
+}
 
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
+/**
+ * ====================================================================
+ * ACESSIBILIDADE
+ * ====================================================================
+ */
+
+/* Focus outlines visíveis para navegação por teclado */
+:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+}
+
+/* Skip link para navegação por teclado */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    padding: 8px 16px;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    z-index: 1000;
+    transition: top 0.2s;
+}
+
+.skip-link:focus {
+    top: 0;
+}
+
+/* ============================================
+   DARK MODE - Melhorias de Legibilidade
+   ============================================ */
+
+/* Melhorar contraste de texto em modo escuro */
+.dark .text-muted-foreground {
+    color: hsl(220 10% 75%);
+}
+
+/* Cartões do Kanban em dark mode */
+.dark .bg-yellow-100 { background-color: rgb(133 100 20 / 0.4); }
+.dark .bg-blue-100 { background-color: rgb(30 80 140 / 0.4); }
+.dark .bg-purple-100 { background-color: rgb(100 50 150 / 0.4); }
+.dark .bg-orange-100 { background-color: rgb(150 80 20 / 0.4); }
+.dark .bg-green-100 { background-color: rgb(30 100 50 / 0.4); }
+.dark .bg-red-100 { background-color: rgb(140 40 40 / 0.4); }
+
+/* Headers do Kanban - manter cores vivas */
+.dark .bg-yellow-500 { background-color: rgb(202 138 4); }
+.dark .bg-blue-500 { background-color: rgb(59 130 246); }
+.dark .bg-purple-500 { background-color: rgb(139 92 246); }
+.dark .bg-orange-500 { background-color: rgb(249 115 22); }
+.dark .bg-green-500 { background-color: rgb(34 197 94); }
+.dark .bg-red-500 { background-color: rgb(239 68 68); }
+
+/* Cartões internos em dark mode */
+.dark [data-testid*="process-card"] {
+    background-color: hsl(220 20% 18%) !important;
+    border-color: hsl(220 15% 28%) !important;
+}
+
+.dark [data-testid*="process-card"]:hover {
+    background-color: hsl(220 20% 22%) !important;
+}
+
+/* Badges em dark mode - texto legível */
+.dark .bg-gray-100 { background-color: hsl(220 15% 25%); }
+.dark .bg-gray-800 { background-color: hsl(220 15% 22%); }
+
+/* Ícones em dark mode - aumentar visibilidade */
+.dark .text-muted-foreground svg,
+.dark svg.text-muted-foreground {
+    color: hsl(220 10% 70%);
+}
+
+/* Badges de status em dark mode */
+.dark .status-clientes_espera { @apply bg-amber-900/50 text-amber-200 border-amber-700; }
+.dark .status-fase_documental,
+.dark .status-fase_documental_ii { @apply bg-blue-900/50 text-blue-200 border-blue-700; }
+.dark .status-enviado_bruno,
+.dark .status-enviado_luis,
+.dark .status-enviado_bcp_rui { @apply bg-purple-900/50 text-purple-200 border-purple-700; }
+.dark .status-entradas_precision,
+.dark .status-fase_bancaria { @apply bg-orange-900/50 text-orange-200 border-orange-700; }
+.dark .status-fase_visitas { @apply bg-sky-900/50 text-sky-200 border-sky-700; }
+.dark .status-ch_aprovado,
+.dark .status-fase_escritura,
+.dark .status-escritura_agendada,
+.dark .status-concluidos { @apply bg-emerald-900/50 text-emerald-200 border-emerald-700; }
+.dark .status-desistencias { @apply bg-red-900/50 text-red-200 border-red-700; }
+
+/* Inputs em dark mode */
+.dark input,
+.dark textarea,
+.dark select {
+    background-color: hsl(220 20% 14%);
+    border-color: hsl(220 15% 25%);
+    color: hsl(0 0% 95%);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+    color: hsl(220 10% 50%);
+}
+
+/* Tabelas em dark mode */
+.dark table th {
+    background-color: hsl(220 20% 16%);
+    color: hsl(0 0% 90%);
+}
+
+.dark table td {
+    border-color: hsl(220 15% 22%);
+}
+
+.dark table tr:hover {
+    background-color: hsl(220 20% 18%);
+}
+
+/* Cursor pointer para elementos interactivos */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+a[href],
+input[type="checkbox"],
+input[type="radio"],
+select {
+    cursor: pointer;
+}
+
+/* Touch targets mínimos de 44x44px para mobile */
+@media (pointer: coarse) {
+    button,
+    [role="button"],
+    input[type="checkbox"],
+    input[type="radio"] {
+        min-height: 44px;
+        min-width: 44px;
     }
+}
+
+/* Indicador de estado de foco para inputs */
+input:focus,
+textarea:focus,
+select:focus {
+    box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring));
+}
+
+/* Reduzir animações para utilizadores que preferem */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* Safe area padding para dispositivos com notch */
+.safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.safe-area-pt {
+    padding-top: env(safe-area-inset-top, 0);
+}
+
+/* Scrollbar estilizada */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+}
+
+.dark ::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.2);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.2);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* ============================================
+   DARK MODE - Correcções de Contraste Adicionais
+   ============================================ */
+
+/* Corrigir texto azul escuro em dark mode */
+.dark .text-blue-950,
+.dark .text-blue-900,
+.dark .text-blue-800 {
+    color: hsl(210 40% 85%) !important;
+}
+
+/* Corrigir fundos azuis claros em dark mode */
+.dark .bg-blue-50 {
+    background-color: hsl(220 30% 18%) !important;
+}
+
+.dark .bg-blue-100 {
+    background-color: hsl(220 30% 20%) !important;
+}
+
+/* Corrigir bordas azuis em dark mode */
+.dark .border-blue-200,
+.dark .border-blue-100 {
+    border-color: hsl(220 20% 30%) !important;
+}
+
+/* Corrigir texto teal em dark mode */
+.dark .text-teal-700,
+.dark .text-teal-800 {
+    color: hsl(175 60% 65%) !important;
+}
+
+/* Corrigir fundos teal em dark mode */
+.dark .bg-teal-50 {
+    background-color: hsl(175 30% 15%) !important;
+}
+
+/* Corrigir texto âmbar em dark mode */
+.dark .text-amber-700,
+.dark .text-amber-800 {
+    color: hsl(43 80% 70%) !important;
+}
+
+/* Corrigir fundos âmbar em dark mode */
+.dark .bg-amber-50 {
+    background-color: hsl(43 30% 15%) !important;
+}
+
+/* Corrigir AlertTriangle/Warning em dark mode */
+.dark .text-yellow-600,
+.dark .text-yellow-700 {
+    color: hsl(45 90% 65%) !important;
+}
+
+.dark .bg-yellow-50 {
+    background-color: hsl(45 30% 15%) !important;
+}
+
+.dark .border-yellow-200 {
+    border-color: hsl(45 40% 30%) !important;
+}
+
+/* Corrigir AlertCircle/Error em dark mode */
+.dark .text-red-600,
+.dark .text-red-700 {
+    color: hsl(0 80% 70%) !important;
+}
+
+.dark .bg-red-50 {
+    background-color: hsl(0 30% 15%) !important;
+}
+
+.dark .border-red-200 {
+    border-color: hsl(0 40% 30%) !important;
+}
+
+/* Corrigir textos verdes em dark mode */
+.dark .text-green-600,
+.dark .text-green-700 {
+    color: hsl(142 70% 60%) !important;
+}
+
+.dark .bg-green-50 {
+    background-color: hsl(142 30% 15%) !important;
+}
+
+.dark .border-green-200 {
+    border-color: hsl(142 40% 25%) !important;
+}
+
+/* Corrigir textos roxos em dark mode */
+.dark .text-purple-600,
+.dark .text-purple-700 {
+    color: hsl(270 70% 70%) !important;
+}
+
+.dark .bg-purple-50 {
+    background-color: hsl(270 30% 15%) !important;
+}
+
+/* Corrigir alertas/avisos personalizados em dark mode */
+.dark [class*="bg-amber-50"],
+.dark [class*="bg-yellow-50"],
+.dark [class*="bg-orange-50"] {
+    background-color: hsl(38 30% 15%) !important;
+}
+
+.dark [class*="text-amber-"],
+.dark [class*="text-yellow-"],
+.dark [class*="text-orange-"] {
+    color: hsl(38 90% 70%) !important;
+}
+
+/* Tabs em dark mode - melhorar contraste */
+.dark [data-state="active"][class*="bg-teal"] {
+    background-color: hsl(175 70% 35%) !important;
+}
+
+.dark .bg-blue-50.border-blue-200 {
+    background-color: hsl(220 25% 18%) !important;
+    border-color: hsl(220 20% 28%) !important;
+}
+
+/* Label text em dark mode */
+.dark label,
+.dark .text-muted-foreground {
+    color: hsl(220 10% 70%);
+}
+
+/* Melhorar legibilidade de Cards em dark mode */
+.dark .bg-muted\/50 {
+    background-color: hsl(220 20% 16%);
 }

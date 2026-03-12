@@ -1,0 +1,28 @@
+[
+  {
+    "_id": {
+      "$oid": "69a8579172c76b29cbbdba35"
+    },
+    "id": "88c3b1f1-6e07-4d2d-a034-d59709cc3b89",
+    "type": "http_400",
+    "message": "A nova password deve ter pelo menos 6 caracteres",
+    "component": "api",
+    "details": {
+      "path": "/api/auth/change-password",
+      "method": "POST",
+      "status_code": 400,
+      "query_params": {}
+    },
+    "severity": "info",
+    "user_id": null,
+    "request_path": "/api/auth/change-password",
+    "timestamp": "2026-03-04T16:02:25.870385+00:00",
+    "date": "2026-03-04",
+    "hour": 16,
+    "read": false,
+    "resolved": false,
+    "resolved_at": null,
+    "resolved_by": null,
+    "notes": null
+  }
+]

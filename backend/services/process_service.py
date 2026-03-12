@@ -1,0 +1,306 @@
+"""
+====================================================================
+SERVIÇO DE PROCESSOS - CREDITOIMO
+====================================================================
+Lógica de negócio para gestão de processos.
+Separado dos endpoints para facilitar manutenção e testes.
+====================================================================
+"""
+import re
+import uuid
+import logging
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any, Tuple
+
+from database import db
+from models.process import ProcessCreate, ProcessUpdate
+
+logger = logging.getLogger(__name__)
+
+
+# ==== FUNÇÕES DE UTILIDADE ====
+
+def sanitize_email(email: str) -> str:
+    """
+    Limpa emails com formatação markdown ou outros artefactos.
+    Extrai o email puro de strings como '[email](mailto:email)' ou 'mailto:email'.
+    """
+    if not email:
+        return ""
+    
+    email = email.strip()
+    
+    # Padrão: [texto](mailto:email) ou [email](mailto:email)
+    markdown_link = re.search(r'\[.*?\]\(mailto:([^)]+)\)', email)
+    if markdown_link:
+        email = markdown_link.group(1)
+    
+    # Padrão: mailto:email
+    if email.startswith('mailto:'):
+        email = email.replace('mailto:', '')
+    
+    # Padrão: <email>
+    angle_brackets = re.search(r'<([^>]+@[^>]+)>', email)
+    if angle_brackets:
+        email = angle_brackets.group(1)
+    
+    # Remover quaisquer caracteres markdown restantes
+    email = re.sub(r'[\[\]\(\)]', '', email)
+    
+    # Validar formato básico de email
+    email = email.strip().lower()
+    if email and not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email, re.IGNORECASE):
+        logger.warning(f"Email inválido após sanitização: {email}")
+        return ""
+    
+    return email
+
+
+async def get_next_process_number() -> int:
+    """
+    Obtém o próximo número de processo baseado no maior existente.
+    Usado para gerar referências como 'PROC-0001'.
+    """
+    latest = await db.processes.find_one(
+        {"process_number": {"$exists": True}},
+        sort=[("process_number", -1)],
+        projection={"_id": 0, "process_number": 1}
+    )
+    if latest and latest.get("process_number"):
+        return latest["process_number"] + 1
+    return 1
+
+
+# ==== FUNÇÕES DE VERIFICAÇÃO DE PERMISSÕES ====
+
+def can_view_process(user: dict, process: dict) -> bool:
+    """
+    Verifica se o utilizador pode ver o processo baseado no seu papel.
+    
+    Regras:
+    - Staff (admin, ceo, diretor, administrativo, consultor, mediador, intermediario): 
+      podem ver TODOS os processos da empresa
+    - Clientes: apenas os seus próprios processos
+    
+    Args:
+        user: Dados do utilizador actual
+        process: Dados do processo
+    
+    Returns:
+        True se pode ver, False caso contrário
+    """
+    user_role = user.get("role", "")
+    user_id = user.get("id", "")
+    
+    # Todos os staff podem ver todos os processos
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "gestor_documentos", "indexacao"]
+    if user_role in staff_roles:
+        return True
+    
+    # Cliente só vê os seus próprios processos
+    if user_role == "cliente":
+        return process.get("client_id") == user_id
+    
+    # Por defeito, negar acesso
+    return False
+
+
+def build_query_filter(user: dict) -> dict:
+    """
+    Constrói o filtro de query baseado no papel do utilizador.
+    
+    Args:
+        user: Dados do utilizador
+        
+    Returns:
+        Filtro MongoDB para a query
+    """
+    user_role = user.get("role", "")
+    user_id = user.get("id", "")
+    
+    # Todos os staff veem todos os processos
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "gestor_documentos", "indexacao"]
+    if user_role in staff_roles:
+        return {}
+    
+    # Clientes só veem os seus próprios processos
+    return {"client_id": user_id}
+
+
+# ==== FUNÇÕES DE CRIAÇÃO E ATUALIZAÇÃO ====
+
+async def create_process_document(
+    data: ProcessCreate,
+    user: dict
+) -> Tuple[dict, str]:
+    """
+    Cria um novo documento de processo.
+    
+    Args:
+        data: Dados do processo do Pydantic model
+        user: Utilizador que está a criar
+        
+    Returns:
+        Tuple com (documento do processo, id do processo)
+    """
+    process_id = str(uuid.uuid4())
+    process_number = await get_next_process_number()
+    process_ref = f"PROC-{process_number:04d}"
+    
+    # Sanitizar email
+    clean_email = ""
+    if data.client_email:
+        clean_email = sanitize_email(data.client_email)
+    
+    # Construir documento
+    process_doc = {
+        "id": process_id,
+        "process_number": process_number,
+        "process_ref": process_ref,
+        "client_name": data.client_name,
+        "client_email": clean_email,
+        "client_phone": data.client_phone or "",
+        "status": data.status or "clientes_espera",
+        "process_type": data.process_type or "credito_habitacao",
+        "service_type": data.service_type or "completo",
+        "consultant_id": data.consultant_id or user.get("id"),
+        "mediador_id": data.mediador_id,
+        "priority": data.priority or "normal",
+        "notes": data.notes or "",
+        "assigned_users": [],
+        "created_by": user.get("id"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "history": [{
+            "action": "created",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "user_id": user.get("id"),
+            "user_name": user.get("name", "Sistema"),
+            "details": f"Processo criado: {data.client_name}"
+        }],
+        # Dados estruturados (inicialmente vazios)
+        "personal_data": data.personal_data.model_dump() if data.personal_data else {},
+        "titular2_data": data.titular2_data.model_dump() if data.titular2_data else {},
+        "financial_data": data.financial_data.model_dump() if data.financial_data else {},
+        "property_data": data.property_data.model_dump() if data.property_data else {},
+        "credit_data": data.credit_data.model_dump() if data.credit_data else {},
+        "documents": [],
+        "tags": data.tags or [],
+    }
+    
+    return process_doc, process_id
+
+
+async def update_process_document(
+    process: dict,
+    data: ProcessUpdate,
+    user: dict
+) -> Tuple[dict, list]:
+    """
+    Aplica atualizações a um documento de processo.
+    
+    Args:
+        process: Documento existente
+        data: Dados de atualização
+        user: Utilizador que está a atualizar
+        
+    Returns:
+        Tuple com (update_data dict, lista de mudanças para histórico)
+    """
+    update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    changes = []
+    
+    # Iterar sobre campos que podem ser atualizados
+    updatable_fields = [
+        "client_name", "client_phone", "status", "process_type",
+        "service_type", "priority", "notes", "consultant_id", "mediador_id",
+        "tags"
+    ]
+    
+    for field in updatable_fields:
+        value = getattr(data, field, None)
+        if value is not None and value != process.get(field):
+            old_value = process.get(field)
+            update_data[field] = value
+            changes.append({
+                "field": field,
+                "old": old_value,
+                "new": value
+            })
+    
+    # Email precisa de sanitização
+    if data.client_email is not None:
+        clean_email = sanitize_email(data.client_email)
+        if clean_email != process.get("client_email"):
+            update_data["client_email"] = clean_email
+            changes.append({
+                "field": "client_email",
+                "old": process.get("client_email"),
+                "new": clean_email
+            })
+    
+    # Dados estruturados
+    if data.personal_data:
+        update_data["personal_data"] = data.personal_data.model_dump()
+        changes.append({"field": "personal_data", "old": "...", "new": "atualizado"})
+        
+    if data.titular2_data:
+        update_data["titular2_data"] = data.titular2_data.model_dump()
+        changes.append({"field": "titular2_data", "old": "...", "new": "atualizado"})
+        
+    if data.financial_data:
+        update_data["financial_data"] = data.financial_data.model_dump()
+        changes.append({"field": "financial_data", "old": "...", "new": "atualizado"})
+        
+    if data.property_data:
+        update_data["property_data"] = data.property_data.model_dump()
+        changes.append({"field": "property_data", "old": "...", "new": "atualizado"})
+        
+    if data.credit_data:
+        update_data["credit_data"] = data.credit_data.model_dump()
+        changes.append({"field": "credit_data", "old": "...", "new": "atualizado"})
+    
+    return update_data, changes
+
+
+# ==== QUERIES COMUNS ====
+
+async def get_process_by_id(process_id: str) -> Optional[dict]:
+    """Obtém um processo pelo ID."""
+    return await db.processes.find_one(
+        {"id": process_id},
+        {"_id": 0}
+    )
+
+
+async def get_processes_for_user(
+    user: dict,
+    status: Optional[str] = None,
+    limit: int = 500
+) -> list:
+    """
+    Obtém processos visíveis para o utilizador.
+    
+    Args:
+        user: Dados do utilizador
+        status: Filtrar por status específico
+        limit: Limite de resultados
+        
+    Returns:
+        Lista de processos
+    """
+    query = build_query_filter(user)
+    
+    if status:
+        query["status"] = status
+    
+    cursor = db.processes.find(query, {"_id": 0}).sort("updated_at", -1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
+async def get_user_name(user_id: str) -> str:
+    """Obtém o nome de um utilizador pelo ID."""
+    if not user_id:
+        return ""
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1})
+    return user.get("name", "") if user else ""
