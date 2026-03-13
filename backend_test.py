@@ -11,7 +11,7 @@ from datetime import datetime
 from time import sleep
 
 class PowerCellAPITester:
-    def __init__(self, base_url="https://repo-merger-5.preview.emergentagent.com"):
+    def __init__(self, base_url="https://login-bridge-7.preview.emergentagent.com"):
         self.base_url = base_url
         self.token = None
         self.tests_run = 0
@@ -252,7 +252,7 @@ class PowerCellAPITester:
         print(f"\n🔍 Testing CORS Configuration...")
         
         headers = {
-            'Origin': 'https://repo-merger-5.preview.emergentagent.com',
+            'Origin': 'https://login-bridge-7.preview.emergentagent.com',
             'Access-Control-Request-Method': 'POST',
             'Access-Control-Request-Headers': 'Content-Type,Authorization'
         }
@@ -388,7 +388,7 @@ class PowerCellAPITester:
 
 def main():
     print("🚀 Iniciando testes do PowerCell System...")
-    print(f"🌐 URL: https://repo-merger-5.preview.emergentagent.com")
+    print(f"🌐 URL: https://login-bridge-7.preview.emergentagent.com")
     
     tester = PowerCellAPITester()
     

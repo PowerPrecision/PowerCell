@@ -10,7 +10,7 @@
       "onedrive_client_id": "trello-sync-1",
       "onedrive_client_secret": "trello-sync-1",
       "onedrive_tenant_id": "trello-sync-1",
-      "onedrive_redirect_uri": "https://file-refresh-ui.preview.emergentagent.com/api/onedrive/callback",
+      "onedrive_redirect_uri": "https://login-bridge-7.preview.emergentagent.com/api/onedrive/callback",
       "onedrive_shared_url": null,
       "google_client_id": null,
       "google_client_secret": null,
@@ -52,7 +52,7 @@
       "api_key": "real_api_key_123",
       "api_token": "ATTAbc123456789_new_token",
       "board_id": "MyXVV27F",
-      "webhook_base_url": "https://file-refresh-ui.preview.emergentagent.com"
+      "webhook_base_url": "https://login-bridge-7.preview.emergentagent.com"
     },
     "settings": {
       "company_name": "Power Real Estate",
