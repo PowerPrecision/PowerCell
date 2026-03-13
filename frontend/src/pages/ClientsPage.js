@@ -279,9 +279,9 @@ export default function ClientsPage() {
     setShowProcessDialog(true);
   };
 
-  // Redirecionar para criar novo processo (cliente = processo)
+  // Abrir dialog para criar novo cliente/processo
   const handleCreateNewProcess = () => {
-    navigate("/processos/novo");
+    setShowCreateDialog(true);
   };
 
   return (
@@ -483,15 +483,6 @@ export default function ClientsPage() {
                       <TableHead>Contacto</TableHead>
                       <TableHead>NIF</TableHead>
                       <TableHead>Fase</TableHead>
-                      <TableHead 
-                        className="text-center cursor-pointer hover:bg-muted"
-                        onClick={() => toggleSort("process_count")}
-                      >
-                        <span className="flex items-center justify-center">
-                          Processos
-                          <SortIcon field="process_count" />
-                        </span>
-                      </TableHead>
                       <TableHead className="text-right">Acções</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -569,24 +560,6 @@ export default function ClientsPage() {
                         ) : (
                           <span className="text-muted-foreground text-sm">-</span>
                         )}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <Badge
-                            variant={
-                              client.active_processes_count > 0
-                                ? "default"
-                                : "secondary"
-                            }
-                          >
-                            {client.active_processes_count || 0} activo(s)
-                          </Badge>
-                          {(client.process_ids?.length || 0) > client.active_processes_count && (
-                            <Badge variant="outline">
-                              {client.process_ids?.length || 0} total
-                            </Badge>
-                          )}
-                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
