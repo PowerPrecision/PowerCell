@@ -270,6 +270,7 @@ class FinancialData(BaseModel):
     employment_type: Optional[str] = None  # efetivo, termo, independente, empresario, reformado, desempregado
     employment_duration: Optional[str] = None  # Tempo de emprego
     employer_name: Optional[str] = None  # Entidade empregadora
+    employer_nif: Optional[str] = None  # NIF da entidade empregadora
     monthly_income: Optional[float] = None  # Rendimento mensal
     # Dados do CPCV - Valores
     valor_pretendido: Optional[float] = None

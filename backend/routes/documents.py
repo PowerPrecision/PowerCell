@@ -279,6 +279,7 @@ async def upload_file_s3(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     category: str = Form(...), # Ex: "Financeiros", "Imovel"
+    empresa_nif: Optional[str] = Form(None),  # NIF da empresa - obrigatório para indexacao
     user: dict = Depends(get_current_user)
 ):
     """
@@ -288,10 +289,38 @@ async def upload_file_s3(
     - Normalização do nome do ficheiro
     - Conversão de imagens (JPG, PNG) para PDF
     - Categorização automática com IA (em background)
+    
+    Nota para utilizadores "indexacao":
+    - O campo empresa_nif é OBRIGATÓRIO
+    - Deve conter o NIF da empresa onde o cliente trabalha
     """
+    # Verificar se utilizador "indexacao" forneceu o NIF da empresa
+    if user.get("role") == "indexacao":
+        if not empresa_nif:
+            raise HTTPException(
+                status_code=400, 
+                detail="O NIF da empresa é obrigatório para utilizadores de indexação. Por favor, insira o NIF da entidade empregadora do cliente."
+            )
+        # Validar formato do NIF (9 dígitos)
+        import re
+        if not re.match(r'^\d{9}$', empresa_nif):
+            raise HTTPException(
+                status_code=400,
+                detail="NIF da empresa inválido. Deve conter exatamente 9 dígitos."
+            )
+    
     process = await db.processes.find_one({"id": client_id})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
+    
+    # Se empresa_nif foi fornecido, guardar no processo
+    if empresa_nif:
+        personal_data = process.get("personal_data", {})
+        personal_data["employer_nif"] = empresa_nif
+        await db.processes.update_one(
+            {"id": client_id},
+            {"$set": {"personal_data": personal_data}}
+        )
     
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     # Obter segundo titular se existir (com verificação de None)
@@ -1981,3 +2010,74 @@ async def rename_all_documents_smart(
     
     return results
 
+
+
+# ====================================================================
+# VERIFICAÇÃO DE NIF DE EMPRESA
+# ====================================================================
+
+@router.get("/check-employer-nif/{nif}")
+async def check_employer_nif(
+    nif: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Verifica se um NIF de empresa já existe na base de dados.
+    
+    Retorna:
+    - exists: True se o NIF já foi usado
+    - processes: Lista de processos onde este NIF foi usado
+    - total_count: Número total de processos com este NIF
+    
+    Útil para utilizadores "indexacao" verificarem se a empresa
+    do cliente já enviou documentos para outros balcões.
+    """
+    import re
+    
+    # Validar formato do NIF
+    if not re.match(r'^\d{9}$', nif):
+        raise HTTPException(
+            status_code=400,
+            detail="NIF inválido. Deve conter exatamente 9 dígitos."
+        )
+    
+    # Buscar processos com este NIF de empregador
+    # O NIF pode estar em personal_data.employer_nif ou personal_data.nif (se for empresa)
+    processes = await db.processes.find(
+        {
+            "$or": [
+                {"personal_data.employer_nif": nif},
+                {"personal_data.nif": nif, "personal_data.nif": {"$regex": "^5"}},  # NIFs de empresa começam por 5
+            ]
+        },
+        {"_id": 0, "id": 1, "client_name": 1, "status": 1, "created_at": 1, 
+         "personal_data.employer_name": 1, "personal_data.employer_nif": 1,
+         "consultor_name": 1, "mediador_name": 1}
+    ).to_list(100)
+    
+    # Buscar nomes dos status
+    workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0, "name": 1, "label": 1, "color": 1}).to_list(100)
+    status_map = {s["name"]: s for s in workflow_statuses}
+    
+    # Formatar resultados
+    results = []
+    for proc in processes:
+        status_info = status_map.get(proc.get("status"), {})
+        results.append({
+            "id": proc.get("id"),
+            "client_name": proc.get("client_name"),
+            "employer_name": proc.get("personal_data", {}).get("employer_name"),
+            "status": proc.get("status"),
+            "status_label": status_info.get("label", proc.get("status")),
+            "status_color": status_info.get("color", "#6B7280"),
+            "consultor_name": proc.get("consultor_name"),
+            "mediador_name": proc.get("mediador_name"),
+            "created_at": proc.get("created_at")
+        })
+    
+    return {
+        "nif": nif,
+        "exists": len(results) > 0,
+        "total_count": len(results),
+        "processes": results
+    }

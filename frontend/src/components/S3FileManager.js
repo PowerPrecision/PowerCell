@@ -146,8 +146,15 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [sortBy, setSortBy] = useState("date"); // "date", "name", "size"
   const [sortOrder, setSortOrder] = useState("desc"); // "asc", "desc"
   
+  // Estado para NIF da empresa (obrigatório para indexacao)
+  const [empresaNifDialog, setEmpresaNifDialog] = useState({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
+  const [pendingFiles, setPendingFiles] = useState(null);
+  
   // Verificar se o utilizador pode mapear S3 (apenas admin)
   const canMapS3 = user?.role === "admin";
+  
+  // Verificar se o utilizador é de indexacao (precisa de NIF da empresa)
+  const isIndexacao = user?.role === "indexacao";
   
   // Função para ordenar ficheiros
   const sortFiles = (filesList) => {
@@ -305,23 +312,84 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
-  // Upload de ficheiro
-  const handleUpload = async (e) => {
-    const selectedFiles = Array.from(e.target.files || []);
-    if (selectedFiles.length === 0) return;
+  // Verificar NIF da empresa
+  const checkEmpresaNif = async (nif) => {
+    try {
+      const response = await fetch(
+        `${API_URL}/api/documents/check-employer-nif/${nif}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      
+      if (response.ok) {
+        return await response.json();
+      }
+      return null;
+    } catch (error) {
+      console.error("Erro ao verificar NIF:", error);
+      return null;
+    }
+  };
 
+  // Handle do botão de verificar NIF
+  const handleVerifyEmpresaNif = async () => {
+    const nif = empresaNifDialog.empresaNif.trim();
+    
+    // Validar NIF (9 dígitos)
+    if (!/^\d{9}$/.test(nif)) {
+      toast.error("NIF inválido. Deve conter exatamente 9 dígitos.");
+      return;
+    }
+    
+    setEmpresaNifDialog(prev => ({ ...prev, checking: true }));
+    
+    const result = await checkEmpresaNif(nif);
+    
+    setEmpresaNifDialog(prev => ({
+      ...prev,
+      checking: false,
+      existingProcesses: result
+    }));
+  };
+
+  // Confirmar upload com NIF da empresa
+  const handleConfirmUploadWithNif = async () => {
+    const nif = empresaNifDialog.empresaNif.trim();
+    
+    if (!/^\d{9}$/.test(nif)) {
+      toast.error("NIF inválido. Deve conter exatamente 9 dígitos.");
+      return;
+    }
+    
+    setEmpresaNifDialog(prev => ({ ...prev, open: false }));
+    
+    // Prosseguir com o upload usando o NIF
+    if (pendingFiles) {
+      await executeUpload(pendingFiles, nif);
+      setPendingFiles(null);
+    }
+  };
+
+  // Executar upload dos ficheiros
+  const executeUpload = async (files, empresaNif = null) => {
     setUploading(true);
     setUploadProgress(0);
 
     let successCount = 0;
-    const totalFiles = selectedFiles.length;
+    const totalFiles = files.length;
 
-    for (let i = 0; i < selectedFiles.length; i++) {
-      const file = selectedFiles[i];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       const formData = new FormData();
       formData.append("file", file);
       // Quando está no tab "all", usar "Outros" como categoria default
       formData.append("category", activeTab === "all" ? "Outros" : activeTab);
+      
+      // Adicionar NIF da empresa se fornecido
+      if (empresaNif) {
+        formData.append("empresa_nif", empresaNif);
+      }
 
       try {
         const response = await fetch(
@@ -362,6 +430,28 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  };
+
+  // Upload de ficheiro
+  const handleUpload = async (e) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length === 0) return;
+
+    // Se o utilizador é "indexacao", pedir NIF da empresa
+    if (isIndexacao) {
+      setPendingFiles(selectedFiles);
+      setEmpresaNifDialog({
+        open: true,
+        files: selectedFiles,
+        empresaNif: "",
+        checking: false,
+        existingProcesses: null
+      });
+      return;
+    }
+
+    // Upload normal para outros utilizadores
+    await executeUpload(selectedFiles);
   };
 
   // Download de ficheiro - usa temporary_url se disponível
@@ -1640,6 +1730,159 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           <DialogFooter>
             <Button onClick={() => setRenameDialog({ open: false, results: null })}>
               Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para NIF da Empresa (obrigatório para indexacao) */}
+      <Dialog open={empresaNifDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setEmpresaNifDialog({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
+          setPendingFiles(null);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+          }
+        }
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-blue-600" />
+              NIF da Empresa
+            </DialogTitle>
+            <DialogDescription>
+              Para concluir o upload, é obrigatório indicar o NIF da empresa onde o cliente trabalha.
+              <br />
+              <span className="text-sm text-muted-foreground mt-1 block">
+                {empresaNifDialog.files?.length || 0} ficheiro(s) selecionado(s) para upload.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">NIF da Empresa (9 dígitos)</label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Ex: 509123456"
+                  value={empresaNifDialog.empresaNif}
+                  onChange={(e) => setEmpresaNifDialog(prev => ({
+                    ...prev,
+                    empresaNif: e.target.value.replace(/\D/g, '').slice(0, 9)
+                  }))}
+                  maxLength={9}
+                  className="flex-1"
+                />
+                <Button
+                  variant="outline"
+                  onClick={handleVerifyEmpresaNif}
+                  disabled={empresaNifDialog.empresaNif.length !== 9 || empresaNifDialog.checking}
+                >
+                  {empresaNifDialog.checking ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                  Verificar
+                </Button>
+              </div>
+            </div>
+
+            {/* Resultado da verificação */}
+            {empresaNifDialog.existingProcesses && (
+              <div className={`rounded-lg border p-4 ${
+                empresaNifDialog.existingProcesses.exists 
+                  ? 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800' 
+                  : 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
+              }`}>
+                {empresaNifDialog.existingProcesses.exists ? (
+                  <>
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium text-amber-800 dark:text-amber-200">
+                          Este NIF já foi utilizado em {empresaNifDialog.existingProcesses.total_count} processo(s)
+                        </p>
+                        <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                          Documentos desta empresa já foram enviados para os seguintes balcões:
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="mt-3 max-h-40 overflow-y-auto space-y-2">
+                      {empresaNifDialog.existingProcesses.processes.map((proc, idx) => (
+                        <div 
+                          key={idx}
+                          className="flex items-center justify-between p-2 rounded bg-white/50 dark:bg-black/20 border border-amber-100 dark:border-amber-900"
+                        >
+                          <div>
+                            <p className="font-medium text-sm">{proc.client_name}</p>
+                            {proc.employer_name && (
+                              <p className="text-xs text-muted-foreground">{proc.employer_name}</p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <Badge 
+                              style={{ 
+                                backgroundColor: proc.status_color || '#6B7280',
+                                color: 'white',
+                                fontSize: '10px'
+                              }}
+                            >
+                              {proc.status_label}
+                            </Badge>
+                            {(proc.consultor_name || proc.mediador_name) && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {proc.consultor_name || proc.mediador_name}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">
+                      Pode prosseguir com o upload mesmo assim. Este aviso é apenas informativo.
+                    </p>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    <div>
+                      <p className="font-medium text-green-800 dark:text-green-200">
+                        NIF não registado anteriormente
+                      </p>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        Este NIF de empresa ainda não foi utilizado em nenhum processo.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEmpresaNifDialog({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
+                setPendingFiles(null);
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = "";
+                }
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmUploadWithNif}
+              disabled={empresaNifDialog.empresaNif.length !== 9}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Confirmar Upload
             </Button>
           </DialogFooter>
         </DialogContent>
