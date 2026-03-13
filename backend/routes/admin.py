@@ -203,6 +203,141 @@ async def fix_duplicate_workflow_statuses(user: dict = Depends(require_roles([Us
     }
 
 
+@router.post("/processes/fix-duplicates")
+async def fix_duplicate_processes(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    """
+    Remove processos duplicados causados por merge.
+    
+    Identifica duplicados por:
+    1. Mesmo email (client_email)
+    2. Mesmo NIF (personal_data.nif)
+    
+    Mantém o processo mais recente (maior created_at) e remove os mais antigos.
+    """
+    from collections import defaultdict
+    
+    # Buscar todos os processos
+    all_processes = await db.processes.find({}).to_list(length=None)
+    
+    # Agrupar por email
+    by_email = defaultdict(list)
+    # Agrupar por NIF
+    by_nif = defaultdict(list)
+    
+    for proc in all_processes:
+        email = proc.get("client_email", "").lower().strip() if proc.get("client_email") else None
+        nif = proc.get("personal_data", {}).get("nif") if proc.get("personal_data") else None
+        
+        if email:
+            by_email[email].append(proc)
+        if nif:
+            by_nif[nif].append(proc)
+    
+    # Identificar duplicados
+    ids_to_remove = set()
+    report = {
+        "analyzed": len(all_processes),
+        "duplicates_by_email": [],
+        "duplicates_by_nif": [],
+        "removed": 0
+    }
+    
+    # Processar duplicados por email
+    for email, procs in by_email.items():
+        if len(procs) > 1:
+            # Ordenar por created_at descendente (mais recente primeiro)
+            procs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            
+            duplicate_info = {
+                "key": email,
+                "count": len(procs),
+                "keeping": procs[0].get("id"),
+                "keeping_name": procs[0].get("client_name"),
+                "removing": []
+            }
+            
+            # Manter o mais recente, remover os outros
+            for proc in procs[1:]:
+                proc_id = proc.get("id")
+                if proc_id not in ids_to_remove:
+                    ids_to_remove.add(proc_id)
+                    duplicate_info["removing"].append({
+                        "id": proc_id,
+                        "name": proc.get("client_name"),
+                        "created_at": proc.get("created_at")
+                    })
+            
+            report["duplicates_by_email"].append(duplicate_info)
+    
+    # Processar duplicados por NIF
+    for nif, procs in by_nif.items():
+        if len(procs) > 1:
+            # Ordenar por created_at descendente
+            procs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            
+            duplicate_info = {
+                "key": nif,
+                "count": len(procs),
+                "keeping": procs[0].get("id"),
+                "keeping_name": procs[0].get("client_name"),
+                "removing": []
+            }
+            
+            # Manter o mais recente, remover os outros (se ainda não marcados)
+            for proc in procs[1:]:
+                proc_id = proc.get("id")
+                if proc_id not in ids_to_remove:
+                    ids_to_remove.add(proc_id)
+                    duplicate_info["removing"].append({
+                        "id": proc_id,
+                        "name": proc.get("client_name"),
+                        "created_at": proc.get("created_at")
+                    })
+            
+            report["duplicates_by_nif"].append(duplicate_info)
+    
+    total_duplicates = len(report["duplicates_by_email"]) + len(report["duplicates_by_nif"])
+    
+    if total_duplicates == 0:
+        return {
+            "success": True,
+            "message": "Não foram encontrados processos duplicados",
+            "report": report
+        }
+    
+    # Remover duplicados
+    for proc_id in ids_to_remove:
+        # Mover documentos associados para o processo mantido? Não, apagar tudo
+        await db.documents.delete_many({"process_id": proc_id})
+        await db.tasks.delete_many({"process_id": proc_id})
+        await db.history.delete_many({"process_id": proc_id})
+        await db.processes.delete_one({"id": proc_id})
+        report["removed"] += 1
+    
+    # Registrar no histórico
+    await db.history.insert_one({
+        "id": str(uuid.uuid4()),
+        "process_id": None,
+        "user_id": user["id"],
+        "user_name": user.get("name", "Admin"),
+        "action": f"Correção de processos duplicados - {report['removed']} processos removidos",
+        "field": "process_duplicates_fixed",
+        "old_value": None,
+        "new_value": str(report["removed"]),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Verificar resultado final
+    remaining = await db.processes.count_documents({})
+    report["remaining_count"] = remaining
+    
+    return {
+        "success": True,
+        "message": f"Removidos {report['removed']} processos duplicados",
+        "report": report
+    }
+
+
 # ============== USER MANAGEMENT ROUTES ==============
 
 @router.get("/users", response_model=List[UserResponse])
