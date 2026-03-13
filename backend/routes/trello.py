@@ -1380,15 +1380,18 @@ async def save_member_mapping(
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Guardar um mapeamento manual de membro Trello → Utilizador."""
+    logger.info(f"A guardar mapeamento: @{mapping.trello_username} → {mapping.user_id}")
+    
     trello_username = mapping.trello_username.lower().strip()
     
     # Verificar se o utilizador existe
     target_user = await db.users.find_one({"id": mapping.user_id}, {"_id": 0})
     if not target_user:
+        logger.warning(f"Utilizador não encontrado: {mapping.user_id}")
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
     
     # Upsert do mapeamento
-    await db.trello_member_mappings.update_one(
+    result = await db.trello_member_mappings.update_one(
         {"trello_username": trello_username},
         {"$set": {
             "trello_username": trello_username,
@@ -1400,6 +1403,8 @@ async def save_member_mapping(
         }},
         upsert=True
     )
+    
+    logger.info(f"Mapeamento guardado: @{trello_username} → {target_user['name']} (matched: {result.matched_count}, modified: {result.modified_count}, upserted: {result.upserted_id})")
     
     return {
         "success": True,
@@ -1413,24 +1418,31 @@ async def save_member_mappings_bulk(
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Guardar múltiplos mapeamentos de uma vez."""
+    logger.info(f"A guardar {len(data.mappings)} mapeamentos em bulk por {user.get('name', 'admin')}")
+    
     saved = 0
     errors = []
     
     for mapping in data.mappings:
         try:
             trello_username = mapping.trello_username.lower().strip()
+            logger.info(f"Processando mapeamento: @{trello_username} → {mapping.user_id}")
             
             # Se user_id estiver vazio, remover mapeamento
             if not mapping.user_id:
+                logger.info(f"A remover mapeamento para @{trello_username} (user_id vazio)")
                 await db.trello_member_mappings.delete_one({"trello_username": trello_username})
+                saved += 1
                 continue
             
             target_user = await db.users.find_one({"id": mapping.user_id}, {"_id": 0})
             if not target_user:
-                errors.append(f"Utilizador {mapping.user_id} não encontrado")
+                error_msg = f"Utilizador {mapping.user_id} não encontrado"
+                logger.warning(error_msg)
+                errors.append(error_msg)
                 continue
             
-            await db.trello_member_mappings.update_one(
+            result = await db.trello_member_mappings.update_one(
                 {"trello_username": trello_username},
                 {"$set": {
                     "trello_username": trello_username,
@@ -1442,9 +1454,14 @@ async def save_member_mappings_bulk(
                 }},
                 upsert=True
             )
+            logger.info(f"Mapeamento salvo: @{trello_username} → {target_user['name']} (upserted: {result.upserted_id is not None})")
             saved += 1
         except Exception as e:
-            errors.append(f"Erro em @{mapping.trello_username}: {str(e)}")
+            error_msg = f"Erro em @{mapping.trello_username}: {str(e)}"
+            logger.error(error_msg)
+            errors.append(error_msg)
+    
+    logger.info(f"Bulk mapeamentos completo: {saved} guardados, {len(errors)} erros")
     
     return {
         "success": len(errors) == 0,
