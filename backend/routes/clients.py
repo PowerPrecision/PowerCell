@@ -65,7 +65,7 @@ async def list_clients(
             {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
              "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
              "assigned_consultor_id": 1, "assigned_mediador_id": 1}
-        ).skip(skip).limit(limit).to_list(length=limit)
+        ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
         
         # Agrupar por cliente
         clients_map = {}
@@ -141,7 +141,7 @@ async def list_clients(
         process_query,
         {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
          "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1}
-    ).skip(skip).limit(limit).to_list(length=limit)
+    ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
     
     # Agrupar por cliente (usando client_id ou client_name como chave)
     clients_map = {}

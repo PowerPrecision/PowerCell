@@ -302,7 +302,7 @@ async def get_processes(user: dict = Depends(get_current_user)):
             {"assigned_mediador_id": user["id"]}
         ]
     
-    processes = await db.processes.find(query, {"_id": 0}).to_list(1000)
+    processes = await db.processes.find(query, {"_id": 0}).sort("client_name", 1).to_list(1000)
     return [ProcessResponse(**p) for p in processes]
 
 
@@ -310,8 +310,8 @@ async def get_processes(user: dict = Depends(get_current_user)):
 async def get_processes_paginated(
     limit: int = Query(20, ge=1, le=100),
     cursor: Optional[str] = None,
-    sort_field: str = Query("created_at", description="Campo de ordenação"),
-    sort_order: str = Query("desc", description="Ordem: asc ou desc"),
+    sort_field: str = Query("client_name", description="Campo de ordenação"),
+    sort_order: str = Query("asc", description="Ordem: asc ou desc"),
     status: Optional[str] = None,
     search: Optional[str] = None,
     user: dict = Depends(get_current_user)
@@ -374,8 +374,8 @@ async def get_processes_paginated(
         collection=db.processes,
         default_limit=20,
         max_limit=100,
-        default_sort_field="created_at",
-        default_sort_order=-1
+        default_sort_field="client_name",
+        default_sort_order=1  # Ordem ascendente (A-Z)
     )
     
     result = await paginator.paginate(
@@ -565,7 +565,7 @@ async def get_my_clients(user: dict = Depends(require_roles([
             "deed_date": 1,
             "property_id": 1
         }
-    ).sort("updated_at", -1).to_list(500)
+    ).sort("client_name", 1).to_list(500)
     
     # Obter labels das fases do workflow
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).to_list(100)

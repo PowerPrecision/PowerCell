@@ -74,7 +74,7 @@ async def get_my_clients(user: dict = Depends(require_roles([
             "assigned_mediador_id": 1,
             "next_action": 1
         }
-    ).sort("updated_at", -1).limit(100).to_list(100)
+    ).sort("client_name", 1).limit(100).to_list(100)
     
     # Para cada processo, buscar tarefas pendentes detalhadas
     for process in processes:
