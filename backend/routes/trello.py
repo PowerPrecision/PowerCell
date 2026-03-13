@@ -212,6 +212,7 @@ async def get_trello_status(user: dict = Depends(require_roles([UserRole.ADMIN, 
         try:
             members_response = await trello_service._request("GET", f"/boards/{trello_service.board_id}/members")
             board_members = [{"id": m.get("id"), "name": m.get("fullName"), "username": m.get("username")} for m in members_response]
+            logger.info(f"Carregados {len(board_members)} membros do Trello")
         except Exception as e:
             logger.warning(f"Não foi possível obter membros do board: {e}")
         
