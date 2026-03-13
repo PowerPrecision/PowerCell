@@ -205,14 +205,21 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # =========================================
     # CRIAR PASTAS S3 PARA O NOVO CLIENTE
     # =========================================
+    s3_folder_path = None
     try:
         if s3_service.is_configured():
-            s3_service.initialize_client_folders(
+            success, s3_folder_path = s3_service.initialize_client_folders(
                 process_id, 
                 data.name,
                 second_client_name=second_client_name
             )
-            logger.info(f"Pastas S3 criadas para novo cliente: {data.name}")
+            if success and s3_folder_path:
+                # Guardar mapeamento no processo
+                await db.processes.update_one(
+                    {"id": process_id},
+                    {"$set": {"s3_folder": s3_folder_path}}
+                )
+                logger.info(f"Pastas S3 criadas e mapeadas para novo cliente: {data.name} -> {s3_folder_path}")
     except Exception as e:
         logger.warning(f"Erro ao criar pastas S3 para cliente {data.name}: {e}")
         # Não falhar o registo se as pastas S3 não forem criadas

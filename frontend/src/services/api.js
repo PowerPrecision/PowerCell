@@ -20,7 +20,7 @@ import { toast } from "../hooks/use-toast";
 // CONFIGURAÇÃO
 // ====================================================================
 // URL do backend - usa variável de ambiente ou fallback para produção
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powerprecisionzia-backend.onrender.com";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com";
 const API_URL = BACKEND_URL + "/api";
 
 // Criar instância Axios

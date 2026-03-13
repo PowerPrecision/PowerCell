@@ -156,7 +156,7 @@ async def _call_gemini(content: str, task_type: str, context: str, model: str) -
 
 
 async def _call_openai(content: str, task_type: str, context: str, model: str) -> Dict[str, Any]:
-    """Chama OpenAI via emergentintegrations."""
+    """Chama OpenAI via biblioteca de integração."""
     if not EMERGENT_LLM_KEY:
         return {"error": "EMERGENT_LLM_KEY não configurada"}
     

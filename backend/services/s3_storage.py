@@ -516,7 +516,7 @@ class S3Service:
         client_id: str, 
         client_name: str,
         second_client_name: str = None
-    ) -> bool:
+    ) -> tuple:
         """
         Cria a estrutura de pastas padrão para um novo cliente.
         No S3, cria-se um ficheiro vazio '.keep' para marcar a pasta.
@@ -527,10 +527,12 @@ class S3Service:
             second_client_name: Nome do segundo titular (opcional)
             
         Returns:
-            True se criado com sucesso
+            Tuplo (success: bool, folder_path: str ou None)
+            - (True, "Documentação Clientes/Nome_Cliente") se criado com sucesso
+            - (False, None) se falhou
         """
         if not self.is_configured():
-            return False
+            return (False, None)
             
         base_path = self._get_client_base_path(client_id, client_name, second_client_name)
         
@@ -543,11 +545,11 @@ class S3Service:
                     Key=path,
                     Body=b''
                 )
-            logger.info(f"Estrutura de pastas criada para cliente: {client_id}")
-            return True
+            logger.info(f"Estrutura de pastas criada para cliente: {client_id} -> {base_path}")
+            return (True, base_path)
         except ClientError as e:
             logger.error(f"Erro ao criar pastas S3: {e}")
-            return False
+            return (False, None)
 
 
     def get_file_content(self, object_name: str) -> Optional[bytes]:

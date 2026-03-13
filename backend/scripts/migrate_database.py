@@ -62,7 +62,7 @@ class DatabaseMigrator:
     
     def __init__(self):
         self.source_url = os.getenv("MONGO_URL")
-        self.source_db_name = os.getenv("DB_NAME", "powerprecision")
+        self.source_db_name = os.getenv("DB_NAME", "powercell")
         
         if not self.source_url:
             raise ValueError("MONGO_URL não definido no ambiente")

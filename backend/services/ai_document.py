@@ -359,7 +359,7 @@ def resize_image_base64(base64_content: str, mime_type: str, max_size: int = MAX
 )
 async def call_openai_api(payload: dict, timeout: float = 60.0) -> dict:
     """
-    Chamar API do OpenAI através da biblioteca emergentintegrations.
+    Chamar API do OpenAI através da biblioteca de integração.
     
     Usa exponential backoff: 2s, 4s, 8s, 16s, 32s
     Máximo 5 tentativas antes de desistir.
@@ -434,7 +434,7 @@ async def call_openai_api(payload: dict, timeout: float = 60.0) -> dict:
         if "rate" in error_msg or "429" in error_msg or "limit" in error_msg:
             logger.warning(f"Rate limit detectado: {e}")
             raise RateLimitError(f"Rate limit: {e}")
-        logger.error(f"Erro ao chamar OpenAI via emergentintegrations: {e}")
+        logger.error(f"Erro ao chamar OpenAI API: {e}")
         raise
 
 
@@ -503,7 +503,7 @@ async def analyze_with_text(text: str, document_type: str) -> Dict[str, Any]:
 
 async def analyze_with_vision(base64_content: str, mime_type: str, document_type: str) -> Dict[str, Any]:
     """
-    Analisar documento usando modelo de visão via emergentintegrations.
+    Analisar documento usando modelo de visão.
     Usado quando extracção de texto não é possível.
     
     Inclui retry automático para erros 429 (rate limit).
@@ -535,7 +535,7 @@ async def analyze_with_vision(base64_content: str, mime_type: str, document_type
     logger.info(f"Análise com visão: tipo={document_type}, detail={image_detail}")
     
     try:
-        # Usar emergentintegrations com suporte a imagem
+        # Usar biblioteca de integração com suporte a imagem
         from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
         import uuid
         

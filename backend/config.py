@@ -320,5 +320,5 @@ AI_CONFIG_DEFAULTS = {
 if GEMINI_API_KEY:
     print("✅ Gemini API configurada", file=sys.stderr)
 if EMERGENT_LLM_KEY:
-    print("✅ Emergent LLM Key configurada (OpenAI)", file=sys.stderr)
+    print("✅ LLM API Key configurada (OpenAI)", file=sys.stderr)
 

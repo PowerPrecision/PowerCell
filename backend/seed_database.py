@@ -10,7 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 # Connection string
 MONGO_URL = "mongodb+srv://admin:y8aEj7BByvgeO2zO@cluster0.373e1eh.mongodb.net/?appName=Cluster0&retryWrites=true&w=majority"
-DB_NAME = "powerprecision_dev"
+DB_NAME = "powercell_dev"
 
 
 def hash_password(password: str) -> str:

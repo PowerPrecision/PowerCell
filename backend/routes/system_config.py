@@ -241,8 +241,8 @@ CONFIG_FIELDS = {
                 label="Fornecedor de IA",
                 type="select",
                 options=[
-                    {"value": "emergent", "label": "Emergent (Recomendado)"},
-                    {"value": "openai", "label": "OpenAI (Chave própria)"},
+                    {"value": "openai", "label": "OpenAI"},
+                    {"value": "emergent", "label": "Emergent"},
                 ],
             ),
             ConfigField(
@@ -648,10 +648,10 @@ async def test_service_connection(
         
         # Testar chamada simples
         try:
-            provider = ai.provider or "emergent"
+            provider = ai.provider or "openai"
             
             if provider == "emergent":
-                # Usar emergentintegrations para chaves Emergent
+                # Usar biblioteca de integração para chaves Emergent
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
                 chat = LlmChat(
                     api_key=ai.api_key,

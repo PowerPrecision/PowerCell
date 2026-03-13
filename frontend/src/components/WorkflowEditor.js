@@ -131,8 +131,16 @@ const WorkflowEditor = () => {
 
     setFormLoading(true);
     try {
-      await deleteWorkflowStatus(selectedStatus.id);
-      toast.success("Estado eliminado com sucesso");
+      const response = await deleteWorkflowStatus(selectedStatus.id);
+      const processesMoved = response.data?.processes_moved || 0;
+      const movedTo = response.data?.moved_to;
+      
+      if (processesMoved > 0) {
+        toast.success(`Estado eliminado. ${processesMoved} processo(s) movido(s) para "${movedTo || 'Clientes em Espera'}"`);
+      } else {
+        toast.success("Estado eliminado com sucesso");
+      }
+      
       setIsDeleteDialogOpen(false);
       setSelectedStatus(null);
       fetchStatuses();
@@ -294,7 +302,6 @@ const WorkflowEditor = () => {
                     size="icon"
                     className="h-7 w-7 text-destructive hover:text-destructive"
                     onClick={() => openDeleteDialog(status)}
-                    disabled={status.is_default}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -523,9 +530,14 @@ const WorkflowEditor = () => {
               <strong>&ldquo;{selectedStatus?.label}&rdquo;</strong>?
             </p>
             <p className="text-sm text-muted-foreground mt-2">
-              Esta ação não pode ser revertida. Certifique-se de que não existem
-              processos neste estado.
+              Se existirem processos neste estado, serão movidos automaticamente para &ldquo;Clientes em Espera&rdquo;.
             </p>
+            {selectedStatus?.is_default && (
+              <p className="text-sm text-amber-600 mt-2 flex items-center gap-1">
+                <AlertTriangle className="h-4 w-4" />
+                Este é um estado padrão do sistema.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button

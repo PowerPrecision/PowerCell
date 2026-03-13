@@ -81,8 +81,8 @@ def _build_default_config() -> SystemConfig:
             imap_password=os.environ.get("IMAP_PASSWORD"),
         ),
         ai=AIConfig(
-            provider="emergent" if os.environ.get("EMERGENT_LLM_KEY") else "openai",
-            api_key=os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY"),
+            provider="openai",
+            api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("EMERGENT_LLM_KEY"),
             model="gpt-4o-mini",
         ),
         trello=TrelloConfig(

@@ -28,7 +28,7 @@ class AIImprovementAgent:
         self.llm_client = None
         self.api_key = EMERGENT_LLM_KEY
         if EMERGENT_LLM_KEY:
-            logger.info("AI Agent inicializado com sucesso (usando emergentintegrations)")
+            logger.info("AI Agent inicializado com sucesso")
         else:
             logger.warning("EMERGENT_LLM_KEY não configurada - AI Agent desativado")
     

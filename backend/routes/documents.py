@@ -381,12 +381,20 @@ async def initialize_folders(client_id: str, user: dict = Depends(get_current_us
     titular2_init = process.get("titular2_data") or {}
     second_client_name = process.get("second_client_name") or titular2_init.get("nome") or titular2_init.get("name")
     
-    success = s3_service.initialize_client_folders(
+    success, s3_folder_path = s3_service.initialize_client_folders(
         client_id, 
         client_name,
         second_client_name=second_client_name
     )
-    return {"success": success}
+    
+    # Se criou as pastas, guardar mapeamento no processo
+    if success and s3_folder_path:
+        await db.processes.update_one(
+            {"id": client_id},
+            {"$set": {"s3_folder": s3_folder_path}}
+        )
+    
+    return {"success": success, "s3_folder": s3_folder_path}
 
 
 @router.get("/client/{client_id}/download", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})

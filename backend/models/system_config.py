@@ -94,7 +94,7 @@ class EmailConfig(BaseModel):
 
 class AIConfig(BaseModel):
     """Configuração do serviço de IA"""
-    provider: AIProvider = AIProvider.EMERGENT
+    provider: AIProvider = AIProvider.OPENAI
     api_key: Optional[str] = None
     model: Optional[str] = "gpt-4o-mini"
     max_tokens: int = 4000

@@ -1,6 +1,6 @@
 {
   "exported_at": "2026-03-05T15:39:50.642840+00:00",
-  "source_db": "powerprecision_dev",
+  "source_db": "powercell_dev",
   "collections": {
     "system_config": 1,
     "properties": 0,

@@ -6,13 +6,13 @@ ENV_FILE="/app/backend/.env"
 case "$1" in
     prod|production)
         echo "🚀 Mudando para PRODUÇÃO..."
-        sed -i 's/DB_NAME="powerprecision_dev"/DB_NAME="powerprecision"/' "$ENV_FILE"
-        echo "✅ DB_NAME alterado para 'powerprecision'"
+        sed -i 's/DB_NAME="powercell_dev"/DB_NAME="powercell"/' "$ENV_FILE"
+        echo "✅ DB_NAME alterado para 'powercell'"
         ;;
     dev|development)
         echo "🔧 Mudando para DESENVOLVIMENTO..."
-        sed -i 's/DB_NAME="powerprecision"/DB_NAME="powerprecision_dev"/' "$ENV_FILE"
-        echo "✅ DB_NAME alterado para 'powerprecision_dev'"
+        sed -i 's/DB_NAME="powercell"/DB_NAME="powercell_dev"/' "$ENV_FILE"
+        echo "✅ DB_NAME alterado para 'powercell_dev'"
         ;;
     status)
         echo "📊 Configuração atual:"

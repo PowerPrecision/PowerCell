@@ -183,7 +183,7 @@ async def check_ai_service() -> ServiceStatus:
             config_fields=["api_key"]
         )
     
-    provider = ai_config.get("provider", "emergent")
+    provider = ai_config.get("provider", "openai")
     model = ai_config.get("model", "gpt-4o-mini")
     
     # Contar análises feitas

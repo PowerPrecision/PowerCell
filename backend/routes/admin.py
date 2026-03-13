@@ -68,20 +68,139 @@ async def update_workflow_status(status_id: str, data: WorkflowStatusUpdate, use
 
 @router.delete("/workflow-statuses/{status_id}")
 async def delete_workflow_status(status_id: str, user: dict = Depends(require_roles([UserRole.ADMIN]))):
-    """Delete a workflow status"""
+    """
+    Elimina uma fase do workflow.
+    
+    Se houver processos associados, são movidos para "Clientes em Espera" (ou a primeira fase disponível).
+    """
     status = await db.workflow_statuses.find_one({"id": status_id})
     if not status:
         raise HTTPException(status_code=404, detail="Estado não encontrado")
     
-    if status.get("is_default"):
-        raise HTTPException(status_code=400, detail="Não pode eliminar estados padrão")
+    status_name = status["name"]
+    target_name = None  # Inicializar
     
-    process_count = await db.processes.count_documents({"status": status["name"]})
+    # Verificar se há processos associados
+    process_count = await db.processes.count_documents({"status": status_name})
+    
     if process_count > 0:
-        raise HTTPException(status_code=400, detail=f"Existem {process_count} processos com este estado")
+        # Encontrar a fase de destino (Clientes em Espera ou primeira fase)
+        target_status = await db.workflow_statuses.find_one(
+            {"name": "clientes_espera"}, 
+            {"_id": 0, "name": 1, "label": 1}
+        )
+        
+        if not target_status:
+            # Se não encontrar "clientes_espera", usar a primeira fase por ordem
+            target_status = await db.workflow_statuses.find_one(
+                {"name": {"$ne": status_name}},
+                {"_id": 0, "name": 1, "label": 1},
+                sort=[("order", 1)]
+            )
+        
+        if not target_status:
+            raise HTTPException(
+                status_code=400, 
+                detail="Não existe outra fase para onde mover os processos"
+            )
+        
+        target_name = target_status["name"]
+        target_label = target_status.get("label", target_name)
+        
+        # Mover todos os processos para a fase de destino
+        result = await db.processes.update_many(
+            {"status": status_name},
+            {"$set": {"status": target_name, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        # Registrar no histórico
+        moved_count = result.modified_count
+        if moved_count > 0:
+            await db.history.insert_one({
+                "id": str(uuid.uuid4()),
+                "process_id": None,
+                "user_id": user["id"],
+                "user_name": user.get("name", "Admin"),
+                "action": f"Fase '{status.get('label', status_name)}' eliminada - {moved_count} processos movidos para '{target_label}'",
+                "field": "workflow_status_deleted",
+                "old_value": status_name,
+                "new_value": target_name,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
     
+    # Eliminar a fase
     await db.workflow_statuses.delete_one({"id": status_id})
-    return {"message": "Estado eliminado"}
+    
+    return {
+        "message": f"Fase '{status.get('label', status_name)}' eliminada",
+        "processes_moved": process_count,
+        "moved_to": target_name if process_count > 0 else None
+    }
+
+
+@router.post("/workflow-statuses/fix-duplicates")
+async def fix_duplicate_workflow_statuses(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    """
+    Remove fases de workflow duplicadas causadas por merge.
+    Mantém apenas a primeira ocorrência de cada fase (por nome).
+    """
+    from collections import defaultdict
+    
+    # Buscar todos os workflow_statuses
+    all_statuses = await db.workflow_statuses.find({}).to_list(length=None)
+    
+    # Agrupar por nome
+    by_name = defaultdict(list)
+    for status in all_statuses:
+        by_name[status.get('name')].append(status)
+    
+    # Identificar duplicados
+    duplicates_found = False
+    ids_to_remove = []
+    report = {"analyzed": len(all_statuses), "duplicates": [], "removed": 0}
+    
+    for name, statuses in by_name.items():
+        if len(statuses) > 1:
+            duplicates_found = True
+            # Ordenar por order para manter o mais relevante
+            statuses.sort(key=lambda x: x.get('order', 999))
+            
+            duplicate_info = {
+                "name": name,
+                "count": len(statuses),
+                "keeping": statuses[0].get('id'),
+                "removing": []
+            }
+            
+            # Manter o primeiro, remover os restantes
+            for status in statuses[1:]:
+                status_id = status.get('id')
+                ids_to_remove.append(status_id)
+                duplicate_info["removing"].append(status_id)
+            
+            report["duplicates"].append(duplicate_info)
+    
+    if not duplicates_found:
+        return {
+            "success": True,
+            "message": "Não foram encontrados duplicados",
+            "report": report
+        }
+    
+    # Remover duplicados
+    for status_id in ids_to_remove:
+        await db.workflow_statuses.delete_one({"id": status_id})
+        report["removed"] += 1
+    
+    # Verificar resultado final
+    remaining = await db.workflow_statuses.count_documents({})
+    report["remaining_count"] = remaining
+    
+    return {
+        "success": True,
+        "message": f"Removidos {report['removed']} duplicados",
+        "report": report
+    }
 
 
 # ============== USER MANAGEMENT ROUTES ==============
