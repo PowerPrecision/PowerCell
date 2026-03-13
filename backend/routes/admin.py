@@ -1,4 +1,5 @@
 import uuid
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -7,6 +8,8 @@ from database import db
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from services.auth import hash_password, require_roles
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -381,6 +384,100 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     
     await db.users.insert_one(user_doc)
     
+    # Enviar email de boas-vindas com dados de acesso
+    try:
+        from services.email_service import send_email
+        
+        # Determinar o nome do cargo em português
+        role_names = {
+            UserRole.CONSULTOR: "Consultor",
+            UserRole.MEDIADOR: "Intermediário",
+            UserRole.INTERMEDIARIO: "Intermediário",
+            UserRole.DIRETOR: "Diretor",
+            UserRole.ADMINISTRATIVO: "Administrativo",
+            UserRole.INDEXACAO: "Indexação",
+            UserRole.GESTOR_DOCUMENTOS: "Gestor de Documentos",
+            UserRole.CEO: "CEO",
+            UserRole.ADMIN: "Administrador"
+        }
+        role_name = role_names.get(data.role, data.role)
+        
+        # Criar corpo do email
+        email_body = f"""Olá {data.name},
+
+Bem-vindo(a) ao PowerCell!
+
+A sua conta foi criada com sucesso. Seguem os dados de acesso:
+
+📧 Email: {data.email}
+🔑 Password: {data.password}
+
+Perfil: {role_name}
+
+🔗 Aceda à plataforma em: https://powercell.vercel.app
+
+Recomendamos que altere a sua password após o primeiro acesso.
+
+Se tiver alguma dúvida, não hesite em contactar.
+
+Cumprimentos,
+Equipa PowerCell
+"""
+        
+        email_html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0d253f 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+                <h1 style="color: white; margin: 0;">Bem-vindo ao PowerCell</h1>
+            </div>
+            <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="font-size: 16px; color: #334155;">Olá <strong>{data.name}</strong>,</p>
+                <p style="font-size: 16px; color: #334155;">A sua conta foi criada com sucesso. Seguem os dados de acesso:</p>
+                
+                <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e2e8f0;">
+                    <p style="margin: 10px 0;"><strong>📧 Email:</strong> {data.email}</p>
+                    <p style="margin: 10px 0;"><strong>🔑 Password:</strong> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">{data.password}</code></p>
+                    <p style="margin: 10px 0;"><strong>👤 Perfil:</strong> {role_name}</p>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="https://powercell.vercel.app" style="background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">
+                        Aceder à Plataforma
+                    </a>
+                </div>
+                
+                <p style="font-size: 14px; color: #64748b; background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+                    ⚠️ Recomendamos que altere a sua password após o primeiro acesso.
+                </p>
+                
+                <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
+                    Se tiver alguma dúvida, não hesite em contactar.<br><br>
+                    Cumprimentos,<br>
+                    <strong>Equipa PowerCell</strong>
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Enviar email (usar conta power ou precision)
+        email_result = await send_email(
+            account_name="power",  # Usar conta Power Real Estate
+            to_emails=[data.email],
+            subject="Bem-vindo ao PowerCell - Dados de Acesso",
+            body=email_body,
+            body_html=email_html
+        )
+        
+        if email_result.get("success"):
+            logger.info(f"Email de boas-vindas enviado para {data.email}")
+        else:
+            logger.warning(f"Não foi possível enviar email para {data.email}: {email_result.get('error')}")
+            
+    except Exception as e:
+        logger.warning(f"Erro ao enviar email de boas-vindas: {e}")
+        # Não falhar a criação do utilizador se o email falhar
+    
     # Associar automaticamente processos do Trello que têm este utilizador atribuído
     # Verifica se o nome do utilizador corresponde a algum membro atribuído no Trello
     name_lower = data.name.lower()
@@ -414,8 +511,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
                 break  # Já encontrou match, passar ao próximo processo
     
     if updated_count > 0:
-        import logging
-        logging.getLogger(__name__).info(f"Utilizador {data.name} criado e associado a {updated_count} processos automaticamente")
+        logger.info(f"Utilizador {data.name} criado e associado a {updated_count} processos automaticamente")
     
     return UserResponse(
         id=user_id,
@@ -616,6 +712,33 @@ async def migrate_process_numbers(user: dict = Depends(require_roles([UserRole.A
     }
 
 
+@router.post("/update-process-active-status")
+async def update_process_active_status(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+    """
+    Atualizar o campo is_active de todos os processos baseado no status.
+    Processos em 'desistencias' ou 'concluidos' são marcados como inativos.
+    """
+    # Status que devem ser marcados como inativos
+    inactive_statuses = ["desistencias", "concluidos"]
+    
+    # Atualizar processos inativos
+    inactive_result = await db.processes.update_many(
+        {"status": {"$in": inactive_statuses}},
+        {"$set": {"is_active": False}}
+    )
+    
+    # Atualizar processos ativos (todos os outros)
+    active_result = await db.processes.update_many(
+        {"status": {"$nin": inactive_statuses}},
+        {"$set": {"is_active": True}}
+    )
+    
+    return {
+        "message": "Status de atividade atualizado",
+        "inactive_updated": inactive_result.modified_count,
+        "active_updated": active_result.modified_count,
+        "total_updated": inactive_result.modified_count + active_result.modified_count
+    }
 
 
 # ============== NOTIFICATION PREFERENCES ==============

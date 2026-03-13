@@ -29,6 +29,8 @@ async def list_clients(
     search: Optional[str] = Query(None, description="Pesquisar por nome, email ou NIF"),
     has_active_process: Optional[bool] = Query(None, description="Filtrar por ter processo activo"),
     show_all: bool = Query(True, description="Se True, mostra todos os clientes da empresa. Se False, apenas os do utilizador"),
+    status_filter: Optional[str] = Query(None, description="Filtrar por fase do processo"),
+    assignment_filter: Optional[str] = Query(None, description="Filtrar por tipo de atribuição: 'both', 'consultor', 'intermediario', 'none'"),
     limit: int = Query(100, le=500),
     skip: int = Query(0),
     user: dict = Depends(get_current_user)
@@ -38,12 +40,20 @@ async def list_clients(
     - show_all=True: Todos os utilizadores vêem todos os clientes da empresa
     - show_all=False: Utilizadores vêem apenas os seus clientes (atribuídos)
     
+    Filtros disponíveis:
+    - status_filter: Filtrar por fase do processo
+    - assignment_filter: 'both' (consultor+intermediario), 'consultor', 'intermediario', 'none'
+    
     Nota: Todos podem ver a lista de clientes para referência,
     mas apenas têm acesso total a processos que lhes estão atribuídos.
     """
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     user_email = user.get("email", "")
+    
+    # Buscar workflow statuses para labels
+    workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    status_map = {s["name"]: s for s in workflow_statuses}
     
     # Se show_all=True OU é admin/ceo/diretor, mostrar todos
     if show_all or user_role in ["admin", "ceo", "diretor"]:
@@ -59,12 +69,69 @@ async def list_clients(
                 ]
             }
         
+        # Filtro por fase/status
+        if status_filter:
+            if process_query:
+                process_query = {"$and": [process_query, {"status": status_filter}]}
+            else:
+                process_query = {"status": status_filter}
+        
+        # Filtro por tipo de atribuição
+        if assignment_filter:
+            assignment_query = None
+            if assignment_filter == "both":
+                # Tem consultor E intermediario
+                assignment_query = {
+                    "assigned_consultor_id": {"$exists": True, "$ne": None},
+                    "assigned_mediador_id": {"$exists": True, "$ne": None}
+                }
+            elif assignment_filter == "consultor":
+                # Tem apenas consultor (sem intermediario)
+                assignment_query = {
+                    "assigned_consultor_id": {"$exists": True, "$ne": None},
+                    "$or": [
+                        {"assigned_mediador_id": None},
+                        {"assigned_mediador_id": {"$exists": False}}
+                    ]
+                }
+            elif assignment_filter == "intermediario":
+                # Tem apenas intermediario (sem consultor)
+                assignment_query = {
+                    "assigned_mediador_id": {"$exists": True, "$ne": None},
+                    "$or": [
+                        {"assigned_consultor_id": None},
+                        {"assigned_consultor_id": {"$exists": False}}
+                    ]
+                }
+            elif assignment_filter == "none":
+                # Não tem nenhum atribuido
+                assignment_query = {
+                    "$or": [
+                        {"assigned_consultor_id": None},
+                        {"assigned_consultor_id": {"$exists": False}}
+                    ],
+                    "$or": [
+                        {"assigned_mediador_id": None},
+                        {"assigned_mediador_id": {"$exists": False}}
+                    ]
+                }
+            
+            if assignment_query:
+                if process_query:
+                    if "$and" in process_query:
+                        process_query["$and"].append(assignment_query)
+                    else:
+                        process_query = {"$and": [process_query, assignment_query]}
+                else:
+                    process_query = assignment_query
+        
         # Buscar todos os processos (clientes únicos)
         processes = await db.processes.find(
             process_query,
             {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
              "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
-             "assigned_consultor_id": 1, "assigned_mediador_id": 1}
+             "assigned_consultor_id": 1, "assigned_mediador_id": 1,
+             "consultor_name": 1, "mediador_name": 1, "is_active": 1}
         ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
         
         # Agrupar por cliente
@@ -85,12 +152,30 @@ async def list_clients(
                     "dados_pessoais": proc.get("personal_data", {}),
                     "nif": proc.get("personal_data", {}).get("nif"),
                     "process_ids": [],
-                    "active_processes_count": 0
+                    "active_processes_count": 0,
+                    "processes": []  # Lista de processos com fase
                 }
             
+            # Adicionar informação do processo
+            status_info = status_map.get(proc.get("status"), {})
+            process_info = {
+                "id": proc.get("id"),
+                "process_number": proc.get("process_number"),
+                "status": proc.get("status"),
+                "status_label": status_info.get("label", proc.get("status")),
+                "status_color": status_info.get("color", "#6B7280"),
+                "is_active": proc.get("is_active", True),
+                "consultor_name": proc.get("consultor_name"),
+                "mediador_name": proc.get("mediador_name")
+            }
+            clients_map[key]["processes"].append(process_info)
             clients_map[key]["process_ids"].append(proc.get("id"))
             
-            if proc.get("status") not in ["arquivado", "perdido", "concluido"]:
+            # Determinar fase principal (primeiro processo ativo ou primeiro processo)
+            if not clients_map[key].get("fase_principal"):
+                clients_map[key]["fase_principal"] = process_info
+            
+            if proc.get("is_active", True) and proc.get("status") not in ["desistencias", "concluidos", "arquivado", "perdido", "concluido"]:
                 clients_map[key]["active_processes_count"] += 1
         
         clients = list(clients_map.values())
@@ -99,10 +184,14 @@ async def list_clients(
         if has_active_process is not None:
             clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
         
+        # Adicionar lista de fases disponíveis para o filtro
+        available_statuses = [{"name": s["name"], "label": s.get("label", s["name"])} for s in workflow_statuses]
+        
         return {
             "clients": clients,
             "total": len(clients),
-            "showing_all": True
+            "showing_all": True,
+            "available_statuses": available_statuses
         }
     
     # show_all=False - Mostrar apenas clientes do utilizador

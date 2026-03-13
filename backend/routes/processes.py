@@ -154,6 +154,7 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         "client_email": user["email"],
         "process_type": data.process_type,
         "status": initial_status,
+        "is_active": True,  # Novos processos são ativos por defeito
         "personal_data": personal_data,
         "financial_data": data.financial_data.model_dump() if data.financial_data else None,
         "real_estate_data": None,
@@ -232,6 +233,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         "client_phone": client_phone,
         "process_type": data.process_type,
         "status": initial_status,
+        "is_active": True,  # Novos processos são ativos por defeito
         "personal_data": personal,
         "financial_data": data.financial_data.model_dump() if data.financial_data else None,
         "real_estate_data": None,
@@ -689,10 +691,19 @@ async def move_process_kanban(
     old_status = process.get("status", "")
     alerts_generated = []
     
+    # Determinar se o processo deve estar ativo ou inativo
+    # Processos em Desistências ou Concluídos são marcados como inativos
+    inactive_statuses = ["desistencias", "concluidos"]
+    is_active = new_status not in inactive_statuses
+    
     # Update process
     await db.processes.update_one(
         {"id": process_id},
-        {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {
+            "status": new_status, 
+            "is_active": is_active,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
     )
     
     # Log history

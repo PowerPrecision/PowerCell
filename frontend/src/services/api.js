@@ -88,6 +88,32 @@ api.interceptors.response.use(
     if (status === 401) {
       // Não mostrar toast para tentativas de login falhadas
       const isLoginAttempt = config.url?.includes("/auth/login");
+      const isStopImpersonate = config.url?.includes("/stop-impersonate");
+      
+      // Se estiver em modo impersonate e existe originalToken, tentar restaurar
+      const originalToken = localStorage.getItem("originalToken");
+      if (originalToken && !isStopImpersonate) {
+        // Estamos em modo impersonate e o token expirou
+        // Tentar voltar à conta original automaticamente
+        console.log("[API] Token de impersonate expirado, tentando restaurar sessão original...");
+        
+        // Restaurar token original
+        localStorage.setItem("token", originalToken);
+        localStorage.removeItem("originalToken");
+        
+        // Mostrar toast a informar
+        toast({
+          title: "Sessão de Visualização Expirada",
+          description: "Voltou à sua conta de administrador.",
+        });
+        
+        // Redirecionar para admin em vez de login
+        setTimeout(() => {
+          window.location.href = "/admin";
+        }, 1000);
+        
+        return Promise.reject(error);
+      }
       
       if (!isLoginAttempt) {
         toast({
@@ -99,6 +125,7 @@ api.interceptors.response.use(
         // Limpar dados de autenticação
         localStorage.removeItem("token");
         localStorage.removeItem("user");
+        localStorage.removeItem("originalToken");
         
         // Redirecionar para login (com delay para mostrar toast)
         setTimeout(() => {

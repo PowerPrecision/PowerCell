@@ -72,6 +72,9 @@ export default function ClientsPage() {
   const [sortField, setSortField] = useState("created_at");
   const [sortOrder, setSortOrder] = useState("desc");
   const [statusFilter, setStatusFilter] = useState("all"); // "all", "active", "inactive"
+  const [phaseFilter, setPhaseFilter] = useState("all"); // Filtro por fase
+  const [assignmentFilter, setAssignmentFilter] = useState("all"); // Filtro por atribuição
+  const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -103,6 +106,10 @@ export default function ClientsPage() {
       // Filtro por processos activos
       if (statusFilter === "active") params.append("has_active_process", "true");
       if (statusFilter === "inactive") params.append("has_active_process", "false");
+      // Filtro por fase
+      if (phaseFilter && phaseFilter !== "all") params.append("status_filter", phaseFilter);
+      // Filtro por atribuição
+      if (assignmentFilter && assignmentFilter !== "all") params.append("assignment_filter", assignmentFilter);
 
       const response = await fetch(`${API_URL}/api/clients?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -111,6 +118,7 @@ export default function ClientsPage() {
       if (response.ok) {
         const data = await response.json();
         setClients(data.clients || []);
+        setAvailablePhases(data.available_statuses || []);
       }
     } catch (error) {
       console.error("Erro ao carregar clientes:", error);
@@ -118,7 +126,7 @@ export default function ClientsPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, phaseFilter, assignmentFilter]);
 
   useEffect(() => {
     fetchClients();
@@ -326,6 +334,33 @@ export default function ClientsPage() {
                     <SelectItem value="inactive">Sem Processos Activos</SelectItem>
                   </SelectContent>
                 </Select>
+                <Select value={phaseFilter} onValueChange={setPhaseFilter}>
+                  <SelectTrigger className="w-[160px]" data-testid="phase-filter">
+                    <Filter className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder="Fase" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as Fases</SelectItem>
+                    {availablePhases.map((phase) => (
+                      <SelectItem key={phase.name} value={phase.name}>
+                        {phase.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={assignmentFilter} onValueChange={setAssignmentFilter}>
+                  <SelectTrigger className="w-[160px]" data-testid="assignment-filter">
+                    <Users className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder="Atribuição" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    <SelectItem value="both">Consultor + Intermediário</SelectItem>
+                    <SelectItem value="consultor">Apenas Consultor</SelectItem>
+                    <SelectItem value="intermediario">Apenas Intermediário</SelectItem>
+                    <SelectItem value="none">Sem Atribuição</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={`${sortField}_${sortOrder}`} onValueChange={(v) => {
                   const [field, order] = v.split('_');
                   setSortField(field);
@@ -431,6 +466,7 @@ export default function ClientsPage() {
                       </TableHead>
                       <TableHead>Contacto</TableHead>
                       <TableHead>NIF</TableHead>
+                      <TableHead>Fase</TableHead>
                       <TableHead 
                         className="text-center cursor-pointer hover:bg-muted"
                         onClick={() => toggleSort("process_count")}
@@ -493,6 +529,26 @@ export default function ClientsPage() {
                             <span className="font-mono text-sm">
                               {client.dados_pessoais.nif}
                             </span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {client.fase_principal ? (
+                          <div className="flex flex-col gap-1">
+                            <Badge 
+                              style={{ 
+                                backgroundColor: client.fase_principal.status_color || '#6B7280',
+                                color: 'white',
+                                fontSize: '11px'
+                              }}
+                            >
+                              {client.fase_principal.status_label}
+                            </Badge>
+                            {!client.fase_principal.is_active && (
+                              <span className="text-xs text-muted-foreground">(Inactivo)</span>
+                            )}
                           </div>
                         ) : (
                           <span className="text-muted-foreground text-sm">-</span>
