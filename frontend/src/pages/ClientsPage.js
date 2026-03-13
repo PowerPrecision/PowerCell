@@ -50,6 +50,8 @@ import {
   ArrowUp,
   ArrowDown,
   Filter,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import {
   Select,
@@ -71,7 +73,7 @@ export default function ClientsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState("created_at");
   const [sortOrder, setSortOrder] = useState("desc");
-  const [statusFilter, setStatusFilter] = useState("all"); // "all", "active", "inactive"
+  const [statusFilter, setStatusFilter] = useState("active"); // "all", "active", "inactive" - default: mostrar apenas ativos
   const [phaseFilter, setPhaseFilter] = useState("all"); // Filtro por fase
   const [assignmentFilter, setAssignmentFilter] = useState("all"); // Filtro por atribuição
   const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
@@ -324,14 +326,28 @@ export default function ClientsPage() {
                   />
                 </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[140px]" data-testid="status-filter">
-                    <Filter className="h-4 w-4 mr-2" />
+                  <SelectTrigger className="w-[170px]" data-testid="status-filter">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="active">Com Processos Activos</SelectItem>
-                    <SelectItem value="inactive">Sem Processos Activos</SelectItem>
+                    <SelectItem value="all">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        Todos os Clientes
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="active">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                        Clientes Ativos
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="inactive">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="h-4 w-4 text-gray-400" />
+                        Clientes Inativos
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={phaseFilter} onValueChange={setPhaseFilter}>
