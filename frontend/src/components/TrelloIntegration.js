@@ -325,6 +325,20 @@ const TrelloIntegration = () => {
         },
         body: JSON.stringify({ mappings: mappingsToSave })
       });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMsg = `Erro ${response.status}`;
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMsg = errorData.detail || errorData.message || errorMsg;
+        } catch (e) {
+          // Se não for JSON, usar texto como está
+          if (errorText) errorMsg = errorText;
+        }
+        throw new Error(errorMsg);
+      }
+      
       const data = await response.json();
       
       if (data.success) {
@@ -344,7 +358,7 @@ const TrelloIntegration = () => {
     } catch (error) {
       toast({
         title: "Erro",
-        description: "Não foi possível guardar os mapeamentos.",
+        description: error.message || "Não foi possível guardar os mapeamentos.",
         variant: "destructive",
       });
     } finally {
