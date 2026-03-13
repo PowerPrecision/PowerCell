@@ -471,7 +471,7 @@ const TrelloIntegration = () => {
         )}
 
         {/* Mapeamento de Membros */}
-        {status?.member_mapping && status.member_mapping.length > 0 && (
+        {status?.connected && (
           <div className="border rounded-lg">
             <button
               onClick={() => setShowMemberMapping(!showMemberMapping)}
@@ -480,9 +480,11 @@ const TrelloIntegration = () => {
               <div className="flex items-center gap-2">
                 <Link2 className="h-4 w-4 text-blue-900" />
                 <span className="font-medium text-sm">Mapeamento Membros Trello ↔ Utilizadores</span>
-                <Badge variant="outline" className="text-xs">
-                  {status.member_mapping.filter(m => m.matched).length}/{status.member_mapping.length} mapeados
-                </Badge>
+                {status?.member_mapping && status.member_mapping.length > 0 && (
+                  <Badge variant="outline" className="text-xs">
+                    {status.member_mapping.filter(m => m.matched).length}/{status.member_mapping.length} mapeados
+                  </Badge>
+                )}
               </div>
               <span className="text-xs text-muted-foreground">
                 {showMemberMapping ? "Ocultar" : "Mostrar"}
@@ -491,12 +493,19 @@ const TrelloIntegration = () => {
             
             {showMemberMapping && (
               <div className="border-t p-3 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Associe cada membro do Trello ao utilizador correspondente na aplicação.
-                  Depois de associar, clique em "Guardar Mapeamentos" e em seguida "Atribuir Auto".
-                </p>
-                
-                {status.member_mapping.map((mapping, idx) => (
+                {!status?.member_mapping || status.member_mapping.length === 0 ? (
+                  <div className="text-sm text-amber-600 flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span>Não foi possível carregar os membros do Trello. Verifique a conexão.</span>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Associe cada membro do Trello ao utilizador correspondente na aplicação.
+                      Depois de associar, clique em "Guardar Mapeamentos" e em seguida "Atribuir Auto".
+                    </p>
+                    
+                    {status.member_mapping.map((mapping, idx) => (
                   <div 
                     key={idx}
                     className={`flex items-center justify-between p-3 rounded text-sm ${
@@ -561,6 +570,8 @@ const TrelloIntegration = () => {
                       Depois de guardar, clique em "Atribuir Auto" para aplicar aos processos existentes.
                     </span>
                   </div>
+                )}
+                  </>
                 )}
               </div>
             )}
