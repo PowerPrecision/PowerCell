@@ -221,10 +221,12 @@ async def get_trello_status(user: dict = Depends(require_roles([UserRole.ADMIN, 
             {"is_active": {"$ne": False}},
             {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}
         ).to_list(100)
-        
+
         # Obter mapeamentos manuais
         manual_mappings = await db.trello_member_mappings.find({}, {"_id": 0}).to_list(100)
+        logger.info(f"Mapeamentos manuais carregados: {len(manual_mappings)} - {[m.get('trello_username') for m in manual_mappings]}")
         manual_map = {m["trello_username"].lower(): m for m in manual_mappings}
+        logger.info(f"Manual map keys: {list(manual_map.keys())}")
         
         # Criar mapas para busca
         users_by_id = {u["id"]: u for u in app_users}
@@ -1455,7 +1457,12 @@ async def save_member_mappings_bulk(
                 }},
                 upsert=True
             )
-            logger.info(f"Mapeamento salvo: @{trello_username} → {target_user['name']} (upserted: {result.upserted_id is not None})")
+            logger.info(f"Mapeamento salvo: @{trello_username} → {target_user['name']} (matched: {result.matched_count}, modified: {result.modified_count}, upserted: {result.upserted_id})")
+
+            # Verificar se foi realmente guardado
+            verify = await db.trello_member_mappings.find_one({"trello_username": trello_username})
+            logger.info(f"Verificação: mapeamento guardado = {verify is not None}, dados = {verify}")
+
             saved += 1
         except Exception as e:
             error_msg = f"Erro em @{mapping.trello_username}: {str(e)}"
