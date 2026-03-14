@@ -307,6 +307,11 @@ const TrelloIntegration = () => {
       user_id: user_id || ""
     }));
 
+    console.log("=== GUARDAR MAPEAMENTOS ===");
+    console.log("pendingMappings:", pendingMappings);
+    console.log("mappingsToSave:", mappingsToSave);
+    console.log("token:", token ? "presente" : "AUSENTE");
+
     if (mappingsToSave.length === 0) {
       toast({
         title: "Nada para guardar",
@@ -317,7 +322,11 @@ const TrelloIntegration = () => {
 
     setSavingMapping(true);
     try {
-      const response = await fetch(`${API_URL}/api/trello/member-mappings/bulk`, {
+      const url = `${API_URL}/api/trello/member-mappings/bulk`;
+      console.log("URL:", url);
+      console.log("Body:", JSON.stringify({ mappings: mappingsToSave }));
+
+      const response = await fetch(url, {
         method: "POST",
         headers: { 
           Authorization: `Bearer ${token}`,
@@ -325,9 +334,13 @@ const TrelloIntegration = () => {
         },
         body: JSON.stringify({ mappings: mappingsToSave })
       });
+
+      console.log("Response status:", response.status);
+      console.log("Response ok:", response.ok);
       
       if (!response.ok) {
         const errorText = await response.text();
+        console.log("Error text:", errorText);
         let errorMsg = `Erro ${response.status}`;
         try {
           const errorData = JSON.parse(errorText);
@@ -340,6 +353,7 @@ const TrelloIntegration = () => {
       }
       
       const data = await response.json();
+      console.log("Response data:", data);
       
       if (data.success) {
         toast({
@@ -356,6 +370,7 @@ const TrelloIntegration = () => {
         });
       }
     } catch (error) {
+      console.error("Erro ao guardar mapeamentos:", error);
       toast({
         title: "Erro",
         description: error.message || "Não foi possível guardar os mapeamentos.",
