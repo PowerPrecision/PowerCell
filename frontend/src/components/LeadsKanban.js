@@ -56,7 +56,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 // Estados do Kanban
 const LEAD_STATUSES = [
   { id: "novo", label: "Novo", color: "bg-blue-500" },
-  { id: "contactado", label: "Contactado", color: "bg-yellow-500" },
+  { id: "contactado", label: "Contactado", color: "bg-yellow-500 text-yellow-900" },
   { id: "visita_agendada", label: "Visita Agendada", color: "bg-purple-500" },
   { id: "proposta", label: "Proposta", color: "bg-orange-500" },
   { id: "reservado", label: "Reservado", color: "bg-green-500" },
