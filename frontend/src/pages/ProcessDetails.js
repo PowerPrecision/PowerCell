@@ -116,6 +116,53 @@ const statusColors = {
   purple: "bg-purple-100 text-purple-800 border-purple-200",
 };
 
+// Cores dos bancos portugueses para badges
+const BANK_COLORS = {
+  "ABANCA": "bg-red-500 text-white",
+  "BBVA": "bg-blue-600 text-white",
+  "BEST": "bg-green-600 text-white",
+  "BIG": "bg-orange-500 text-white",
+  "BPI": "bg-yellow-400 text-yellow-900",
+  "CGD": "bg-red-600 text-white",
+  "Crédito Agrícola": "bg-green-500 text-white",
+  "Credito Agricola": "bg-green-500 text-white",
+  "CTT": "bg-red-400 text-white",
+  "Millennium bcp": "bg-red-500 text-white",
+  "Millennium": "bg-red-500 text-white",
+  "bcp": "bg-red-500 text-white",
+  "Novo Banco": "bg-gray-700 text-white",
+  "NovoBanco": "bg-gray-700 text-white",
+  "Popular": "bg-blue-500 text-white",
+  "Santander Totta": "bg-red-600 text-white",
+  "Santander": "bg-red-600 text-white",
+  "Bankinter": "bg-blue-800 text-white",
+  "ActivoBank": "bg-teal-500 text-white",
+  "Eurobic": "bg-red-500 text-white",
+  "BIC": "bg-red-500 text-white",
+  "Caixa Geral": "bg-red-600 text-white",
+};
+
+// Função para obter cor do banco
+const getBankColor = (bankName) => {
+  if (!bankName) return "bg-gray-200 text-gray-800";
+  
+  // Tentar match exato primeiro
+  if (BANK_COLORS[bankName]) {
+    return BANK_COLORS[bankName];
+  }
+  
+  // Tentar match parcial (case-insensitive)
+  const bankLower = bankName.toLowerCase();
+  for (const [bank, color] of Object.entries(BANK_COLORS)) {
+    if (bankLower.includes(bank.toLowerCase()) || bank.toLowerCase().includes(bankLower)) {
+      return color;
+    }
+  }
+  
+  // Cor padrão para bancos não mapeados
+  return "bg-gray-200 text-gray-800";
+};
+
 // Status relacionados com bancos - ao mudar para estes status, verificar créditos ativos
 const BANK_RELATED_STATUSES = ["enviado_bruno", "enviado_luis", "enviado_bcp_rui", "fase_bancaria", "entradas_precision"];
 
@@ -1656,7 +1703,7 @@ const ProcessDetails = () => {
                             </h4>
                             <div className="flex flex-wrap gap-2">
                               {financialData.bancos_creditos.map((banco, idx) => (
-                                <Badge key={idx} variant="destructive">{banco}</Badge>
+                                <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
                               ))}
                             </div>
                           </CardContent>
@@ -2576,11 +2623,11 @@ const ProcessDetails = () => {
                   O cliente <strong>{process?.client_name}</strong> tem créditos ativos nos seguintes bancos:
                 </p>
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <ul className="list-disc list-inside space-y-1">
+                  <div className="flex flex-wrap gap-2">
                     {pendingStatusChange?.activeBanks?.map((bank, index) => (
-                      <li key={index} className="font-medium text-amber-800">{bank}</li>
+                      <Badge key={index} className={getBankColor(bank)}>{bank}</Badge>
                     ))}
-                  </ul>
+                  </div>
                 </div>
                 <p className="text-sm text-muted-foreground">
                   Tem a certeza que deseja alterar o status para &quot;{workflowStatuses.find(s => s.name === pendingStatusChange?.status)?.label || pendingStatusChange?.status}&quot;?
