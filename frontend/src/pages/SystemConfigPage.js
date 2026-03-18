@@ -42,6 +42,7 @@ import {
   Users,
   FolderOpen,
   Link,
+  UserCheck,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -505,6 +506,7 @@ const SystemConfigPage = () => {
     const [s3SearchTerm, setS3SearchTerm] = useState("");
     const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
     const [autoMapping, setAutoMapping] = useState(false);
+    const [fixingNames, setFixingNames] = useState(false);
     
     // Filtrar clientes para exibição
     const filteredS3Clients = s3MappingData?.processes?.filter(p => {
@@ -663,6 +665,33 @@ const SystemConfigPage = () => {
         toast.error("Erro ao auto-mapear clientes");
       } finally {
         setAutoMapping(false);
+      }
+    };
+    
+    // Corrigir nomes de clientes em falta
+    const handleFixMissingNames = async () => {
+      setFixingNames(true);
+      try {
+        const response = await fetch(`${API_URL}/api/admin/client-s3-mappings/fix-missing-names`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await response.json();
+        
+        if (response.ok) {
+          if (data.fixed_count > 0) {
+            toast.success(`${data.fixed_count} processos corrigidos com nomes extraídos das pastas S3 ou emails`);
+          } else {
+            toast.info("Todos os processos já têm nome definido");
+          }
+          loadS3MappingData();
+        } else {
+          toast.error(data.detail || "Erro ao corrigir nomes");
+        }
+      } catch (error) {
+        toast.error("Erro ao corrigir nomes de clientes");
+      } finally {
+        setFixingNames(false);
       }
     };
 
@@ -870,7 +899,7 @@ const SystemConfigPage = () => {
                     </div>
                     
                     {/* Filtros */}
-                    <div className="flex gap-3 items-center">
+                    <div className="flex flex-wrap gap-3 items-center">
                       <Input
                         placeholder="Pesquisar por nome..."
                         value={s3SearchTerm}
@@ -898,6 +927,20 @@ const SystemConfigPage = () => {
                           <Sparkles className="h-4 w-4 mr-2" />
                         )}
                         Auto-Mapear
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={handleFixMissingNames}
+                        disabled={fixingNames}
+                        className="text-orange-600 border-orange-300 hover:bg-orange-50"
+                      >
+                        {fixingNames ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <UserCheck className="h-4 w-4 mr-2" />
+                        )}
+                        Corrigir Nomes
                       </Button>
                     </div>
                     

@@ -217,11 +217,28 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     process_number = await get_next_process_number()
     now = datetime.now(timezone.utc).isoformat()
     
-    # Extrair nome e email dos dados pessoais
+    # Extrair nome e email dos dados pessoais - garantir que o nome é sempre preenchido
     personal = data.personal_data.model_dump() if data.personal_data else {}
-    client_name = personal.get("nome_completo") or data.client_name or "Cliente"
+    # Tentar várias fontes para o nome do cliente
+    client_name = (
+        personal.get("nome_completo") or 
+        personal.get("nome") or 
+        data.client_name or 
+        personal.get("name") or
+        None  # Se não houver nome, vamos extrair do email
+    )
+    # Se ainda não temos nome, extrair do email (parte antes do @)
     client_email = sanitize_email(personal.get("email") or data.client_email or "")
-    client_phone = personal.get("telefone") or ""
+    if not client_name and client_email:
+        # Extrair nome do email: "joao.silva@example.com" -> "Joao Silva"
+        email_name = client_email.split("@")[0]
+        # Converter separadores comuns em espaços e capitalizar
+        client_name = email_name.replace(".", " ").replace("_", " ").replace("-", " ").title()
+    elif not client_name:
+        # Último recurso: usar "Cliente" com timestamp para evitar duplicados
+        client_name = f"Cliente {datetime.now().strftime('%Y%m%d%H%M%S')}"
+    
+    client_phone = personal.get("telefone") or personal.get("phone") or ""
     
     # Construir documento do processo
     process_doc = {

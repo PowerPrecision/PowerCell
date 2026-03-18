@@ -64,17 +64,29 @@ async def batch_update_client_s3_mappings_alias(
     return await batch_update_process_s3_mappings(mappings=mappings, user=user)
 
 
+@router.post("/client-s3-mappings/fix-missing-names")
+async def fix_missing_client_names_alias(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """Alias para fix-missing-names (retrocompatibilidade)."""
+    return await fix_missing_client_names(user=user)
+
+
 @router.post("/client-s3-mappings/auto-map")
 async def auto_map_client_s3_folders(
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    """Mapeamento automático de pastas S3 para processos baseado em nome."""
+    """
+    Mapeamento automático de pastas S3 para processos baseado em nome.
+    
+    Se o processo não tiver client_name, o nome da pasta é usado para preencher.
+    """
     from services.s3_storage import s3_service
     
     if not s3_service.is_configured():
         raise HTTPException(status_code=503, detail="S3 não configurado")
     
-    results = {"mapped": 0, "skipped": 0, "errors": []}
+    results = {"mapped": 0, "skipped": 0, "updated_names": 0, "errors": []}
     
     try:
         # Listar pastas S3
@@ -95,18 +107,51 @@ async def auto_map_client_s3_folders(
         for folder in folders:
             folder_name = folder["name"]
             
-            # Procurar processo pelo nome do cliente
+            # Tentar converter nome da pasta para formato legível (underscores -> espaços)
+            folder_name_readable = folder_name.replace("_", " ").replace("  ", " ")
+            
+            # Procurar processo pelo nome do cliente (exact match case-insensitive)
             process = await db.processes.find_one(
                 {"client_name": {"$regex": f"^{folder_name}$", "$options": "i"}},
-                {"_id": 0, "id": 1, "s3_folder": 1}
+                {"_id": 0, "id": 1, "s3_folder": 1, "client_name": 1}
             )
             
-            if process and not process.get("s3_folder"):
-                await db.processes.update_one(
-                    {"id": process["id"]},
-                    {"$set": {"s3_folder": folder["path"]}}
+            # Se não encontrou, tentar com nome legível
+            if not process:
+                process = await db.processes.find_one(
+                    {"client_name": {"$regex": f"^{folder_name_readable}$", "$options": "i"}},
+                    {"_id": 0, "id": 1, "s3_folder": 1, "client_name": 1}
                 )
-                results["mapped"] += 1
+            
+            # Se ainda não encontrou, tentar match parcial
+            if not process:
+                # Procurar por processos que contenham o nome da pasta ou vice-versa
+                name_parts = folder_name.replace("_", " ").split()
+                if len(name_parts) >= 2:
+                    # Usar primeiros nomes para match mais flexível
+                    first_name = name_parts[0]
+                    last_name = name_parts[-1]
+                    process = await db.processes.find_one(
+                        {"client_name": {"$regex": f"{first_name}.*{last_name}", "$options": "i"}},
+                        {"_id": 0, "id": 1, "s3_folder": 1, "client_name": 1}
+                    )
+            
+            if process:
+                update_fields = {"s3_folder": folder["path"]}
+                
+                # Se o processo não tem client_name, usar o nome da pasta
+                if not process.get("client_name") or process.get("client_name") == "Sem nome":
+                    update_fields["client_name"] = folder_name_readable
+                    results["updated_names"] += 1
+                
+                if not process.get("s3_folder"):
+                    await db.processes.update_one(
+                        {"id": process["id"]},
+                        {"$set": update_fields}
+                    )
+                    results["mapped"] += 1
+                else:
+                    results["skipped"] += 1
             else:
                 results["skipped"] += 1
                 
@@ -345,6 +390,74 @@ async def update_process_s3_mapping(
     })
     
     return {"success": True, "process_id": process_id, "s3_folder": clean_s3_folder, "client_name": process.get("client_name")}
+
+
+@router.post("/process-s3-mappings/fix-missing-names")
+async def fix_missing_client_names(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Corrige processos que não têm client_name definido.
+    Extrai o nome da pasta S3 mapeada ou do email do cliente.
+    """
+    fixed_count = 0
+    
+    # Processos sem nome ou com nome "Sem nome"
+    processes_without_name = await db.processes.find({
+        "$or": [
+            {"client_name": None},
+            {"client_name": ""},
+            {"client_name": "Sem nome"},
+            {"client_name": {"$exists": False}}
+        ]
+    }).to_list(1000)
+    
+    for process in processes_without_name:
+        new_name = None
+        
+        # 1. Tentar extrair da pasta S3
+        s3_folder = process.get("s3_folder")
+        if s3_folder:
+            # Extrair nome da pasta: "Documentação Clientes/Nome_Cliente" -> "Nome Cliente"
+            folder_name = s3_folder.replace("Documentação Clientes/", "").rstrip("/")
+            if folder_name:
+                new_name = folder_name.replace("_", " ").replace("  ", " ")
+        
+        # 2. Tentar extrair do email
+        if not new_name:
+            email = process.get("client_email")
+            if email and "@" in email:
+                email_name = email.split("@")[0]
+                new_name = email_name.replace(".", " ").replace("_", " ").replace("-", " ").title()
+        
+        # 3. Tentar extrair de personal_data
+        if not new_name:
+            personal = process.get("personal_data", {})
+            new_name = (
+                personal.get("nome_completo") or 
+                personal.get("nome") or 
+                personal.get("name")
+            )
+        
+        # 4. Se ainda não temos nome, usar "Cliente" com número do processo
+        if not new_name:
+            process_num = process.get("process_number", "Desconhecido")
+            new_name = f"Cliente #{process_num}"
+        
+        # Atualizar o processo
+        if new_name:
+            await db.processes.update_one(
+                {"id": process["id"]},
+                {"$set": {"client_name": new_name, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            fixed_count += 1
+    
+    return {
+        "success": True,
+        "message": f"Corrigidos {fixed_count} processos sem nome",
+        "fixed_count": fixed_count,
+        "total_found": len(processes_without_name)
+    }
 
 
 @router.post("/process-s3-mappings/batch")
