@@ -569,9 +569,18 @@ async def get_my_clients(user: dict = Depends(require_roles([
         }
     ).sort("client_name", 1).to_list(500)
     
-    # Obter labels das fases do workflow
-    statuses = await db.workflow_statuses.find({}, {"_id": 0}).to_list(100)
+    # Obter labels das fases do workflow ordenadas
+    statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     status_map = {s["name"]: s for s in statuses}
+    
+    # Ordenar processos por fase (order do status) e depois por nome
+    def get_sort_key(p):
+        status_info = status_map.get(p.get("status"), {})
+        phase_order = status_info.get("order", 999)
+        client_name = p.get("client_name", "").lower()
+        return (phase_order, client_name)
+    
+    processes = sorted(processes, key=get_sort_key)
     
     # Obter tarefas pendentes por processo
     process_ids = [p["id"] for p in processes]
