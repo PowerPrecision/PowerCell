@@ -14,9 +14,10 @@ import {
 } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
-import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock } from "lucide-react";
+import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
+import { cn } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
@@ -30,6 +31,53 @@ const FieldHint = ({ children }) => (
     <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
     <span>{children}</span>
   </p>
+);
+
+// Helper component for field errors
+const FieldError = ({ children }) => (
+  <p className="text-xs text-red-600 mt-1 flex items-start gap-1 font-medium">
+    <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+    <span>{children}</span>
+  </p>
+);
+
+// Validated Input Component
+const ValidatedInput = ({ 
+  error, 
+  required,
+  className,
+  ...props 
+}) => (
+  <div className="space-y-1">
+    <Input
+      className={cn(
+        className,
+        error && "border-red-500 focus-visible:ring-red-500 bg-red-50"
+      )}
+      {...props}
+    />
+    {error && <FieldError>{error}</FieldError>}
+  </div>
+);
+
+// Validated Select Wrapper
+const ValidatedSelect = ({ 
+  error, 
+  children,
+  triggerClassName,
+  ...props 
+}) => (
+  <div className="space-y-1">
+    <Select {...props}>
+      <SelectTrigger className={cn(
+        triggerClassName,
+        error && "border-red-500 focus:ring-red-500 bg-red-50"
+      )}>
+        {children}
+      </SelectTrigger>
+    </Select>
+    {error && <FieldError>{error}</FieldError>}
+  </div>
 );
 
 // Progress Bar Component com percentagem
@@ -144,6 +192,9 @@ const PublicClientForm = () => {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [blockedMessage, setBlockedMessage] = useState(null);
+  
+  // Estado para erros de validação por campo
+  const [fieldErrors, setFieldErrors] = useState({});
   
   // Auto-save state
   const [lastSaved, setLastSaved] = useState(null);
@@ -553,25 +604,31 @@ const PublicClientForm = () => {
           <Label htmlFor="name">Nome completo *</Label>
           <Input
             id="name"
+            name="name"
             value={formData.name}
             onChange={(e) => updateField("name", e.target.value)}
             placeholder="Nome completo"
             required
             data-testid="client-name"
+            className={cn(fieldErrors.name && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
+          {fieldErrors.name && <FieldError>{fieldErrors.name}</FieldError>}
         </div>
         
         <div className="space-y-2">
           <Label htmlFor="email">Email *</Label>
           <Input
             id="email"
+            name="email"
             type="email"
             value={formData.email}
             onChange={(e) => updateField("email", e.target.value)}
             placeholder="email@exemplo.pt"
             required
             data-testid="client-email"
+            className={cn(fieldErrors.email && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
+          {fieldErrors.email && <FieldError>{fieldErrors.email}</FieldError>}
           <FieldHint>Utilizaremos este email para comunicar consigo sobre o seu processo.</FieldHint>
         </div>
         
@@ -579,13 +636,16 @@ const PublicClientForm = () => {
           <Label htmlFor="phone">Telemóvel *</Label>
           <Input
             id="phone"
+            name="phone"
             type="tel"
             value={formData.phone}
             onChange={(e) => updateField("phone", e.target.value)}
             placeholder="+351 912 345 678"
             required
             data-testid="client-phone"
+            className={cn(fieldErrors.phone && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
+          {fieldErrors.phone && <FieldError>{fieldErrors.phone}</FieldError>}
           <FieldHint>Número de contacto direto para agendar visitas e reuniões.</FieldHint>
         </div>
         
@@ -593,6 +653,7 @@ const PublicClientForm = () => {
           <Label htmlFor="nif">NIF *</Label>
           <Input
             id="nif"
+            name="nif"
             type="text"
             value={formData.nif}
             onChange={(e) => updateField("nif", e.target.value.replace(/\D/g, ""))}
@@ -600,7 +661,9 @@ const PublicClientForm = () => {
             maxLength={9}
             required
             data-testid="client-nif"
+            className={cn(fieldErrors.nif && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
+          {fieldErrors.nif && <FieldError>{fieldErrors.nif}</FieldError>}
           <FieldHint>Número de Identificação Fiscal - 9 dígitos, encontra-se no Cartão de Cidadão.</FieldHint>
         </div>
         
@@ -608,12 +671,15 @@ const PublicClientForm = () => {
           <Label htmlFor="documento_id">Cartão de Cidadão/Passaporte *</Label>
           <Input
             id="documento_id"
+            name="documento_id"
             value={formData.documento_id}
             onChange={(e) => updateField("documento_id", e.target.value)}
             placeholder="Número do documento"
             required
             data-testid="client-documento"
+            className={cn(fieldErrors.documento_id && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
+          {fieldErrors.documento_id && <FieldError>{fieldErrors.documento_id}</FieldError>}
           <FieldHint>Número do documento de identificação válido.</FieldHint>
         </div>
         
@@ -621,12 +687,15 @@ const PublicClientForm = () => {
           <Label htmlFor="naturalidade">Naturalidade *</Label>
           <Input
             id="naturalidade"
+            name="naturalidade"
             value={formData.naturalidade}
             onChange={(e) => updateField("naturalidade", e.target.value)}
             placeholder="Local de nascimento"
             required
             data-testid="client-naturalidade"
+            className={cn(fieldErrors.naturalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
+          {fieldErrors.naturalidade && <FieldError>{fieldErrors.naturalidade}</FieldError>}
           <FieldHint>Freguesia/concelho onde nasceu.</FieldHint>
         </div>
         
@@ -634,6 +703,7 @@ const PublicClientForm = () => {
           <Label htmlFor="nacionalidade">Nacionalidade *</Label>
           <Input
             id="nacionalidade"
+            name="nacionalidade"
             value={formData.nacionalidade}
             onChange={(e) => updateField("nacionalidade", e.target.value)}
             placeholder="Portuguesa"
@@ -1479,76 +1549,163 @@ const PublicClientForm = () => {
   // Validação por step com mensagens de erro
   const validateStep = (stepNum) => {
     const errors = [];
+    const newFieldErrors = {};
     
     switch (stepNum) {
       case 1:
         if (!formData.name || formData.name.trim().length < 2) {
           errors.push("Nome completo é obrigatório");
+          newFieldErrors.name = "Nome completo é obrigatório (mínimo 2 caracteres)";
         }
         const emailCheck = validateEmail(formData.email);
-        if (!emailCheck.valid) errors.push(emailCheck.message);
+        if (!emailCheck.valid) {
+          errors.push(emailCheck.message);
+          newFieldErrors.email = emailCheck.message;
+        }
         const phoneCheck = validatePhone(formData.phone);
-        if (!phoneCheck.valid) errors.push(phoneCheck.message);
+        if (!phoneCheck.valid) {
+          errors.push(phoneCheck.message);
+          newFieldErrors.phone = phoneCheck.message;
+        }
         const nifCheck = validateNIF(formData.nif);
-        if (!nifCheck.valid) errors.push(nifCheck.message);
-        if (!formData.documento_id) errors.push("Nº do documento é obrigatório");
-        if (!formData.naturalidade) errors.push("Naturalidade é obrigatória");
-        if (!formData.nacionalidade) errors.push("Nacionalidade é obrigatória");
-        if (!formData.morada_fiscal) errors.push("Morada fiscal é obrigatória");
-        if (!formData.birth_date) errors.push("Data de nascimento é obrigatória");
-        if (!formData.estado_civil) errors.push("Estado civil é obrigatório");
+        if (!nifCheck.valid) {
+          errors.push(nifCheck.message);
+          newFieldErrors.nif = nifCheck.message;
+        }
+        if (!formData.documento_id) {
+          errors.push("Nº do documento é obrigatório");
+          newFieldErrors.documento_id = "Nº do documento é obrigatório";
+        }
+        if (!formData.naturalidade) {
+          errors.push("Naturalidade é obrigatória");
+          newFieldErrors.naturalidade = "Naturalidade é obrigatória";
+        }
+        if (!formData.nacionalidade) {
+          errors.push("Nacionalidade é obrigatória");
+          newFieldErrors.nacionalidade = "Nacionalidade é obrigatória";
+        }
+        if (!formData.morada_fiscal) {
+          errors.push("Morada fiscal é obrigatória");
+          newFieldErrors.morada_fiscal = "Morada fiscal é obrigatória";
+        }
+        if (!formData.birth_date) {
+          errors.push("Data de nascimento é obrigatória");
+          newFieldErrors.birth_date = "Data de nascimento é obrigatória";
+        }
+        if (!formData.estado_civil) {
+          errors.push("Estado civil é obrigatório");
+          newFieldErrors.estado_civil = "Estado civil é obrigatório";
+        }
         break;
       case 2:
         // Se tem 2º titular, validar os campos
         if (formData.compra_tipo === "outra_pessoa") {
           if (!formData.titular2_name || formData.titular2_name.trim().length < 2) {
             errors.push("Nome do 2º titular é obrigatório");
+            newFieldErrors.titular2_name = "Nome do 2º titular é obrigatório";
           }
           if (formData.titular2_nif) {
             const nif2Check = validateNIF(formData.titular2_nif);
-            if (!nif2Check.valid) errors.push(`2º Titular: ${nif2Check.message}`);
+            if (!nif2Check.valid) {
+              errors.push(`2º Titular: ${nif2Check.message}`);
+              newFieldErrors.titular2_nif = nif2Check.message;
+            }
           }
           if (formData.titular2_email) {
             const email2Check = validateEmail(formData.titular2_email);
-            if (!email2Check.valid) errors.push(`2º Titular: ${email2Check.message}`);
+            if (!email2Check.valid) {
+              errors.push(`2º Titular: ${email2Check.message}`);
+              newFieldErrors.titular2_email = email2Check.message;
+            }
           }
         }
         break;
       case 3:
-        if (!formData.finalidade) errors.push("Finalidade é obrigatória");
+        if (!formData.finalidade) {
+          errors.push("Finalidade é obrigatória");
+          newFieldErrors.finalidade = "Selecione a finalidade do pedido";
+        }
         if (formData.finalidade !== "refinanciamento") {
-          if (!formData.tipo_imovel) errors.push("Tipo de imóvel é obrigatório");
-          if (!formData.num_quartos) errors.push("Número de quartos é obrigatório");
-          if (!formData.localizacao) errors.push("Localização é obrigatória");
+          if (!formData.tipo_imovel) {
+            errors.push("Tipo de imóvel é obrigatório");
+            newFieldErrors.tipo_imovel = "Tipo de imóvel é obrigatório";
+          }
+          if (!formData.num_quartos) {
+            errors.push("Número de quartos é obrigatório");
+            newFieldErrors.num_quartos = "Número de quartos é obrigatório";
+          }
+          if (!formData.localizacao) {
+            errors.push("Localização é obrigatória");
+            newFieldErrors.localizacao = "Localização é obrigatória";
+          }
         }
         break;
       case 4:
-        if (!formData.chave_movel_digital) errors.push("Chave móvel digital é obrigatória");
-        if (!formData.salario_liquido) errors.push("Salário líquido é obrigatório");
+        if (!formData.chave_movel_digital) {
+          errors.push("Chave móvel digital é obrigatória");
+          newFieldErrors.chave_movel_digital = "Chave móvel digital é obrigatória";
+        }
+        if (!formData.salario_liquido) {
+          errors.push("Salário líquido é obrigatório");
+          newFieldErrors.salario_liquido = "Salário líquido é obrigatório";
+        }
         break;
       case 5:
-        if (!formData.capital_proprio) errors.push("Capital próprio é obrigatório");
-        if (!formData.valor_financiado) errors.push("Valor a financiar é obrigatório");
+        if (!formData.capital_proprio) {
+          errors.push("Capital próprio é obrigatório");
+          newFieldErrors.capital_proprio = "Capital próprio é obrigatório";
+        }
+        if (!formData.valor_financiado) {
+          errors.push("Valor a financiar é obrigatório");
+          newFieldErrors.valor_financiado = "Valor a financiar é obrigatório";
+        }
         break;
       case 6:
-        if (!formData.consent_data) errors.push("Deve aceitar o tratamento de dados");
-        if (!formData.consent_contact) errors.push("Deve aceitar ser contactado");
+        if (!formData.consent_data) {
+          errors.push("Deve aceitar o tratamento de dados");
+          newFieldErrors.consent_data = "Obrigatório";
+        }
+        if (!formData.consent_contact) {
+          errors.push("Deve aceitar ser contactado");
+          newFieldErrors.consent_contact = "Obrigatório";
+        }
         break;
       default:
         break;
     }
     
-    return errors;
+    return { errors, fieldErrors: newFieldErrors };
   };
 
   const handleNextStep = () => {
-    const errors = validateStep(step);
+    const { errors, fieldErrors: newFieldErrors } = validateStep(step);
+    
+    // Limpar erros anteriores e definir novos
+    setFieldErrors(newFieldErrors);
+    
     if (errors.length > 0) {
-      errors.forEach(err => toast.error(err));
+      // Mostrar toast com resumo dos erros
+      toast.error(`Por favor corrija ${errors.length} erro(s) antes de continuar`);
+      // Scroll para o primeiro campo com erro
+      const firstErrorField = Object.keys(newFieldErrors)[0];
+      if (firstErrorField) {
+        const element = document.querySelector(`[name="${firstErrorField}"], [data-testid="${firstErrorField}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.focus?.();
+        }
+      }
       return;
     }
+    
+    // Limpar erros se passou na validação
+    setFieldErrors({});
     setStep(Math.min(6, step + 1));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Função helper para obter erro de um campo específico
+  const getFieldError = (fieldName) => fieldErrors[fieldName] || null;
 
   const canProceed = () => {
     switch (step) {
