@@ -69,6 +69,7 @@ import UnifiedDocumentsPanel from "../components/UnifiedDocumentsPanel";
 import ProcessTimeline from "../components/ProcessTimeline";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
 import DataConflictResolver from "../components/DataConflictResolver";
+import CPCVModal from "../components/CPCVModal";
 import {
   ArrowLeft,
   User,
@@ -212,6 +213,9 @@ const ProcessDetails = () => {
   // Estado para aviso de bancos com créditos ativos
   const [showBankWarning, setShowBankWarning] = useState(false);
   const [pendingStatusChange, setPendingStatusChange] = useState(null);
+  
+  // Estado para o modal CPCV
+  const [showCPCVModal, setShowCPCVModal] = useState(false);
   
   // Buscar utilizadores
   const fetchUsers = async () => {
@@ -961,6 +965,20 @@ const ProcessDetails = () => {
               </Button>
             )}
             
+            {/* Botão CPCV */}
+            {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                onClick={() => setShowCPCVModal(true)}
+                title="Gerar Contrato Promessa Compra e Venda"
+              >
+                <FileSignature className="h-4 w-4 mr-2" />
+                CPCV
+              </Button>
+            )}
+            
             {canChangeStatus && (
               <Select value={status} onValueChange={setStatus}>
                 <SelectTrigger className="w-48" data-testid="status-select">
@@ -1095,10 +1113,6 @@ const ProcessDetails = () => {
                     <TabsTrigger value="realestate" className="gap-2">
                       <Building2 className="h-4 w-4" />
                       <span className="hidden sm:inline">Imobiliário</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="cpcv" className="gap-2">
-                      <FileSignature className="h-4 w-4" />
-                      <span className="hidden sm:inline">CPCV</span>
                     </TabsTrigger>
                     <TabsTrigger value="credit" className="gap-2">
                       <CreditCard className="h-4 w-4" />
@@ -1850,197 +1864,6 @@ const ProcessDetails = () => {
                     )}
                   </TabsContent>
 
-                  {/* CPCV Tab */}
-                  <TabsContent value="cpcv" className="space-y-4 mt-4">
-                    <div className="space-y-6">
-                      {/* Header CPCV */}
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold flex items-center gap-2">
-                          <FileSignature className="h-5 w-5 text-indigo-600" />
-                          Contrato Promessa Compra e Venda
-                        </h3>
-                        {realEstateData?.data_cpcv && (
-                          <Badge variant="secondary">
-                            Data: {realEstateData.data_cpcv}
-                          </Badge>
-                        )}
-                      </div>
-
-                      {/* Dados do Imóvel do CPCV */}
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm flex items-center gap-2">
-                            <Building2 className="h-4 w-4" />
-                            Dados do Imóvel
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">Valor do Imóvel</span>
-                            <p className="font-semibold text-green-600">
-                              {realEstateData?.valor_imovel ? `€${Number(realEstateData.valor_imovel).toLocaleString('pt-PT')}` : '-'}
-                            </p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Tipologia</span>
-                            <p className="font-medium">{realEstateData?.tipologia || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Área</span>
-                            <p className="font-medium">{realEstateData?.area ? `${realEstateData.area} m²` : '-'}</p>
-                          </div>
-                          <div className="col-span-2 md:col-span-3">
-                            <span className="text-muted-foreground">Morada</span>
-                            <p className="font-medium">{realEstateData?.morada_imovel || realEstateData?.localizacao || '-'}</p>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      {/* Vendedor */}
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm flex items-center gap-2">
-                            <User className="h-4 w-4" />
-                            Vendedor
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">Nome</span>
-                            <p className="font-medium">{process?.vendedor?.nome || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">NIF</span>
-                            <p className="font-medium">{process?.vendedor?.nif || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Telefone</span>
-                            <p className="font-medium">{process?.vendedor?.telefone || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Email</span>
-                            <p className="font-medium">{process?.vendedor?.email || '-'}</p>
-                          </div>
-                          <div className="col-span-2">
-                            <span className="text-muted-foreground">Morada</span>
-                            <p className="font-medium">{process?.vendedor?.morada || '-'}</p>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      {/* Compradores */}
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm flex items-center gap-2">
-                            <Users className="h-4 w-4" />
-                            Compradores
-                            <Badge variant="secondary" className="ml-2">
-                              {(process?.co_buyers?.length || 0) + 1}
-                            </Badge>
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          {/* Comprador Principal */}
-                          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Badge>Comprador Principal</Badge>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                              <div>
-                                <span className="text-muted-foreground text-xs">Nome:</span>
-                                <p className="font-medium">{process?.client_name || '-'}</p>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground text-xs">NIF:</span>
-                                <p className="font-medium">{personalData?.nif || '-'}</p>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* Co-Compradores */}
-                          {process?.co_buyers?.map((buyer, index) => (
-                            <div key={index} className="p-3 bg-indigo-50 rounded-lg border border-indigo-200">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Badge variant="outline">Comprador {index + 2}</Badge>
-                                {buyer.estado_civil && (
-                                  <Badge variant="secondary" className="text-xs">{buyer.estado_civil}</Badge>
-                                )}
-                              </div>
-                              <div className="grid grid-cols-2 gap-2 text-sm">
-                                <div>
-                                  <span className="text-muted-foreground text-xs">Nome:</span>
-                                  <p className="font-medium">{buyer.nome || '-'}</p>
-                                </div>
-                                <div>
-                                  <span className="text-muted-foreground text-xs">NIF:</span>
-                                  <p className="font-medium">{buyer.nif || '-'}</p>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </CardContent>
-                      </Card>
-
-                      {/* Valores Financeiros do CPCV */}
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm flex items-center gap-2">
-                            <CreditCard className="h-4 w-4" />
-                            Valores e Datas
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">Valor da Entrada</span>
-                            <p className="font-semibold text-amber-600">
-                              {financialData?.valor_entrada ? `€${Number(financialData.valor_entrada).toLocaleString('pt-PT')}` : '-'}
-                            </p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Data do Sinal</span>
-                            <p className="font-medium">{financialData?.data_sinal || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Data CPCV</span>
-                            <p className="font-medium">{realEstateData?.data_cpcv || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Data Escritura Prevista</span>
-                            <p className="font-medium">{realEstateData?.data_escritura_prevista || '-'}</p>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Valor Financiamento</span>
-                            <p className="font-semibold text-blue-600">
-                              {financialData?.valor_pretendido ? `€${Number(financialData.valor_pretendido).toLocaleString('pt-PT')}` : '-'}
-                            </p>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      {/* Mediador */}
-                      {process?.mediador && (
-                        <Card>
-                          <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                              <Briefcase className="h-4 w-4" />
-                              Mediador
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <span className="text-muted-foreground">Nome/Empresa</span>
-                              <p className="font-medium">{process.mediador.nome || '-'}</p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Licença AMI</span>
-                              <p className="font-medium">{process.mediador.licenca_ami || '-'}</p>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )}
-                    </div>
-                  </TabsContent>
-
                   {/* Credit Tab */}
                   <TabsContent value="credit" className="space-y-4 mt-4">
                     {!canEditCredit && !creditData?.requested_amount ? (
@@ -2773,6 +2596,17 @@ const ProcessDetails = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Modal CPCV - Contrato Promessa Compra e Venda */}
+      <CPCVModal
+        open={showCPCVModal}
+        onOpenChange={setShowCPCVModal}
+        process={process}
+        personalData={personalData}
+        financialData={financialData}
+        realEstateData={realEstateData}
+        token={token}
+      />
     </DashboardLayout>
   );
 };
