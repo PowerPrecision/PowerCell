@@ -78,6 +78,8 @@ from routes.admin_storage import router as admin_storage_router
 from routes.diagnostics import router as diagnostics_router
 from routes.rgpd import router as rgpd_router
 from routes.temp_links import router as temp_links_router
+from routes.admin_encryption import router as admin_encryption_router
+from routes.restore import router as restore_router
 
 # Configuração Sentry
 if SENTRY_DSN:
@@ -374,6 +376,8 @@ app.include_router(admin_storage_router, prefix="/api")
 app.include_router(diagnostics_router, prefix="/api")
 app.include_router(rgpd_router, prefix="/api")
 app.include_router(temp_links_router, prefix="/api")
+app.include_router(admin_encryption_router, prefix="/api")
+app.include_router(restore_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
