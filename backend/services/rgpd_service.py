@@ -97,6 +97,13 @@ async def create_rgpd_request(
     
     await db[RGPD_REQUESTS_COLLECTION].insert_one(request_doc)
     
+    # Adicionar comentário nas atividades do processo
+    await log_history(
+        process_id,
+        user,
+        f"RGPD solicitado - Email enviado para {client_email}"
+    )
+    
     logger.info(f"RGPD request created: {request_id} for process {process_id}")
     
     return {
