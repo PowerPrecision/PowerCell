@@ -55,7 +55,10 @@ from services.process_service import (
     update_process_document,
     get_process_by_id,
     get_processes_for_user,
-    get_user_name
+    get_user_name,
+    encrypt_sensitive_data,
+    decrypt_sensitive_data,
+    decrypt_processes_list
 )
 from services.process_assignment import (
     assign_both_to_process,
@@ -165,6 +168,9 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         "updated_at": now
     }
     
+    # Encriptar campos sensíveis antes de guardar
+    process_doc = encrypt_sensitive_data(process_doc)
+    
     # Inserir na base de dados
     await db.processes.insert_one(process_doc)
     
@@ -178,7 +184,9 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         notification_type="new_process"
     )
     
-    return ProcessResponse(**{k: v for k, v in process_doc.items() if k != "_id"})
+    # Desencriptar para a resposta
+    response_doc = decrypt_sensitive_data(process_doc)
+    return ProcessResponse(**{k: v for k, v in response_doc.items() if k != "_id"})
 
 
 @router.post("/create-client", response_model=ProcessResponse)
@@ -268,6 +276,9 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         process_doc["assigned_consultor_id"] = user["id"]
         process_doc["consultor_name"] = user["name"]
     
+    # Encriptar campos sensíveis antes de guardar
+    process_doc = encrypt_sensitive_data(process_doc)
+    
     # Inserir na base de dados
     await db.processes.insert_one(process_doc)
     
@@ -280,7 +291,9 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     except Exception as e:
         logger.warning(f"Erro ao sincronizar com Trello: {e}")
     
-    return ProcessResponse(**{k: v for k, v in process_doc.items() if k != "_id"})
+    # Desencriptar para a resposta
+    response_doc = decrypt_sensitive_data(process_doc)
+    return ProcessResponse(**{k: v for k, v in response_doc.items() if k != "_id"})
 
 
 # ====================================================================
@@ -322,6 +335,8 @@ async def get_processes(user: dict = Depends(get_current_user)):
         ]
     
     processes = await db.processes.find(query, {"_id": 0}).sort("client_name", 1).to_list(1000)
+    # Desencriptar dados sensíveis
+    processes = decrypt_processes_list(processes)
     return [ProcessResponse(**p) for p in processes]
 
 
@@ -405,6 +420,9 @@ async def get_processes_paginated(
         sort_order=order
     )
     
+    # Desencriptar dados sensíveis
+    result["items"] = decrypt_processes_list(result["items"])
+    
     return {
         "processes": result["items"],
         "next_cursor": result["next_cursor"],
@@ -482,6 +500,9 @@ async def get_kanban_board(
     
     # Get processes
     processes = await db.processes.find(query, {"_id": 0}).to_list(1000)
+    
+    # Desencriptar dados sensíveis
+    processes = decrypt_processes_list(processes)
     
     # Get all users for name lookup
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
@@ -839,6 +860,9 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     if not can_view_process(user, process):
         raise HTTPException(status_code=403, detail="Acesso negado")
     
+    # Desencriptar dados sensíveis
+    process = decrypt_sensitive_data(process)
+    
     return ProcessResponse(**process)
 
 
@@ -954,8 +978,14 @@ async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depe
                     notification_type="status_change"
                 )
     
+    # Encriptar campos sensíveis antes de guardar
+    update_data = encrypt_sensitive_data(update_data)
+    
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    
+    # Desencriptar dados para a resposta
+    updated = decrypt_sensitive_data(updated)
     
     # Sincronizar com Trello (nome e descrição do card)
     await sync_process_to_trello(updated)

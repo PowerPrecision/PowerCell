@@ -4,6 +4,10 @@ SERVIÇO DE PROCESSOS - CREDITOIMO
 ====================================================================
 Lógica de negócio para gestão de processos.
 Separado dos endpoints para facilitar manutenção e testes.
+
+SEGURANÇA:
+- Campos sensíveis (NIFs, telefones, moradas) são encriptados automaticamente
+- A desencriptação é transparente na leitura
 ====================================================================
 """
 import re
@@ -14,6 +18,7 @@ from typing import Optional, Dict, Any, Tuple
 
 from database import db
 from models.process import ProcessCreate, ProcessUpdate
+from services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +193,9 @@ async def create_process_document(
         "tags": data.tags or [],
     }
     
+    # Encriptar campos sensíveis antes de guardar
+    process_doc = encrypt_sensitive_data(process_doc)
+    
     return process_doc, process_id
 
 
@@ -266,11 +274,19 @@ async def update_process_document(
 # ==== QUERIES COMUNS ====
 
 async def get_process_by_id(process_id: str) -> Optional[dict]:
-    """Obtém um processo pelo ID."""
-    return await db.processes.find_one(
+    """
+    Obtém um processo pelo ID.
+    
+    Os dados sensíveis são desencriptados automaticamente.
+    """
+    process = await db.processes.find_one(
         {"id": process_id},
         {"_id": 0}
     )
+    
+    if process:
+        return decrypt_sensitive_data(process)
+    return None
 
 
 async def get_processes_for_user(
@@ -287,7 +303,7 @@ async def get_processes_for_user(
         limit: Limite de resultados
         
     Returns:
-        Lista de processos
+        Lista de processos com dados desencriptados
     """
     query = build_query_filter(user)
     
@@ -295,7 +311,10 @@ async def get_processes_for_user(
         query["status"] = status
     
     cursor = db.processes.find(query, {"_id": 0}).sort("updated_at", -1).limit(limit)
-    return await cursor.to_list(length=limit)
+    processes = await cursor.to_list(length=limit)
+    
+    # Desencriptar dados sensíveis
+    return decrypt_processes_list(processes)
 
 
 async def get_user_name(user_id: str) -> str:
@@ -304,3 +323,126 @@ async def get_user_name(user_id: str) -> str:
         return ""
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1})
     return user.get("name", "") if user else ""
+
+
+# ==== FUNÇÕES DE ENCRIPTAÇÃO ====
+
+def encrypt_sensitive_data(data: dict) -> dict:
+    """
+    Encripta campos sensíveis de um processo antes de guardar na BD.
+    
+    Campos encriptados:
+    - personal_data.nif, documento_id, morada_fiscal, phone
+    - titular2_data.nif, documento_id, phone
+    - financial_data.portal_financas_senha, seg_social_senha, employer_nif
+    - vendedor.nif, documento_id, phone
+    - mediador.nif, phone
+    - co_buyers[].nif, documento_id, phone
+    - co_applicants[].nif
+    - client_phone, client_nif (nível raiz)
+    
+    Args:
+        data: Dicionário com dados do processo
+        
+    Returns:
+        Dicionário com campos sensíveis encriptados
+    """
+    if not encryption_service.is_available() or not data:
+        return data
+    
+    result = data.copy()
+    
+    # Encriptar campos no nível raiz
+    root_fields = ["client_phone", "client_nif"]
+    for field in root_fields:
+        if field in result and result[field]:
+            result[field] = encryption_service.encrypt(str(result[field]))
+    
+    # Encriptar sub-dicionários
+    sections = {
+        "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
+        "titular2_data": ["nif", "documento_id", "phone", "telefone"],
+        "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
+        "vendedor": ["nif", "documento_id", "phone", "telefone"],
+        "mediador": ["nif", "phone", "telefone"],
+    }
+    
+    for section, fields in sections.items():
+        if section in result and isinstance(result[section], dict):
+            for field in fields:
+                if field in result[section] and result[section][field]:
+                    result[section][field] = encryption_service.encrypt(str(result[section][field]))
+    
+    # Encriptar listas de co-compradores/co-proponentes
+    for list_field in ["co_buyers", "co_applicants"]:
+        if list_field in result and isinstance(result[list_field], list):
+            list_fields = ["nif", "documento_id", "phone", "telefone"]
+            for i, item in enumerate(result[list_field]):
+                if isinstance(item, dict):
+                    for field in list_fields:
+                        if field in item and item[field]:
+                            result[list_field][i][field] = encryption_service.encrypt(str(item[field]))
+    
+    return result
+
+
+def decrypt_sensitive_data(data: dict) -> dict:
+    """
+    Desencripta campos sensíveis de um processo após ler da BD.
+    
+    Args:
+        data: Dicionário com dados encriptados
+        
+    Returns:
+        Dicionário com campos sensíveis desencriptados
+    """
+    if not encryption_service.is_available() or not data:
+        return data
+    
+    result = data.copy()
+    
+    # Desencriptar campos no nível raiz
+    root_fields = ["client_phone", "client_nif"]
+    for field in root_fields:
+        if field in result and result[field]:
+            result[field] = encryption_service.decrypt(str(result[field]))
+    
+    # Desencriptar sub-dicionários
+    sections = {
+        "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
+        "titular2_data": ["nif", "documento_id", "phone", "telefone"],
+        "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
+        "vendedor": ["nif", "documento_id", "phone", "telefone"],
+        "mediador": ["nif", "phone", "telefone"],
+    }
+    
+    for section, fields in sections.items():
+        if section in result and isinstance(result[section], dict):
+            for field in fields:
+                if field in result[section] and result[section][field]:
+                    result[section][field] = encryption_service.decrypt(str(result[section][field]))
+    
+    # Desencriptar listas de co-compradores/co-proponentes
+    for list_field in ["co_buyers", "co_applicants"]:
+        if list_field in result and isinstance(result[list_field], list):
+            list_fields = ["nif", "documento_id", "phone", "telefone"]
+            for i, item in enumerate(result[list_field]):
+                if isinstance(item, dict):
+                    for field in list_fields:
+                        if field in item and item[field]:
+                            result[list_field][i][field] = encryption_service.decrypt(str(item[field]))
+    
+    return result
+
+
+def decrypt_processes_list(processes: list) -> list:
+    """
+    Desencripta uma lista de processos.
+    
+    Args:
+        processes: Lista de processos
+        
+    Returns:
+        Lista com processos desencriptados
+    """
+    return [decrypt_sensitive_data(p) for p in processes]

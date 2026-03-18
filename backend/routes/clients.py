@@ -3,6 +3,9 @@ Rotas para gestão de Clientes
 
 Permite gerir clientes de forma independente dos processos.
 Um cliente pode ter múltiplos processos de compra/financiamento.
+
+SEGURANÇA:
+- Campos sensíveis (NIFs, telefones) são encriptados automaticamente
 """
 
 import uuid
@@ -19,9 +22,63 @@ from models.client import (
 )
 from services.auth import get_current_user, require_roles
 from models.auth import UserRole
+from services.encryption import encryption_service
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
+
+
+def encrypt_client_data(data: dict) -> dict:
+    """Encripta campos sensíveis de um cliente."""
+    if not encryption_service.is_available() or not data:
+        return data
+    
+    result = data.copy()
+    
+    # Encriptar dados_pessoais
+    if "dados_pessoais" in result and isinstance(result["dados_pessoais"], dict):
+        fields = ["nif", "documento_id", "morada_fiscal", "phone", "telefone"]
+        for field in fields:
+            if field in result["dados_pessoais"] and result["dados_pessoais"][field]:
+                result["dados_pessoais"][field] = encryption_service.encrypt(str(result["dados_pessoais"][field]))
+    
+    # Encriptar contacto
+    if "contacto" in result and isinstance(result["contacto"], dict):
+        fields = ["telefone", "telefone_secundario", "phone"]
+        for field in fields:
+            if field in result["contacto"] and result["contacto"][field]:
+                result["contacto"][field] = encryption_service.encrypt(str(result["contacto"][field]))
+    
+    return result
+
+
+def decrypt_client_data(data: dict) -> dict:
+    """Desencripta campos sensíveis de um cliente."""
+    if not encryption_service.is_available() or not data:
+        return data
+    
+    result = data.copy()
+    
+    # Desencriptar dados_pessoais
+    if "dados_pessoais" in result and isinstance(result["dados_pessoais"], dict):
+        fields = ["nif", "documento_id", "morada_fiscal", "phone", "telefone"]
+        for field in fields:
+            if field in result["dados_pessoais"] and result["dados_pessoais"][field]:
+                result["dados_pessoais"][field] = encryption_service.decrypt(str(result["dados_pessoais"][field]))
+    
+    # Desencriptar contacto
+    if "contacto" in result and isinstance(result["contacto"], dict):
+        fields = ["telefone", "telefone_secundario", "phone"]
+        for field in fields:
+            if field in result["contacto"] and result["contacto"][field]:
+                result["contacto"][field] = encryption_service.decrypt(str(result["contacto"][field]))
+    
+    return result
+
+
+def decrypt_clients_list(clients: list) -> list:
+    """Desencripta uma lista de clientes."""
+    return [decrypt_client_data(c) for c in clients]
 
 
 @router.get("")
@@ -184,6 +241,9 @@ async def list_clients(
         if has_active_process is not None:
             clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
         
+        # Desencriptar dados sensíveis
+        clients = decrypt_clients_list(clients)
+        
         # Adicionar lista de fases disponíveis para o filtro
         available_statuses = [{"name": s["name"], "label": s.get("label", s["name"])} for s in workflow_statuses]
         
@@ -264,6 +324,9 @@ async def list_clients(
     if has_active_process is not None:
         clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
     
+    # Desencriptar dados sensíveis
+    clients = decrypt_clients_list(clients)
+    
     return {
         "clients": clients,
         "total": len(clients),
@@ -291,6 +354,9 @@ async def get_client(
         ).to_list(length=50)
     
     client["processes"] = processes
+    
+    # Desencriptar dados sensíveis
+    client = decrypt_client_data(client)
     
     return client
 
@@ -339,11 +405,17 @@ async def create_client(
         created_by=user.get("email")
     )
     
-    await db.clients.insert_one(client.model_dump())
+    # Encriptar campos sensíveis antes de guardar
+    client_dict = client.model_dump()
+    client_dict = encrypt_client_data(client_dict)
+    
+    await db.clients.insert_one(client_dict)
     
     logger.info(f"Cliente criado: {client.id} - {client.nome} por {user.get('email')}")
     
-    return client
+    # Desencriptar para a resposta
+    client_dict = decrypt_client_data(client_dict)
+    return Client(**client_dict)
 
 
 @router.put("/{client_id}")
@@ -712,19 +784,25 @@ async def find_or_create_client(
 @router.delete("/{client_id}")
 async def delete_client(
     client_id: str,
+    hard_delete: bool = False,
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
-    Eliminar um cliente/processo.
+    Eliminar um cliente/processo (soft delete por defeito).
     
     Nota: Neste sistema, clientes e processos são a mesma entidade.
     Esta função procura primeiro na colecção 'processes' e depois em 'clients'.
+    
+    Por defeito, usa soft delete (status='eliminado') para permitir undo.
+    Com hard_delete=True, elimina permanentemente.
     
     Apenas Admin, CEO e Diretor podem eliminar.
     """
     # Verificar também se é diretor
     if user.get("role") not in ["admin", "ceo", "diretor"]:
         raise HTTPException(status_code=403, detail="Sem permissão para eliminar clientes")
+    
+    now = datetime.now(timezone.utc).isoformat()
     
     # Procurar primeiro em processes (tabela principal)
     process = await db.processes.find_one({"id": client_id})
@@ -736,21 +814,57 @@ async def delete_client(
             # Permitir eliminar mas avisar
             logger.warning(f"Processo {client_id} eliminado com status activo: {process.get('status')}")
         
-        # Eliminar documentos associados
-        await db.documents.delete_many({"process_id": client_id})
-        
-        # Eliminar tarefas associadas
-        await db.tasks.delete_many({"process_id": client_id})
-        
-        # Eliminar histórico associado
-        await db.history.delete_many({"process_id": client_id})
-        
-        # Eliminar o processo
-        await db.processes.delete_one({"id": client_id})
-        
-        logger.info(f"Processo/Cliente {client_id} ({process.get('client_name')}) eliminado por {user.get('email')}")
-        
-        return {"success": True, "message": f"Cliente '{process.get('client_name')}' eliminado com sucesso"}
+        if hard_delete:
+            # Eliminação permanente
+            await db.documents.delete_many({"process_id": client_id})
+            await db.tasks.delete_many({"process_id": client_id})
+            await db.history.delete_many({"process_id": client_id})
+            await db.processes.delete_one({"id": client_id})
+            
+            logger.info(f"Processo/Cliente {client_id} ({process.get('client_name')}) eliminado permanentemente por {user.get('email')}")
+            
+            return {"success": True, "message": f"Cliente '{process.get('client_name')}' eliminado permanentemente"}
+        else:
+            # Soft delete - permite undo
+            await db.processes.update_one(
+                {"id": client_id},
+                {"$set": {
+                    "status": "eliminado",
+                    "is_active": False,
+                    "deleted_at": now,
+                    "deleted_by": user["id"],
+                    "updated_at": now
+                }}
+            )
+            
+            # Marcar documentos como eliminados (soft delete)
+            await db.documents.update_many(
+                {"process_id": client_id},
+                {"$set": {
+                    "deleted": True,
+                    "deleted_at": now,
+                    "deleted_by": user["id"]
+                }}
+            )
+            
+            # Marcar tarefas como eliminadas (soft delete)
+            await db.tasks.update_many(
+                {"process_id": client_id},
+                {"$set": {
+                    "deleted": True,
+                    "deleted_at": now,
+                    "deleted_by": user["id"]
+                }}
+            )
+            
+            logger.info(f"Processo/Cliente {client_id} ({process.get('client_name')}) movido para lixo por {user.get('email')}")
+            
+            return {
+                "success": True, 
+                "message": f"Cliente '{process.get('client_name')}' movido para o lixo",
+                "can_undo": True,
+                "restore_endpoint": f"/api/processes/{client_id}/restore"
+            }
     
     # Se não encontrou em processes, procurar em clients (compatibilidade)
     client = await db.clients.find_one({"id": client_id})
@@ -762,7 +876,7 @@ async def delete_client(
     if client.get("process_ids"):
         active_count = await db.processes.count_documents({
             "id": {"$in": client["process_ids"]},
-            "status": {"$nin": ["arquivado", "cancelado", "concluido"]}
+            "status": {"$nin": ["arquivado", "cancelado", "concluido", "eliminado"]}
         })
         if active_count > 0:
             raise HTTPException(
@@ -770,8 +884,26 @@ async def delete_client(
                 detail=f"Cliente tem {active_count} processo(s) activo(s). Archive-os primeiro."
             )
     
-    await db.clients.delete_one({"id": client_id})
-    
-    logger.info(f"Cliente {client_id} eliminado por {user.get('email')}")
-    
-    return {"success": True, "message": "Cliente eliminado"}
+    if hard_delete:
+        await db.clients.delete_one({"id": client_id})
+        logger.info(f"Cliente {client_id} eliminado permanentemente por {user.get('email')}")
+        return {"success": True, "message": "Cliente eliminado permanentemente"}
+    else:
+        # Soft delete para cliente na coleção clients
+        await db.clients.update_one(
+            {"id": client_id},
+            {"$set": {
+                "deleted": True,
+                "deleted_at": now,
+                "deleted_by": user["id"]
+            }}
+        )
+        
+        logger.info(f"Cliente {client_id} movido para lixo por {user.get('email')}")
+        
+        return {
+            "success": True, 
+            "message": "Cliente movido para o lixo",
+            "can_undo": True,
+            "restore_endpoint": f"/api/clients/{client_id}/restore"
+        }
