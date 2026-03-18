@@ -160,6 +160,24 @@ class PersonalData(BaseModel):
             import re
             v = re.sub(r'<[^>]+>', '', str(v))
             return v.strip()[:500]
+    
+    @field_validator('data_nascimento', mode='before')
+    @classmethod
+    def sync_birth_date(cls, v, info):
+        """Sincroniza data_nascimento com birth_date se não fornecido."""
+        # Se data_nascimento não foi fornecido, usar birth_date
+        if v is None and info.data.get('birth_date'):
+            return info.data.get('birth_date')
+        return v
+    
+    @field_validator('birth_date', mode='before')
+    @classmethod
+    def sync_data_nascimento(cls, v, info):
+        """Sincroniza birth_date com data_nascimento se não fornecido."""
+        # Se birth_date não foi fornecido, usar data_nascimento
+        if v is None and info.data.get('data_nascimento'):
+            return info.data.get('data_nascimento')
+        return v
 
 
 class Titular2Data(BaseModel):
