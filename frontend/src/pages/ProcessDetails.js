@@ -70,6 +70,9 @@ import ProcessTimeline from "../components/ProcessTimeline";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
+import ProcessStickyHeader from "../components/ProcessStickyHeader";
+import DSTICalculator from "../components/DSTICalculator";
+import RiskCalculator from "../components/RiskCalculator";
 import {
   ArrowLeft,
   User,
@@ -99,6 +102,8 @@ import {
   AlertTriangle,
   CheckCircle,
   Database,
+  Calculator,
+  TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isAfter } from "date-fns";
@@ -937,6 +942,14 @@ const ProcessDetails = () => {
 
   return (
     <DashboardLayout title="Detalhes do Processo">
+      {/* Header Fixo - Sempre visível durante scroll */}
+      <ProcessStickyHeader
+        process={process}
+        personalData={personalData}
+        financialData={financialData}
+        statusInfo={currentStatusInfo}
+      />
+
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1024,6 +1037,53 @@ const ProcessDetails = () => {
                 <FileSignature className="h-4 w-4 mr-2" />
                 CPCV
               </Button>
+            )}
+
+            {/* Calculadoras */}
+            {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
+              <>
+                <DSTICalculator
+                  trigger={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                      title="Calculadora DSTI - Taxa de Esforço"
+                    >
+                      <Calculator className="h-4 w-4 mr-2" />
+                      DSTI
+                    </Button>
+                  }
+                  clientData={{
+                    rendimento_bruto: financialData?.rendimento_bruto,
+                    rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
+                    salario_liquido: financialData?.salario_liquido,
+                    renda_habitacao_atual: financialData?.renda_habitacao_atual,
+                    rendimento_co_titular: financialData?.rendimento_co_titular,
+                  }}
+                />
+                <RiskCalculator
+                  trigger={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                      title="Calculadora de Risco de Crédito"
+                    >
+                      <TrendingUp className="h-4 w-4 mr-2" />
+                      Risco
+                    </Button>
+                  }
+                  clientData={{
+                    rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
+                    valor_imovel: realEstateData?.valor_imovel || realEstateData?.valor,
+                    valor_entrada: financialData?.valor_entrada || financialData?.capital_proprio,
+                    capital_proprio: financialData?.capital_proprio,
+                    idade: personalData?.idade,
+                    data_nascimento: personalData?.data_nascimento || personalData?.birth_date,
+                  }}
+                />
+              </>
             )}
             
             {canChangeStatus && (
