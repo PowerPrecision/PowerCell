@@ -192,6 +192,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         "source": "public_form",
         "has_property": has_property,
         "idade_menos_35": idade_menos_35,
+        "is_active": True,  # Processos novos são ativos por defeito
         # Documentos e histórico
         "documents": [],
         "notes": None,

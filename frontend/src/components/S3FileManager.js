@@ -1212,6 +1212,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
+                          {isPreviewable(file.name) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handlePreviewFile(file)}
+                              title="Visualizar"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"

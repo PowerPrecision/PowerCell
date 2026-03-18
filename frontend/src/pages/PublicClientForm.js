@@ -238,17 +238,28 @@ const PublicClientForm = () => {
       proprietario_contacto: "",     // Contacto do proprietário
       caracteristicas_imovel: "",    // Características básicas do imóvel escolhido
       
+      // Campos de refinanciamento
+      valor_transferencia: "",       // Valor a transferir/consolidar
+      valor_extra: "",               // Valor extra necessário
+      prazo_pretendido: "",          // Prazo pretendido em anos
+      
       // Outras Informações
       outras_informacoes: "",
       
       // Situação Financeira
       acesso_portal_financas: "",
-    chave_movel_digital: "",
-    renda_habitacao_atual: "",
-    precisa_vender_casa: "",
-    efetivo: "",
-    fiador: "",
-    salario_liquido: "",
+      chave_movel_digital: "",
+      renda_habitacao_atual: "",
+      precisa_vender_casa: "",
+      efetivo: "",
+      fiador: "",
+      salario_liquido: "",
+      
+      // Situação Profissional (campos de emprego)
+      employment_type: "",
+      employment_duration: "",
+      employer_name: "",
+      employer_nif: "",
     
     // Bancos com créditos ativos
     bancos_creditos: [],
@@ -451,6 +462,11 @@ const PublicClientForm = () => {
           bancos_creditos: formData.bancos_creditos,
           capital_proprio: formData.capital_proprio ? parseFloat(formData.capital_proprio) : null,
           valor_financiado: formData.valor_financiado,
+          // Campos de emprego
+          employment_type: formData.employment_type,
+          employment_duration: formData.employment_duration,
+          employer_name: formData.employer_name,
+          employer_nif: formData.employer_nif,
         },
       });
 
@@ -1032,17 +1048,59 @@ const PublicClientForm = () => {
         
         {/* Para refinanciamento, mostrar campos específicos */}
         {formData.finalidade === "refinanciamento" && (
-          <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="outras_informacoes">Informações sobre o crédito actual</Label>
-            <Textarea
-              id="outras_informacoes"
-              value={formData.outras_informacoes}
-              onChange={(e) => updateField("outras_informacoes", e.target.value)}
-              placeholder="Indique o banco actual, valor em dívida, spread actual, etc..."
-              rows={3}
-              data-testid="imovel-outras-info"
-            />
-          </div>
+          <>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="valor_transferencia">Valor a Transferir/Consolidar (€) *</Label>
+              <Input
+                id="valor_transferencia"
+                type="number"
+                value={formData.valor_transferencia}
+                onChange={(e) => updateField("valor_transferencia", e.target.value)}
+                placeholder="Ex: 150000"
+                data-testid="imovel-valor-transferencia"
+              />
+              <FieldHint>Valor total dos créditos que pretende consolidar/transferir.</FieldHint>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="valor_extra">Valor Extra Necessário (€)</Label>
+              <Input
+                id="valor_extra"
+                type="number"
+                value={formData.valor_extra}
+                onChange={(e) => updateField("valor_extra", e.target.value)}
+                placeholder="Ex: 30000"
+                data-testid="imovel-valor-extra"
+              />
+              <FieldHint>Se precisa de capital adicional além do refinanciamento.</FieldHint>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="prazo_pretendido">Prazo Pretendido (anos) *</Label>
+              <Select value={formData.prazo_pretendido} onValueChange={(v) => updateField("prazo_pretendido", v)}>
+                <SelectTrigger data-testid="imovel-prazo">
+                  <SelectValue placeholder="Selecione" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[5, 10, 15, 20, 25, 30, 35, 40].map((anos) => (
+                    <SelectItem key={anos} value={anos.toString()}>{anos} anos</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="outras_informacoes">Informações sobre o crédito actual</Label>
+              <Textarea
+                id="outras_informacoes"
+                value={formData.outras_informacoes}
+                onChange={(e) => updateField("outras_informacoes", e.target.value)}
+                placeholder="Indique o banco actual, valor em dívida, spread actual, etc..."
+                rows={3}
+                data-testid="imovel-outras-info"
+              />
+            </div>
+          </>
         )}
         
         {formData.finalidade !== "refinanciamento" && (
@@ -1141,6 +1199,61 @@ const PublicClientForm = () => {
             </SelectContent>
           </Select>
           <FieldHint>Se tem contrato de trabalho sem termo (efetivo) ou está em período experimental.</FieldHint>
+        </div>
+        
+        <div className="space-y-2">
+          <Label>Tipo de Contrato de Trabalho *</Label>
+          <Select value={formData.employment_type} onValueChange={(v) => updateField("employment_type", v)}>
+            <SelectTrigger data-testid="fin-employment-type">
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="efetivo">Contrato Efetivo (Sem Termo)</SelectItem>
+              <SelectItem value="termo_certo">Contrato a Termo Certo</SelectItem>
+              <SelectItem value="termo_incerto">Contrato a Termo Incerto</SelectItem>
+              <SelectItem value="independente">Trabalhador Independente</SelectItem>
+              <SelectItem value="empresario">Empresário em Nome Individual</SelectItem>
+              <SelectItem value="reformado">Reformado/Pensionista</SelectItem>
+              <SelectItem value="desempregado">Desempregado</SelectItem>
+            </SelectContent>
+          </Select>
+          <FieldHint>Indique a sua situação profissional atual.</FieldHint>
+        </div>
+        
+        <div className="space-y-2">
+          <Label htmlFor="employment_duration">Tempo no Emprego Atual</Label>
+          <Input
+            id="employment_duration"
+            value={formData.employment_duration}
+            onChange={(e) => updateField("employment_duration", e.target.value)}
+            placeholder="Ex: 2 anos e 3 meses"
+            data-testid="fin-employment-duration"
+          />
+          <FieldHint>Quanto tempo trabalha na empresa atual ou como independente.</FieldHint>
+        </div>
+        
+        <div className="space-y-2">
+          <Label htmlFor="employer_name">Entidade Empregadora</Label>
+          <Input
+            id="employer_name"
+            value={formData.employer_name}
+            onChange={(e) => updateField("employer_name", e.target.value)}
+            placeholder="Nome da empresa"
+            data-testid="fin-employer-name"
+          />
+        </div>
+        
+        <div className="space-y-2">
+          <Label htmlFor="employer_nif">NIF da Entidade Empregadora</Label>
+          <Input
+            id="employer_nif"
+            value={formData.employer_nif}
+            onChange={(e) => updateField("employer_nif", e.target.value.replace(/\D/g, ""))}
+            placeholder="123456789"
+            maxLength={9}
+            data-testid="fin-employer-nif"
+          />
+          <FieldHint>O NIF da empresa onde trabalha (encontra-se no recibo de vencimento).</FieldHint>
         </div>
         
         <div className="space-y-2">
