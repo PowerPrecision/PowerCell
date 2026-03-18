@@ -1150,6 +1150,19 @@ const ProcessDetails = () => {
                             Identificação
                           </h4>
                           <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1 md:col-span-2">
+                              <Label className="text-xs text-muted-foreground">Nome Completo</Label>
+                              <Input
+                                value={personalData.nome_completo || process?.client_name || ""}
+                                onChange={(e) => setPersonalData({ ...personalData, nome_completo: e.target.value })}
+                                disabled={!canEditPersonal}
+                                className="h-9"
+                                placeholder="Nome completo do cliente (pode ser diferente do nome do processo)"
+                              />
+                              <p className="text-[10px] text-muted-foreground">
+                                O nome completo pode ser diferente do nome do processo
+                              </p>
+                            </div>
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">NIF</Label>
                               <Input
