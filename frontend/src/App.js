@@ -16,6 +16,8 @@ import PublicClientForm from "./pages/PublicClientForm";
 import StaffDashboard from "./pages/StaffDashboard";
 import ProcessDetails from "./pages/ProcessDetails";
 import RGPDPage from "./pages/RGPDPage";
+import TempLinkUploadPage from "./pages/TempLinkUploadPage";
+import TempLinkDownloadPage from "./pages/TempLinkDownloadPage";
 
 // ====================================================================
 // PÁGINAS COM CODE SPLITTING (lazy loading)
@@ -143,6 +145,12 @@ function App() {
           
           {/* RGPD Public Page - for client consent signature */}
           <Route path="/rgpd/:token" element={<RGPDPage />} />
+          
+          {/* Temporary Link Upload - for client document upload */}
+          <Route path="/upload/:token" element={<TempLinkUploadPage />} />
+          
+          {/* Temporary Link Download - for client document download */}
+          <Route path="/download/:token" element={<TempLinkDownloadPage />} />
           
           {/* Staff login */}
           <Route path="/login" element={<LoginPage />} />

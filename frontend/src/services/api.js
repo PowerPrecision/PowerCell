@@ -462,7 +462,14 @@ export const getGdprAudit = (params = {}) => api.get("/gdpr/audit", { params });
 export const getBackupStatistics = () => api.get("/backup/statistics");
 export const triggerBackup = (data) => api.post("/backup/trigger", data);
 export const getBackupHistory = (params = {}) => api.get("/backup/history", { params });
-export const verifyBackups = () => api.post("/backup/verify");
+
+// Temporary Links (for document upload/download)
+export const createTempLink = (data) => api.post("/temp-links/create", data, {
+  headers: { 'Content-Type': 'multipart/form-data' }
+});
+export const getProcessTempLinks = (processId) => api.get(`/temp-links/process/${processId}`);
+export const cancelTempLink = (linkId) => api.post(`/temp-links/${linkId}/cancel`);
+export const deleteTempLink = (linkId) => api.delete(`/temp-links/${linkId}`);
 
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
