@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { 
-  Users, Search, UserPlus, Edit, Trash2, Loader2, UserX, UserCheck, Eye
+  Users, Search, UserPlus, Edit, Trash2, Loader2, UserX, UserCheck, Eye, EyeOff, RefreshCw, Copy
 } from "lucide-react";
 import { toast } from "sonner";
 import { getUsers, createUser, updateUser, deleteUser } from "../services/api";
@@ -59,6 +59,8 @@ const UsersManagementPage = () => {
     role: "consultor",
     onedrive_folder: "",
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [generatedPassword, setGeneratedPassword] = useState("");
 
   useEffect(() => {
     fetchUsers();
@@ -85,12 +87,50 @@ const UsersManagementPage = () => {
     });
   }, [users, searchTerm, roleFilter]);
 
+  // Gerar password aleatória
+  const generatePassword = () => {
+    const length = 12;
+    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+    let password = "";
+    // Garantir pelo menos uma de cada tipo
+    password += "ABCDEFGHIJKLMNOPQRSTUVWXYZ".charAt(Math.floor(Math.random() * 26));
+    password += "abcdefghijklmnopqrstuvwxyz".charAt(Math.floor(Math.random() * 26));
+    password += "0123456789".charAt(Math.floor(Math.random() * 10));
+    password += "!@#$%^&*".charAt(Math.floor(Math.random() * 8));
+    // Preencher o resto
+    for (let i = 4; i < length; i++) {
+      password += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+    // Embaralhar
+    password = password.split('').sort(() => Math.random() - 0.5).join('');
+    setFormData({ ...formData, password });
+    setGeneratedPassword(password);
+    setShowPassword(true);
+  };
+
+  // Copiar password para clipboard
+  const copyPassword = () => {
+    navigator.clipboard.writeText(formData.password);
+    toast.success("Password copiada para o clipboard");
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
     setFormLoading(true);
     try {
-      await createUser(formData);
+      const response = await createUser(formData);
       toast.success("Utilizador criado com sucesso");
+      // Mostrar a password após criação
+      if (formData.password) {
+        toast.success(
+          <div>
+            <strong>Password do utilizador:</strong>
+            <div className="mt-1 p-2 bg-gray-100 rounded font-mono select-all">{formData.password}</div>
+            <p className="text-xs mt-1">Copie esta password e envie ao utilizador por email seguro.</p>
+          </div>,
+          { duration: 10000 }
+        );
+      }
       setIsCreateDialogOpen(false);
       setFormData({
         name: "",
@@ -100,6 +140,8 @@ const UsersManagementPage = () => {
         role: "consultor",
         onedrive_folder: "",
       });
+      setGeneratedPassword("");
+      setShowPassword(false);
       fetchUsers();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Erro ao criar utilizador");
@@ -230,12 +272,54 @@ const UsersManagementPage = () => {
                     </div>
                     <div className="space-y-2">
                       <Label>Password</Label>
-                      <Input 
-                        type="password" 
-                        value={formData.password} 
-                        onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
-                        required 
-                      />
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <Input 
+                            type={showPassword ? "text" : "password"} 
+                            value={formData.password} 
+                            onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
+                            required 
+                            className="pr-20"
+                          />
+                          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => setShowPassword(!showPassword)}
+                              title={showPassword ? "Ocultar password" : "Mostrar password"}
+                            >
+                              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                            {formData.password && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={copyPassword}
+                                title="Copiar password"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={generatePassword}
+                          title="Gerar password aleatória"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      {generatedPassword && (
+                        <p className="text-xs text-green-600 font-medium">
+                          ✓ Password gerada. Copie e envie ao utilizador.
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label>Telefone</Label>
