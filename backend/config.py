@@ -178,8 +178,9 @@ CORS_MAX_AGE = int(os.environ.get('CORS_MAX_AGE', '600'))
 # ====================================================================
 # SENTRY_DSN é opcional - se não definido, Sentry fica desactivado
 # Obter DSN em: https://sentry.io -> Project Settings -> Client Keys (DSN)
+# Suporta ambos: DSN_SENTRY_BACKEND (preferido) e SENTRY_DSN (legado)
 # ====================================================================
-SENTRY_DSN = os.environ.get('SENTRY_DSN', '')
+SENTRY_DSN = os.environ.get('DSN_SENTRY_BACKEND') or os.environ.get('SENTRY_DSN', '')
 SENTRY_ENVIRONMENT = os.environ.get('SENTRY_ENVIRONMENT', 'development')
 SENTRY_TRACES_SAMPLE_RATE = float(os.environ.get('SENTRY_TRACES_SAMPLE_RATE', '1.0'))
 SENTRY_PROFILES_SAMPLE_RATE = float(os.environ.get('SENTRY_PROFILES_SAMPLE_RATE', '0.1'))
