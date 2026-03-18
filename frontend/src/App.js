@@ -388,7 +388,7 @@ function App() {
           <Route
             path="/admin/rgpd"
             element={
-              <ProtectedRoute allowedRoles={["admin", "staff"]}>
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
                 <RGPDAdminPage />
               </ProtectedRoute>
             }
