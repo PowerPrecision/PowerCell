@@ -1742,6 +1742,15 @@ const ProcessDetails = () => {
                           </Select>
                         </div>
                         <div className="space-y-2">
+                          <Label>Tipologia do Imóvel (CPCV)</Label>
+                          <Input
+                            value={realEstateData.tipologia || ""}
+                            onChange={(e) => setRealEstateData({ ...realEstateData, tipologia: e.target.value })}
+                            disabled={!canEditRealEstate}
+                            placeholder="Ex: T2, T3, T4"
+                          />
+                        </div>
+                        <div className="space-y-2">
                           <Label>Localização Pretendida</Label>
                           <Input
                             value={realEstateData.localizacao || realEstateData.property_zone || ""}
@@ -2126,8 +2135,8 @@ const ProcessDetails = () => {
                   </Card>
                 )}
 
-                {/* Conexões de Dados - Admin Only */}
-                {user?.role === "admin" && (
+                {/* Conexões de Dados - Visível para todos exceto clientes e indexacao */}
+                {user?.role !== "cliente" && user?.role !== "indexacao" && (
                   <Card className="mt-6 border-blue-200 bg-blue-50/50">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm flex items-center gap-2 text-blue-700">

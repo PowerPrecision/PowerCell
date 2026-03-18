@@ -65,12 +65,19 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName }
             <p className="font-semibold text-sm text-blue-700 dark:text-blue-400">
               {formatCurrency(process.property_value)}
             </p>
-            {process.real_estate_data?.district && (
-              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                {process.real_estate_data.district}
-              </p>
-            )}
+            <div className="flex items-center gap-1 flex-wrap">
+              {process.real_estate_data?.num_quartos && (
+                <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                  {process.real_estate_data.num_quartos}
+                </Badge>
+              )}
+              {process.real_estate_data?.district && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MapPin className="h-3 w-3" />
+                  {process.real_estate_data.district}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Financiamento */}
