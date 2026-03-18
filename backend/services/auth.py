@@ -1,9 +1,10 @@
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 import bcrypt
+import re
 
 from config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_HOURS
 from database import db
@@ -11,6 +12,49 @@ from models.auth import UserRole
 
 
 security = HTTPBearer()
+
+
+def validate_password_strength(password: str) -> Tuple[bool, str]:
+    """
+    Valida a força da password.
+    
+    Requisitos mínimos:
+    - Pelo menos 8 caracteres
+    - Pelo menos uma letra minúscula
+    - Pelo menos uma letra maiúscula
+    - Pelo menos um dígito
+    - Pelo menos um carácter especial (@$!%*?&)
+    
+    Returns:
+        Tuple[bool, str]: (válido, mensagem de erro)
+    """
+    if len(password) < 8:
+        return False, "Password deve ter pelo menos 8 caracteres"
+    
+    if len(password) > 128:
+        return False, "Password não pode exceder 128 caracteres"
+    
+    if not re.search(r'[a-z]', password):
+        return False, "Password deve conter pelo menos uma letra minúscula"
+    
+    if not re.search(r'[A-Z]', password):
+        return False, "Password deve conter pelo menos uma letra maiúscula"
+    
+    if not re.search(r'\d', password):
+        return False, "Password deve conter pelo menos um dígito"
+    
+    if not re.search(r'[@$!%*?&#^()\-_=+\[\]{}|;:,.<>~`]', password):
+        return False, "Password deve conter pelo menos um carácter especial (@$!%*?& etc.)"
+    
+    # Verificar passwords comuns fracas
+    common_passwords = [
+        'password', 'Password1!', '12345678', 'qwerty123', 'admin123',
+        'letmein1!', 'welcome1!', 'Password123!', 'Admin123!'
+    ]
+    if password.lower() in [p.lower() for p in common_passwords]:
+        return False, "Password é demasiado comum. Escolha uma password mais segura."
+    
+    return True, ""
 
 
 def hash_password(password: str) -> str:

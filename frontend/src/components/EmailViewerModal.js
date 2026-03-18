@@ -1,8 +1,10 @@
 /**
  * EmailViewerModal - Modal para visualização de emails
  * Mostra email selecionado com lista de emails ao lado para navegação
+ * 
+ * SEGURANÇA: Usa sanitizeEmailHtml para prevenir ataques XSS
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "./ui/button";
@@ -13,6 +15,7 @@ import {
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import { sanitizeEmailHtml } from "../utils/sanitize";
 
 const EmailViewerModal = ({ 
   isOpen, 
@@ -23,6 +26,14 @@ const EmailViewerModal = ({
 }) => {
   const [currentEmail, setCurrentEmail] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Memorizar o HTML sanitizado para evitar re-sanitização em cada render
+  const sanitizedBodyHtml = useMemo(() => {
+    if (currentEmail?.body_html) {
+      return sanitizeEmailHtml(currentEmail.body_html);
+    }
+    return '';
+  }, [currentEmail?.body_html]);
 
   useEffect(() => {
     if (selectedEmailId && emails.length > 0) {
@@ -215,9 +226,9 @@ const EmailViewerModal = ({
             {/* Corpo do email - com scroll visível */}
             <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-muted-foreground/30 scrollbar-track-transparent hover:scrollbar-thumb-muted-foreground/50">
               <div className="prose prose-sm max-w-none dark:prose-invert">
-                {currentEmail.body_html ? (
+                {sanitizedBodyHtml ? (
                   <div 
-                    dangerouslySetInnerHTML={{ __html: currentEmail.body_html }}
+                    dangerouslySetInnerHTML={{ __html: sanitizedBodyHtml }}
                     className="email-content"
                   />
                 ) : (

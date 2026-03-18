@@ -32,6 +32,9 @@ from services.s3_storage import s3_service, sanitize_folder_name
 # Importar serviço de processamento de documentos (conversão imagem → PDF)
 from services.document_processor import convert_image_to_pdf, IMG2PDF_AVAILABLE
 
+# Importar serviço de validação de ficheiros (MIME type validation)
+from services.file_validation import validate_file_content
+
 router = APIRouter(prefix="/documents", tags=["Document Management"])
 logger = logging.getLogger(__name__)
 
@@ -335,6 +338,16 @@ async def upload_file_s3(
     original_filename = file.filename
     content_type = file.content_type
     
+    # ====================================================================
+    # SEGURANÇA: Validar MIME type usando magic bytes (não apenas extensão)
+    # Isto previne uploads de executáveis disfarçados como documentos
+    # ====================================================================
+    try:
+        validate_file_content(file_content, original_filename)
+    except HTTPException as e:
+        logger.warning(f"[SECURITY] Ficheiro rejeitado: {original_filename} - {e.detail}")
+        raise
+    
     # Verificar se é uma imagem e converter para PDF
     converted_to_pdf = False
     if is_image_file(original_filename, content_type) and IMG2PDF_AVAILABLE:
@@ -404,6 +417,15 @@ async def initialize_folders(client_id: str, user: dict = Depends(get_current_us
     process = await db.processes.find_one({"id": client_id})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
+    
+    # Verificar se já existe mapeamento S3 - NÃO criar duplicados
+    existing_s3_folder = process.get("s3_folder")
+    if existing_s3_folder:
+        # Verificar se a pasta ainda existe no S3
+        if s3_service._folder_exists(existing_s3_folder):
+            logger.info(f"Pasta S3 já existe para cliente {client_id}: {existing_s3_folder}")
+            return {"success": True, "s3_folder": existing_s3_folder, "already_exists": True}
+        # Se não existe, continuar para criar nova
     
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     # Obter segundo titular se existir (com verificação de None)
