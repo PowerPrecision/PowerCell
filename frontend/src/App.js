@@ -47,7 +47,7 @@ const AIDataReviewPage = React.lazy(() => import("./pages/AIDataReviewPage"));
 const DiagnosticsPage = React.lazy(() => import("./pages/DiagnosticsPage"));
 const ExpiringDocumentsDashboard = React.lazy(() => import("./pages/ExpiringDocumentsDashboard"));
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
-const ClientRegistrationsAdminPage = React.lazy(() => import("./pages/ClientRegistrationsAdminPage"));
+const ClientRegistrationsPage = React.lazy(() => import("./pages/ClientRegistrationsPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -402,12 +402,12 @@ function App() {
             }
           />
 
-          {/* Client Registrations Admin - Admin only */}
+          {/* Client Registrations - All staff (Registo de Clientes) */}
           <Route
-            path="/admin/registos-clientes"
+            path="/registos-clientes"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <ClientRegistrationsAdminPage />
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <ClientRegistrationsPage />
               </ProtectedRoute>
             }
           />

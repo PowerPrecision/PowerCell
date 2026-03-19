@@ -103,11 +103,11 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo Negócio
-    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/meus-clientes"];
+    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/meus-clientes", "/registos-clientes"];
     // Rotas do grupo IA
     const iaRoutes = ["/configuracoes/ia", "/ai-insights", "/revisao-dados-ia", "/configuracoes/treino-ia"];
     // Rotas do grupo Configurações (unificado com Sistema)
-    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/admin/rgpd", "/admin/registos-clientes"];
+    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/admin/rgpd"];
     
     return {
       negocio: negocioRoutes.some(r => path.startsWith(r)),
@@ -188,7 +188,12 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/utilizadores",
               },
               {
-                label: "Clientes",
+                label: "Registo de Clientes",
+                icon: Users,
+                href: "/registos-clientes",
+              },
+              {
+                label: "Processos",
                 icon: User,
                 href: "/clientes",
               },
@@ -286,11 +291,6 @@ const DashboardLayout = ({ children, title }) => {
                 icon: FileSignature,
                 href: "/admin/rgpd",
               },
-              {
-                label: "Registos Clientes",
-                icon: Users,
-                href: "/admin/registos-clientes",
-              },
             ],
           },
         ],
@@ -299,7 +299,7 @@ const DashboardLayout = ({ children, title }) => {
 
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
     if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao", "gestor_documentos"].includes(user?.role)) {
-      // Menu simplificado para INDEXACAO - só Clientes
+      // Menu simplificado para INDEXACAO - só Clientes e Registos
       if (user?.role === "indexacao" || user?.role === "gestor_documentos") {
         return {
           main: [
@@ -309,7 +309,12 @@ const DashboardLayout = ({ children, title }) => {
               href: "/staff",
             },
             {
-              label: "Clientes",
+              label: "Registo de Clientes",
+              icon: Users,
+              href: "/registos-clientes",
+            },
+            {
+              label: "Processos",
               icon: User,
               href: "/clientes",
             },
@@ -334,9 +339,16 @@ const DashboardLayout = ({ children, title }) => {
         });
       }
       
-      // Clientes para todos
+      // Registo de Clientes para todos
       negocioItems.push({
-        label: "Clientes",
+        label: "Registo de Clientes",
+        icon: Users,
+        href: "/registos-clientes",
+      });
+      
+      // Processos (Gestão de Processos) para todos
+      negocioItems.push({
+        label: "Processos",
         icon: User,
         href: "/clientes",
       });
@@ -392,7 +404,12 @@ const DashboardLayout = ({ children, title }) => {
         main: [
           ...baseItems,
           {
-            label: "Clientes",
+            label: "Registo de Clientes",
+            icon: Users,
+            href: "/registos-clientes",
+          },
+          {
+            label: "Processos",
             icon: User,
             href: "/clientes",
           },

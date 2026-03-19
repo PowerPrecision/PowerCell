@@ -4,9 +4,10 @@ ROTAS PÚBLICAS - CREDITOIMO
 ====================================================================
 Endpoints públicos (sem autenticação).
 
-IMPORTANTE: O cliente NÃO é um utilizador do sistema.
-O registo público cria apenas um documento na colecção Processes.
-Os dados do cliente (email, telefone) ficam guardados no Process.
+FLUXO DE REGISTO:
+1. Formulário público cria ficha de cliente na tabela 'clients'
+2. Quando o cliente é atribuído a um utilizador, cria-se o processo
+3. Um cliente pode ter vários processos
 
 SEGURANÇA: Rate limiting aplicado para prevenir abusos.
 ====================================================================
@@ -76,13 +77,12 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     
     FLUXO:
     1. Verifica se email ou NIF já existem (bloqueia duplicados)
-    2. Cria documento na colecção Processes (NÃO cria utilizador)
+    2. Cria ficha de cliente na tabela 'clients' (NÃO cria processo)
     3. Envia email de confirmação ao cliente
     4. Notifica administradores/staff
     5. Gera alertas no sistema
     
-    O cliente é apenas um "conjunto de dados" dentro do Processo,
-    não um utilizador com credenciais de login.
+    O processo é criado quando o cliente é atribuído a um utilizador.
     """
     
     # Sanitizar email logo no início
@@ -92,39 +92,33 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # VERIFICAR DUPLICADOS (EMAIL E NIF)
     # =========================================
     
-    # Verificar se já existe processo com o mesmo email
-    existing_by_email = await db.processes.find_one({"client_email": clean_email})
+    # Verificar se já existe cliente com o mesmo email
+    existing_by_email = await db.clients.find_one({"contacto.email": clean_email.lower()})
     if existing_by_email:
         return {
             "success": False,
             "blocked": True,
             "reason": "email",
-            "message": "Já existe um processo com este email. A nossa equipa entrará em contacto consigo em breve."
+            "message": "Já existe um registo com este email. A nossa equipa entrará em contacto consigo em breve."
         }
     
-    # Verificar se já existe processo com o mesmo NIF
+    # Verificar se já existe cliente com o mesmo NIF
     nif = None
     if data.personal_data:
         nif = data.personal_data.nif
     
     if nif:
-        existing_by_nif = await db.processes.find_one({"personal_data.nif": nif})
+        existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": nif})
         if existing_by_nif:
             return {
                 "success": False,
                 "blocked": True,
                 "reason": "nif",
-                "message": "Já existe um processo com este NIF. A nossa equipa entrará em contacto consigo em breve."
+                "message": "Já existe um registo com este NIF. A nossa equipa entrará em contacto consigo em breve."
             }
     
-    first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
-    initial_status = first_status["name"] if first_status else "clientes_espera"
-    
-    process_id = str(uuid.uuid4())
+    client_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Gerar número sequencial do processo
-    process_number = await get_next_process_number()
     
     # Processar dados do formulário
     real_estate_data = data.real_estate_data.model_dump() if data.real_estate_data else {}
@@ -161,82 +155,33 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     if titular2_data_dict:
         second_client_name = titular2_data_dict.get("nome") or titular2_data_dict.get("name")
     
-    # Criar documento do processo (SEM criar utilizador)
-    process_doc = {
-        "id": process_id,
-        "process_number": process_number,  # Número sequencial único
-        # Dados do cliente guardados directamente no processo
-        "client_id": None,  # Não há utilizador associado
-        "client_name": data.name,
-        "client_email": clean_email,  # Email já sanitizado
-        "client_phone": data.phone,
-        "second_client_name": second_client_name,  # Nome do 2º titular para pastas
-        # Tipo e estado
-        "process_type": data.process_type,
-        "status": initial_status,
-        # Dados estruturados
-        "personal_data": personal_data,
+    # =========================================
+    # CRIAR FICHA DE CLIENTE (tabela clients)
+    # =========================================
+    client_doc = {
+        "id": client_id,
+        "nome": data.name,
+        "contacto": {
+            "email": clean_email.lower(),
+            "telefone": data.phone
+        },
+        "dados_pessoais": personal_data,
+        "dados_financeiros": data.financial_data.model_dump() if data.financial_data else {},
+        "dados_imobiliarios": real_estate_data,  # Novo campo para dados do imóvel
         "titular2_data": titular2_data_dict,
-        "financial_data": data.financial_data.model_dump() if data.financial_data else None,
-        "real_estate_data": real_estate_data,
-        "credit_data": None,
-        # Atribuições (a ser preenchido pelo staff)
-        "assigned_consultor_id": None,
-        "assigned_mediador_id": None,
-        "consultor_id": None,
-        "consultor_name": None,
-        "intermediario_id": None,
-        "mediador_id": None,
-        "mediador_name": None,
-        # Flags
-        "source": "public_form",
+        "process_ids": [],  # Vazio até ser criado o processo
+        "fonte": "public_form",
         "has_property": has_property,
         "idade_menos_35": idade_menos_35,
-        "is_active": True,  # Processos novos são ativos por defeito
-        # Documentos e histórico
-        "documents": [],
-        "notes": None,
-        # Timestamps
+        "second_client_name": second_client_name,
         "created_at": now,
-        "updated_at": now
+        "updated_at": now,
+        "registration_completed": True,  # Marcar que completou o registo
+        "assigned_to": None,  # Atribuído a nenhum utilizador inicialmente
+        "assigned_at": None
     }
     
-    await db.processes.insert_one(process_doc)
-    
-    # =========================================
-    # CRIAR PASTAS S3 PARA O NOVO CLIENTE
-    # =========================================
-    s3_folder_path = None
-    try:
-        if s3_service.is_configured():
-            success, s3_folder_path = s3_service.initialize_client_folders(
-                process_id, 
-                data.name,
-                second_client_name=second_client_name
-            )
-            if success and s3_folder_path:
-                # Guardar mapeamento no processo
-                await db.processes.update_one(
-                    {"id": process_id},
-                    {"$set": {"s3_folder": s3_folder_path}}
-                )
-                logger.info(f"Pastas S3 criadas e mapeadas para novo cliente: {data.name} -> {s3_folder_path}")
-    except Exception as e:
-        logger.warning(f"Erro ao criar pastas S3 para cliente {data.name}: {e}")
-        # Não falhar o registo se as pastas S3 não forem criadas
-    
-    # Registar no histórico
-    await db.history.insert_one({
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "user_id": None,
-        "user_name": data.name,
-        "action": "Cliente registou-se via formulário público",
-        "field": None,
-        "old_value": None,
-        "new_value": None,
-        "created_at": now
-    })
+    await db.clients.insert_one(client_doc)
     
     # =========================================
     # ENVIAR EMAIL DE CONFIRMAÇÃO AO CLIENTE
@@ -263,7 +208,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # =========================================
     
     # Criar alertas no sistema de notificações
-    await notify_new_client_registration(process_doc, has_property)
+    await notify_new_client_registration(client_doc, has_property)
     
     # =========================================
     # ENVIAR PUSH NOTIFICATIONS PARA STAFF
@@ -283,10 +228,10 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
                 title="Novo Cliente Registado",
                 body=f"{data.name} registou-se via formulário",
                 tag="new_client",
-                url=f"/processo/{process_id}",
+                url=f"/clientes",  # Link para página de registos
                 data={
                     "type": "new_client",
-                    "process_id": process_id,
+                    "client_id": client_id,
                     "client_name": data.name
                 }
             )
@@ -308,8 +253,8 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         first_admin = staff[0]
         staff_job = await task_queue.send_email(
             to=first_admin["email"],
-            subject=f"Novo Cliente: {data.name}",
-            body=f"Foi registado um novo cliente:\n\nNome: {data.name}\nEmail: {clean_email}\nTelefone: {data.phone}\nTipo: {data.process_type}"
+            subject=f"Novo Cliente Registado: {data.name}",
+            body=f"Foi registado um novo cliente via formulário público:\n\nNome: {data.name}\nEmail: {clean_email}\nTelefone: {data.phone}\n\nO cliente aguarda atribuição."
         )
         
         # Fallback se Task Queue não disponível
@@ -326,7 +271,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     return {
         "success": True,
         "message": "Registo criado com sucesso. Verifique o seu email.",
-        "process_id": process_id,
+        "client_id": client_id,
         "has_property": has_property,
         "idade_menos_35": idade_menos_35,
         "email_queued": bool(job_id)
