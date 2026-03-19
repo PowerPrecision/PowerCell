@@ -158,41 +158,47 @@ async def get_rgpd_by_process(process_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Dados do RGPD ou None
     """
-    # Procurar o mais recente assinado
-    requests = await db[RGPD_REQUESTS_COLLECTION].find(
-        {"process_id": process_id, "status": "signed"}
-    ).sort("signed_at", -1).limit(1).to_list(1)
-    
-    if requests:
-        request = requests[0]
-        return {
-            "has_rgpd": True,
-            "status": "signed",
-            "signed_at": request.get("signed_at"),
-            "pdf_url": request.get("pdf_url"),
-            "request_id": request["id"]
-        }
-    
-    # Verificar se há pendente
-    pending_requests = await db[RGPD_REQUESTS_COLLECTION].find(
-        {"process_id": process_id, "status": "pending"}
-    ).sort("created_at", -1).limit(1).to_list(1)
-    
-    if pending_requests:
-        pending = pending_requests[0]
-        try:
-            expires = datetime.fromisoformat(pending["token_expires_at"].replace("Z", "+00:00"))
-            if expires > datetime.now(timezone.utc):
-                return {
-                    "has_rgpd": False,
-                    "status": "pending",
-                    "expires_at": pending["token_expires_at"],
-                    "request_id": pending["id"]
-                }
-        except (KeyError, ValueError) as e:
-            logger.warning(f"Error parsing token expiry: {e}")
-    
-    return {"has_rgpd": False, "status": None}
+    try:
+        # Procurar o mais recente assinado
+        requests = await db[RGPD_REQUESTS_COLLECTION].find(
+            {"process_id": process_id, "status": "signed"}
+        ).sort("signed_at", -1).limit(1).to_list(1)
+        
+        if requests:
+            request = requests[0]
+            return {
+                "has_rgpd": True,
+                "status": "signed",
+                "signed_at": request.get("signed_at"),
+                "pdf_url": request.get("pdf_url"),
+                "request_id": request.get("id")
+            }
+        
+        # Verificar se há pendente
+        pending_requests = await db[RGPD_REQUESTS_COLLECTION].find(
+            {"process_id": process_id, "status": "pending"}
+        ).sort("created_at", -1).limit(1).to_list(1)
+        
+        if pending_requests:
+            pending = pending_requests[0]
+            try:
+                expires_str = pending.get("token_expires_at")
+                if expires_str:
+                    expires = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
+                    if expires > datetime.now(timezone.utc):
+                        return {
+                            "has_rgpd": False,
+                            "status": "pending",
+                            "expires_at": expires_str,
+                            "request_id": pending.get("id")
+                        }
+            except (KeyError, ValueError, AttributeError) as e:
+                logger.warning(f"Error parsing token expiry: {e}")
+        
+        return {"has_rgpd": False, "status": None}
+    except Exception as e:
+        logger.error(f"Error in get_rgpd_by_process for {process_id}: {e}")
+        return {"has_rgpd": False, "status": None}
 
 
 async def sign_rgpd(

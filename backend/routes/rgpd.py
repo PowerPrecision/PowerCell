@@ -186,18 +186,23 @@ async def get_rgpd_status(
     
     Permissões: Qualquer utilizador autenticado pode verificar.
     """
-    result = await get_rgpd_by_process(process_id)
-    
-    if not result:
+    try:
+        result = await get_rgpd_by_process(process_id)
+        
+        if not result:
+            return RGPDStatusResponse(has_rgpd=False)
+        
+        return RGPDStatusResponse(
+            has_rgpd=result.get("has_rgpd", False),
+            status=result.get("status"),
+            signed_at=result.get("signed_at"),
+            pdf_url=result.get("pdf_url"),
+            request_id=result.get("request_id")
+        )
+    except Exception as e:
+        logger.error(f"Erro ao verificar estado RGPD para processo {process_id}: {e}")
+        # Retornar resposta vazia em vez de erro
         return RGPDStatusResponse(has_rgpd=False)
-    
-    return RGPDStatusResponse(
-        has_rgpd=result.get("has_rgpd", False),
-        status=result.get("status"),
-        signed_at=result.get("signed_at"),
-        pdf_url=result.get("pdf_url"),
-        request_id=result.get("request_id")
-    )
 
 
 @router.get("/data/{token}")
