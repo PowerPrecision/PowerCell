@@ -556,9 +556,9 @@ async def criar_dados_teste(count: int = 100, clear: bool = False):
         print("\n📝 Exemplos de processos criados:")
         print("-" * 80)
         
-        # Exemplo com 1 titular
+        # Exemplo com 1 titular (sem co_buyers ou co_buyers vazio)
         exemplo1 = await db.processes.find_one(
-            {"_test_data": True, "co_buyers": {"$or": [{"$exists": False}, {"$size": 0}]}},
+            {"_test_data": True, "$or": [{"co_buyers": {"$exists": False}}, {"co_buyers": {"$size": 0}}]},
             sort=[("created_at", -1)]
         )
         if exemplo1:

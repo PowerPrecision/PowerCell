@@ -63,7 +63,7 @@ import {
   Brain,
   CheckSquare,
   Square,
-
+  Eye,
   Link,
   Settings2,
   ChevronDown,
@@ -189,6 +189,23 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     { value: "valuation_appeal", label: "Apelação de Avaliação Bancária" },
     { value: "deed_reminder", label: "Lembrete de Escritura" },
   ];
+
+  // Verificar se o ficheiro pode ser visualizado (PDFs e imagens)
+  const isPreviewable = (filename) => {
+    const ext = filename?.split('.').pop()?.toLowerCase();
+    return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+  };
+
+  // Pré-visualizar ficheiro
+  const handlePreviewFile = async (file) => {
+    // Para PDFs e imagens, abrir em nova janela
+    if (file.temporary_url) {
+      window.open(file.temporary_url, "_blank");
+    } else {
+      // Fallback: usar endpoint de download
+      handleDownload(file);
+    }
+  };
 
   // Carregar ficheiros
   const fetchFiles = useCallback(async () => {
