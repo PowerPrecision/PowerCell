@@ -4,6 +4,11 @@ Rotas para gestão de Clientes
 Permite gerir clientes de forma independente dos processos.
 Um cliente pode ter múltiplos processos de compra/financiamento.
 
+FLUXO:
+1. Formulário público cria ficha de cliente na tabela 'clients'
+2. Quando o cliente é atribuído a um utilizador, cria-se o processo
+3. Um cliente pode ter vários processos
+
 SEGURANÇA:
 - Campos sensíveis (NIFs, telefones) são encriptados automaticamente
 """
@@ -23,6 +28,7 @@ from models.client import (
 from services.auth import get_current_user, require_roles
 from models.auth import UserRole
 from services.encryption import encryption_service
+from services.process_service import get_next_process_number
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
@@ -79,6 +85,282 @@ def decrypt_client_data(data: dict) -> dict:
 def decrypt_clients_list(clients: list) -> list:
     """Desencripta uma lista de clientes."""
     return [decrypt_client_data(c) for c in clients]
+
+
+# ==============================================================================
+# ENDPOINT: LISTAR CLIENTES REGISTADOS (PÁGINA REGISTO DE CLIENTE)
+# ==============================================================================
+
+@router.get("/registered")
+async def list_registered_clients(
+    search: Optional[str] = Query(None, description="Pesquisar por nome, email ou NIF"),
+    has_process: Optional[bool] = Query(None, description="Filtrar por ter processo criado"),
+    assigned_to_me: bool = Query(False, description="Mostrar apenas clientes atribuídos ao utilizador atual"),
+    sort_field: str = Query("created_at", description="Campo de ordenação"),
+    sort_order: str = Query("desc", description="Ordem: asc ou desc"),
+    limit: int = Query(50, le=200),
+    skip: int = Query(0),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Listar clientes registados via formulário público.
+    
+    PÁGINA: Registo de Cliente
+    ACESSO: Todos os utilizadores
+    
+    Filtros disponíveis:
+    - search: Pesquisar por nome, email ou NIF
+    - has_process: True = com processo, False = sem processo
+    - assigned_to_me: Mostrar apenas clientes atribuídos ao utilizador atual (para INDEXACAO)
+    
+    Ordenação por defeito: data de registo (mais recentes primeiro)
+    """
+    user_role = user.get("role", "")
+    user_id = user.get("id", "")
+    
+    # Construir query
+    query = {"registration_completed": True}
+    
+    # Filtro de pesquisa
+    if search:
+        search_regex = {"$regex": search, "$options": "i"}
+        query["$or"] = [
+            {"nome": search_regex},
+            {"contacto.email": search_regex},
+            {"dados_pessoais.nif": search_regex}
+        ]
+    
+    # Filtro por ter processo
+    if has_process is not None:
+        if has_process:
+            query["process_ids"] = {"$exists": True, "$ne": []}
+        else:
+            query["$or"] = [
+                {"process_ids": {"$exists": False}},
+                {"process_ids": []},
+                {"process_ids": None}
+            ]
+    
+    # Filtro para INDEXACAO - ver apenas clientes atribuídos a ele
+    if assigned_to_me or user_role == "indexacao":
+        query["assigned_to"] = user_id
+    
+    # Construir ordenação
+    sort_order_int = -1 if sort_order.lower() == "desc" else 1
+    valid_sort_fields = ["created_at", "updated_at", "nome"]
+    if sort_field not in valid_sort_fields:
+        sort_field = "created_at"
+    
+    # Buscar clientes
+    clients = await db.clients.find(
+        query,
+        {"_id": 0}
+    ).sort(sort_field, sort_order_int).skip(skip).limit(limit).to_list(length=limit)
+    
+    # Contar total
+    total = await db.clients.count_documents(query)
+    
+    # Buscar nomes dos utilizadores atribuídos
+    assigned_user_ids = list(set(c.get("assigned_to") for c in clients if c.get("assigned_to")))
+    assigned_users = {}
+    if assigned_user_ids:
+        users = await db.users.find(
+            {"id": {"$in": assigned_user_ids}},
+            {"_id": 0, "id": 1, "name": 1}
+        ).to_list(length=50)
+        assigned_users = {u["id"]: u["name"] for u in users}
+    
+    # Enriquecer dados dos clientes
+    enriched_clients = []
+    for c in clients:
+        # Verificar se tem processos
+        process_ids = c.get("process_ids", [])
+        has_process_flag = bool(process_ids)
+        
+        # Buscar informação dos processos
+        processes_info = []
+        if process_ids:
+            processes = await db.processes.find(
+                {"id": {"$in": process_ids}},
+                {"_id": 0, "id": 1, "process_number": 1, "status": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1}
+            ).to_list(length=10)
+            
+            for p in processes:
+                processes_info.append({
+                    "id": p.get("id"),
+                    "process_number": p.get("process_number"),
+                    "status": p.get("status")
+                })
+        
+        enriched_clients.append({
+            "id": c.get("id"),
+            "nome": c.get("nome"),
+            "contacto": c.get("contacto", {}),
+            "dados_pessoais": c.get("dados_pessoais", {}),
+            "nif": c.get("dados_pessoais", {}).get("nif"),
+            "has_process": has_process_flag,
+            "process_count": len(process_ids),
+            "processes": processes_info,
+            "assigned_to": c.get("assigned_to"),
+            "assigned_to_name": assigned_users.get(c.get("assigned_to")),
+            "assigned_at": c.get("assigned_at"),
+            "created_at": c.get("created_at"),
+            "updated_at": c.get("updated_at"),
+            "fonte": c.get("fonte"),
+            "has_property": c.get("has_property"),
+            "idade_menos_35": c.get("idade_menos_35")
+        })
+    
+    # Desencriptar dados sensíveis
+    enriched_clients = decrypt_clients_list(enriched_clients)
+    
+    return {
+        "clients": enriched_clients,
+        "total": total,
+        "has_process_filter": has_process,
+        "assigned_to_me": assigned_to_me,
+        "sort_field": sort_field,
+        "sort_order": sort_order
+    }
+
+
+@router.post("/{client_id}/assign")
+async def assign_client_to_user(
+    client_id: str,
+    assign_to_user_id: Optional[str] = Query(None, description="ID do utilizador a atribuir (vazio = atribuir a si próprio)"),
+    create_process: bool = Query(True, description="Criar processo automaticamente"),
+    process_type: str = Query("credito_habitacao", description="Tipo de processo a criar"),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Atribuir um cliente a um utilizador.
+    
+    FLUXO:
+    1. Atribui o cliente ao utilizador
+    2. Se create_process=True, cria automaticamente um processo
+    
+    Permissões:
+    - Admin/CEO/Diretor: Podem atribuir a qualquer utilizador
+    - Consultor/Intermediario: Atribuem a si próprios
+    - Gestor de Documentos: Não pode atribuir clientes
+    """
+    # Verificar permissões
+    user_role = user.get("role", "")
+    user_id = user.get("id", "")
+    
+    if user_role == "gestor_documentos":
+        raise HTTPException(status_code=403, detail="Gestor de Documentos não pode atribuir clientes")
+    
+    # Determinar utilizador de destino
+    if user_role in ["admin", "ceo", "diretor"]:
+        target_user_id = assign_to_user_id or user_id
+    else:
+        target_user_id = user_id  # Apenas a si próprio
+    
+    # Buscar cliente
+    client = await db.clients.find_one({"id": client_id})
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    
+    # Buscar utilizador de destino
+    target_user = await db.users.find_one({"id": target_user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    process_id = None
+    process_number = None
+    
+    # Criar processo se solicitado
+    if create_process:
+        # Obter próximo número de processo
+        process_number = await get_next_process_number()
+        process_id = str(uuid.uuid4())
+        
+        # Obter estado inicial
+        first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
+        initial_status = first_status["name"] if first_status else "clientes_espera"
+        
+        # Preparar dados do processo
+        client_email = client.get("contacto", {}).get("email", "")
+        client_phone = client.get("contacto", {}).get("telefone", "")
+        client_name = client.get("nome", "")
+        
+        personal_data = client.get("dados_pessoais", {}) or {}
+        if client_email and not personal_data.get("email"):
+            personal_data["email"] = client_email
+        if client_phone and not personal_data.get("telefone"):
+            personal_data["telefone"] = client_phone
+        if client_name and not personal_data.get("nome"):
+            personal_data["nome"] = client_name
+        
+        # Criar documento do processo
+        process_doc = {
+            "id": process_id,
+            "process_number": process_number,
+            "client_ids": [client_id],
+            "client_id": client_id,
+            "client_name": client_name,
+            "client_email": client_email,
+            "client_phone": client_phone,
+            "client_nif": client.get("dados_pessoais", {}).get("nif"),
+            "process_type": process_type,
+            "status": initial_status,
+            "is_active": True,
+            "personal_data": personal_data,
+            "financial_data": client.get("dados_financeiros", {}),
+            "real_estate_data": client.get("dados_imobiliarios", {}),
+            "titular2_data": client.get("titular2_data"),
+            "credit_data": None,
+            "has_property": client.get("has_property", False),
+            "idade_menos_35": client.get("idade_menos_35", False),
+            "source": "client_assignment",
+            "created_at": now,
+            "updated_at": now,
+            "created_by": user.get("email")
+        }
+        
+        # Atribuir automaticamente baseado no papel do utilizador de destino
+        target_role = target_user.get("role", "")
+        if target_role in ["intermediario", "mediador"]:
+            process_doc["assigned_mediador_id"] = target_user_id
+            process_doc["mediador_name"] = target_user.get("name")
+        elif target_role == "consultor":
+            process_doc["assigned_consultor_id"] = target_user_id
+            process_doc["consultor_name"] = target_user.get("name")
+        elif target_role == "indexacao":
+            process_doc["assigned_indexacao_id"] = target_user_id
+        
+        # Inserir processo
+        await db.processes.insert_one(process_doc)
+    
+    # Atualizar cliente
+    if process_id:
+        await db.clients.update_one(
+            {"id": client_id},
+            {
+                "$set": {"assigned_to": target_user_id, "assigned_at": now, "updated_at": now},
+                "$addToSet": {"process_ids": process_id}
+            }
+        )
+    else:
+        await db.clients.update_one(
+            {"id": client_id},
+            {"$set": {"assigned_to": target_user_id, "assigned_at": now, "updated_at": now}}
+        )
+    
+    logger.info(f"Cliente {client_id} atribuído a {target_user_id} por {user.get('email')}")
+    
+    return {
+        "success": True,
+        "message": f"Cliente atribuído a {target_user.get('name')}",
+        "client_id": client_id,
+        "assigned_to": target_user_id,
+        "assigned_to_name": target_user.get("name"),
+        "process_created": create_process,
+        "process_id": process_id,
+        "process_number": process_number
+    }
 
 
 @router.get("")
