@@ -159,10 +159,18 @@ async def get_rgpd_by_process(process_id: str) -> Optional[Dict[str, Any]]:
         Dados do RGPD ou None
     """
     try:
+        # Validar entrada
+        if not process_id:
+            return {"has_rgpd": False, "status": None}
+            
         # Procurar o mais recente assinado
-        requests = await db[RGPD_REQUESTS_COLLECTION].find(
-            {"process_id": process_id, "status": "signed"}
-        ).sort("signed_at", -1).limit(1).to_list(1)
+        try:
+            requests = await db[RGPD_REQUESTS_COLLECTION].find(
+                {"process_id": process_id, "status": "signed"}
+            ).sort("signed_at", -1).limit(1).to_list(1)
+        except Exception as db_err:
+            logger.error(f"Erro ao buscar RGPD assinados: {db_err}")
+            requests = []
         
         if requests:
             request = requests[0]
@@ -175,29 +183,36 @@ async def get_rgpd_by_process(process_id: str) -> Optional[Dict[str, Any]]:
             }
         
         # Verificar se há pendente
-        pending_requests = await db[RGPD_REQUESTS_COLLECTION].find(
-            {"process_id": process_id, "status": "pending"}
-        ).sort("created_at", -1).limit(1).to_list(1)
+        try:
+            pending_requests = await db[RGPD_REQUESTS_COLLECTION].find(
+                {"process_id": process_id, "status": "pending"}
+            ).sort("created_at", -1).limit(1).to_list(1)
+        except Exception as db_err:
+            logger.error(f"Erro ao buscar RGPD pendentes: {db_err}")
+            pending_requests = []
         
         if pending_requests:
             pending = pending_requests[0]
             try:
                 expires_str = pending.get("token_expires_at")
                 if expires_str:
+                    # Tratar diferentes formatos de data
+                    if expires_str.endswith('Z'):
+                        expires_str = expires_str[:-1] + '+00:00'
                     expires = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
                     if expires > datetime.now(timezone.utc):
                         return {
                             "has_rgpd": False,
                             "status": "pending",
-                            "expires_at": expires_str,
+                            "expires_at": pending.get("token_expires_at"),
                             "request_id": pending.get("id")
                         }
-            except (KeyError, ValueError, AttributeError) as e:
+            except (KeyError, ValueError, AttributeError, TypeError) as e:
                 logger.warning(f"Error parsing token expiry: {e}")
         
         return {"has_rgpd": False, "status": None}
     except Exception as e:
-        logger.error(f"Error in get_rgpd_by_process for {process_id}: {e}")
+        logger.error(f"Error in get_rgpd_by_process for {process_id}: {e}", exc_info=True)
         return {"has_rgpd": False, "status": None}
 
 
@@ -276,7 +291,7 @@ async def send_rgpd_email(
     token: str,
     request_id: str,
     user_email: str,
-    base_url: str = "https://crmcredito.precisioncredito.pt"
+    base_url: str = None
 ) -> bool:
     """
     Envia email de RGPD para o cliente.
@@ -287,11 +302,16 @@ async def send_rgpd_email(
         token: Token de validação
         request_id: ID do pedido
         user_email: Email do utilizador que solicitou
-        base_url: URL base para o link
+        base_url: URL base para o link (default: variável de ambiente ou www.powercell.pt)
     
     Returns:
         True se enviado com sucesso
     """
+    import os
+    # Usar variável de ambiente ou URL de produção
+    if base_url is None:
+        base_url = os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
+    
     # Construir link temporário
     rgpd_link = f"{base_url}/rgpd/{token}"
     
