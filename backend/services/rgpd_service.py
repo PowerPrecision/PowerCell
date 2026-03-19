@@ -276,7 +276,7 @@ async def send_rgpd_email(
     token: str,
     request_id: str,
     user_email: str,
-    base_url: str = "https://crmcredito.precisioncredito.pt"
+    base_url: str = None
 ) -> bool:
     """
     Envia email de RGPD para o cliente.
@@ -287,11 +287,16 @@ async def send_rgpd_email(
         token: Token de validação
         request_id: ID do pedido
         user_email: Email do utilizador que solicitou
-        base_url: URL base para o link
+        base_url: URL base para o link (default: variável de ambiente ou www.powercell.pt)
     
     Returns:
         True se enviado com sucesso
     """
+    import os
+    # Usar variável de ambiente ou URL de produção
+    if base_url is None:
+        base_url = os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
+    
     # Construir link temporário
     rgpd_link = f"{base_url}/rgpd/{token}"
     
