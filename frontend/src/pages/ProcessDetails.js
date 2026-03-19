@@ -563,8 +563,24 @@ const ProcessDetails = () => {
       }
     }
     
+    // Tentar parsear formato "DD/MM/YYYY"
+    const shortMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (shortMatch) {
+      const day = shortMatch[1].padStart(2, '0');
+      const month = shortMatch[2].padStart(2, '0');
+      const year = shortMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+    
     // Se não conseguir parsear, retornar null para evitar erros
     return null;
+  };
+
+  // Helper para formatar data para input type="date" (sempre retorna yyyy-MM-dd ou vazio)
+  const formatDateForInput = (dateStr) => {
+    if (!dateStr) return "";
+    const iso = convertPortugueseDateToISO(dateStr);
+    return iso || "";
   };
 
   // Helper para limpar dados pessoais antes de enviar
@@ -1348,7 +1364,7 @@ const ProcessDetails = () => {
                               <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
                               <Input
                                 type="date"
-                                value={personalData.data_nascimento || personalData.birth_date || ""}
+                                value={formatDateForInput(personalData.data_nascimento || personalData.birth_date)}
                                 onChange={(e) => setPersonalData({ ...personalData, data_nascimento: e.target.value })}
                                 disabled={!canEditPersonal}
                                 className="h-9"
@@ -1358,7 +1374,7 @@ const ProcessDetails = () => {
                               <Label className="text-xs text-muted-foreground">Validade CC</Label>
                               <Input
                                 type="date"
-                                value={personalData.data_validade_cc || ""}
+                                value={formatDateForInput(personalData.data_validade_cc)}
                                 onChange={(e) => setPersonalData({ ...personalData, data_validade_cc: e.target.value })}
                                 disabled={!canEditPersonal}
                                 className="h-9"
@@ -2061,7 +2077,7 @@ const ProcessDetails = () => {
                           <Label>Data de Aprovação</Label>
                           <Input
                             type="date"
-                            value={creditData.bank_approval_date || ""}
+                            value={formatDateForInput(creditData.bank_approval_date)}
                             onChange={(e) => setCreditData({ ...creditData, bank_approval_date: e.target.value })}
                             disabled={!canEditCredit}
                           />
