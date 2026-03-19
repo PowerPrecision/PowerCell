@@ -273,9 +273,9 @@ export const getProcess = (id) => api.get(`/processes/${id}`);
 export const createProcess = (data) => api.post("/processes", data);
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
 export const updateProcess = (id, data) => api.put(`/processes/${id}`, data);
-export const assignProcess = (id, consultorId, mediadorId) => 
+export const assignProcess = (id, consultorId, mediadorId, indexacaoId) => 
   api.post(`/processes/${id}/assign`, null, {
-    params: { consultor_id: consultorId, mediador_id: mediadorId }
+    params: { consultor_id: consultorId, mediador_id: mediadorId, indexacao_id: indexacaoId }
   });
 export const getKanbanBoard = () => api.get("/processes/kanban");
 export const moveProcessKanban = (processId, newStatus) => 

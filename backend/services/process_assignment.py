@@ -125,6 +125,48 @@ async def assign_mediador_to_process(
     }, f"Mediador {mediador.get('name')} atribuído com sucesso"
 
 
+async def assign_indexacao_to_process(
+    process_id: str,
+    indexacao_id: str,
+    assigning_user: dict
+) -> Tuple[bool, dict, str]:
+    """
+    Atribui um utilizador de indexação a um processo.
+    
+    Args:
+        process_id: ID do processo
+        indexacao_id: ID do utilizador de indexação a atribuir
+        assigning_user: Utilizador que está a fazer a atribuição
+        
+    Returns:
+        Tuple com (sucesso, dados atualizados, mensagem)
+    """
+    # Validar utilizador de indexação
+    valid, indexacao_user, error = await validate_assignment_user(indexacao_id)
+    if not valid:
+        return False, {}, error
+    
+    # Atualizar processo
+    update_data = {
+        "assigned_indexacao_id": indexacao_id,
+        "indexacao_name": indexacao_user.get("name", ""),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    result = await db.processes.update_one(
+        {"id": process_id},
+        {"$set": update_data}
+    )
+    
+    if result.modified_count == 0:
+        return False, {}, "Processo não encontrado ou não atualizado"
+    
+    return True, {
+        "assigned_indexacao_id": indexacao_id,
+        "indexacao_name": indexacao_user.get("name", "")
+    }, f"Indexação {indexacao_user.get('name')} atribuído com sucesso"
+
+
 async def assign_both_to_process(
     process_id: str,
     consultant_id: Optional[str],

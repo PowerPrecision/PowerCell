@@ -998,10 +998,11 @@ async def assign_process(
     process_id: str, 
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
+    indexacao_id: Optional[str] = None,
     user: dict = Depends(require_staff())
 ):
     """
-    Atribuir consultor e/ou mediador a um processo.
+    Atribuir consultor, mediador e/ou utilizador de indexação a um processo.
     Qualquer utilizador staff pode atribuir.
     """
     process = await db.processes.find_one({"id": process_id})
@@ -1011,6 +1012,7 @@ async def assign_process(
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     old_consultor = process.get("assigned_consultor_id")
     old_mediador = process.get("assigned_mediador_id")
+    old_indexacao = process.get("assigned_indexacao_id")
     
     # Atribuir consultor
     if consultor_id is not None:
@@ -1051,6 +1053,26 @@ async def assign_process(
                     old_user = await db.users.find_one({"id": old_mediador}, {"name": 1})
                     old_name = old_user.get("name") if old_user else None
                 await log_history(process_id, user, "Atribuiu mediador", "assigned_mediador_id", old_name, mediador["name"])
+    
+    # Atribuir utilizador de indexação
+    if indexacao_id is not None:
+        if indexacao_id == "" or indexacao_id == "null":
+            # Remover indexação
+            update_data["assigned_indexacao_id"] = None
+            update_data["indexacao_name"] = None
+            if old_indexacao:
+                old_user = await db.users.find_one({"id": old_indexacao}, {"name": 1})
+                await log_history(process_id, user, "Removeu indexação", "assigned_indexacao_id", old_user.get("name") if old_user else old_indexacao, None)
+        else:
+            indexacao_user = await db.users.find_one({"id": indexacao_id})
+            if indexacao_user:
+                update_data["assigned_indexacao_id"] = indexacao_id
+                update_data["indexacao_name"] = indexacao_user["name"]
+                old_name = None
+                if old_indexacao:
+                    old_user = await db.users.find_one({"id": old_indexacao}, {"name": 1})
+                    old_name = old_user.get("name") if old_user else None
+                await log_history(process_id, user, "Atribuiu indexação", "assigned_indexacao_id", old_name, indexacao_user["name"])
     
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     return {"success": True, "message": "Atribuições actualizadas com sucesso"}

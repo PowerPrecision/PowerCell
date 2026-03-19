@@ -253,6 +253,7 @@ const ProcessDetails = () => {
   const [appUsers, setAppUsers] = useState([]);
   const [selectedConsultor, setSelectedConsultor] = useState("");
   const [selectedMediador, setSelectedMediador] = useState("");
+  const [selectedIndexacao, setSelectedIndexacao] = useState("");
   const [savingAssignment, setSavingAssignment] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   
@@ -361,6 +362,7 @@ const ProcessDetails = () => {
     if (process) {
       setSelectedConsultor(process.assigned_consultor_id || "");
       setSelectedMediador(process.assigned_mediador_id || "");
+      setSelectedIndexacao(process.assigned_indexacao_id || "");
       
       // Abrir dialog e buscar utilizadores se necessário
       setShowAssignDialog(true);
@@ -377,6 +379,7 @@ const ProcessDetails = () => {
       const params = new URLSearchParams();
       params.append("consultor_id", selectedConsultor || "");
       params.append("mediador_id", selectedMediador || "");
+      params.append("indexacao_id", selectedIndexacao || "");
       
       const response = await fetch(`${API_URL}/api/processes/${id}/assign?${params.toString()}`, {
         method: "POST",
@@ -2560,6 +2563,26 @@ const ProcessDetails = () => {
                     <SelectItem value="none">Nenhum</SelectItem>
                     {appUsers
                       .filter(u => ["mediador", "intermediario", "intermediario_credito", "diretor"].includes(u.role))
+                      .map(u => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.name} ({u.role})
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label className="text-sm font-medium">Indexação (Documentos)</Label>
+                <Select value={selectedIndexacao || "none"} onValueChange={(v) => setSelectedIndexacao(v === "none" ? "" : v)}>
+                  <SelectTrigger className="mt-1" data-testid="indexacao-select">
+                    <SelectValue placeholder="Seleccionar indexação..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum</SelectItem>
+                    {appUsers
+                      .filter(u => ["indexacao", "gestor_documentos", "administrativo", "admin", "ceo"].includes(u.role))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})

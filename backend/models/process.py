@@ -446,6 +446,7 @@ class ProcessResponse(BaseModel):
     credit_data: Optional[dict] = None
     assigned_consultor_id: Optional[str] = None
     assigned_mediador_id: Optional[str] = None
+    assigned_indexacao_id: Optional[str] = None  # Utilizador responsável pela indexação de documentos
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     notes: Optional[str] = None
