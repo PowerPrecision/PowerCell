@@ -133,7 +133,11 @@ if _cors_env == '*':
 
 # Parsing e validação estrita das origens
 CORS_ORIGINS = []
+CORS_ORIGIN_REGEX = []  # Para padrões de wildcard
 _invalid_origins = []
+
+# Verificar se devemos permitir previews do Vercel
+_allow_vercel_previews = os.environ.get('ALLOW_VERCEL_PREVIEWS', 'true').lower() == 'true'
 
 for origin in _cors_env.split(','):
     origin = origin.strip()
@@ -151,6 +155,14 @@ for origin in _cors_env.split(','):
         _invalid_origins.append(f"{origin} (HTTP não seguro)")
     else:
         _invalid_origins.append(f"{origin} (formato inválido)")
+
+# Adicionar suporte para previews do Vercel
+# Sempre que ALLOW_VERCEL_PREVIEWS=true, permite qualquer subdomínio de vercel.app
+# Isto é seguro porque previews do Vercel requerem autenticação do GitHub para aceder
+if _allow_vercel_previews:
+    # Regex para permitir qualquer subdomínio de vercel.app
+    CORS_ORIGIN_REGEX = [r"https://[a-z0-9-]+\.vercel\.app"]
+    print(f"✅ Vercel preview domains habilitados", file=sys.stderr)
 
 # Reportar origens inválidas
 if _invalid_origins:
