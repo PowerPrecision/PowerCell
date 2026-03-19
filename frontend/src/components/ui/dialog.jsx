@@ -30,35 +30,27 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
  * @param {object} props
  * @param {string} [props.title] - Optional title for accessibility. If provided, will be rendered as hidden title.
  * @param {string} [props.description] - Optional description for accessibility.
- * @param {boolean} [props.hideTitle] - If true, renders title visually hidden but accessible to screen readers.
  */
 const DialogContent = React.forwardRef(({ 
   className, 
   children, 
   title,
   description,
-  hideTitle = false,
   ...props 
 }, ref) => {
   // Check if children already contain a DialogTitle
-  const hasVisibleTitle = React.Children.toArray(children).some(
+  const hasTitle = React.Children.toArray(children).some(
     child => React.isValidElement(child) && 
     (child.type === DialogTitle || 
      child.type?.displayName === DialogTitle.displayName ||
-     (child.props?.children && React.Children.toArray(child.props.children).some(
-       nested => React.isValidElement(nested) && 
-       (nested.type === DialogTitle || nested.type?.displayName === DialogTitle.displayName)
-     )))
+     child.type === DialogHeader)
   )
-  
-  // Check for DialogHeader containing DialogTitle
-  const hasTitle = hasVisibleTitle || React.Children.toArray(children).some(
+
+  // Check if children contain a DialogDescription
+  const hasDescription = React.Children.toArray(children).some(
     child => React.isValidElement(child) && 
-    child.type === DialogHeader &&
-    React.Children.toArray(child.props.children).some(
-      nested => React.isValidElement(nested) && 
-      (nested.type === DialogTitle || nested.type?.displayName === DialogTitle.displayName)
-    )
+    (child.type === DialogDescription || 
+     child.type?.displayName === DialogDescription.displayName)
   )
 
   return (
@@ -66,25 +58,20 @@ const DialogContent = React.forwardRef(({
       <DialogOverlay />
       <DialogPrimitive.Content
         ref={ref}
+        aria-describedby={hasDescription || description ? undefined : undefined}
         className={cn(
           "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
           className
         )}
         {...props}>
         {/* Render hidden title for accessibility if no visible title exists */}
-        {!hasTitle && !title && (
+        {!hasTitle && (
           <VisuallyHidden.Root>
-            <DialogPrimitive.Title>Dialog</DialogPrimitive.Title>
-          </VisuallyHidden.Root>
-        )}
-        {/* Render provided title as hidden if specified */}
-        {title && !hasTitle && (
-          <VisuallyHidden.Root>
-            <DialogPrimitive.Title>{title}</DialogPrimitive.Title>
+            <DialogPrimitive.Title>{title || "Dialog"}</DialogPrimitive.Title>
           </VisuallyHidden.Root>
         )}
         {/* Render provided description as hidden if specified */}
-        {description && (
+        {description && !hasDescription && (
           <VisuallyHidden.Root>
             <DialogPrimitive.Description>{description}</DialogPrimitive.Description>
           </VisuallyHidden.Root>
