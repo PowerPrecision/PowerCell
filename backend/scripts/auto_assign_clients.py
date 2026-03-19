@@ -33,7 +33,7 @@ from typing import List, Dict, Any, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import db
-from models.auth import UserRole
+from models.auth import UserRole, UserRoleEnum
 
 
 # ====================================================================
@@ -47,7 +47,7 @@ MAX_CLIENTS_PER_USER = {
     UserRole.INDEXACAO: 100,
 }
 
-# Prioridade de roles para atribuição
+# Prioridade de roles para atribuição (strings diretamente)
 PRIORITY_ROLES = [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INDEXACAO]
 
 # Logs
@@ -122,11 +122,14 @@ async def get_available_users(role: Optional[str] = None) -> List[Dict[str, Any]
     """
     query = {
         "is_active": True,
-        "role": {"$in": [r.value for r in PRIORITY_ROLES]}
     }
     
     if role:
+        # Se role for especificado, usar apenas esse
         query["role"] = role
+    else:
+        # Caso contrário, usar os roles prioritários (já são strings)
+        query["role"] = {"$in": PRIORITY_ROLES}
     
     users = await db.users.find(query).to_list(50)
     
@@ -134,7 +137,8 @@ async def get_available_users(role: Optional[str] = None) -> List[Dict[str, Any]
     for user in users:
         count = await db.clients.count_documents({"assigned_to": user["id"]})
         user["current_client_count"] = count
-        user["max_clients"] = MAX_CLIENTS_PER_USER.get(UserRole(user["role"]), 50)
+        # user["role"] já é uma string, usar diretamente
+        user["max_clients"] = MAX_CLIENTS_PER_USER.get(user["role"], 50)
         user["available_slots"] = user["max_clients"] - user["current_client_count"]
     
     # Ordenar por disponibilidade (mais slots disponíveis primeiro)
