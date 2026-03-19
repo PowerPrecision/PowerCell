@@ -63,8 +63,7 @@ import {
   Brain,
   CheckSquare,
   Square,
-  Eye,
-  ExternalLink,
+
   Link,
   Settings2,
   ChevronDown,
@@ -126,9 +125,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [aiDialog, setAiDialog] = useState({ open: false, results: null });
   const [selectedFilesForAI, setSelectedFilesForAI] = useState([]);
   const [applyingChanges, setApplyingChanges] = useState(false);
-  
-  // Estado para preview de documentos
-  const [previewDialog, setPreviewDialog] = useState({ open: false, file: null, url: null, loading: false });
   
   // Estado para mapeamento S3 individual
   const [s3MappingOpen, setS3MappingOpen] = useState(false);
@@ -820,82 +816,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
-  // Preview de documento
-  const handlePreviewFile = async (file) => {
-    setPreviewDialog({ open: true, file, url: null, loading: true });
-    
-    try {
-      // Usar endpoint proxy para evitar problemas de CORS
-      const proxyUrl = `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`;
-      
-      // Verificar se o ficheiro está acessível
-      const response = await fetch(proxyUrl, { 
-        method: 'HEAD',
-        headers: { Authorization: `Bearer ${token}` } 
-      });
-      
-      if (response.ok) {
-        // Para o preview, usar a URL do proxy com token no header
-        // Criar uma URL temporária com blob para exibir
-        const fileResponse = await fetch(proxyUrl, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        if (fileResponse.ok) {
-          const blob = await fileResponse.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          setPreviewDialog(prev => ({ ...prev, url: blobUrl, loading: false }));
-        } else {
-          toast.error("Erro ao carregar ficheiro");
-          setPreviewDialog({ open: false, file: null, url: null, loading: false });
-        }
-      } else {
-        toast.error("Erro ao obter URL do ficheiro");
-        setPreviewDialog({ open: false, file: null, url: null, loading: false });
-      }
-    } catch (error) {
-      console.error("Erro ao visualizar ficheiro:", error);
-      toast.error("Erro ao visualizar ficheiro");
-      setPreviewDialog({ open: false, file: null, url: null, loading: false });
-    }
-  };
-  
-  // Abrir ficheiro em nova aba
-  const handleOpenInNewTab = async () => {
-    if (previewDialog.file) {
-      // Obter URL presigned para abrir em nova aba
-      try {
-        const response = await fetch(
-          `${API_URL}/api/documents/download-url/${encodeURIComponent(previewDialog.file.path)}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (response.ok) {
-          const { url } = await response.json();
-          window.open(url, '_blank');
-        }
-      } catch (error) {
-        // Fallback: usar o blob URL se disponível
-        if (previewDialog.url) {
-          window.open(previewDialog.url, '_blank');
-        }
-      }
-    }
-  };
-  
-  // Verificar se ficheiro é visualizável
-  const isPreviewable = (filename) => {
-    const ext = filename?.toLowerCase().split('.').pop();
-    return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext);
-  };
-  
-  // Obter tipo de ficheiro para preview
-  const getFileType = (filename) => {
-    const ext = filename?.toLowerCase().split('.').pop();
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) return 'image';
-    if (ext === 'pdf') return 'pdf';
-    return 'other';
-  };
-
   if (loading) {
     return (
       <Card data-testid="s3-file-manager">
@@ -1286,16 +1206,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => handlePreviewFile(file)}
-                              title="Visualizar"
-                              data-testid={`preview-btn-${idx}`}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
                               onClick={() => handleDownload(file)}
                               title="Download"
                               data-testid={`download-btn-${idx}`}
@@ -1598,79 +1508,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 Aplicar Sugestões
               </Button>
             )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog de Preview de Documento */}
-      <Dialog open={previewDialog.open} onOpenChange={(open) => {
-        if (!open) setPreviewDialog({ open: false, file: null, url: null, loading: false });
-      }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Eye className="h-5 w-5 text-blue-600" />
-              {previewDialog.file?.name || "Documento"}
-            </DialogTitle>
-            <DialogDescription>
-              Pré-visualização do documento
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-auto min-h-[400px] bg-muted/30 rounded-lg flex items-center justify-center">
-            {previewDialog.loading ? (
-              <div className="flex flex-col items-center gap-2">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">A carregar...</span>
-              </div>
-            ) : previewDialog.url ? (
-              getFileType(previewDialog.file?.name) === 'image' ? (
-                <img 
-                  src={previewDialog.url} 
-                  alt={previewDialog.file?.name}
-                  className="max-w-full max-h-[60vh] object-contain"
-                />
-              ) : getFileType(previewDialog.file?.name) === 'pdf' ? (
-                <iframe 
-                  src={previewDialog.url}
-                  title={previewDialog.file?.name}
-                  className="w-full h-[60vh] border-0"
-                />
-              ) : (
-                <div className="text-center p-8">
-                  <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-muted-foreground mb-4">
-                    Este tipo de ficheiro não pode ser pré-visualizado.
-                  </p>
-                  <Button onClick={handleOpenInNewTab} variant="outline">
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    Abrir em Nova Aba
-                  </Button>
-                </div>
-              )
-            ) : (
-              <div className="text-center p-8">
-                <AlertCircle className="h-16 w-16 mx-auto mb-4 text-red-500" />
-                <p className="text-muted-foreground">Erro ao carregar documento</p>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="flex justify-between pt-4 border-t">
-            <div className="text-sm text-muted-foreground">
-              {previewDialog.file?.size && (
-                <span>{(previewDialog.file.size / 1024).toFixed(1)} KB</span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handleOpenInNewTab} disabled={!previewDialog.url}>
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Abrir em Nova Aba
-              </Button>
-              <Button variant="outline" onClick={() => setPreviewDialog({ open: false, file: null, url: null, loading: false })}>
-                Fechar
-              </Button>
-            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
