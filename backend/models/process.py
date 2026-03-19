@@ -431,7 +431,9 @@ class ProcessUpdate(BaseModel):
 class ProcessResponse(BaseModel):
     id: str
     process_number: Optional[int] = None  # Número sequencial único do processo
-    client_id: Optional[str] = None
+    # Suporte a múltiplos clientes por processo (relação N:M)
+    client_ids: Optional[List[str]] = None  # Lista de IDs de clientes associados
+    client_id: Optional[str] = None  # ID do cliente principal (compatibilidade)
     client_name: str
     client_email: Optional[str] = None
     client_phone: Optional[str] = None
