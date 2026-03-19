@@ -92,6 +92,7 @@ const DashboardLayout = ({ children, title }) => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
   
   // Atalhos de teclado
   const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts({
@@ -122,6 +123,18 @@ const DashboardLayout = ({ children, title }) => {
   useEffect(() => {
     setOpenSections(getInitialOpenSections());
   }, [location.pathname]);
+
+  // Detectar scroll para minimizar header
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollY = window.scrollY;
+      const threshold = 100; // Pixels antes de minimizar
+      setHeaderCollapsed(scrollY > threshold);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const toggleSection = (section) => {
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -566,9 +579,15 @@ const DashboardLayout = ({ children, title }) => {
 
       {/* Main content */}
       <div className="lg:pl-64">
-        {/* Top bar */}
-        <header className={`h-16 border-b border-border bg-card sticky ${impersonateOffset} z-30`}>
-          <div className="flex items-center justify-between h-full px-4 lg:px-6">
+        {/* Top bar - Expanded */}
+        <header 
+          className={`border-b border-border bg-card sticky ${impersonateOffset} z-30 transition-all duration-300 ease-in-out ${
+            headerCollapsed ? 'h-12' : 'h-16'
+          }`}
+        >
+          <div className={`flex items-center justify-between h-full px-4 lg:px-6 transition-all duration-300 ${
+            headerCollapsed ? 'gap-2' : 'gap-4'
+          }`}>
             <div className="flex items-center gap-4">
               <Button
                 variant="ghost"
@@ -578,30 +597,29 @@ const DashboardLayout = ({ children, title }) => {
               >
                 <Menu className="h-5 w-5" />
               </Button>
-              <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+              <h1 className={`font-semibold tracking-tight transition-all duration-300 ${
+                headerCollapsed ? 'text-base' : 'text-xl'
+              }`}>{title}</h1>
             </div>
 
             <div className="flex items-center gap-2">
               {/* Search Button (Ctrl+K) */}
               <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => setShowSearchModal(true)}
-                className="hidden sm:flex items-center gap-2 text-muted-foreground"
-              >
-                <Search className="h-4 w-4" />
-                <span className="text-xs">Pesquisar...</span>
-                <kbd className="ml-2 px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">
-                  Ctrl+K
-                </kbd>
-              </Button>
-              <Button 
-                variant="ghost" 
+                variant={headerCollapsed ? "ghost" : "outline"} 
                 size="icon"
                 onClick={() => setShowSearchModal(true)}
-                className="sm:hidden"
+                title="Pesquisar (Ctrl+K)"
+                className={headerCollapsed ? "" : "hidden sm:flex items-center gap-2 text-muted-foreground"}
               >
-                <Search className="h-5 w-5" />
+                <Search className="h-4 w-4" />
+                {!headerCollapsed && (
+                  <>
+                    <span className="text-xs">Pesquisar...</span>
+                    <kbd className="ml-2 px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">
+                      Ctrl+K
+                    </kbd>
+                  </>
+                )}
               </Button>
               
               {/* Dark Mode Toggle */}
@@ -612,36 +630,40 @@ const DashboardLayout = ({ children, title }) => {
                 title={isDark ? "Modo Claro" : "Modo Escuro"}
               >
                 {isDark ? (
-                  <Sun className="h-5 w-5" />
+                  <Sun className="h-4 w-4" />
                 ) : (
-                  <Moon className="h-5 w-5" />
+                  <Moon className="h-4 w-4" />
                 )}
               </Button>
               
-              {/* Keyboard Shortcuts Help */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowHelpModal(true)}
-                title="Atalhos de Teclado (Ctrl+/)"
-                className="hidden sm:flex"
-              >
-                <Keyboard className="h-5 w-5" />
-              </Button>
+              {/* Keyboard Shortcuts Help - hide when collapsed */}
+              {!headerCollapsed && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowHelpModal(true)}
+                  title="Atalhos de Teclado (Ctrl+/)"
+                  className="hidden sm:flex"
+                >
+                  <Keyboard className="h-5 w-5" />
+                </Button>
+              )}
               
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => {
-                  // Página inicial baseada no role do utilizador
-                  const homePage = user?.role === "cliente" ? "/portal-cliente" : "/dashboard";
-                  navigate(homePage);
-                }}
-                className="gap-2 hidden sm:flex"
-              >
-                <Home className="h-4 w-4" />
-                <span className="hidden md:inline">Página Inicial</span>
-              </Button>
+              {/* Home Button - hide when collapsed */}
+              {!headerCollapsed && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => {
+                    const homePage = user?.role === "cliente" ? "/portal-cliente" : "/dashboard";
+                    navigate(homePage);
+                  }}
+                  className="gap-2 hidden sm:flex"
+                >
+                  <Home className="h-4 w-4" />
+                  <span className="hidden md:inline">Página Inicial</span>
+                </Button>
+              )}
               
               {/* Notificações - só para utilizadores autenticados (não clientes) */}
               {user?.role !== "cliente" && (
@@ -654,16 +676,16 @@ const DashboardLayout = ({ children, title }) => {
                     title="Chat Interno"
                     data-testid="open-chat-btn"
                   >
-                    <MessageSquare className="h-5 w-5" />
+                    <MessageSquare className="h-4 w-4" />
                   </Button>
-                  <NotificationsDropdown />
+                  <NotificationsDropdown compact={headerCollapsed} />
                 </>
               )}
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="rounded-full">
-                    <User className="h-5 w-5" />
+                    <User className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
