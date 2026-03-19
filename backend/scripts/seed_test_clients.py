@@ -415,6 +415,11 @@ async def criar_clientes_teste(count: int = 100, clear: bool = False):
         print("❌ Erro: MONGO_URL e DB_NAME devem estar definidos no .env")
         sys.exit(1)
     
+    # Mostrar informação da base de dados
+    print(f"\n📦 Base de Dados: {db_name}")
+    print(f"🔗 Ligação: {mongo_url.split('@')[-1] if '@' in mongo_url else mongo_url}")
+    print(f"📋 Coleção: clients\n")
+    
     client = AsyncIOMotorClient(mongo_url)
     db = client[db_name]
     
