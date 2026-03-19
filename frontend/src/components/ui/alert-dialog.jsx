@@ -44,30 +44,32 @@ const AlertDialogContent = React.forwardRef(({
      child.type === AlertDialogHeader)
   )
 
+  // Check if children contain an AlertDialogDescription
+  const hasDescription = React.Children.toArray(children).some(
+    child => React.isValidElement(child) && 
+    (child.type === AlertDialogDescription || 
+     child.type?.displayName === AlertDialogDescription.displayName)
+  )
+
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay />
       <AlertDialogPrimitive.Content
         ref={ref}
+        aria-describedby={hasDescription || description ? undefined : undefined}
         className={cn(
           "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
           className
         )}
         {...props}>
         {/* Render hidden title for accessibility if no visible title exists */}
-        {!hasTitle && !title && (
+        {!hasTitle && (
           <VisuallyHidden.Root>
-            <AlertDialogPrimitive.Title>Alert</AlertDialogPrimitive.Title>
-          </VisuallyHidden.Root>
-        )}
-        {/* Render provided title as hidden if specified */}
-        {title && !hasTitle && (
-          <VisuallyHidden.Root>
-            <AlertDialogPrimitive.Title>{title}</AlertDialogPrimitive.Title>
+            <AlertDialogPrimitive.Title>{title || "Alert"}</AlertDialogPrimitive.Title>
           </VisuallyHidden.Root>
         )}
         {/* Render provided description as hidden if specified */}
-        {description && (
+        {description && !hasDescription && (
           <VisuallyHidden.Root>
             <AlertDialogPrimitive.Description>{description}</AlertDialogPrimitive.Description>
           </VisuallyHidden.Root>
