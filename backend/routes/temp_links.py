@@ -61,9 +61,20 @@ async def create_temp_link(
         file_paths: Lista de paths S3 para download (separados por vírgula)
         notify_email: Se deve enviar email ao cliente
     """
+    logger.info(f"Criando link temporário: process_id={process_id}, link_type={link_type}, user={user.get('id')}")
+    
+    # Validar process_id
+    if not process_id or process_id.strip() == "":
+        logger.warning("process_id vazio ou inválido")
+        raise HTTPException(
+            status_code=400,
+            detail="ID do processo é obrigatório."
+        )
+    
     try:
         link_type_enum = TempLinkType(link_type.lower())
     except ValueError:
+        logger.warning(f"Tipo de link inválido: {link_type}")
         raise HTTPException(
             status_code=400,
             detail="Tipo de link inválido. Use 'upload' ou 'download'."
@@ -114,13 +125,15 @@ async def create_temp_link(
             notify_email=notify_email
         )
         
+        logger.info(f"Link temporário criado com sucesso: {link.id}")
         return link
         
     except ValueError as e:
+        logger.warning(f"Erro de validação ao criar link: {e}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Erro ao criar link temporário: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao criar link temporário")
+        logger.error(f"Erro ao criar link temporário: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro ao criar link temporário: {str(e)}")
 
 
 @router.get("/process/{process_id}")

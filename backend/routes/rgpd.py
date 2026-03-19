@@ -187,6 +187,14 @@ async def get_rgpd_status(
     Permissões: Qualquer utilizador autenticado pode verificar.
     """
     try:
+        # Validar se process_id é um UUID válido
+        import uuid
+        try:
+            uuid.UUID(process_id)
+        except (ValueError, TypeError):
+            logger.warning(f"process_id inválido fornecido: {process_id}")
+            return RGPDStatusResponse(has_rgpd=False)
+        
         result = await get_rgpd_by_process(process_id)
         
         if not result:
@@ -200,7 +208,7 @@ async def get_rgpd_status(
             request_id=result.get("request_id")
         )
     except Exception as e:
-        logger.error(f"Erro ao verificar estado RGPD para processo {process_id}: {e}")
+        logger.error(f"Erro ao verificar estado RGPD para processo {process_id}: {e}", exc_info=True)
         # Retornar resposta vazia em vez de erro
         return RGPDStatusResponse(has_rgpd=False)
 
