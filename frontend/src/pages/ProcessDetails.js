@@ -563,8 +563,24 @@ const ProcessDetails = () => {
       }
     }
     
+    // Tentar parsear formato "DD/MM/YYYY"
+    const shortMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (shortMatch) {
+      const day = shortMatch[1].padStart(2, '0');
+      const month = shortMatch[2].padStart(2, '0');
+      const year = shortMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+    
     // Se não conseguir parsear, retornar null para evitar erros
     return null;
+  };
+
+  // Helper para formatar data para input type="date" (sempre retorna yyyy-MM-dd ou vazio)
+  const formatDateForInput = (dateStr) => {
+    if (!dateStr) return "";
+    const iso = convertPortugueseDateToISO(dateStr);
+    return iso || "";
   };
 
   // Helper para limpar dados pessoais antes de enviar
@@ -957,13 +973,19 @@ const ProcessDetails = () => {
 
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col gap-4">
+          {/* Linha 1: Nome e Badge do Status */}
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <div>
-              <h2 className="text-xl font-semibold">{process.client_name}</h2>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-xl font-semibold truncate">{process.client_name}</h2>
+                <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
+                  {currentStatusInfo.label}
+                </Badge>
+              </div>
               <p className="text-sm text-muted-foreground">
                 #{process.process_number || '—'} • {typeLabels[process.process_type]}
                 {process.id && (
@@ -974,11 +996,9 @@ const ProcessDetails = () => {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Badge className={`${statusColors[currentStatusInfo.color]} border`}>
-              {currentStatusInfo.label}
-            </Badge>
-
+          
+          {/* Linha 2: Botões de Ação */}
+          <div className="flex flex-wrap items-center gap-2 pl-12">
             {/* Botão para Gerir Atribuições - escondido para gestor_documentos */}
             {user?.role !== "gestor_documentos" && (
               <Button
@@ -988,7 +1008,7 @@ const ProcessDetails = () => {
                 onClick={openAssignDialog}
                 data-testid="assign-users-btn"
               >
-                <Users className="h-4 w-4 mr-2" />
+                <Users className="h-4 w-4 mr-1" />
                 Atribuições
               </Button>
             )}
@@ -1016,11 +1036,11 @@ const ProcessDetails = () => {
                 }
               >
                 {rgpdSending || rgpdLoading ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                 ) : rgpdStatus?.status === 'signed' ? (
-                  <CheckCircle className="h-4 w-4 mr-2" />
+                  <CheckCircle className="h-4 w-4 mr-1" />
                 ) : (
-                  <FileSignature className="h-4 w-4 mr-2" />
+                  <FileSignature className="h-4 w-4 mr-1" />
                 )}
                 {rgpdStatus?.status === 'signed' 
                   ? 'RGPD Assinado' 
@@ -1093,7 +1113,7 @@ const ProcessDetails = () => {
             
             {canChangeStatus && (
               <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger className="w-48" data-testid="status-select">
+                <SelectTrigger className="w-44" data-testid="status-select">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1113,7 +1133,7 @@ const ProcessDetails = () => {
                 onClick={handleDeleteClient}
                 data-testid="delete-client-btn"
               >
-                <Trash2 className="h-4 w-4 mr-2" />
+                <Trash2 className="h-4 w-4 mr-1" />
                 Eliminar
               </Button>
             )}
@@ -1344,7 +1364,7 @@ const ProcessDetails = () => {
                               <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
                               <Input
                                 type="date"
-                                value={personalData.data_nascimento || personalData.birth_date || ""}
+                                value={formatDateForInput(personalData.data_nascimento || personalData.birth_date)}
                                 onChange={(e) => setPersonalData({ ...personalData, data_nascimento: e.target.value })}
                                 disabled={!canEditPersonal}
                                 className="h-9"
@@ -1354,7 +1374,7 @@ const ProcessDetails = () => {
                               <Label className="text-xs text-muted-foreground">Validade CC</Label>
                               <Input
                                 type="date"
-                                value={personalData.data_validade_cc || ""}
+                                value={formatDateForInput(personalData.data_validade_cc)}
                                 onChange={(e) => setPersonalData({ ...personalData, data_validade_cc: e.target.value })}
                                 disabled={!canEditPersonal}
                                 className="h-9"
@@ -2057,7 +2077,7 @@ const ProcessDetails = () => {
                           <Label>Data de Aprovação</Label>
                           <Input
                             type="date"
-                            value={creditData.bank_approval_date || ""}
+                            value={formatDateForInput(creditData.bank_approval_date)}
                             onChange={(e) => setCreditData({ ...creditData, bank_approval_date: e.target.value })}
                             disabled={!canEditCredit}
                           />
