@@ -27,7 +27,146 @@ import {
   Percent,
   Building2,
   Calculator,
+  PiggyBank,
+  Clock,
+  User,
+  Banknote,
+  ArrowUpRight,
+  ArrowDownRight,
 } from "lucide-react";
+
+/**
+ * Componente de medidor circular (Gauge) - versão avançada
+ */
+const RadialGauge = ({ value, max = 100, size = 130, strokeWidth = 12, label, thresholds = [30, 50, 70], unit = "%" }) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const percentage = Math.min((value / max) * 100, 100);
+  const offset = circumference - (percentage / 100) * circumference;
+  
+  const getColor = () => {
+    if (percentage <= thresholds[0]) return '#22c55e';
+    if (percentage <= thresholds[1]) return '#eab308';
+    if (percentage <= thresholds[2]) return '#f97316';
+    return '#ef4444';
+  };
+  
+  const getRiskLabel = () => {
+    if (percentage <= thresholds[0]) return { text: 'Baixo', color: 'text-green-600' };
+    if (percentage <= thresholds[1]) return { text: 'Moderado', color: 'text-yellow-600' };
+    if (percentage <= thresholds[2]) return { text: 'Elevado', color: 'text-orange-600' };
+    return { text: 'Crítico', color: 'text-red-600' };
+  };
+  
+  const riskLabel = getRiskLabel();
+  
+  return (
+    <div className="flex flex-col items-center">
+      <div className="relative inline-flex items-center justify-center">
+        <svg width={size} height={size} className="transform -rotate-90">
+          <defs>
+            <linearGradient id={`gradient-${label}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor={getColor()} stopOpacity="0.8" />
+              <stop offset="100%" stopColor={getColor()} stopOpacity="1" />
+            </linearGradient>
+          </defs>
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke="#f3f4f6"
+            strokeWidth={strokeWidth}
+            fill="none"
+          />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={`url(#gradient-${label})`}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            className="transition-all duration-700 ease-out"
+          />
+        </svg>
+        <div className="absolute flex flex-col items-center justify-center">
+          <span className="text-2xl font-bold" style={{ color: getColor() }}>
+            {value.toFixed(1)}{unit}
+          </span>
+          <span className={`text-xs font-medium ${riskLabel.color}`}>{riskLabel.text}</span>
+        </div>
+      </div>
+      <span className="text-xs text-gray-500 mt-2 font-medium">{label}</span>
+    </div>
+  );
+};
+
+/**
+ * Mini gráfico de barras
+ */
+const MiniBarChart = ({ data }) => {
+  const maxValue = Math.max(...data.map(d => d.value));
+  
+  return (
+    <div className="space-y-2">
+      {data.map((item, index) => (
+        <div key={index} className="flex items-center gap-3">
+          <div className="w-20 text-xs text-gray-500">{item.label}</div>
+          <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden relative">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${item.color}`}
+              style={{ width: `${(item.value / maxValue) * 100}%` }}
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium">
+              {typeof item.value === 'number' && item.value >= 1000 
+                ? `${(item.value / 1000).toFixed(0)}k€`
+                : `${item.value.toFixed(0)}${item.unit || '€'}`
+              }
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+/**
+ * Card de métrica
+ */
+const MetricCard = ({ label, value, icon, color, trend, subtitle }) => {
+  const colorClasses = {
+    blue: 'bg-blue-50 border-blue-200 text-blue-600',
+    green: 'bg-green-50 border-green-200 text-green-600',
+    red: 'bg-red-50 border-red-200 text-red-600',
+    orange: 'bg-orange-50 border-orange-200 text-orange-600',
+    purple: 'bg-purple-50 border-purple-200 text-purple-600',
+  };
+  
+  return (
+    <div className={`${colorClasses[color]} border rounded-xl p-4`}>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs text-gray-500 font-medium">{label}</p>
+          <p className="text-2xl font-bold mt-1">{value}</p>
+          {subtitle && <p className="text-xs mt-1">{subtitle}</p>}
+        </div>
+        {icon && (
+          <div className={`p-2 rounded-lg bg-white/50`}>
+            {icon}
+          </div>
+        )}
+      </div>
+      {trend !== undefined && (
+        <div className={`flex items-center gap-1 mt-2 text-xs ${trend >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+          {trend >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+          <span>{Math.abs(trend).toFixed(1)}%</span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 /**
  * Calculadora de Risco de Crédito
@@ -48,7 +187,7 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
   // Resultados
   const [resultado, setResultado] = useState(null);
 
-  // Pré-preencher com dados do cliente quando disponível
+  // Pré-preencher com dados do cliente
   useEffect(() => {
     if (clientData && open) {
       if (clientData.valor_imovel) {
@@ -81,7 +220,7 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
     const rendimento = parseFloat(rendimentoMensal) || 0;
     const idade = parseInt(idadeProponente) || 30;
 
-    // Cálculos
+    // Cálculos básicos
     const valorFinanciar = vImovel - vEntrada;
     const ltv = vImovel > 0 ? (valorFinanciar / vImovel) * 100 : 0;
 
@@ -96,66 +235,67 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
         (Math.pow(1 + taxaMensal, numPrestacoes) - 1);
     }
 
-    // MTIC (Montante Total Imputado ao Consumidor)
+    // MTIC e juros
     const mtic = prestacaoMensal * numPrestacoes;
     const jurosTotal = mtic - valorFinanciar;
 
-    // TAEG estimada (simplificada)
-    const taegEstimada = taxa * 1.15; // Adiciona custos estimados
+    // TAEG estimada
+    const taegEstimada = taxa * 1.15;
 
     // DSTI
     const dsti = rendimento > 0 ? (prestacaoMensal / rendimento) * 100 : 0;
 
     // Análise de risco
-    let riscoLTV = "";
-    let riscoDSTI = "";
-    let riscoIdade = "";
-    let classificacaoGeral = "";
-    let corClassificacao = "";
+    let riscoLTV = "", riscoDSTI = "", riscoIdade = "";
+    let scoreLTV = 0, scoreDSTI = 0, scoreIdade = 0;
 
     // Risco LTV
     if (ltv <= 80) {
-      riscoLTV = "Baixo";
+      riscoLTV = "Baixo"; scoreLTV = 100;
     } else if (ltv <= 90) {
-      riscoLTV = "Moderado";
+      riscoLTV = "Moderado"; scoreLTV = 60;
     } else if (ltv <= 100) {
-      riscoLTV = "Elevado";
+      riscoLTV = "Elevado"; scoreLTV = 30;
     } else {
-      riscoLTV = "Muito Elevado";
+      riscoLTV = "Crítico"; scoreLTV = 0;
     }
 
     // Risco DSTI
     if (dsti <= 30) {
-      riscoDSTI = "Baixo";
+      riscoDSTI = "Baixo"; scoreDSTI = 100;
     } else if (dsti <= 40) {
-      riscoDSTI = "Moderado";
+      riscoDSTI = "Moderado"; scoreDSTI = 70;
     } else if (dsti <= 50) {
-      riscoDSTI = "Elevado";
+      riscoDSTI = "Elevado"; scoreDSTI = 40;
     } else {
-      riscoDSTI = "Muito Elevado";
+      riscoDSTI = "Crítico"; scoreDSTI = 0;
     }
 
-    // Risco Idade (limitação de prazo)
+    // Risco Idade
     const idadeFinal = idade + prazo;
     if (idadeFinal <= 70) {
-      riscoIdade = "Baixo";
+      riscoIdade = "Baixo"; scoreIdade = 100;
     } else if (idadeFinal <= 75) {
-      riscoIdade = "Moderado";
+      riscoIdade = "Moderado"; scoreIdade = 60;
     } else {
-      riscoIdade = "Elevado";
+      riscoIdade = "Elevado"; scoreIdade = 20;
     }
 
-    // Classificação geral
-    const riscos = [riscoLTV, riscoDSTI, riscoIdade];
-    const riscosAltos = riscos.filter((r) => r === "Elevado" || r === "Muito Elevado").length;
+    // Score geral (0-100)
+    const scoreGeral = (scoreLTV + scoreDSTI + scoreIdade) / 3;
 
-    if (riscosAltos === 0) {
+    // Classificação geral
+    let classificacaoGeral = "", corClassificacao = "";
+    if (scoreGeral >= 80) {
+      classificacaoGeral = "Perfil Excelente";
+      corClassificacao = "bg-green-500 text-white";
+    } else if (scoreGeral >= 60) {
       classificacaoGeral = "Perfil Aprovado";
       corClassificacao = "bg-green-500 text-white";
-    } else if (riscosAltos === 1) {
+    } else if (scoreGeral >= 40) {
       classificacaoGeral = "Perfil Aceitável";
       corClassificacao = "bg-yellow-500 text-yellow-900";
-    } else if (riscosAltos === 2) {
+    } else if (scoreGeral >= 20) {
       classificacaoGeral = "Perfil de Risco";
       corClassificacao = "bg-orange-500 text-white";
     } else {
@@ -163,11 +303,13 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
       corClassificacao = "bg-red-500 text-white";
     }
 
-    // Prazo máximo recomendado
+    // Prazo máximo
     const prazoMaxIdade = Math.max(5, 70 - idade);
     const prazoRecomendado = Math.min(prazo, prazoMaxIdade);
 
     const resultados = {
+      valorImovel: vImovel,
+      valorEntrada: vEntrada,
       valorFinanciar,
       prestacaoMensal,
       ltv,
@@ -175,13 +317,20 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
       jurosTotal,
       taegEstimada,
       dsti,
+      prazo,
+      prazoAnos: prazo,
       riscoLTV,
       riscoDSTI,
       riscoIdade,
+      scoreLTV,
+      scoreDSTI,
+      scoreIdade,
+      scoreGeral,
       classificacaoGeral,
       corClassificacao,
       prazoMaxIdade,
       prazoRecomendado,
+      idadeFinal,
       dentroLimites: ltv <= 90 && dsti <= 50 && idadeFinal <= 75,
     };
 
@@ -192,7 +341,6 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
     }
   };
 
-  // Limpar formulário
   const limpar = () => {
     setValorImovel("");
     setValorEntrada("");
@@ -214,7 +362,7 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5 text-purple-600" />
@@ -256,7 +404,7 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
             </div>
           </div>
 
-          {/* Dados do Financiamento */}
+          {/* Condições do Crédito */}
           <div className="space-y-4">
             <h3 className="font-semibold text-sm text-purple-600 flex items-center gap-2">
               <Percent className="h-4 w-4" />
@@ -308,7 +456,8 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
           {/* Dados do Cliente */}
           <div className="space-y-4 md:col-span-2">
             <h3 className="font-semibold text-sm text-green-600 flex items-center gap-2">
-              👤 Dados do Cliente
+              <User className="h-4 w-4" />
+              Dados do Cliente
             </h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -337,7 +486,7 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
 
         {/* Botões */}
         <div className="flex gap-3 mt-6">
-          <Button onClick={calcular} className="flex-1">
+          <Button onClick={calcular} className="flex-1 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700">
             <Calculator className="h-4 w-4 mr-2" />
             Calcular Risco
           </Button>
@@ -348,110 +497,187 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
 
         {/* Resultados */}
         {resultado && (
-          <Card className="mt-6 border-2 border-purple-200">
+          <Card className="mt-6 border-2 border-purple-200 bg-gradient-to-br from-white to-purple-50">
             <CardContent className="pt-6">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-6">
                 <h3 className="font-semibold text-lg">Resultados da Simulação</h3>
                 <Badge className={resultado.corClassificacao}>
                   {resultado.classificacaoGeral}
                 </Badge>
               </div>
 
-              {/* Valores principais */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div className="text-center p-3 bg-blue-50 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Valor a Financiar</p>
-                  <p className="text-xl font-bold text-blue-600">
-                    {resultado.valorFinanciar.toLocaleString('pt-PT')}€
-                  </p>
-                </div>
-                <div className="text-center p-3 bg-green-50 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Prestação Mensal</p>
-                  <p className="text-xl font-bold text-green-600">
-                    {resultado.prestacaoMensal.toFixed(2)}€
-                  </p>
-                </div>
-                <div className="text-center p-3 bg-purple-50 rounded-lg">
-                  <p className="text-xs text-muted-foreground">LTV</p>
-                  <p className="text-xl font-bold text-purple-600">
-                    {resultado.ltv.toFixed(1)}%
-                  </p>
-                </div>
-                <div className="text-center p-3 bg-orange-50 rounded-lg">
-                  <p className="text-xs text-muted-foreground">DSTI</p>
-                  <p className="text-xl font-bold text-orange-600">
-                    {resultado.dsti.toFixed(1)}%
-                  </p>
-                </div>
+              {/* Gauges de Risco */}
+              <div className="flex flex-wrap justify-center gap-6 mb-8">
+                <RadialGauge 
+                  value={resultado.ltv} 
+                  max={100} 
+                  label="LTV" 
+                  thresholds={[80, 90, 100]}
+                />
+                <RadialGauge 
+                  value={resultado.dsti} 
+                  max={100} 
+                  label="DSTI" 
+                  thresholds={[30, 40, 50]}
+                />
+                <RadialGauge 
+                  value={resultado.scoreGeral} 
+                  max={100} 
+                  label="Score Geral" 
+                  thresholds={[40, 60, 80]}
+                  unit=""
+                />
               </div>
 
-              {/* Custos totais */}
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="text-center p-2 bg-gray-50 rounded">
-                  <p className="text-xs text-muted-foreground">MTIC</p>
-                  <p className="font-semibold">{resultado.mtic.toLocaleString('pt-PT', { maximumFractionDigits: 0 })}€</p>
-                </div>
-                <div className="text-center p-2 bg-gray-50 rounded">
-                  <p className="text-xs text-muted-foreground">Total Juros</p>
-                  <p className="font-semibold text-red-600">{resultado.jurosTotal.toLocaleString('pt-PT', { maximumFractionDigits: 0 })}€</p>
-                </div>
-                <div className="text-center p-2 bg-gray-50 rounded">
-                  <p className="text-xs text-muted-foreground">TAEG Est.</p>
-                  <p className="font-semibold">{(resultado.taegEstimada * 100).toFixed(2)}%</p>
-                </div>
+              {/* Métricas principais */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                <MetricCard
+                  label="Valor a Financiar"
+                  value={`${resultado.valorFinanciar.toLocaleString('pt-PT')}€`}
+                  icon={<Banknote className="h-4 w-4" />}
+                  color="blue"
+                />
+                <MetricCard
+                  label="Prestação Mensal"
+                  value={`${resultado.prestacaoMensal.toFixed(0)}€`}
+                  icon={<PiggyBank className="h-4 w-4" />}
+                  color="green"
+                />
+                <MetricCard
+                  label="Total Juros"
+                  value={`${resultado.jurosTotal.toLocaleString('pt-PT', { maximumFractionDigits: 0 })}€`}
+                  icon={<TrendingUp className="h-4 w-4" />}
+                  color="red"
+                  subtitle={`${resultado.mtic.toLocaleString('pt-PT', { maximumFractionDigits: 0 })}€ MTIC`}
+                />
+                <MetricCard
+                  label="TAEG Estimada"
+                  value={`${(resultado.taegEstimada * 100).toFixed(2)}%`}
+                  icon={<Percent className="h-4 w-4" />}
+                  color="purple"
+                />
               </div>
 
-              {/* Análise de risco */}
-              <div className="space-y-3">
-                <h4 className="font-semibold text-sm">Análise de Risco</h4>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className={`p-2 rounded border ${
-                    resultado.riscoLTV === 'Baixo' ? 'bg-green-50 border-green-200' :
-                    resultado.riscoLTV === 'Moderado' ? 'bg-yellow-50 border-yellow-200' :
-                    'bg-red-50 border-red-200'
-                  }`}>
-                    <p className="text-xs text-muted-foreground">Risco LTV</p>
-                    <p className="font-semibold">{resultado.riscoLTV}</p>
+              {/* Gráfico de barras - composição do valor total */}
+              <div className="bg-white rounded-xl p-4 mb-6 border">
+                <h4 className="font-medium text-sm mb-4 flex items-center gap-2">
+                  <PiggyBank className="h-4 w-4 text-purple-500" />
+                  Composição do Custo Total
+                </h4>
+                <MiniBarChart data={[
+                  { label: 'Capital', value: resultado.valorFinanciar, color: 'bg-blue-400' },
+                  { label: 'Juros', value: resultado.jurosTotal, color: 'bg-red-400' },
+                  { label: 'MTIC', value: resultado.mtic, color: 'bg-purple-400' },
+                ]} />
+              </div>
+
+              {/* Análise de risco por fator */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {/* Risco LTV */}
+                <div className={`p-4 rounded-xl border-2 ${
+                  resultado.riscoLTV === 'Baixo' ? 'bg-green-50 border-green-300' :
+                  resultado.riscoLTV === 'Moderado' ? 'bg-yellow-50 border-yellow-300' :
+                  resultado.riscoLTV === 'Elevado' ? 'bg-orange-50 border-orange-300' :
+                  'bg-red-50 border-red-300'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-500">Risco LTV</span>
+                    <span className="font-semibold">{resultado.riscoLTV}</span>
                   </div>
-                  <div className={`p-2 rounded border ${
-                    resultado.riscoDSTI === 'Baixo' ? 'bg-green-50 border-green-200' :
-                    resultado.riscoDSTI === 'Moderado' ? 'bg-yellow-50 border-yellow-200' :
-                    'bg-red-50 border-red-200'
-                  }`}>
-                    <p className="text-xs text-muted-foreground">Risco DSTI</p>
-                    <p className="font-semibold">{resultado.riscoDSTI}</p>
+                  <div className="text-lg font-bold">{resultado.ltv.toFixed(1)}%</div>
+                  <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full ${
+                        resultado.ltv <= 80 ? 'bg-green-500' :
+                        resultado.ltv <= 90 ? 'bg-yellow-500' :
+                        'bg-red-500'
+                      }`}
+                      style={{ width: `${Math.min(resultado.ltv, 100)}%` }}
+                    />
                   </div>
-                  <div className={`p-2 rounded border ${
-                    resultado.riscoIdade === 'Baixo' ? 'bg-green-50 border-green-200' :
-                    resultado.riscoIdade === 'Moderado' ? 'bg-yellow-50 border-yellow-200' :
-                    'bg-red-50 border-red-200'
-                  }`}>
-                    <p className="text-xs text-muted-foreground">Risco Idade</p>
-                    <p className="font-semibold">{resultado.riscoIdade}</p>
+                  <p className="text-xs text-gray-500 mt-2">
+                    {resultado.ltv <= 80 ? '✓ Dentro do recomendado (≤80%)' :
+                     resultado.ltv <= 90 ? '⚠ Limite aceitável (≤90%)' :
+                     '✗ Ultrapassa limites'}
+                  </p>
+                </div>
+
+                {/* Risco DSTI */}
+                <div className={`p-4 rounded-xl border-2 ${
+                  resultado.riscoDSTI === 'Baixo' ? 'bg-green-50 border-green-300' :
+                  resultado.riscoDSTI === 'Moderado' ? 'bg-yellow-50 border-yellow-300' :
+                  resultado.riscoDSTI === 'Elevado' ? 'bg-orange-50 border-orange-300' :
+                  'bg-red-50 border-red-300'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-500">Risco DSTI</span>
+                    <span className="font-semibold">{resultado.riscoDSTI}</span>
                   </div>
+                  <div className="text-lg font-bold">{resultado.dsti.toFixed(1)}%</div>
+                  <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full ${
+                        resultado.dsti <= 30 ? 'bg-green-500' :
+                        resultado.dsti <= 40 ? 'bg-yellow-500' :
+                        resultado.dsti <= 50 ? 'bg-orange-500' :
+                        'bg-red-500'
+                      }`}
+                      style={{ width: `${Math.min(resultado.dsti, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    {resultado.dsti <= 30 ? '✓ Excelente capacidade' :
+                     resultado.dsti <= 40 ? '⚠ Risco moderado' :
+                     resultado.dsti <= 50 ? '⚠ Limite do BdP' :
+                     '✗ Ultrapassa 50%'}
+                  </p>
+                </div>
+
+                {/* Risco Idade */}
+                <div className={`p-4 rounded-xl border-2 ${
+                  resultado.riscoIdade === 'Baixo' ? 'bg-green-50 border-green-300' :
+                  resultado.riscoIdade === 'Moderado' ? 'bg-yellow-50 border-yellow-300' :
+                  'bg-orange-50 border-orange-300'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-500">Risco Idade</span>
+                    <span className="font-semibold">{resultado.riscoIdade}</span>
+                  </div>
+                  <div className="text-lg font-bold">{resultado.idadeFinal} anos</div>
+                  <div className="mt-2 flex items-center gap-1 text-xs">
+                    <Clock className="h-3 w-3" />
+                    <span>Idade final do contrato</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    {resultado.idadeFinal <= 70 ? '✓ Dentro do limite' :
+                     resultado.idadeFinal <= 75 ? '⚠ Limite aceitável' :
+                     '✗ Pode comprometer aprovação'}
+                  </p>
                 </div>
               </div>
 
               {/* Avisos */}
               {!resultado.dentroLimites && (
-                <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200 flex items-start gap-2">
+                <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 flex items-start gap-3">
                   <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div className="text-sm text-amber-800">
                     <strong>Atenção:</strong> Alguns parâmetros estão fora dos limites recomendados.
                     <ul className="list-disc list-inside mt-1">
                       {resultado.ltv > 90 && <li>LTV superior a 90%</li>}
                       {resultado.dsti > 50 && <li>DSTI superior a 50%</li>}
+                      {resultado.idadeFinal > 75 && <li>Idade final superior a 75 anos</li>}
                     </ul>
                   </div>
                 </div>
               )}
 
               {/* Info adicional */}
-              <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-muted-foreground">
-                <p>
+              <div className="mt-4 p-4 bg-gray-50 rounded-xl flex items-start gap-3">
+                <Info className="h-5 w-5 text-gray-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-gray-600">
                   <strong>Prazo máximo recomendado:</strong> {resultado.prazoMaxIdade} anos
-                  (baseado na idade final do contrato não exceder 70-75 anos)
-                </p>
+                  <span className="text-gray-400 ml-2">(baseado na idade final do contrato não exceder 70-75 anos)</span>
+                </div>
               </div>
             </CardContent>
           </Card>
