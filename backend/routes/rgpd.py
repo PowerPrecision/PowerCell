@@ -274,34 +274,44 @@ async def list_all_rgpd(
     - page: Página (default: 1)
     - limit: Itens por página (default: 20)
     """
-    query = {}
+    try:
+        query = {}
 
-    if status:
-        query["status"] = status
+        if status:
+            query["status"] = status
 
-    if search:
-        query["$or"] = [
-            {"client_name": {"$regex": search, "$options": "i"}},
-            {"consent_data.contribuinte": {"$regex": search, "$options": "i"}},
-            {"consent_data.nome": {"$regex": search, "$options": "i"}}
-        ]
+        if search:
+            query["$or"] = [
+                {"client_name": {"$regex": search, "$options": "i"}},
+                {"consent_data.contribuinte": {"$regex": search, "$options": "i"}},
+                {"consent_data.nome": {"$regex": search, "$options": "i"}}
+            ]
 
-    skip = (page - 1) * limit
+        skip = (page - 1) * limit
 
-    total = await db[RGPD_REQUESTS_COLLECTION].count_documents(query)
+        total = await db[RGPD_REQUESTS_COLLECTION].count_documents(query)
 
-    requests = await db[RGPD_REQUESTS_COLLECTION].find(
-        query,
-        {"_id": 0, "token": 0}
-    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+        requests = await db[RGPD_REQUESTS_COLLECTION].find(
+            query,
+            {"_id": 0, "token": 0}
+        ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
 
-    return {
-        "requests": requests,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "pages": (total + limit - 1) // limit
-    }
+        return {
+            "requests": requests,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": (total + limit - 1) // limit
+        }
+    except Exception as e:
+        logger.error(f"Erro ao obter RGPD admin all: {e}")
+        return {
+            "requests": [],
+            "total": 0,
+            "page": page,
+            "limit": limit,
+            "pages": 0
+        }
 
 
 @router.get("/admin/{request_id}")
@@ -462,39 +472,51 @@ async def get_rgpd_stats(
 
     Permissões: Apenas staff.
     """
-    from datetime import datetime, timezone, timedelta
+    try:
+        from datetime import datetime, timezone, timedelta
 
-    # Contar por estado
-    pipeline = [
-        {
-            "$group": {
-                "_id": "$status",
-                "count": {"$sum": 1}
+        # Contar por estado
+        pipeline = [
+            {
+                "$group": {
+                    "_id": "$status",
+                    "count": {"$sum": 1}
+                }
             }
+        ]
+
+        status_counts = await db[RGPD_REQUESTS_COLLECTION].aggregate(pipeline).to_list(10)
+
+        stats = {
+            "pending": 0,
+            "signed": 0,
+            "expired": 0,
+            "cancelled": 0,
+            "total": 0
         }
-    ]
 
-    status_counts = await db[RGPD_REQUESTS_COLLECTION].aggregate(pipeline).to_list(10)
+        for item in status_counts:
+            if item["_id"]:
+                stats[item["_id"]] = item["count"]
+                stats["total"] += item["count"]
 
-    stats = {
-        "pending": 0,
-        "signed": 0,
-        "expired": 0,
-        "cancelled": 0,
-        "total": 0
-    }
+        # Contar assinados hoje
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        signed_today = await db[RGPD_REQUESTS_COLLECTION].count_documents({
+            "status": "signed",
+            "signed_at": {"$gte": today.isoformat()}
+        })
 
-    for item in status_counts:
-        stats[item["_id"]] = item["count"]
-        stats["total"] += item["count"]
+        stats["signed_today"] = signed_today
 
-    # Contar assinados hoje
-    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    signed_today = await db[RGPD_REQUESTS_COLLECTION].count_documents({
-        "status": "signed",
-        "signed_at": {"$gte": today.isoformat()}
-    })
-
-    stats["signed_today"] = signed_today
-
-    return stats
+        return stats
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas RGPD: {e}")
+        return {
+            "pending": 0,
+            "signed": 0,
+            "expired": 0,
+            "cancelled": 0,
+            "total": 0,
+            "signed_today": 0
+        }
