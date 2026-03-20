@@ -47,8 +47,11 @@ async def find_cliente_placeholder(dry_run: bool = True, verbose: bool = False) 
         Lista de clientes encontrados
     """
     # Procurar clientes com nome exatamente "Cliente"
+    # Suporta múltiplos campos: nome, name, client_name
     query = {
         "$or": [
+            {"nome": "Cliente"},
+            {"nome": {"$regex": "^Cliente$", "$options": "i"}},
             {"name": "Cliente"},
             {"name": {"$regex": "^Cliente$", "$options": "i"}},
             {"client_name": "Cliente"},
@@ -63,11 +66,12 @@ async def find_cliente_placeholder(dry_run: bool = True, verbose: bool = False) 
     for client in clients:
         if verbose:
             logger.info(f"  - ID: {client.get('id')}")
-            logger.info(f"    Nome: {client.get('name') or client.get('client_name')}")
-            logger.info(f"    Email: {client.get('email') or client.get('client_email', 'N/A')}")
+            logger.info(f"    Nome: {client.get('nome') or client.get('name') or client.get('client_name')}")
+            logger.info(f"    Email: {client.get('email') or client.get('contacto', {}).get('email') or client.get('client_email', 'N/A')}")
             logger.info(f"    Criado: {client.get('created_at', 'N/A')}")
         else:
-            logger.info(f"  - {client.get('id')}: {client.get('email') or client.get('client_email', 'sem email')}")
+            email = client.get('email') or client.get('contacto', {}).get('email') or client.get('client_email', 'sem email')
+            logger.info(f"  - {client.get('id')}: {email}")
     
     return clients
 
