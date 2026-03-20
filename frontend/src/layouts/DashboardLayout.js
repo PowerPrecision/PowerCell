@@ -474,6 +474,7 @@ const DashboardLayout = ({ children, title }) => {
               size="icon"
               className="lg:hidden text-white hover:bg-slate-700"
               onClick={() => setSidebarOpen(false)}
+              aria-label="Fechar menu"
             >
               <X className="h-5 w-5" />
             </Button>
@@ -594,6 +595,7 @@ const DashboardLayout = ({ children, title }) => {
                 size="icon"
                 className="lg:hidden"
                 onClick={() => setSidebarOpen(true)}
+                aria-label="Abrir menu"
               >
                 <Menu className="h-5 w-5" />
               </Button>
@@ -610,6 +612,7 @@ const DashboardLayout = ({ children, title }) => {
                   size="icon"
                   onClick={() => setShowSearchModal(true)}
                   title="Pesquisar (Ctrl+K)"
+                  aria-label="Pesquisar"
                   className="h-8 w-8"
                 >
                   <Search className="h-4 w-4" />
@@ -635,6 +638,7 @@ const DashboardLayout = ({ children, title }) => {
                 size="icon"
                 onClick={toggleTheme}
                 title={isDark ? "Modo Claro" : "Modo Escuro"}
+                aria-label={isDark ? "Ativar modo claro" : "Ativar modo escuro"}
                 className="h-8 w-8"
               >
                 {isDark ? (
@@ -651,11 +655,12 @@ const DashboardLayout = ({ children, title }) => {
                   size="icon"
                   onClick={() => setShowHelpModal(true)}
                   title="Atalhos de Teclado (Ctrl+/)"
+                  aria-label="Atalhos de teclado"
                   className="hidden sm:flex h-8 w-8"
                 >
                   <Keyboard className="h-4 w-4" />
                 </Button>
-              )}
+              )
               
               {/* Home Button - hide when collapsed */}
               {!headerCollapsed && (
@@ -682,6 +687,7 @@ const DashboardLayout = ({ children, title }) => {
                     onClick={() => setChatOpen(true)}
                     className="relative h-8 w-8"
                     title="Chat Interno"
+                    aria-label="Chat interno"
                     data-testid="open-chat-btn"
                   >
                     <MessageSquare className="h-4 w-4" />
@@ -692,7 +698,7 @@ const DashboardLayout = ({ children, title }) => {
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="rounded-full h-8 w-8">
+                  <Button variant="ghost" size="icon" className="rounded-full h-8 w-8" aria-label="Menu do utilizador">
                     <User className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
