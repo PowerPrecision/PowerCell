@@ -223,7 +223,8 @@ async def create_process_for_client(
     import uuid
     
     client_id = client.get("id")
-    client_name = client.get("name") or client.get("client_name", "Cliente")
+    # Suporta múltiplos campos de nome: nome, name, client_name
+    client_name = client.get("nome") or client.get("name") or client.get("client_name", "Cliente")
     
     if dry_run:
         logger.info(f"[DRY-RUN] Criar processo para cliente {client_name}")
@@ -330,7 +331,8 @@ async def run_auto_assignment(
                 continue
             
             client_id = client.get("id")
-            client_name = client.get("name") or client.get("client_name", "Cliente")
+            # Suporta múltiplos campos de nome: nome, name, client_name
+            client_name = client.get("nome") or client.get("name") or client.get("client_name", "Cliente")
             user_id = user["id"]
             user_name = user.get("name", user.get("email", "Utilizador"))
             
