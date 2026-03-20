@@ -43,12 +43,23 @@ from models.auth import UserRole, UserRoleEnum
 # Capacidade máxima de clientes por utilizador (por role)
 MAX_CLIENTS_PER_USER = {
     UserRole.CONSULTOR: 50,
-    UserRole.MEDIADOR: 30,
+    UserRole.INTERMEDIARIO: 50,  # Intermediário de Crédito
+    UserRole.MEDIADOR: 30,       # Legacy alias
     UserRole.INDEXACAO: 100,
+    UserRole.CEO: 100,           # CEO também pode ter clientes
+    UserRole.DIRETOR: 80,        # Diretor também pode ter clientes
 }
 
 # Prioridade de roles para atribuição (strings diretamente)
-PRIORITY_ROLES = [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INDEXACAO]
+# Inclui todos os roles que podem receber clientes
+PRIORITY_ROLES = [
+    UserRole.CONSULTOR,
+    UserRole.INTERMEDIARIO,  # Intermediário de Crédito
+    UserRole.MEDIADOR,       # Legacy alias
+    UserRole.INDEXACAO,
+    UserRole.CEO,
+    UserRole.DIRETOR,
+]
 
 # Logs
 import logging
@@ -120,8 +131,12 @@ async def get_available_users(role: Optional[str] = None) -> List[Dict[str, Any]
     Returns:
         Lista de utilizadores disponíveis
     """
+    # Query base - incluir utilizadores ativos ou sem campo is_active definido
     query = {
-        "is_active": True,
+        "$or": [
+            {"is_active": True},
+            {"is_active": {"$exists": False}},  # Incluir se campo não existe
+        ]
     }
     
     if role:
