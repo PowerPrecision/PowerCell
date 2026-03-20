@@ -726,8 +726,8 @@ const ClientRegistrationsAdminPage = () => {
               <EmptyState icon={Users} message="Nenhum registo encontrado" />
             ) : (
               <div className="space-y-2">
-                {/* Table Header */}
-                <div className="grid grid-cols-12 gap-2 px-3 py-2 text-sm font-medium text-muted-foreground border-b">
+                {/* Table Header - Hidden on mobile, shown on md+ */}
+                <div className="hidden md:grid grid-cols-12 gap-2 px-3 py-2 text-sm font-medium text-muted-foreground border-b">
                   <div className="col-span-3">Cliente</div>
                   <div className="col-span-2">NIF</div>
                   <div className="col-span-2">Origem</div>
@@ -736,9 +736,9 @@ const ClientRegistrationsAdminPage = () => {
                   <div className="col-span-2 text-right">Ações</div>
                 </div>
 
-                {/* Rows */}
+                {/* Rows - Desktop */}
                 {registrations.map((reg) => (
-                  <div key={reg.id} className="grid grid-cols-12 gap-2 px-3 py-3 items-center hover:bg-muted/50 rounded-lg">
+                  <div key={reg.id} className="hidden md:grid grid-cols-12 gap-2 px-3 py-3 items-center hover:bg-muted/50 rounded-lg">
                     <div className="col-span-3">
                       <p className="font-medium truncate">{reg.client_name}</p>
                       <p className="text-xs text-muted-foreground truncate">{reg.client_email}</p>
@@ -754,6 +754,38 @@ const ClientRegistrationsAdminPage = () => {
                     </div>
                   </div>
                 ))}
+                
+                {/* Rows - Mobile (Card Layout) */}
+                <div className="md:hidden space-y-3">
+                  {registrations.map((reg) => (
+                    <div key={reg.id} className="bg-card border rounded-lg p-4 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">{reg.client_name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{reg.client_email}</p>
+                        </div>
+                        <StatusBadge status={reg.status} />
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">NIF:</span>
+                        <span>{reg.personal_data?.nif || "-"}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Origem:</span>
+                        <SourceBadge source={reg.source} />
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Data:</span>
+                        <span>{reg.created_at ? new Date(reg.created_at).toLocaleDateString("pt-PT") : "-"}</span>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-2 border-t">
+                        <Button variant="outline" size="sm" onClick={() => handleView(reg)}><Eye className="h-4 w-4 mr-1" />Ver</Button>
+                        <Button variant="outline" size="sm" onClick={() => handleEdit(reg)}><Edit className="h-4 w-4 mr-1" />Editar</Button>
+                        <Button variant="outline" size="sm" onClick={() => setDeleteModal({ open: true, registration: reg })} className="text-red-600 hover:text-red-700"><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

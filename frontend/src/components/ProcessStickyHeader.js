@@ -78,7 +78,7 @@ const ProcessStickyHeader = ({
   return (
     <>
       {/* Placeholder para evitar salto quando sticky ativa */}
-      {isSticky && <div className="h-20" />}
+      {isSticky && <div className="h-16 lg:h-20" />}
 
       {/* Header fixo */}
       <div
@@ -86,7 +86,7 @@ const ProcessStickyHeader = ({
         className={`
           z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700
           transition-all duration-200
-          ${isSticky ? "fixed top-0 left-0 right-0 shadow-md" : ""}
+          ${isSticky ? "fixed top-12 lg:top-16 left-0 right-0 lg:left-64 shadow-md" : ""}
         `}
       >
         <div className="px-4 py-2">
