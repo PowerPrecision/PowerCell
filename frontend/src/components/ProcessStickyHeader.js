@@ -195,6 +195,8 @@ const ProcessStickyHeader = ({
                 size="sm"
                 className="h-7 w-7 p-0"
                 onClick={() => setCollapsed(!collapsed)}
+                aria-label={collapsed ? "Expandir detalhes" : "Colapsar detalhes"}
+                title={collapsed ? "Expandir detalhes" : "Colapsar detalhes"}
               >
                 {collapsed ? (
                   <ChevronDown className="h-4 w-4" />
