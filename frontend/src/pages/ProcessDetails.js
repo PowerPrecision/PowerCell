@@ -219,6 +219,7 @@ const ProcessDetails = () => {
   const [sideTab, setSideTab] = useState("deadlines");
 
   const [accessDenied, setAccessDenied] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   
   // Estado de erro de validação do NIF
   const [nifError, setNifError] = useState(null);
@@ -509,7 +510,9 @@ const ProcessDetails = () => {
       // No need to load them here
     } catch (error) {
       console.error("Error fetching data:", error);
-      if (error.response?.status === 403) {
+      if (error.response?.status === 404) {
+        setNotFound(true);
+      } else if (error.response?.status === 403) {
         setAccessDenied(true);
         toast.error("Não tem permissão para aceder a este processo");
       } else {
@@ -938,6 +941,26 @@ const ProcessDetails = () => {
               Este processo não lhe está atribuído. Se acha que deveria ter acesso, contacte o administrador.
             </p>
             <Button onClick={() => navigate(-1)}>Voltar</Button>
+          </CardContent>
+        </Card>
+      </DashboardLayout>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <DashboardLayout title="Processo não encontrado">
+        <Card className="border-border">
+          <CardContent className="p-8 text-center">
+            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-amber-500" />
+            <h2 className="text-xl font-semibold mb-2">Processo não encontrado</h2>
+            <p className="text-muted-foreground mb-4">
+              O processo que procura não existe ou foi eliminado.
+            </p>
+            <p className="text-sm text-muted-foreground mb-6">
+              O ID do processo pode estar incorreto ou o processo pode ter sido removido do sistema.
+            </p>
+            <Button onClick={() => navigate("/clientes")}>Ir para Processos</Button>
           </CardContent>
         </Card>
       </DashboardLayout>
