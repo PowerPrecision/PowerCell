@@ -1817,6 +1817,44 @@ const ProcessDetails = () => {
                         </Card>
                       )}
                       
+                      {/* Simulações de Crédito */}
+                      {financialData?.bancos_simulacoes?.length > 0 && (
+                        <Card className="border-l-4 border-l-blue-500">
+                          <CardContent className="pt-4">
+                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                              <CreditCard className="h-4 w-4 text-blue-500" />
+                              Simulações de Crédito Efetuadas
+                            </h4>
+                            <div className="flex flex-wrap gap-2">
+                              {financialData.bancos_simulacoes.map((banco, idx) => (
+                                <Badge key={idx} variant="outline" className="border-blue-300 text-blue-700">{banco}</Badge>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                      
+                      {/* Tempo Restante do Crédito (Refinanciamento) */}
+                      {financialData?.tempo_restante_credito && (
+                        <Card className="border-l-4 border-l-amber-500">
+                          <CardContent className="pt-4">
+                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                              <Clock className="h-4 w-4 text-amber-500" />
+                              Tempo Restante do Crédito Atual
+                            </h4>
+                            <p className="text-sm">
+                              {financialData.tempo_restante_credito === "menos_1_ano" ? "Menos de 1 ano" :
+                               financialData.tempo_restante_credito === "1_5_anos" ? "1 a 5 anos" :
+                               financialData.tempo_restante_credito === "5_10_anos" ? "5 a 10 anos" :
+                               financialData.tempo_restante_credito === "10_15_anos" ? "10 a 15 anos" :
+                               financialData.tempo_restante_credito === "15_20_anos" ? "15 a 20 anos" :
+                               financialData.tempo_restante_credito === "mais_20_anos" ? "Mais de 20 anos" : 
+                               financialData.tempo_restante_credito}
+                            </p>
+                          </CardContent>
+                        </Card>
+                      )}
+                      
                       {/* Emprego */}
                       <Card className="border-l-4 border-l-purple-500">
                         <CardContent className="pt-4">

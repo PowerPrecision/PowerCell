@@ -282,6 +282,8 @@ class FinancialData(BaseModel):
     efetivo: Optional[str] = None
     fiador: Optional[str] = None
     bancos_creditos: Optional[List[str]] = None
+    bancos_simulacoes: Optional[List[str]] = None  # Bancos onde efetuou simulações de crédito
+    tempo_restante_credito: Optional[str] = None  # Tempo restante do crédito atual (refinanciamento)
     capital_proprio: Optional[float] = None
     valor_financiado: Optional[str] = None
     # Situação Profissional

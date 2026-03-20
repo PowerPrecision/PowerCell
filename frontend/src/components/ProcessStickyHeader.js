@@ -109,11 +109,11 @@ const ProcessStickyHeader = ({
               {!collapsed && (
                 <>
                   {/* Contactos */}
-                  <div className="hidden md:flex items-center gap-3 text-xs text-gray-600">
+                  <div className="hidden md:flex items-center gap-3 text-xs text-gray-600 min-w-0">
                     {process?.client_phone && (
                       <a
                         href={`tel:${process.client_phone}`}
-                        className="flex items-center gap-1 hover:text-blue-600"
+                        className="flex items-center gap-1 hover:text-blue-600 flex-shrink-0"
                       >
                         <Phone className="h-3 w-3" />
                         {process.client_phone}
@@ -122,16 +122,19 @@ const ProcessStickyHeader = ({
                     {process?.client_email && (
                       <a
                         href={`mailto:${process.client_email}`}
-                        className="flex items-center gap-1 hover:text-blue-600 truncate max-w-[180px]"
+                        className="flex items-center gap-1 hover:text-blue-600 flex-shrink-0"
+                        title={process.client_email}
                       >
                         <Mail className="h-3 w-3" />
-                        {process.client_email}
+                        <span className="truncate max-w-[180px]">
+                          {process.client_email}
+                        </span>
                       </a>
                     )}
                   </div>
 
                   {/* NIF e Rendimento */}
-                  <div className="hidden lg:flex items-center gap-3 text-xs">
+                  <div className="hidden lg:flex items-center gap-3 text-xs flex-shrink-0">
                     {personalData?.nif && (
                       <span className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
                         NIF: {personalData.nif}
