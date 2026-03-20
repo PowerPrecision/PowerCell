@@ -46,19 +46,15 @@ MAX_CLIENTS_PER_USER = {
     UserRole.INTERMEDIARIO: 50,  # Intermediário de Crédito
     UserRole.MEDIADOR: 30,       # Legacy alias
     UserRole.INDEXACAO: 100,
-    UserRole.CEO: 100,           # CEO também pode ter clientes
-    UserRole.DIRETOR: 80,        # Diretor também pode ter clientes
 }
 
 # Prioridade de roles para atribuição (strings diretamente)
-# Inclui todos os roles que podem receber clientes
+# CEO e DIRETOR excluídos - não recebem atribuições automáticas
 PRIORITY_ROLES = [
     UserRole.CONSULTOR,
     UserRole.INTERMEDIARIO,  # Intermediário de Crédito
     UserRole.MEDIADOR,       # Legacy alias
     UserRole.INDEXACAO,
-    UserRole.CEO,
-    UserRole.DIRETOR,
 ]
 
 # Logs
@@ -76,13 +72,13 @@ logger = logging.getLogger(__name__)
 
 async def get_unassigned_clients(limit: int = 100) -> List[Dict[str, Any]]:
     """
-    Obtém clientes sem utilizador atribuído.
+    Obtém clientes sem utilizador atribuído E sem processo existente.
     
     Args:
         limit: Número máximo de clientes a retornar
         
     Returns:
-        Lista de clientes não atribuídos
+        Lista de clientes não atribuídos e sem processo
     """
     # Clientes da coleção 'clients' que não têm assigned_to
     unassigned_clients = await db.clients.find({
@@ -91,11 +87,31 @@ async def get_unassigned_clients(limit: int = 100) -> List[Dict[str, Any]]:
             {"assigned_to": ""},
             {"assigned_to": {"$exists": False}}
         ]
-    }).limit(limit).to_list(limit)
+    }).limit(limit * 2).to_list(limit * 2)  # Buscar mais para compensar filtros
     
-    logger.info(f"Encontrados {len(unassigned_clients)} clientes não atribuídos na coleção 'clients'")
+    logger.info(f"Encontrados {len(unassigned_clients)} clientes não atribuídos")
     
-    return unassigned_clients
+    # Filtrar clientes que já têm processo
+    clients_without_process = []
+    for client in unassigned_clients:
+        client_id = client.get("id")
+        if not client_id:
+            continue
+            
+        # Verificar se já existe processo para este cliente
+        existing_process = await db.processes.find_one({"client_id": client_id})
+        if existing_process:
+            logger.debug(f"Cliente {client_id} já tem processo, a saltar...")
+            continue
+            
+        clients_without_process.append(client)
+        
+        if len(clients_without_process) >= limit:
+            break
+    
+    logger.info(f"Clientes sem processo: {len(clients_without_process)}")
+    
+    return clients_without_process
 
 
 async def get_unassigned_processes(limit: int = 100) -> List[Dict[str, Any]]:
