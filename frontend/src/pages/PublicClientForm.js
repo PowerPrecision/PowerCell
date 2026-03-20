@@ -804,14 +804,16 @@ const PublicClientForm = () => {
       {formData.compra_tipo === "outra_pessoa" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="titular2_name">Nome completo</Label>
+            <Label htmlFor="titular2_name">Nome completo *</Label>
             <Input
               id="titular2_name"
               value={formData.titular2_name}
               onChange={(e) => updateField("titular2_name", e.target.value)}
               placeholder="Nome completo"
               data-testid="titular2-name"
+              className={cn(fieldErrors.titular2_name && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_name && <FieldError>{fieldErrors.titular2_name}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -823,7 +825,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_email", e.target.value)}
               placeholder="email@exemplo.pt"
               data-testid="titular2-email"
+              className={cn(fieldErrors.titular2_email && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_email && <FieldError>{fieldErrors.titular2_email}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -835,7 +839,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_phone", e.target.value)}
               placeholder="+351 912 345 678"
               data-testid="titular2-phone"
+              className={cn(fieldErrors.titular2_phone && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_phone && <FieldError>{fieldErrors.titular2_phone}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -848,7 +854,10 @@ const PublicClientForm = () => {
               placeholder="123456789"
               maxLength={9}
               data-testid="titular2-nif"
+              className={cn(fieldErrors.titular2_nif && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_nif && <FieldError>{fieldErrors.titular2_nif}</FieldError>}
+            <FieldHint>Número de Identificação Fiscal - 9 dígitos</FieldHint>
           </div>
           
           <div className="space-y-2">
@@ -859,7 +868,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_documento_id", e.target.value)}
               placeholder="Número do documento"
               data-testid="titular2-documento"
+              className={cn(fieldErrors.titular2_documento_id && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_documento_id && <FieldError>{fieldErrors.titular2_documento_id}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -870,7 +881,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_naturalidade", e.target.value)}
               placeholder="Local de nascimento"
               data-testid="titular2-naturalidade"
+              className={cn(fieldErrors.titular2_naturalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_naturalidade && <FieldError>{fieldErrors.titular2_naturalidade}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -881,7 +894,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_nacionalidade", e.target.value)}
               placeholder="Portuguesa"
               data-testid="titular2-nacionalidade"
+              className={cn(fieldErrors.titular2_nacionalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_nacionalidade && <FieldError>{fieldErrors.titular2_nacionalidade}</FieldError>}
           </div>
           
           <div className="space-y-2 md:col-span-2">
@@ -892,7 +907,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_morada_fiscal", e.target.value)}
               placeholder="Rua, número, código postal, localidade"
               data-testid="titular2-morada"
+              className={cn(fieldErrors.titular2_morada_fiscal && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_morada_fiscal && <FieldError>{fieldErrors.titular2_morada_fiscal}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -903,13 +920,18 @@ const PublicClientForm = () => {
               value={formData.titular2_birth_date}
               onChange={(e) => updateField("titular2_birth_date", e.target.value)}
               data-testid="titular2-birth-date"
+              className={cn(fieldErrors.titular2_birth_date && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_birth_date && <FieldError>{fieldErrors.titular2_birth_date}</FieldError>}
           </div>
           
           <div className="space-y-2">
             <Label htmlFor="titular2_estado_civil">Estado Civil</Label>
             <Select value={formData.titular2_estado_civil} onValueChange={(v) => updateField("titular2_estado_civil", v)}>
-              <SelectTrigger data-testid="titular2-estado-civil">
+              <SelectTrigger 
+                data-testid="titular2-estado-civil"
+                className={cn(fieldErrors.titular2_estado_civil && "border-red-500 focus:ring-red-500 bg-red-50")}
+              >
                 <SelectValue placeholder="Selecione" />
               </SelectTrigger>
               <SelectContent>
@@ -918,6 +940,7 @@ const PublicClientForm = () => {
                 ))}
               </SelectContent>
             </Select>
+            {fieldErrors.titular2_estado_civil && <FieldError>{fieldErrors.titular2_estado_civil}</FieldError>}
           </div>
         </div>
       ) : (
