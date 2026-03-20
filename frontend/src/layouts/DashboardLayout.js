@@ -580,13 +580,11 @@ const DashboardLayout = ({ children, title }) => {
 
       {/* Main content */}
       <div className="lg:pl-64">
-        {/* Top bar - Expanded */}
+        {/* Top bar - Fixed height to prevent layout shift */}
         <header 
-          className={`border-b border-border bg-card sticky ${impersonateOffset} z-30 transition-all duration-300 ease-in-out ${
-            headerCollapsed ? 'h-12' : 'h-16'
-          }`}
+          className={`border-b border-border bg-card sticky ${impersonateOffset} z-30 h-16`}
         >
-          <div className={`flex items-center justify-between h-full px-4 lg:px-6 transition-all duration-300 ${
+          <div className={`flex items-center justify-between h-full px-4 lg:px-6 ${
             headerCollapsed ? 'gap-2' : 'gap-4'
           }`}>
             <div className="flex items-center gap-4">

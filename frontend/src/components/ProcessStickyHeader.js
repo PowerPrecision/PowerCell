@@ -78,7 +78,7 @@ const ProcessStickyHeader = ({
   return (
     <>
       {/* Placeholder para evitar salto quando sticky ativa */}
-      {isSticky && <div className="h-16 lg:h-20" />}
+      {isSticky && <div className="h-16 lg:h-20 flex-shrink-0" aria-hidden="true" />}
 
       {/* Header fixo */}
       <div
