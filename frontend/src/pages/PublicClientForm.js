@@ -315,6 +315,12 @@ const PublicClientForm = () => {
     // Bancos com créditos ativos
     bancos_creditos: [],
     
+    // Bancos onde efetuou simulações de crédito
+    bancos_simulacoes: [],
+    
+    // Tempo restante do crédito atual (refinanciamento)
+    tempo_restante_credito: "",
+    
     // Capital e Financiamento
     capital_proprio: "",
     valor_financiado: "",
@@ -511,6 +517,8 @@ const PublicClientForm = () => {
           fiador: formData.fiador,
           monthly_income: formData.salario_liquido ? parseFloat(formData.salario_liquido) : null,
           bancos_creditos: formData.bancos_creditos,
+          bancos_simulacoes: formData.bancos_simulacoes,
+          tempo_restante_credito: formData.tempo_restante_credito || null,
           capital_proprio: formData.capital_proprio ? parseFloat(formData.capital_proprio) : null,
           valor_financiado: formData.valor_financiado,
           // Campos de emprego
@@ -571,6 +579,15 @@ const PublicClientForm = () => {
       bancos_creditos: prev.bancos_creditos.includes(banco)
         ? prev.bancos_creditos.filter(b => b !== banco)
         : [...prev.bancos_creditos, banco]
+    }));
+  };
+
+  const toggleBancoSimulacoes = (banco) => {
+    setFormData(prev => ({
+      ...prev,
+      bancos_simulacoes: prev.bancos_simulacoes.includes(banco)
+        ? prev.bancos_simulacoes.filter(b => b !== banco)
+        : [...prev.bancos_simulacoes, banco]
     }));
   };
 
@@ -1407,6 +1424,49 @@ const PublicClientForm = () => {
           <FieldHint>Inclui crédito habitação, automóvel, pessoal, ou cartões de crédito com saldo em dívida.</FieldHint>
         </div>
         
+        {/* Pergunta sobre simulações de crédito */}
+        <div className="space-y-3">
+          <Label>Efetou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {BANCOS.map((banco) => (
+              <div key={`sim-${banco}`} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`banco-sim-${banco}`}
+                  checked={formData.bancos_simulacoes.includes(banco)}
+                  onCheckedChange={() => toggleBancoSimulacoes(banco)}
+                  data-testid={`banco-sim-${banco.toLowerCase().replace(/\s+/g, '-')}`}
+                />
+                <Label htmlFor={`banco-sim-${banco}`} className="text-sm cursor-pointer">{banco}</Label>
+              </div>
+            ))}
+          </div>
+          <FieldHint>Indique os bancos onde já efetuou simulações ou pedidos de crédito habitação.</FieldHint>
+        </div>
+        
+        {/* Pergunta sobre tempo restante do crédito (apenas para refinanciamento) */}
+        {formData.finalidade === "refinanciamento" && (
+          <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <Label htmlFor="tempo_restante_credito">Quanto tempo falta para acabar de pagar o crédito atual? *</Label>
+            <Select 
+              value={formData.tempo_restante_credito} 
+              onValueChange={(v) => updateField("tempo_restante_credito", v)}
+            >
+              <SelectTrigger data-testid="tempo-restante-credito">
+                <SelectValue placeholder="Selecione o tempo restante" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="menos_1_ano">Menos de 1 ano</SelectItem>
+                <SelectItem value="1_5_anos">1 a 5 anos</SelectItem>
+                <SelectItem value="5_10_anos">5 a 10 anos</SelectItem>
+                <SelectItem value="10_15_anos">10 a 15 anos</SelectItem>
+                <SelectItem value="15_20_anos">15 a 20 anos</SelectItem>
+                <SelectItem value="mais_20_anos">Mais de 20 anos</SelectItem>
+              </SelectContent>
+            </Select>
+            <FieldHint>Esta informação ajuda a determinar as condições do refinanciamento.</FieldHint>
+          </div>
+        )}
+        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="capital_proprio">Capital próprio disponível * (€)</Label>
@@ -1494,6 +1554,31 @@ const PublicClientForm = () => {
             <p>{formData.bancos_creditos.length > 0 ? formData.bancos_creditos.join(", ") : "Nenhum banco selecionado"}</p>
           </CardContent>
         </Card>
+        
+        <Card className="border-border">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Simulações de Crédito</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <p>{formData.bancos_simulacoes.length > 0 ? formData.bancos_simulacoes.join(", ") : "Nenhuma simulação efetuada"}</p>
+          </CardContent>
+        </Card>
+        
+        {formData.finalidade === "refinanciamento" && formData.tempo_restante_credito && (
+          <Card className="border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Tempo Restante do Crédito</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              <p>{formData.tempo_restante_credito === "menos_1_ano" ? "Menos de 1 ano" :
+                  formData.tempo_restante_credito === "1_5_anos" ? "1 a 5 anos" :
+                  formData.tempo_restante_credito === "5_10_anos" ? "5 a 10 anos" :
+                  formData.tempo_restante_credito === "10_15_anos" ? "10 a 15 anos" :
+                  formData.tempo_restante_credito === "15_20_anos" ? "15 a 20 anos" :
+                  formData.tempo_restante_credito === "mais_20_anos" ? "Mais de 20 anos" : "-"}</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="space-y-4 pt-4 border-t">
