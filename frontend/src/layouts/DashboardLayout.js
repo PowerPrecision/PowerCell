@@ -602,25 +602,32 @@ const DashboardLayout = ({ children, title }) => {
               }`}>{title}</h1>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {/* Search Button (Ctrl+K) */}
-              <Button 
-                variant={headerCollapsed ? "ghost" : "outline"} 
-                size="icon"
-                onClick={() => setShowSearchModal(true)}
-                title="Pesquisar (Ctrl+K)"
-                className={headerCollapsed ? "" : "hidden sm:flex items-center gap-2 text-muted-foreground"}
-              >
-                <Search className="h-4 w-4" />
-                {!headerCollapsed && (
-                  <>
-                    <span className="text-xs">Pesquisar...</span>
-                    <kbd className="ml-2 px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">
-                      Ctrl+K
-                    </kbd>
-                  </>
-                )}
-              </Button>
+              {headerCollapsed ? (
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  onClick={() => setShowSearchModal(true)}
+                  title="Pesquisar (Ctrl+K)"
+                  className="h-8 w-8"
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setShowSearchModal(true)}
+                  className="hidden sm:flex items-center gap-2 text-muted-foreground h-8"
+                >
+                  <Search className="h-4 w-4" />
+                  <span className="text-xs">Pesquisar...</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">
+                    Ctrl+K
+                  </kbd>
+                </Button>
+              )}
               
               {/* Dark Mode Toggle */}
               <Button
@@ -628,6 +635,7 @@ const DashboardLayout = ({ children, title }) => {
                 size="icon"
                 onClick={toggleTheme}
                 title={isDark ? "Modo Claro" : "Modo Escuro"}
+                className="h-8 w-8"
               >
                 {isDark ? (
                   <Sun className="h-4 w-4" />
@@ -643,9 +651,9 @@ const DashboardLayout = ({ children, title }) => {
                   size="icon"
                   onClick={() => setShowHelpModal(true)}
                   title="Atalhos de Teclado (Ctrl+/)"
-                  className="hidden sm:flex"
+                  className="hidden sm:flex h-8 w-8"
                 >
-                  <Keyboard className="h-5 w-5" />
+                  <Keyboard className="h-4 w-4" />
                 </Button>
               )}
               
@@ -653,12 +661,12 @@ const DashboardLayout = ({ children, title }) => {
               {!headerCollapsed && (
                 <Button 
                   variant="ghost" 
-                  size="sm" 
+                  size="sm"
                   onClick={() => {
                     const homePage = user?.role === "cliente" ? "/portal-cliente" : "/dashboard";
                     navigate(homePage);
                   }}
-                  className="gap-2 hidden sm:flex"
+                  className="gap-2 hidden sm:flex h-8"
                 >
                   <Home className="h-4 w-4" />
                   <span className="hidden md:inline">Página Inicial</span>
@@ -672,7 +680,7 @@ const DashboardLayout = ({ children, title }) => {
                     variant="ghost"
                     size="icon"
                     onClick={() => setChatOpen(true)}
-                    className="relative"
+                    className="relative h-8 w-8"
                     title="Chat Interno"
                     data-testid="open-chat-btn"
                   >
@@ -684,7 +692,7 @@ const DashboardLayout = ({ children, title }) => {
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="rounded-full">
+                  <Button variant="ghost" size="icon" className="rounded-full h-8 w-8">
                     <User className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
