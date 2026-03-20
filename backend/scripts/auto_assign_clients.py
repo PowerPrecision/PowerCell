@@ -12,7 +12,7 @@ Uso:
 Opções:
     --dry-run    Simula as atribuições sem guardar na base de dados
     --role       Filtrar por role de utilizador (consultor, intermediario, indexacao)
-    --limit      Limite de processos a processar (default: 100)
+    --limit      Limite de processos a processar (default: 10000)
     --verbose    Mostrar mais detalhes
 
 Regras de atribuição:
@@ -41,11 +41,12 @@ from models.auth import UserRole
 # ====================================================================
 
 # Capacidade máxima de processos por utilizador (por role)
+# Valores altos para garantir que todos os processos são atribuídos
 MAX_PROCESS_PER_USER = {
-    UserRole.CONSULTOR: 50,
-    UserRole.INTERMEDIARIO: 50,
-    UserRole.MEDIADOR: 30,
-    UserRole.INDEXACAO: 100,
+    UserRole.CONSULTOR: 10000,
+    UserRole.INTERMEDIARIO: 10000,
+    UserRole.MEDIADOR: 10000,
+    UserRole.INDEXACAO: 10000,
 }
 
 # Roles que podem receber atribuições automáticas
@@ -70,7 +71,7 @@ logger = logging.getLogger(__name__)
 # FUNÇÕES AUXILIARES
 # ====================================================================
 
-async def get_unassigned_processes(limit: int = 100) -> List[Dict[str, Any]]:
+async def get_unassigned_processes(limit: int = 10000) -> List[Dict[str, Any]]:
     """
     Obtém processos sem consultor/mediador atribuído.
     
@@ -219,7 +220,7 @@ async def assign_process_to_user(
 async def run_auto_assignment(
     dry_run: bool = False,
     role_filter: Optional[str] = None,
-    limit: int = 100,
+    limit: int = 10000,
     verbose: bool = False
 ) -> Dict[str, int]:
     """
@@ -347,8 +348,8 @@ def main():
     parser.add_argument(
         "--limit",
         type=int,
-        default=100,
-        help="Limite de processos a processar (default: 100)"
+        default=10000,
+        help="Limite de processos a processar (default: 10000)"
     )
     parser.add_argument(
         "--verbose", "-v",
