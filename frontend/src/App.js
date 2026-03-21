@@ -48,6 +48,7 @@ const DiagnosticsPage = React.lazy(() => import("./pages/DiagnosticsPage"));
 const ExpiringDocumentsDashboard = React.lazy(() => import("./pages/ExpiringDocumentsDashboard"));
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const ClientRegistrationsPage = React.lazy(() => import("./pages/ClientRegistrationsPage"));
+const WorkflowStatusesPage = React.lazy(() => import("./pages/WorkflowStatusesPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -272,6 +273,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
                 <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Workflow Statuses - Admin and CEO */}
+          <Route
+            path="/workflow-estados"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <WorkflowStatusesPage />
               </ProtectedRoute>
             }
           />

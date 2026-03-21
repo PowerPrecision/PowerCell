@@ -304,6 +304,11 @@ const DashboardLayout = ({ children, title }) => {
                 icon: FileSignature,
                 href: "/admin/rgpd",
               },
+              {
+                label: "Estados do Workflow",
+                icon: Settings,
+                href: "/workflow-estados",
+              },
             ],
           },
         ],
@@ -398,16 +403,32 @@ const DashboardLayout = ({ children, title }) => {
         href: "/validades",
       });
       
+      // Estados do Workflow apenas para Admin e CEO
+      const configItems = [];
+      if (["admin", "ceo"].includes(user?.role)) {
+        configItems.push({
+          label: "Estados do Workflow",
+          icon: Settings,
+          href: "/workflow-estados",
+        });
+      }
+      
       return {
         main: mainItems,
-        groups: negocioItems.length > 0 ? [
-          {
+        groups: [
+          ...(negocioItems.length > 0 ? [{
             id: "negocio",
             label: "Negócio",
             icon: Building2,
             items: negocioItems,
-          },
-        ] : [],
+          }] : []),
+          ...(configItems.length > 0 ? [{
+            id: "configuracoes",
+            label: "Configurações",
+            icon: Cog,
+            items: configItems,
+          }] : []),
+        ],
       };
     }
 
