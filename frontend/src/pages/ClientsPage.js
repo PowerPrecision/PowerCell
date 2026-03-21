@@ -292,10 +292,10 @@ export default function ClientsPage() {
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Users className="h-6 w-6 text-primary" />
-              Gestão de Clientes
+              Gestão de Processos
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Gerir clientes e os seus processos de compra
+              Gerir processos de compra e financiamento
             </p>
           </div>
           {canCreateProcess && (

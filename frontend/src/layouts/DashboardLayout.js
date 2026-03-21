@@ -92,6 +92,7 @@ const DashboardLayout = ({ children, title }) => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
   
   // Atalhos de teclado
   const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts({
@@ -103,11 +104,11 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo Negócio
-    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/meus-clientes"];
+    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/meus-clientes", "/registos-clientes"];
     // Rotas do grupo IA
     const iaRoutes = ["/configuracoes/ia", "/ai-insights", "/revisao-dados-ia", "/configuracoes/treino-ia"];
     // Rotas do grupo Configurações (unificado com Sistema)
-    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/admin/rgpd", "/admin/registos-clientes"];
+    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/admin/rgpd"];
     
     return {
       negocio: negocioRoutes.some(r => path.startsWith(r)),
@@ -122,6 +123,18 @@ const DashboardLayout = ({ children, title }) => {
   useEffect(() => {
     setOpenSections(getInitialOpenSections());
   }, [location.pathname]);
+
+  // Detectar scroll para minimizar header
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollY = window.scrollY;
+      const threshold = 100; // Pixels antes de minimizar
+      setHeaderCollapsed(scrollY > threshold);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const toggleSection = (section) => {
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -188,7 +201,12 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/utilizadores",
               },
               {
-                label: "Clientes",
+                label: "Registo de Clientes",
+                icon: Users,
+                href: "/registos-clientes",
+              },
+              {
+                label: "Processos",
                 icon: User,
                 href: "/clientes",
               },
@@ -286,11 +304,6 @@ const DashboardLayout = ({ children, title }) => {
                 icon: FileSignature,
                 href: "/admin/rgpd",
               },
-              {
-                label: "Registos Clientes",
-                icon: Users,
-                href: "/admin/registos-clientes",
-              },
             ],
           },
         ],
@@ -299,7 +312,7 @@ const DashboardLayout = ({ children, title }) => {
 
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
     if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao", "gestor_documentos"].includes(user?.role)) {
-      // Menu simplificado para INDEXACAO - só Clientes
+      // Menu simplificado para INDEXACAO - só Clientes e Registos
       if (user?.role === "indexacao" || user?.role === "gestor_documentos") {
         return {
           main: [
@@ -309,7 +322,12 @@ const DashboardLayout = ({ children, title }) => {
               href: "/staff",
             },
             {
-              label: "Clientes",
+              label: "Registo de Clientes",
+              icon: Users,
+              href: "/registos-clientes",
+            },
+            {
+              label: "Processos",
               icon: User,
               href: "/clientes",
             },
@@ -334,9 +352,16 @@ const DashboardLayout = ({ children, title }) => {
         });
       }
       
-      // Clientes para todos
+      // Registo de Clientes para todos
       negocioItems.push({
-        label: "Clientes",
+        label: "Registo de Clientes",
+        icon: Users,
+        href: "/registos-clientes",
+      });
+      
+      // Processos (Gestão de Processos) para todos
+      negocioItems.push({
+        label: "Processos",
         icon: User,
         href: "/clientes",
       });
@@ -392,7 +417,12 @@ const DashboardLayout = ({ children, title }) => {
         main: [
           ...baseItems,
           {
-            label: "Clientes",
+            label: "Registo de Clientes",
+            icon: Users,
+            href: "/registos-clientes",
+          },
+          {
+            label: "Processos",
             icon: User,
             href: "/clientes",
           },
@@ -444,6 +474,7 @@ const DashboardLayout = ({ children, title }) => {
               size="icon"
               className="lg:hidden text-white hover:bg-slate-700"
               onClick={() => setSidebarOpen(false)}
+              aria-label="Fechar menu"
             >
               <X className="h-5 w-5" />
             </Button>
@@ -549,43 +580,55 @@ const DashboardLayout = ({ children, title }) => {
 
       {/* Main content */}
       <div className="lg:pl-64">
-        {/* Top bar */}
-        <header className={`h-16 border-b border-border bg-card sticky ${impersonateOffset} z-30`}>
-          <div className="flex items-center justify-between h-full px-4 lg:px-6">
+        {/* Top bar - Fixed height to prevent layout shift */}
+        <header 
+          className={`border-b border-border bg-card sticky ${impersonateOffset} z-30 h-16`}
+        >
+          <div className={`flex items-center justify-between h-full px-4 lg:px-6 ${
+            headerCollapsed ? 'gap-2' : 'gap-4'
+          }`}>
             <div className="flex items-center gap-4">
               <Button
                 variant="ghost"
                 size="icon"
                 className="lg:hidden"
                 onClick={() => setSidebarOpen(true)}
+                aria-label="Abrir menu"
               >
                 <Menu className="h-5 w-5" />
               </Button>
-              <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+              <h1 className={`font-semibold tracking-tight transition-all duration-300 ${
+                headerCollapsed ? 'text-base' : 'text-xl'
+              }`}>{title}</h1>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {/* Search Button (Ctrl+K) */}
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => setShowSearchModal(true)}
-                className="hidden sm:flex items-center gap-2 text-muted-foreground"
-              >
-                <Search className="h-4 w-4" />
-                <span className="text-xs">Pesquisar...</span>
-                <kbd className="ml-2 px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">
-                  Ctrl+K
-                </kbd>
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => setShowSearchModal(true)}
-                className="sm:hidden"
-              >
-                <Search className="h-5 w-5" />
-              </Button>
+              {headerCollapsed ? (
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  onClick={() => setShowSearchModal(true)}
+                  title="Pesquisar (Ctrl+K)"
+                  aria-label="Pesquisar"
+                  className="h-8 w-8"
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setShowSearchModal(true)}
+                  className="hidden sm:flex items-center gap-2 text-muted-foreground h-8"
+                >
+                  <Search className="h-4 w-4" />
+                  <span className="text-xs">Pesquisar...</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">
+                    Ctrl+K
+                  </kbd>
+                </Button>
+              )}
               
               {/* Dark Mode Toggle */}
               <Button
@@ -593,38 +636,45 @@ const DashboardLayout = ({ children, title }) => {
                 size="icon"
                 onClick={toggleTheme}
                 title={isDark ? "Modo Claro" : "Modo Escuro"}
+                aria-label={isDark ? "Ativar modo claro" : "Ativar modo escuro"}
+                className="h-8 w-8"
               >
                 {isDark ? (
-                  <Sun className="h-5 w-5" />
+                  <Sun className="h-4 w-4" />
                 ) : (
-                  <Moon className="h-5 w-5" />
+                  <Moon className="h-4 w-4" />
                 )}
               </Button>
               
-              {/* Keyboard Shortcuts Help */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowHelpModal(true)}
-                title="Atalhos de Teclado (Ctrl+/)"
-                className="hidden sm:flex"
-              >
-                <Keyboard className="h-5 w-5" />
-              </Button>
+              {/* Keyboard Shortcuts Help - hide when collapsed */}
+              {!headerCollapsed && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowHelpModal(true)}
+                  title="Atalhos de Teclado (Ctrl+/)"
+                  aria-label="Atalhos de teclado"
+                  className="hidden sm:flex h-8 w-8"
+                >
+                  <Keyboard className="h-4 w-4" />
+                </Button>
+              )}
               
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => {
-                  // Página inicial baseada no role do utilizador
-                  const homePage = user?.role === "cliente" ? "/portal-cliente" : "/dashboard";
-                  navigate(homePage);
-                }}
-                className="gap-2 hidden sm:flex"
-              >
-                <Home className="h-4 w-4" />
-                <span className="hidden md:inline">Página Inicial</span>
-              </Button>
+              {/* Home Button - hide when collapsed */}
+              {!headerCollapsed && (
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    const homePage = user?.role === "cliente" ? "/portal-cliente" : "/dashboard";
+                    navigate(homePage);
+                  }}
+                  className="gap-2 hidden sm:flex h-8"
+                >
+                  <Home className="h-4 w-4" />
+                  <span className="hidden md:inline">Página Inicial</span>
+                </Button>
+              )}
               
               {/* Notificações - só para utilizadores autenticados (não clientes) */}
               {user?.role !== "cliente" && (
@@ -633,20 +683,21 @@ const DashboardLayout = ({ children, title }) => {
                     variant="ghost"
                     size="icon"
                     onClick={() => setChatOpen(true)}
-                    className="relative"
+                    className="relative h-8 w-8"
                     title="Chat Interno"
+                    aria-label="Chat interno"
                     data-testid="open-chat-btn"
                   >
-                    <MessageSquare className="h-5 w-5" />
+                    <MessageSquare className="h-4 w-4" />
                   </Button>
-                  <NotificationsDropdown />
+                  <NotificationsDropdown compact={headerCollapsed} />
                 </>
               )}
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="rounded-full">
-                    <User className="h-5 w-5" />
+                  <Button variant="ghost" size="icon" className="rounded-full h-8 w-8" aria-label="Menu do utilizador">
+                    <User className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">

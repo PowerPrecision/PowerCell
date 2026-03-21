@@ -36,6 +36,7 @@ import {
   Calendar,
   FileText,
   Eye,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -60,12 +61,39 @@ const BANK_COLORS = {
   "Eurobic": "bg-red-500 text-white",
 };
 
+// Helper component for field errors
+const FieldError = ({ children }) => (
+  <p className="text-xs text-red-600 mt-1 flex items-start gap-1 font-medium">
+    <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+    <span>{children}</span>
+  </p>
+);
+
+// Validar NIF português
+const validateNIF = (nif) => {
+  if (!nif) return { valid: true };
+  const cleanNif = nif.replace(/[^\d]/g, '');
+  if (cleanNif.length !== 9) return { valid: false, message: "NIF deve ter 9 dígitos" };
+  
+  const digits = cleanNif.split('').map(Number);
+  const weights = [9, 8, 7, 6, 5, 4, 3, 2];
+  const sum = digits.slice(0, 8).reduce((acc, d, i) => acc + d * weights[i], 0);
+  const remainder = sum % 11;
+  const checkDigit = remainder > 1 ? 11 - remainder : 0;
+  
+  if (checkDigit !== digits[8]) {
+    return { valid: false, message: "NIF inválido" };
+  }
+  return { valid: true };
+};
+
 const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, realEstateData, token }) => {
   const [loading, setLoading] = useState(false);
   const [minutas, setMinutas] = useState([]);
   const [selectedMinuta, setSelectedMinuta] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [generatedDocument, setGeneratedDocument] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
 
   // Estado do formulário CPCV
   const [cpcvData, setCpcvData] = useState({
@@ -187,11 +215,47 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
 
   const handleFieldChange = (field, value) => {
     setCpcvData(prev => ({ ...prev, [field]: value }));
+    // Limpar erro do campo quando o utilizador começa a corrigir
+    if (fieldErrors[field]) {
+      setFieldErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+  };
+
+  // Validar campos antes de gerar documento
+  const validateFields = () => {
+    const errors = {};
+    
+    // Validar NIFs
+    if (cpcvData.vendedor_nif) {
+      const nifCheck = validateNIF(cpcvData.vendedor_nif);
+      if (!nifCheck.valid) errors.vendedor_nif = nifCheck.message;
+    }
+    if (cpcvData.comprador_nif) {
+      const nifCheck = validateNIF(cpcvData.comprador_nif);
+      if (!nifCheck.valid) errors.comprador_nif = nifCheck.message;
+    }
+    if (cpcvData.co_comprador_nif) {
+      const nifCheck = validateNIF(cpcvData.co_comprador_nif);
+      if (!nifCheck.valid) errors.co_comprador_nif = nifCheck.message;
+    }
+    
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const gerarDocumento = () => {
     if (!selectedMinuta) {
       toast.error("Selecione uma minuta/template");
+      return;
+    }
+
+    // Validar antes de gerar
+    if (!validateFields()) {
+      toast.error("Corrija os erros no formulário");
       return;
     }
 
@@ -579,7 +643,9 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
                     onChange={(e) => handleFieldChange('vendedor_nif', e.target.value)}
                     placeholder="123456789"
                     maxLength={9}
+                    className={fieldErrors.vendedor_nif ? "border-red-500 focus-visible:ring-red-500 bg-red-50" : ""}
                   />
+                  {fieldErrors.vendedor_nif && <FieldError>{fieldErrors.vendedor_nif}</FieldError>}
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <Label className="text-xs">Morada</Label>
@@ -648,7 +714,9 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
                     onChange={(e) => handleFieldChange('comprador_nif', e.target.value)}
                     placeholder="123456789"
                     maxLength={9}
+                    className={fieldErrors.comprador_nif ? "border-red-500 focus-visible:ring-red-500 bg-red-50" : ""}
                   />
+                  {fieldErrors.comprador_nif && <FieldError>{fieldErrors.comprador_nif}</FieldError>}
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <Label className="text-xs">Morada</Label>
@@ -718,7 +786,9 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
                       onChange={(e) => handleFieldChange('co_comprador_nif', e.target.value)}
                       placeholder="123456789"
                       maxLength={9}
+                      className={fieldErrors.co_comprador_nif ? "border-red-500 focus-visible:ring-red-500 bg-red-50" : ""}
                     />
+                    {fieldErrors.co_comprador_nif && <FieldError>{fieldErrors.co_comprador_nif}</FieldError>}
                   </div>
                   <div className="space-y-2 md:col-span-2">
                     <Label className="text-xs">Morada</Label>

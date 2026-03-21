@@ -8,6 +8,7 @@
  * ====================================================================
  */
 import { useState, useEffect } from "react";
+import { useAuth } from "../contexts/AuthContext";
 import {
   Dialog,
   DialogContent,
@@ -15,18 +16,20 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "../components/ui/dialog";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { Badge } from "../components/ui/badge";
+} from "./ui/dialog";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Badge } from "./ui/badge";
+import { Checkbox } from "./ui/checkbox";
+import { ScrollArea } from "./ui/scroll-area";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../components/ui/select";
+} from "./ui/select";
 import {
   Table,
   TableBody,
@@ -34,29 +37,40 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "../components/ui/table";
+} from "./ui/table";
 import {
   Upload,
   Download,
   Link2,
   Copy,
-  Trash2,
   Clock,
-  CheckCircle,
   XCircle,
   Loader2,
-  Mail,
   ExternalLink,
+  FileText,
+  FileImage,
+  File,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  createTempLink,
-  getProcessTempLinks,
-  cancelTempLink,
-  deleteTempLink,
-} from "../services/api";
+
+const API_URL = process.env.REACT_APP_BACKEND_URL;
+
+// Ícone baseado na extensão do ficheiro
+const FileIcon = ({ filename }) => {
+  const ext = filename?.split('.').pop()?.toLowerCase();
+  
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) {
+    return <FileImage className="h-4 w-4 text-pink-500" />;
+  }
+  if (['pdf'].includes(ext)) {
+    return <FileText className="h-4 w-4 text-red-500" />;
+  }
+  return <File className="h-4 w-4 text-gray-500" />;
+};
 
 const TempLinksManager = ({ processId, clientName, clientEmail }) => {
+  const { token } = useAuth();
   const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -68,17 +82,38 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
   const [maxUses, setMaxUses] = useState("1");
   const [description, setDescription] = useState("");
   const [notifyEmail, setNotifyEmail] = useState(true);
+  
+  // Files state for download links
+  const [availableFiles, setAvailableFiles] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
 
   // Load existing links
   useEffect(() => {
     loadLinks();
   }, [processId]);
 
+  // Load files when dialog opens and type is download
+  useEffect(() => {
+    if (showCreateDialog && linkType === "download") {
+      loadAvailableFiles();
+    }
+  }, [showCreateDialog, linkType]);
+
   const loadLinks = async () => {
     try {
       setLoading(true);
-      const response = await getProcessTempLinks(processId);
-      setLinks(response.data.links || []);
+      const response = await fetch(
+        `${API_URL}/api/temp-links/process/${processId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setLinks(data.links || []);
+      }
     } catch (error) {
       console.error("Erro ao carregar links:", error);
     } finally {
@@ -86,7 +121,47 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
     }
   };
 
+  const loadAvailableFiles = async () => {
+    setLoadingFiles(true);
+    try {
+      const response = await fetch(
+        `${API_URL}/api/documents/client/${processId}/files`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        // Flatten all files from all categories
+        const allFiles = [];
+        if (data.files) {
+          Object.entries(data.files).forEach(([category, files]) => {
+            files.forEach(file => {
+              allFiles.push({
+                ...file,
+                category
+              });
+            });
+          });
+        }
+        setAvailableFiles(allFiles);
+      }
+    } catch (error) {
+      console.error("Erro ao carregar ficheiros:", error);
+      toast.error("Erro ao carregar lista de ficheiros");
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
   const handleCreateLink = async () => {
+    // Validação para links de download
+    if (linkType === "download" && selectedFiles.length === 0) {
+      toast.error("Selecione pelo menos um ficheiro para download");
+      return;
+    }
+
     setCreating(true);
     try {
       const formData = new FormData();
@@ -96,8 +171,25 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
       formData.append("max_uses", parseInt(maxUses));
       formData.append("description", description);
       formData.append("notify_email", notifyEmail);
+      
+      // Adicionar ficheiros selecionados para download
+      if (linkType === "download" && selectedFiles.length > 0) {
+        formData.append("file_paths", selectedFiles.join(","));
+      }
 
-      await createTempLink(formData);
+      const response = await fetch(
+        `${API_URL}/api/temp-links/create`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        }
+      );
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "Erro ao criar link");
+      }
       
       toast.success(
         linkType === "upload" 
@@ -109,7 +201,7 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
       resetForm();
       loadLinks();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao criar link");
+      toast.error(error.message || "Erro ao criar link");
     } finally {
       setCreating(false);
     }
@@ -124,23 +216,37 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
     if (!window.confirm("Tem a certeza que deseja cancelar este link?")) return;
     
     try {
-      await cancelTempLink(linkId);
-      toast.success("Link cancelado");
-      loadLinks();
+      const response = await fetch(
+        `${API_URL}/api/temp-links/${linkId}/cancel`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      
+      if (response.ok) {
+        toast.success("Link cancelado");
+        loadLinks();
+      }
     } catch (error) {
       toast.error("Erro ao cancelar link");
     }
   };
 
-  const handleDeleteLink = async (linkId) => {
-    if (!window.confirm("Eliminar este link permanentemente?")) return;
-    
-    try {
-      await deleteTempLink(linkId);
-      toast.success("Link eliminado");
-      loadLinks();
-    } catch (error) {
-      toast.error("Erro ao eliminar link");
+  const toggleFileSelection = (filePath) => {
+    setSelectedFiles(prev => {
+      if (prev.includes(filePath)) {
+        return prev.filter(p => p !== filePath);
+      }
+      return [...prev, filePath];
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedFiles.length === availableFiles.length) {
+      setSelectedFiles([]);
+    } else {
+      setSelectedFiles(availableFiles.map(f => f.path));
     }
   };
 
@@ -150,6 +256,16 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
     setMaxUses("1");
     setDescription("");
     setNotifyEmail(true);
+    setSelectedFiles([]);
+    setAvailableFiles([]);
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return "";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
   };
 
   const getStatusBadge = (link) => {
@@ -284,8 +400,11 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
       )}
 
       {/* Create Link Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent>
+      <Dialog open={showCreateDialog} onOpenChange={(open) => {
+        setShowCreateDialog(open);
+        if (!open) resetForm();
+      }}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Criar Link Temporário</DialogTitle>
             <DialogDescription>
@@ -317,6 +436,73 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* File Selection for Download */}
+            {linkType === "download" && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Ficheiros para Download</Label>
+                  {availableFiles.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleSelectAll}
+                      className="text-xs"
+                    >
+                      {selectedFiles.length === availableFiles.length ? "Desmarcar todos" : "Selecionar todos"}
+                    </Button>
+                  )}
+                </div>
+                
+                {loadingFiles ? (
+                  <div className="flex items-center justify-center py-8 border rounded-lg">
+                    <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                  </div>
+                ) : availableFiles.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 text-sm border rounded-lg">
+                    <File className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    Nenhum ficheiro disponível
+                  </div>
+                ) : (
+                  <ScrollArea className="h-64 border rounded-lg">
+                    <div className="p-2 space-y-1">
+                      {availableFiles.map((file, index) => (
+                        <div
+                          key={`${file.path}-${index}`}
+                          className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
+                            selectedFiles.includes(file.path)
+                              ? "bg-teal-50 border border-teal-200"
+                              : "hover:bg-gray-50 border border-transparent"
+                          }`}
+                          onClick={() => toggleFileSelection(file.path)}
+                        >
+                          <Checkbox
+                            checked={selectedFiles.includes(file.path)}
+                            onCheckedChange={() => toggleFileSelection(file.path)}
+                          />
+                          <FileIcon filename={file.name} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{file.name}</p>
+                            <p className="text-xs text-gray-500">
+                              {file.category} • {formatFileSize(file.size)}
+                            </p>
+                          </div>
+                          {selectedFiles.includes(file.path) && (
+                            <Check className="h-4 w-4 text-teal-600" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+                
+                {selectedFiles.length > 0 && (
+                  <p className="text-sm text-teal-600">
+                    {selectedFiles.length} ficheiro(s) selecionado(s)
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Expiration */}
             <div className="space-y-2">
@@ -363,14 +549,12 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
             {/* Notify Email */}
             {clientEmail && (
               <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="notify-email"
                   checked={notifyEmail}
-                  onChange={(e) => setNotifyEmail(e.target.checked)}
-                  className="rounded"
+                  onCheckedChange={setNotifyEmail}
                 />
-                <Label htmlFor="notify-email" className="text-sm">
+                <Label htmlFor="notify-email" className="text-sm cursor-pointer">
                   Enviar email para {clientEmail}
                 </Label>
               </div>
@@ -381,7 +565,11 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleCreateLink} disabled={creating}>
+            <Button 
+              onClick={handleCreateLink} 
+              disabled={creating || (linkType === "download" && selectedFiles.length === 0)}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
               {creating ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
