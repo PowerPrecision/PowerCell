@@ -481,6 +481,55 @@ const ProcessDetails = () => {
     fetchRgpdStatus();
   }, [id]);
 
+  // Auto-save quando o status muda
+  useEffect(() => {
+    // Ignorar se:
+    // - Ainda está a carregar
+    // - Não há processo carregado
+    // - Status ainda não foi definido
+    // - Status é igual ao status original do processo
+    if (loading || !process || !status || status === process.status) {
+      return;
+    }
+
+    // Verificar se o utilizador pode mudar o status
+    const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "diretor"].includes(user?.role);
+    if (!canChangeStatus) {
+      return;
+    }
+
+    // Debounce para evitar múltiplas gravações
+    const timeoutId = setTimeout(() => {
+      // Verificar se está a mudar para um status relacionado com bancos
+      if (BANK_RELATED_STATUSES.includes(status)) {
+        const activeBanks = getActiveBanks();
+        if (activeBanks.length > 0) {
+          // Mostrar aviso com os bancos onde o cliente tem créditos ativos
+          setPendingStatusChange({ status, activeBanks });
+          setShowBankWarning(true);
+          return;
+        }
+      }
+
+      // Guardar apenas o status
+      const saveStatusOnly = async () => {
+        try {
+          await updateProcess(id, { status });
+          toast.success("Estado atualizado");
+          fetchData();
+        } catch (error) {
+          console.error("Erro ao atualizar estado:", error);
+          toast.error("Erro ao atualizar estado");
+          // Reverter para o status anterior
+          setStatus(process.status);
+        }
+      };
+      saveStatusOnly();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [status]);
+
   const fetchData = async () => {
     try {
       const [processRes, deadlinesRes, activitiesRes, historyRes, statusesRes] = await Promise.all([
