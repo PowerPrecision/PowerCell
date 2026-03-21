@@ -78,7 +78,7 @@ const ProcessStickyHeader = ({
   return (
     <>
       {/* Placeholder para evitar salto quando sticky ativa */}
-      {isSticky && <div className="h-20" />}
+      {isSticky && <div className="h-16 lg:h-20 flex-shrink-0" aria-hidden="true" />}
 
       {/* Header fixo */}
       <div
@@ -86,7 +86,7 @@ const ProcessStickyHeader = ({
         className={`
           z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700
           transition-all duration-200
-          ${isSticky ? "fixed top-0 left-0 right-0 shadow-md" : ""}
+          ${isSticky ? "fixed top-12 lg:top-16 left-0 right-0 lg:left-64 shadow-md" : ""}
         `}
       >
         <div className="px-4 py-2">
@@ -109,11 +109,11 @@ const ProcessStickyHeader = ({
               {!collapsed && (
                 <>
                   {/* Contactos */}
-                  <div className="hidden md:flex items-center gap-3 text-xs text-gray-600">
+                  <div className="hidden md:flex items-center gap-3 text-xs text-gray-600 min-w-0">
                     {process?.client_phone && (
                       <a
                         href={`tel:${process.client_phone}`}
-                        className="flex items-center gap-1 hover:text-blue-600"
+                        className="flex items-center gap-1 hover:text-blue-600 flex-shrink-0"
                       >
                         <Phone className="h-3 w-3" />
                         {process.client_phone}
@@ -122,16 +122,19 @@ const ProcessStickyHeader = ({
                     {process?.client_email && (
                       <a
                         href={`mailto:${process.client_email}`}
-                        className="flex items-center gap-1 hover:text-blue-600 truncate max-w-[180px]"
+                        className="flex items-center gap-1 hover:text-blue-600 flex-shrink-0"
+                        title={process.client_email}
                       >
                         <Mail className="h-3 w-3" />
-                        {process.client_email}
+                        <span className="truncate max-w-[180px]">
+                          {process.client_email}
+                        </span>
                       </a>
                     )}
                   </div>
 
                   {/* NIF e Rendimento */}
-                  <div className="hidden lg:flex items-center gap-3 text-xs">
+                  <div className="hidden lg:flex items-center gap-3 text-xs flex-shrink-0">
                     {personalData?.nif && (
                       <span className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
                         NIF: {personalData.nif}
@@ -192,6 +195,8 @@ const ProcessStickyHeader = ({
                 size="sm"
                 className="h-7 w-7 p-0"
                 onClick={() => setCollapsed(!collapsed)}
+                aria-label={collapsed ? "Expandir detalhes" : "Colapsar detalhes"}
+                title={collapsed ? "Expandir detalhes" : "Colapsar detalhes"}
               >
                 {collapsed ? (
                   <ChevronDown className="h-4 w-4" />

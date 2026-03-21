@@ -46,6 +46,7 @@ import {
   Mail,
   Phone,
   CreditCard,
+  AlertCircle,
 } from "lucide-react";
 import { 
   StatCard, 
@@ -92,11 +93,38 @@ const CLIENT_STATUS_OPTIONS = [
   { value: "rejeitado", label: "Rejeitado" },
 ];
 
+// Helper component for field errors
+const FieldError = ({ children }) => (
+  <p className="text-xs text-red-600 mt-1 flex items-start gap-1 font-medium">
+    <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+    <span>{children}</span>
+  </p>
+);
+
+// Validar NIF português
+const validateNIF = (nif) => {
+  if (!nif) return { valid: true }; // Campo opcional
+  const cleanNif = nif.replace(/[^\d]/g, '');
+  if (cleanNif.length !== 9) return { valid: false, message: "NIF deve ter 9 dígitos" };
+  
+  const digits = cleanNif.split('').map(Number);
+  const weights = [9, 8, 7, 6, 5, 4, 3, 2];
+  const sum = digits.slice(0, 8).reduce((acc, d, i) => acc + d * weights[i], 0);
+  const remainder = sum % 11;
+  const checkDigit = remainder > 1 ? 11 - remainder : 0;
+  
+  if (checkDigit !== digits[8]) {
+    return { valid: false, message: "NIF inválido" };
+  }
+  return { valid: true };
+};
+
 // Modal de Edição
 const EditModal = ({ open, onClose, registration, onSave }) => {
   const [formData, setFormData] = useState({});
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("personal");
+  const [fieldErrors, setFieldErrors] = useState({});
 
   useEffect(() => {
     if (registration) {
@@ -109,11 +137,20 @@ const EditModal = ({ open, onClose, registration, onSave }) => {
         real_estate_data: registration.real_estate_data || {},
         financial_data: registration.financial_data || {},
       });
+      setFieldErrors({});
     }
   }, [registration]);
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+    // Limpar erro do campo
+    if (fieldErrors[field]) {
+      setFieldErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
   };
 
   const handleNestedChange = (section, field, value) => {
@@ -124,9 +161,55 @@ const EditModal = ({ open, onClose, registration, onSave }) => {
         [field]: value,
       },
     }));
+    // Limpar erro do campo aninhado
+    const errorKey = `${section}.${field}`;
+    if (fieldErrors[errorKey]) {
+      setFieldErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[errorKey];
+        return newErrors;
+      });
+    }
+  };
+
+  const validateForm = () => {
+    const errors = {};
+    
+    // Validar NIF do titular
+    if (formData.personal_data?.nif) {
+      const nifCheck = validateNIF(formData.personal_data.nif);
+      if (!nifCheck.valid) {
+        errors["personal_data.nif"] = nifCheck.message;
+      }
+    }
+    
+    // Validar NIF do titular2
+    if (formData.titular2_data?.nif) {
+      const nif2Check = validateNIF(formData.titular2_data.nif);
+      if (!nif2Check.valid) {
+        errors["titular2_data.nif"] = nif2Check.message;
+      }
+    }
+    
+    // Validar email do titular2
+    if (formData.titular2_data?.email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.titular2_data.email)) {
+        errors["titular2_data.email"] = "Email inválido";
+      }
+    }
+    
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSave = async () => {
+    // Validar antes de guardar
+    if (!validateForm()) {
+      toast.error("Por favor corrija os erros no formulário");
+      return;
+    }
+    
     setSaving(true);
     try {
       await onSave(registration.id, formData);
@@ -198,7 +281,13 @@ const EditModal = ({ open, onClose, registration, onSave }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>NIF</Label>
-                  <Input value={formData.personal_data?.nif || ""} onChange={(e) => handleNestedChange("personal_data", "nif", e.target.value)} maxLength={9} />
+                  <Input 
+                    value={formData.personal_data?.nif || ""} 
+                    onChange={(e) => handleNestedChange("personal_data", "nif", e.target.value)} 
+                    maxLength={9}
+                    className={fieldErrors["personal_data.nif"] ? "border-red-500 focus-visible:ring-red-500 bg-red-50" : ""}
+                  />
+                  {fieldErrors["personal_data.nif"] && <FieldError>{fieldErrors["personal_data.nif"]}</FieldError>}
                 </div>
                 <div className="space-y-2">
                   <Label>Documento ID</Label>
@@ -240,13 +329,46 @@ const EditModal = ({ open, onClose, registration, onSave }) => {
             <TabsContent value="titular2" className="space-y-4 mt-0">
               <h4 className="font-medium">Dados do 2º Titular</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Nome</Label><Input value={formData.titular2_data?.name || ""} onChange={(e) => handleNestedChange("titular2_data", "name", e.target.value)} /></div>
-                <div className="space-y-2"><Label>Email</Label><Input type="email" value={formData.titular2_data?.email || ""} onChange={(e) => handleNestedChange("titular2_data", "email", e.target.value)} /></div>
-                <div className="space-y-2"><Label>Telefone</Label><Input value={formData.titular2_data?.phone || ""} onChange={(e) => handleNestedChange("titular2_data", "phone", e.target.value)} /></div>
-                <div className="space-y-2"><Label>NIF</Label><Input value={formData.titular2_data?.nif || ""} onChange={(e) => handleNestedChange("titular2_data", "nif", e.target.value)} maxLength={9} /></div>
-                <div className="space-y-2"><Label>Documento ID</Label><Input value={formData.titular2_data?.documento_id || ""} onChange={(e) => handleNestedChange("titular2_data", "documento_id", e.target.value)} /></div>
-                <div className="space-y-2"><Label>Data de Nascimento</Label><Input type="date" value={formData.titular2_data?.birth_date || ""} onChange={(e) => handleNestedChange("titular2_data", "birth_date", e.target.value)} /></div>
-                <div className="space-y-2 md:col-span-2"><Label>Morada Fiscal</Label><Input value={formData.titular2_data?.morada_fiscal || ""} onChange={(e) => handleNestedChange("titular2_data", "morada_fiscal", e.target.value)} /></div>
+                <div className="space-y-2">
+                  <Label>Nome</Label>
+                  <Input value={formData.titular2_data?.name || ""} onChange={(e) => handleNestedChange("titular2_data", "name", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <Input 
+                    type="email" 
+                    value={formData.titular2_data?.email || ""} 
+                    onChange={(e) => handleNestedChange("titular2_data", "email", e.target.value)}
+                    className={fieldErrors["titular2_data.email"] ? "border-red-500 focus-visible:ring-red-500 bg-red-50" : ""}
+                  />
+                  {fieldErrors["titular2_data.email"] && <FieldError>{fieldErrors["titular2_data.email"]}</FieldError>}
+                </div>
+                <div className="space-y-2">
+                  <Label>Telefone</Label>
+                  <Input value={formData.titular2_data?.phone || ""} onChange={(e) => handleNestedChange("titular2_data", "phone", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>NIF</Label>
+                  <Input 
+                    value={formData.titular2_data?.nif || ""} 
+                    onChange={(e) => handleNestedChange("titular2_data", "nif", e.target.value)} 
+                    maxLength={9}
+                    className={fieldErrors["titular2_data.nif"] ? "border-red-500 focus-visible:ring-red-500 bg-red-50" : ""}
+                  />
+                  {fieldErrors["titular2_data.nif"] && <FieldError>{fieldErrors["titular2_data.nif"]}</FieldError>}
+                </div>
+                <div className="space-y-2">
+                  <Label>Documento ID</Label>
+                  <Input value={formData.titular2_data?.documento_id || ""} onChange={(e) => handleNestedChange("titular2_data", "documento_id", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Data de Nascimento</Label>
+                  <Input type="date" value={formData.titular2_data?.birth_date || ""} onChange={(e) => handleNestedChange("titular2_data", "birth_date", e.target.value)} />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Morada Fiscal</Label>
+                  <Input value={formData.titular2_data?.morada_fiscal || ""} onChange={(e) => handleNestedChange("titular2_data", "morada_fiscal", e.target.value)} />
+                </div>
               </div>
             </TabsContent>
 
@@ -604,8 +726,8 @@ const ClientRegistrationsAdminPage = () => {
               <EmptyState icon={Users} message="Nenhum registo encontrado" />
             ) : (
               <div className="space-y-2">
-                {/* Table Header */}
-                <div className="grid grid-cols-12 gap-2 px-3 py-2 text-sm font-medium text-muted-foreground border-b">
+                {/* Table Header - Hidden on mobile, shown on md+ */}
+                <div className="hidden md:grid grid-cols-12 gap-2 px-3 py-2 text-sm font-medium text-muted-foreground border-b">
                   <div className="col-span-3">Cliente</div>
                   <div className="col-span-2">NIF</div>
                   <div className="col-span-2">Origem</div>
@@ -614,9 +736,9 @@ const ClientRegistrationsAdminPage = () => {
                   <div className="col-span-2 text-right">Ações</div>
                 </div>
 
-                {/* Rows */}
+                {/* Rows - Desktop */}
                 {registrations.map((reg) => (
-                  <div key={reg.id} className="grid grid-cols-12 gap-2 px-3 py-3 items-center hover:bg-muted/50 rounded-lg">
+                  <div key={reg.id} className="hidden md:grid grid-cols-12 gap-2 px-3 py-3 items-center hover:bg-muted/50 rounded-lg">
                     <div className="col-span-3">
                       <p className="font-medium truncate">{reg.client_name}</p>
                       <p className="text-xs text-muted-foreground truncate">{reg.client_email}</p>
@@ -632,6 +754,38 @@ const ClientRegistrationsAdminPage = () => {
                     </div>
                   </div>
                 ))}
+                
+                {/* Rows - Mobile (Card Layout) */}
+                <div className="md:hidden space-y-3">
+                  {registrations.map((reg) => (
+                    <div key={reg.id} className="bg-card border rounded-lg p-4 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">{reg.client_name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{reg.client_email}</p>
+                        </div>
+                        <StatusBadge status={reg.status} />
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">NIF:</span>
+                        <span>{reg.personal_data?.nif || "-"}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Origem:</span>
+                        <SourceBadge source={reg.source} />
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Data:</span>
+                        <span>{reg.created_at ? new Date(reg.created_at).toLocaleDateString("pt-PT") : "-"}</span>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-2 border-t">
+                        <Button variant="outline" size="sm" onClick={() => handleView(reg)}><Eye className="h-4 w-4 mr-1" />Ver</Button>
+                        <Button variant="outline" size="sm" onClick={() => handleEdit(reg)}><Edit className="h-4 w-4 mr-1" />Editar</Button>
+                        <Button variant="outline" size="sm" onClick={() => setDeleteModal({ open: true, registration: reg })} className="text-red-600 hover:text-red-700"><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

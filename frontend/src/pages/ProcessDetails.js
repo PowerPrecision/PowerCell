@@ -219,6 +219,7 @@ const ProcessDetails = () => {
   const [sideTab, setSideTab] = useState("deadlines");
 
   const [accessDenied, setAccessDenied] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   
   // Estado de erro de validação do NIF
   const [nifError, setNifError] = useState(null);
@@ -509,7 +510,9 @@ const ProcessDetails = () => {
       // No need to load them here
     } catch (error) {
       console.error("Error fetching data:", error);
-      if (error.response?.status === 403) {
+      if (error.response?.status === 404) {
+        setNotFound(true);
+      } else if (error.response?.status === 403) {
         setAccessDenied(true);
         toast.error("Não tem permissão para aceder a este processo");
       } else {
@@ -938,6 +941,26 @@ const ProcessDetails = () => {
               Este processo não lhe está atribuído. Se acha que deveria ter acesso, contacte o administrador.
             </p>
             <Button onClick={() => navigate(-1)}>Voltar</Button>
+          </CardContent>
+        </Card>
+      </DashboardLayout>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <DashboardLayout title="Processo não encontrado">
+        <Card className="border-border">
+          <CardContent className="p-8 text-center">
+            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-amber-500" />
+            <h2 className="text-xl font-semibold mb-2">Processo não encontrado</h2>
+            <p className="text-muted-foreground mb-4">
+              O processo que procura não existe ou foi eliminado.
+            </p>
+            <p className="text-sm text-muted-foreground mb-6">
+              O ID do processo pode estar incorreto ou o processo pode ter sido removido do sistema.
+            </p>
+            <Button onClick={() => navigate("/clientes")}>Ir para Processos</Button>
           </CardContent>
         </Card>
       </DashboardLayout>
@@ -1813,6 +1836,44 @@ const ProcessDetails = () => {
                                 <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
                               ))}
                             </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                      
+                      {/* Simulações de Crédito */}
+                      {financialData?.bancos_simulacoes?.length > 0 && (
+                        <Card className="border-l-4 border-l-blue-500">
+                          <CardContent className="pt-4">
+                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                              <CreditCard className="h-4 w-4 text-blue-500" />
+                              Simulações de Crédito Efetuadas
+                            </h4>
+                            <div className="flex flex-wrap gap-2">
+                              {financialData.bancos_simulacoes.map((banco, idx) => (
+                                <Badge key={idx} variant="outline" className="border-blue-300 text-blue-700">{banco}</Badge>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                      
+                      {/* Tempo Restante do Crédito (Refinanciamento) */}
+                      {financialData?.tempo_restante_credito && (
+                        <Card className="border-l-4 border-l-amber-500">
+                          <CardContent className="pt-4">
+                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                              <Clock className="h-4 w-4 text-amber-500" />
+                              Tempo Restante do Crédito Atual
+                            </h4>
+                            <p className="text-sm">
+                              {financialData.tempo_restante_credito === "menos_1_ano" ? "Menos de 1 ano" :
+                               financialData.tempo_restante_credito === "1_5_anos" ? "1 a 5 anos" :
+                               financialData.tempo_restante_credito === "5_10_anos" ? "5 a 10 anos" :
+                               financialData.tempo_restante_credito === "10_15_anos" ? "10 a 15 anos" :
+                               financialData.tempo_restante_credito === "15_20_anos" ? "15 a 20 anos" :
+                               financialData.tempo_restante_credito === "mais_20_anos" ? "Mais de 20 anos" : 
+                               financialData.tempo_restante_credito}
+                            </p>
                           </CardContent>
                         </Card>
                       )}

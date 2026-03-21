@@ -198,6 +198,12 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     processos para os seus clientes. O processo é automaticamente
     atribuído ao intermediário que o criou.
     
+    RELAÇÃO CLIENTE-PROCESSO (N:M):
+    - Um cliente pode ter vários processos
+    - Um processo pode ter vários clientes (titulares)
+    - Se o cliente já existir (por NIF ou email), usa o existente
+    - Se não existir, cria um novo cliente
+    
     Permissões:
     - Admin, CEO, Consultor, Intermediário: Podem criar
     
@@ -247,15 +253,67 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         client_name = f"Cliente {datetime.now().strftime('%Y%m%d%H%M%S')}"
     
     client_phone = personal.get("telefone") or personal.get("phone") or ""
+    client_nif = personal.get("nif")
     
-    # Construir documento do processo
+    # ============================================================
+    # VERIFICAR/CRIAR CLIENTE NA TABELA CLIENTS
+    # ============================================================
+    existing_client = None
+    client_id = None
+    
+    # Procurar cliente existente por NIF ou email
+    if client_nif or client_email:
+        query = []
+        if client_nif:
+            query.append({"dados_pessoais.nif": client_nif})
+        if client_email:
+            query.append({"contacto.email": client_email.lower()})
+        
+        existing_client = await db.clients.find_one({"$or": query})
+    
+    if existing_client:
+        # Cliente já existe - usar o ID existente
+        client_id = existing_client["id"]
+        logger.info(f"Cliente existente encontrado: {client_id} - {existing_client.get('nome')}")
+    else:
+        # Criar novo cliente
+        from models.client import Client, ClientContact, ClientPersonalData
+        
+        client_id = str(uuid.uuid4())
+        new_client = {
+            "id": client_id,
+            "nome": client_name,
+            "contacto": {
+                "email": client_email.lower() if client_email else None,
+                "telefone": client_phone
+            },
+            "dados_pessoais": {
+                "nif": client_nif,
+                **{k: v for k, v in personal.items() if k not in ["nif", "email", "telefone", "phone"]}
+            },
+            "process_ids": [],  # Será atualizado após criar o processo
+            "fonte": "staff_created",
+            "created_at": now,
+            "updated_at": now,
+            "created_by": user.get("email")
+        }
+        
+        await db.clients.insert_one(new_client)
+        logger.info(f"Novo cliente criado: {client_id} - {client_name}")
+    
+    # ============================================================
+    # CONSTRUIR DOCUMENTO DO PROCESSO
+    # ============================================================
     process_doc = {
         "id": process_id,
         "process_number": process_number,
-        "client_id": None,  # Não há utilizador cliente associado
+        # Suporte a múltiplos clientes (N:M)
+        "client_ids": [client_id] if client_id else [],
+        "client_id": client_id,  # Mantém compatibilidade
         "client_name": client_name,
         "client_email": client_email,
         "client_phone": client_phone,
+        "client_nif": client_nif,
         "process_type": data.process_type,
         "status": initial_status,
         "is_active": True,  # Novos processos são ativos por defeito
@@ -281,6 +339,16 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     
     # Inserir na base de dados
     await db.processes.insert_one(process_doc)
+    
+    # Atualizar process_ids do cliente
+    if client_id:
+        await db.clients.update_one(
+            {"id": client_id},
+            {
+                "$addToSet": {"process_ids": process_id},
+                "$set": {"updated_at": now}
+            }
+        )
     
     # Registar no histórico
     await log_history(process_id, user, f"Criou processo para cliente {client_name}")
@@ -1325,5 +1393,237 @@ async def confirm_client_data(
         "success": True,
         "message": f"Dados do cliente {'confirmados e bloqueados' if confirmed else 'desbloqueados'}",
         "is_data_confirmed": confirmed
+    }
+
+
+# ====================================================================
+# ENDPOINTS DE GESTÃO DE CLIENTES DO PROCESSO (N:M)
+# ====================================================================
+
+@router.post("/{process_id}/add-client")
+async def add_client_to_process(
+    process_id: str,
+    client_id: str = Query(..., description="ID do cliente a adicionar"),
+    as_co_titular: bool = Query(False, description="Se True, adiciona como co-titular"),
+    user: dict = Depends(require_staff())
+):
+    """
+    Adicionar um cliente existente a um processo.
+    
+    Isto permite que um processo tenha múltiplos clientes (titulares).
+    Por exemplo, um processo de crédito com dois titulares.
+    
+    Args:
+        process_id: ID do processo
+        client_id: ID do cliente a adicionar
+        as_co_titular: Se True, adiciona como co-titular (co_buyer)
+    
+    Returns:
+        Success message
+    """
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    client = await db.clients.find_one({"id": client_id})
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    
+    # Verificar se já está associado
+    current_client_ids = process.get("client_ids", [])
+    if client_id in current_client_ids:
+        raise HTTPException(status_code=400, detail="Cliente já está associado a este processo")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Adicionar cliente ao processo
+    update_data = {
+        "updated_at": now
+    }
+    
+    # Adicionar à lista de client_ids
+    current_client_ids.append(client_id)
+    update_data["client_ids"] = current_client_ids
+    
+    # Se for co-titular, adicionar aos co_buyers
+    if as_co_titular:
+        co_buyers = process.get("co_buyers", [])
+        co_buyers.append({
+            "name": client.get("nome"),
+            "email": client.get("contacto", {}).get("email"),
+            "nif": client.get("dados_pessoais", {}).get("nif"),
+            "phone": client.get("contacto", {}).get("telefone"),
+            "client_id": client_id,
+            "relacao": "co-titular"
+        })
+        update_data["co_buyers"] = co_buyers
+        
+        # Adicionar também ao titular2_data se for o primeiro co-titular
+        if len(co_buyers) == 1:
+            update_data["titular2_data"] = {
+                "name": client.get("nome"),
+                "email": client.get("contacto", {}).get("email"),
+                "nif": client.get("dados_pessoais", {}).get("nif"),
+                "phone": client.get("contacto", {}).get("telefone")
+            }
+    
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    
+    # Atualizar process_ids do cliente
+    await db.clients.update_one(
+        {"id": client_id},
+        {
+            "$addToSet": {"process_ids": process_id},
+            "$set": {"updated_at": now}
+        }
+    )
+    
+    await log_history(
+        process_id, user, 
+        f"Adicionou cliente {client.get('nome')} ao processo" + (" como co-titular" if as_co_titular else "")
+    )
+    
+    return {
+        "success": True,
+        "message": f"Cliente {client.get('nome')} adicionado ao processo",
+        "total_clients": len(current_client_ids)
+    }
+
+
+@router.post("/{process_id}/remove-client")
+async def remove_client_from_process(
+    process_id: str,
+    client_id: str = Query(..., description="ID do cliente a remover"),
+    user: dict = Depends(require_staff())
+):
+    """
+    Remover um cliente de um processo.
+    
+    Nota: Não é possível remover o cliente principal (titular).
+    Apenas co-titulares podem ser removidos.
+    
+    Args:
+        process_id: ID do processo
+        client_id: ID do cliente a remover
+    
+    Returns:
+        Success message
+    """
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    current_client_ids = process.get("client_ids", [])
+    
+    # Verificar se está associado
+    if client_id not in current_client_ids:
+        raise HTTPException(status_code=400, detail="Cliente não está associado a este processo")
+    
+    # Não permitir remover o cliente principal
+    if client_id == process.get("client_id"):
+        raise HTTPException(
+            status_code=400, 
+            detail="Não é possível remover o cliente principal. Apenas co-titulares podem ser removidos."
+        )
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Remover cliente da lista
+    current_client_ids.remove(client_id)
+    
+    # Remover dos co_buyers
+    co_buyers = process.get("co_buyers", [])
+    co_buyers = [cb for cb in co_buyers if cb.get("client_id") != client_id]
+    
+    update_data = {
+        "client_ids": current_client_ids,
+        "co_buyers": co_buyers if co_buyers else None,
+        "updated_at": now
+    }
+    
+    # Atualizar titular2_data se necessário
+    if co_buyers:
+        update_data["titular2_data"] = {
+            "name": co_buyers[0].get("name"),
+            "email": co_buyers[0].get("email"),
+            "nif": co_buyers[0].get("nif"),
+            "phone": co_buyers[0].get("phone")
+        }
+    else:
+        update_data["titular2_data"] = None
+    
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    
+    # Remover process_ids do cliente
+    await db.clients.update_one(
+        {"id": client_id},
+        {
+            "$pull": {"process_ids": process_id},
+            "$set": {"updated_at": now}
+        }
+    )
+    
+    client = await db.clients.find_one({"id": client_id})
+    client_name = client.get("nome") if client else client_id
+    
+    await log_history(process_id, user, f"Removeu cliente {client_name} do processo")
+    
+    return {
+        "success": True,
+        "message": f"Cliente {client_name} removido do processo",
+        "total_clients": len(current_client_ids)
+    }
+
+
+@router.get("/{process_id}/clients")
+async def get_process_clients(
+    process_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Obter todos os clientes associados a um processo.
+    
+    Returns:
+        Lista de clientes com seus dados básicos
+    """
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    client_ids = process.get("client_ids", [])
+    if not client_ids:
+        # Compatibilidade com processos antigos
+        if process.get("client_id"):
+            client_ids = [process.get("client_id")]
+        else:
+            return {"clients": [], "total": 0}
+    
+    clients = await db.clients.find(
+        {"id": {"$in": client_ids}},
+        {"_id": 0}
+    ).to_list(length=10)
+    
+    # Enriquecer com informação de relação
+    co_buyers = process.get("co_buyers", [])
+    co_buyer_ids = {cb.get("client_id") for cb in co_buyers if cb.get("client_id")}
+    
+    result = []
+    for c in clients:
+        client_info = {
+            "id": c.get("id"),
+            "nome": c.get("nome"),
+            "email": c.get("contacto", {}).get("email"),
+            "telefone": c.get("contacto", {}).get("telefone"),
+            "nif": c.get("dados_pessoais", {}).get("nif"),
+            "is_main": c.get("id") == process.get("client_id"),
+            "relacao": "co-titular" if c.get("id") in co_buyer_ids else "titular"
+        }
+        result.append(client_info)
+    
+    return {
+        "clients": result,
+        "total": len(result),
+        "process_id": process_id,
+        "process_number": process.get("process_number")
     }
 

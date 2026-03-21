@@ -1,4 +1,4 @@
-# Scripts de Atribuição Automática de Clientes
+# Scripts de Utilidade - PowerCell
 
 ## Scripts Disponíveis
 
@@ -22,15 +22,12 @@ python scripts/auto_assign_clients.py --limit 50
 
 # Modo verbose
 python scripts/auto_assign_clients.py --dry-run --verbose
-
-# Não criar processos automaticamente
-python scripts/auto_assign_clients.py --no-processes
 ```
 
 **Opções:**
 | Opção | Descrição |
 |-------|-----------|
-| `--dry-run` | Simula as atribuições sem guardar na base de dados |
+| `--dry-run` | Simula as atribuições sem guardar |
 | `--role` | Filtrar por role (consultor, mediador, indexacao) |
 | `--limit` | Limite de clientes a processar (default: 100) |
 | `--no-processes` | Não criar processos automaticamente |
@@ -38,62 +35,54 @@ python scripts/auto_assign_clients.py --no-processes
 
 ---
 
-### 2. `assign_specific_clients.py`
+### 2. `cleanup_cliente_data.py`
 
-Atribui clientes específicos a utilizadores específicos.
+Remove processos com `client_name: "Cliente"` (dados de teste).
 
 **Uso:**
 ```bash
-# Listar utilizadores disponíveis
-python scripts/assign_specific_clients.py --list-users
+# Ver o que vai ser apagado (simulação)
+python scripts/cleanup_cliente_data.py
 
-# Listar clientes não atribuídos
-python scripts/assign_specific_clients.py --list-unassigned
-
-# Atribuir um cliente a um utilizador
-python scripts/assign_specific_clients.py --client CLIENT_ID --user USER_ID
-
-# Atribuir múltiplos clientes
-python scripts/assign_specific_clients.py --clients ID1,ID2,ID3 --user USER_ID
-
-# Não criar processo
-python scripts/assign_specific_clients.py --client CLIENT_ID --user USER_ID --no-process
+# Executar limpeza
+python scripts/cleanup_cliente_data.py --execute
 ```
-
-**Opções:**
-| Opção | Descrição |
-|-------|-----------|
-| `--list-users` | Lista utilizadores disponíveis |
-| `--list-unassigned` | Lista clientes não atribuídos |
-| `--client` | ID do cliente a atribuir |
-| `--clients` | IDs separados por vírgula |
-| `--user` | ID do utilizador para atribuição |
-| `--no-process` | Não criar processo automaticamente |
-| `--limit` | Limite para listagem (default: 50) |
 
 ---
 
-## Fluxo Recomendado
+### 3. `seed_test_clients.py`
 
-1. **Ver clientes não atribuídos:**
-   ```bash
-   python scripts/assign_specific_clients.py --list-unassigned
-   ```
+Cria clientes e processos de teste com dados realistas portugueses.
 
-2. **Ver utilizadores disponíveis:**
-   ```bash
-   python scripts/assign_specific_clients.py --list-users
-   ```
+**Uso:**
+```bash
+# Criar 100 clientes de teste
+python scripts/seed_test_clients.py
 
-3. **Simular atribuição automática:**
-   ```bash
-   python scripts/auto_assign_clients.py --dry-run --verbose
-   ```
+# Criar 50 clientes
+python scripts/seed_test_clients.py --count 50
 
-4. **Executar atribuição real:**
-   ```bash
-   python scripts/auto_assign_clients.py
-   ```
+# Limpar dados de teste existentes antes de criar
+python scripts/seed_test_clients.py --clear
+```
+
+---
+
+### 4. `migrate_database.py`
+
+Migração de base de dados MongoDB (export/import/migrate).
+
+**Uso:**
+```bash
+# Exportar dados para ficheiros JSON
+python scripts/migrate_database.py export --output ./backup
+
+# Importar dados de ficheiros JSON
+python scripts/migrate_database.py import --input ./backup --target-url "mongodb+srv://..."
+
+# Migrar diretamente de uma BD para outra
+python scripts/migrate_database.py migrate --target-url "mongodb+srv://..." --target-db "nova_db"
+```
 
 ---
 
@@ -102,22 +91,9 @@ python scripts/assign_specific_clients.py --client CLIENT_ID --user USER_ID --no
 - Clientes são distribuídos de forma round-robin entre utilizadores
 - Respeita capacidade máxima por role:
   - Consultor: 50 clientes
-  - Mediador: 30 clientes
+  - Mediador/Intermediário: 30 clientes
   - Indexação: 100 clientes
+  - CEO: 100 clientes
+  - Diretor: 80 clientes
 - Cria automaticamente um processo para cada cliente atribuído
 - Prioriza utilizadores com mais capacidade disponível
-
----
-
-## Execução em Produção
-
-Para executar no servidor Render:
-
-```bash
-# Conectar via SSH ou usar shell do Render
-cd /app/backend
-python scripts/auto_assign_clients.py --dry-run
-python scripts/auto_assign_clients.py
-```
-
-Ou configurar como tarefa agendada no sistema.

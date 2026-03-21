@@ -115,8 +115,9 @@ class TempLinkService:
         # Guardar na base de dados
         await db.temp_links.insert_one(link_doc)
 
-        # Construir URL
-        base_url = "https://powercell.vercel.app"  # TODO: usar variável de ambiente
+        # Construir URL - usar variável de ambiente ou URL de produção
+        import os
+        base_url = os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
         if link_type == TempLinkType.UPLOAD:
             url = f"{base_url}/upload/{token}"
         else:
@@ -312,7 +313,8 @@ class TempLinkService:
         ).sort("created_at", -1).to_list(100)
 
         # Adicionar URLs
-        base_url = "https://powercell.vercel.app"
+        import os
+        base_url = os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
         for link in links:
             if link["link_type"] == TempLinkType.UPLOAD.value:
                 link["url"] = f"{base_url}/upload/{link['token']}"

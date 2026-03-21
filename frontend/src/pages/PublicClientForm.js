@@ -315,6 +315,12 @@ const PublicClientForm = () => {
     // Bancos com créditos ativos
     bancos_creditos: [],
     
+    // Bancos onde efetuou simulações de crédito
+    bancos_simulacoes: [],
+    
+    // Tempo restante do crédito atual (refinanciamento)
+    tempo_restante_credito: "",
+    
     // Capital e Financiamento
     capital_proprio: "",
     valor_financiado: "",
@@ -511,6 +517,8 @@ const PublicClientForm = () => {
           fiador: formData.fiador,
           monthly_income: formData.salario_liquido ? parseFloat(formData.salario_liquido) : null,
           bancos_creditos: formData.bancos_creditos,
+          bancos_simulacoes: formData.bancos_simulacoes,
+          tempo_restante_credito: formData.tempo_restante_credito || null,
           capital_proprio: formData.capital_proprio ? parseFloat(formData.capital_proprio) : null,
           valor_financiado: formData.valor_financiado,
           // Campos de emprego
@@ -571,6 +579,15 @@ const PublicClientForm = () => {
       bancos_creditos: prev.bancos_creditos.includes(banco)
         ? prev.bancos_creditos.filter(b => b !== banco)
         : [...prev.bancos_creditos, banco]
+    }));
+  };
+
+  const toggleBancoSimulacoes = (banco) => {
+    setFormData(prev => ({
+      ...prev,
+      bancos_simulacoes: prev.bancos_simulacoes.includes(banco)
+        ? prev.bancos_simulacoes.filter(b => b !== banco)
+        : [...prev.bancos_simulacoes, banco]
     }));
   };
 
@@ -804,14 +821,16 @@ const PublicClientForm = () => {
       {formData.compra_tipo === "outra_pessoa" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="titular2_name">Nome completo</Label>
+            <Label htmlFor="titular2_name">Nome completo *</Label>
             <Input
               id="titular2_name"
               value={formData.titular2_name}
               onChange={(e) => updateField("titular2_name", e.target.value)}
               placeholder="Nome completo"
               data-testid="titular2-name"
+              className={cn(fieldErrors.titular2_name && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_name && <FieldError>{fieldErrors.titular2_name}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -823,7 +842,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_email", e.target.value)}
               placeholder="email@exemplo.pt"
               data-testid="titular2-email"
+              className={cn(fieldErrors.titular2_email && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_email && <FieldError>{fieldErrors.titular2_email}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -835,7 +856,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_phone", e.target.value)}
               placeholder="+351 912 345 678"
               data-testid="titular2-phone"
+              className={cn(fieldErrors.titular2_phone && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_phone && <FieldError>{fieldErrors.titular2_phone}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -848,7 +871,10 @@ const PublicClientForm = () => {
               placeholder="123456789"
               maxLength={9}
               data-testid="titular2-nif"
+              className={cn(fieldErrors.titular2_nif && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_nif && <FieldError>{fieldErrors.titular2_nif}</FieldError>}
+            <FieldHint>Número de Identificação Fiscal - 9 dígitos</FieldHint>
           </div>
           
           <div className="space-y-2">
@@ -859,7 +885,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_documento_id", e.target.value)}
               placeholder="Número do documento"
               data-testid="titular2-documento"
+              className={cn(fieldErrors.titular2_documento_id && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_documento_id && <FieldError>{fieldErrors.titular2_documento_id}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -870,7 +898,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_naturalidade", e.target.value)}
               placeholder="Local de nascimento"
               data-testid="titular2-naturalidade"
+              className={cn(fieldErrors.titular2_naturalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_naturalidade && <FieldError>{fieldErrors.titular2_naturalidade}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -881,7 +911,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_nacionalidade", e.target.value)}
               placeholder="Portuguesa"
               data-testid="titular2-nacionalidade"
+              className={cn(fieldErrors.titular2_nacionalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_nacionalidade && <FieldError>{fieldErrors.titular2_nacionalidade}</FieldError>}
           </div>
           
           <div className="space-y-2 md:col-span-2">
@@ -892,7 +924,9 @@ const PublicClientForm = () => {
               onChange={(e) => updateField("titular2_morada_fiscal", e.target.value)}
               placeholder="Rua, número, código postal, localidade"
               data-testid="titular2-morada"
+              className={cn(fieldErrors.titular2_morada_fiscal && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_morada_fiscal && <FieldError>{fieldErrors.titular2_morada_fiscal}</FieldError>}
           </div>
           
           <div className="space-y-2">
@@ -903,13 +937,18 @@ const PublicClientForm = () => {
               value={formData.titular2_birth_date}
               onChange={(e) => updateField("titular2_birth_date", e.target.value)}
               data-testid="titular2-birth-date"
+              className={cn(fieldErrors.titular2_birth_date && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
             />
+            {fieldErrors.titular2_birth_date && <FieldError>{fieldErrors.titular2_birth_date}</FieldError>}
           </div>
           
           <div className="space-y-2">
             <Label htmlFor="titular2_estado_civil">Estado Civil</Label>
             <Select value={formData.titular2_estado_civil} onValueChange={(v) => updateField("titular2_estado_civil", v)}>
-              <SelectTrigger data-testid="titular2-estado-civil">
+              <SelectTrigger 
+                data-testid="titular2-estado-civil"
+                className={cn(fieldErrors.titular2_estado_civil && "border-red-500 focus:ring-red-500 bg-red-50")}
+              >
                 <SelectValue placeholder="Selecione" />
               </SelectTrigger>
               <SelectContent>
@@ -918,6 +957,7 @@ const PublicClientForm = () => {
                 ))}
               </SelectContent>
             </Select>
+            {fieldErrors.titular2_estado_civil && <FieldError>{fieldErrors.titular2_estado_civil}</FieldError>}
           </div>
         </div>
       ) : (
@@ -1384,6 +1424,49 @@ const PublicClientForm = () => {
           <FieldHint>Inclui crédito habitação, automóvel, pessoal, ou cartões de crédito com saldo em dívida.</FieldHint>
         </div>
         
+        {/* Pergunta sobre simulações de crédito */}
+        <div className="space-y-3">
+          <Label>Efetou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {BANCOS.map((banco) => (
+              <div key={`sim-${banco}`} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`banco-sim-${banco}`}
+                  checked={formData.bancos_simulacoes.includes(banco)}
+                  onCheckedChange={() => toggleBancoSimulacoes(banco)}
+                  data-testid={`banco-sim-${banco.toLowerCase().replace(/\s+/g, '-')}`}
+                />
+                <Label htmlFor={`banco-sim-${banco}`} className="text-sm cursor-pointer">{banco}</Label>
+              </div>
+            ))}
+          </div>
+          <FieldHint>Indique os bancos onde já efetuou simulações ou pedidos de crédito habitação.</FieldHint>
+        </div>
+        
+        {/* Pergunta sobre tempo restante do crédito (apenas para refinanciamento) */}
+        {formData.finalidade === "refinanciamento" && (
+          <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <Label htmlFor="tempo_restante_credito">Quanto tempo falta para acabar de pagar o crédito atual? *</Label>
+            <Select 
+              value={formData.tempo_restante_credito} 
+              onValueChange={(v) => updateField("tempo_restante_credito", v)}
+            >
+              <SelectTrigger data-testid="tempo-restante-credito">
+                <SelectValue placeholder="Selecione o tempo restante" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="menos_1_ano">Menos de 1 ano</SelectItem>
+                <SelectItem value="1_5_anos">1 a 5 anos</SelectItem>
+                <SelectItem value="5_10_anos">5 a 10 anos</SelectItem>
+                <SelectItem value="10_15_anos">10 a 15 anos</SelectItem>
+                <SelectItem value="15_20_anos">15 a 20 anos</SelectItem>
+                <SelectItem value="mais_20_anos">Mais de 20 anos</SelectItem>
+              </SelectContent>
+            </Select>
+            <FieldHint>Esta informação ajuda a determinar as condições do refinanciamento.</FieldHint>
+          </div>
+        )}
+        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="capital_proprio">Capital próprio disponível * (€)</Label>
@@ -1471,6 +1554,31 @@ const PublicClientForm = () => {
             <p>{formData.bancos_creditos.length > 0 ? formData.bancos_creditos.join(", ") : "Nenhum banco selecionado"}</p>
           </CardContent>
         </Card>
+        
+        <Card className="border-border">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Simulações de Crédito</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <p>{formData.bancos_simulacoes.length > 0 ? formData.bancos_simulacoes.join(", ") : "Nenhuma simulação efetuada"}</p>
+          </CardContent>
+        </Card>
+        
+        {formData.finalidade === "refinanciamento" && formData.tempo_restante_credito && (
+          <Card className="border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Tempo Restante do Crédito</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              <p>{formData.tempo_restante_credito === "menos_1_ano" ? "Menos de 1 ano" :
+                  formData.tempo_restante_credito === "1_5_anos" ? "1 a 5 anos" :
+                  formData.tempo_restante_credito === "5_10_anos" ? "5 a 10 anos" :
+                  formData.tempo_restante_credito === "10_15_anos" ? "10 a 15 anos" :
+                  formData.tempo_restante_credito === "15_20_anos" ? "15 a 20 anos" :
+                  formData.tempo_restante_credito === "mais_20_anos" ? "Mais de 20 anos" : "-"}</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="space-y-4 pt-4 border-t">

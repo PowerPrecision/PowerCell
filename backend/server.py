@@ -36,7 +36,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from config import (
-    CORS_ORIGINS, CORS_ALLOW_CREDENTIALS, CORS_ALLOW_METHODS, 
+    CORS_ORIGINS, CORS_ORIGIN_REGEX, CORS_ALLOW_CREDENTIALS, CORS_ALLOW_METHODS, 
     CORS_ALLOW_HEADERS, CORS_MAX_AGE,
     SENTRY_DSN, SENTRY_ENVIRONMENT, SENTRY_TRACES_SAMPLE_RATE,
     SENTRY_PROFILES_SAMPLE_RATE, SENTRY_SEND_DEFAULT_PII
@@ -519,6 +519,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else None,
     allow_methods=CORS_ALLOW_METHODS,
     allow_headers=CORS_ALLOW_HEADERS,
     max_age=CORS_MAX_AGE,
