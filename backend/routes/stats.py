@@ -25,12 +25,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
         process_query = {"assigned_consultor_id": user_id}
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
         process_query = {"assigned_mediador_id": user_id}
-    elif role == UserRole.DIRETOR:
-        process_query = {"$or": [
-            {"assigned_consultor_id": user_id},
-            {"assigned_mediador_id": user_id}
-        ]}
-    # Admin, CEO e Administrativo see all (no filter)
+    # Admin, CEO, Administrativo e Diretor see all (no filter)
     
     # Get process count
     stats["total_processes"] = await db.processes.count_documents(process_query)
@@ -49,8 +44,8 @@ async def get_stats(user: dict = Depends(get_current_user)):
     stats["dropped_processes"] = await db.processes.count_documents(dropped_query)
     
     # Get process IDs que o utilizador tem acesso (para contar prazos)
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO]:
-        # Admin, CEO e Administrativo vêem todos os prazos pendentes
+    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+        # Admin, CEO, Administrativo e Diretor vêem todos os prazos pendentes
         pending_deadlines_count = await db.deadlines.count_documents({"completed": False})
     elif role == UserRole.CLIENTE:
         # Clientes vêem apenas prazos dos seus processos
@@ -61,7 +56,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
             "completed": False
         }) if my_process_ids else 0
     else:
-        # Consultores/Intermediários/Diretores vêem apenas prazos dos processos que lhes estão atribuídos
+        # Consultores/Intermediários vêem apenas prazos dos processos que lhes estão atribuídos
         my_processes = await db.processes.find({
             "$or": [
                 {"assigned_consultor_id": user_id},
