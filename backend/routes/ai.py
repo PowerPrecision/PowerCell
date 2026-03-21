@@ -215,7 +215,7 @@ class ResetClientDataRequest(BaseModel):
 @router.post("/reset-client-data")
 async def reset_client_data(
     request: ResetClientDataRequest,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Reset/clear extracted AI data for a specific client.

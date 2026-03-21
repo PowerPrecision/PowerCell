@@ -280,7 +280,7 @@ async def clear_expired_nif_cache():
 
 @router.get("/nif-cache/stats")
 async def get_nif_cache_stats(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Obtém estatísticas do cache de NIF."""
     await _load_nif_cache_from_db()
@@ -309,7 +309,7 @@ async def get_nif_cache_stats(
 
 @router.post("/nif-cache/clear")
 async def clear_nif_cache(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Limpa todo o cache de NIF."""
     global nif_session_cache, _nif_cache_loaded
@@ -336,7 +336,7 @@ class NIFMappingRequest(BaseModel):
 @router.post("/nif-cache/add-mapping")
 async def add_nif_mapping_manual(
     request: NIFMappingRequest,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Adiciona mapeamento NIF manualmente."""
     # Validar NIF

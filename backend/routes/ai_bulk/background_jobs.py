@@ -178,7 +178,7 @@ def _format_duration(seconds: float) -> str:
 async def get_background_jobs(
     status: Optional[str] = None,
     limit: int = Query(50, le=200),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Lista jobs em background com filtros opcionais."""
     query = {}
@@ -304,7 +304,7 @@ async def get_job_metrics(
 @router.get("/background-jobs/notifications")
 async def get_job_notifications(
     unread_only: bool = True,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Obtém notificações de jobs (ex: jobs stuck)."""
     query = {"type": "stuck_job"}
@@ -322,7 +322,7 @@ async def get_job_notifications(
 @router.put("/background-jobs/notifications/{notification_id}/read")
 async def mark_notification_read(
     notification_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Marca notificação como lida."""
     result = await db.job_notifications.update_one(
@@ -335,7 +335,7 @@ async def mark_notification_read(
 
 @router.delete("/background-jobs/notifications/clear")
 async def clear_job_notifications(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Limpa todas as notificações de jobs."""
     result = await db.job_notifications.delete_many({})
@@ -345,7 +345,7 @@ async def clear_job_notifications(
 @router.get("/background-jobs/{job_id}")
 async def get_background_job_status(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Obtém estado de um job específico."""
     # Primeiro tentar memória (mais rápido)
@@ -364,7 +364,7 @@ async def get_background_job_status(
 @router.delete("/background-jobs/{job_id}")
 async def delete_background_job(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Remove um job em background."""
     # Remover de memória
@@ -380,7 +380,7 @@ async def delete_background_job(
 @router.post("/background-jobs/{job_id}/cancel")
 async def cancel_background_job(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Cancela um job em execução."""
     job = background_processes.get(job_id)
@@ -401,7 +401,7 @@ async def cancel_background_job(
 @router.post("/background-jobs/cleanup-stuck")
 async def cleanup_stuck_jobs(
     hours: int = Query(2, ge=1, le=24),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Limpa jobs que estão stuck há mais de X horas."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -424,7 +424,7 @@ async def cleanup_stuck_jobs(
 
 @router.delete("/background-jobs")
 async def clear_finished_jobs(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Remove jobs terminados (success ou failed)."""
     result = await db.background_jobs.delete_many({
@@ -442,7 +442,7 @@ async def clear_finished_jobs(
 
 @router.post("/background-jobs/clear-all")
 async def clear_all_jobs(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Remove TODOS os jobs (usar com cuidado)."""
     result = await db.background_jobs.delete_many({})
@@ -468,7 +468,7 @@ class ProgressUpdateRequest(BaseModel):
 async def update_background_job_progress(
     job_id: str,
     request: ProgressUpdateRequest,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Actualizar progresso de um job em background.

@@ -49,8 +49,9 @@ const StaffDashboard = () => {
 
   const isAdmin = user?.role === "admin";
   const isCeo = user?.role === "ceo";
-  const canManageUsers = isAdmin;
-  const canSeeAllStats = isAdmin || isCeo;
+  const isAdminOrCeo = isAdmin || isCeo;
+  const canManageUsers = isAdminOrCeo;
+  const canSeeAllStats = isAdminOrCeo;
 
   useEffect(() => {
     fetchData();

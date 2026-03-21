@@ -83,7 +83,7 @@ async def get_statistics(
 async def get_eligible_processes(
     retention_days: int = Query(default=None, description="Dias de retenção"),
     limit: int = Query(default=50, le=200),
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Lista processos elegíveis para anonimização.
@@ -103,7 +103,7 @@ async def get_eligible_processes(
 @router.post("/anonymize")
 async def anonymize_single(
     request: AnonymizeRequest,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Anonimiza dados de um processo ou utilizador específico.
@@ -150,7 +150,7 @@ async def anonymize_single(
 @router.post("/batch")
 async def anonymize_batch(
     request: BatchAnonymizeRequest,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Executa anonimização em lote.
@@ -220,7 +220,7 @@ async def get_audit_log(
     days: int = Query(default=30, le=365),
     action: Optional[str] = Query(default=None),
     limit: int = Query(default=100, le=500),
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Consulta o log de auditoria GDPR.
@@ -248,7 +248,7 @@ async def get_audit_log(
 
 @router.get("/config")
 async def get_gdpr_config(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Obtém configuração actual do GDPR.

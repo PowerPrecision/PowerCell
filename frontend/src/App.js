@@ -100,8 +100,8 @@ const DashboardRedirect = () => {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin vai para /admin, todos os outros staff vão para /staff
-  if (user.role === "admin") {
+  // Admin e CEO vão para /admin, todos os outros staff vão para /staff
+  if (user.role === "admin" || user.role === "ceo") {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/staff" replace />;
@@ -121,7 +121,7 @@ const RootRedirect = () => {
 
   // Se autenticado, redireciona para o dashboard apropriado
   if (user) {
-    if (user.role === "admin") {
+    if (user.role === "admin" || user.role === "ceo") {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/staff" replace />;
