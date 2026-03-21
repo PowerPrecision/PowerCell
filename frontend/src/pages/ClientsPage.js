@@ -298,16 +298,6 @@ export default function ClientsPage() {
               Gerir processos de compra e financiamento
             </p>
           </div>
-          {canCreateProcess && (
-            <Button
-              onClick={handleCreateNewProcess}
-              className="gap-2"
-              data-testid="create-client-btn"
-            >
-              <Plus className="h-4 w-4" />
-              Novo Processo
-            </Button>
-          )}
         </div>
 
         {/* Search, Filters & Stats */}
