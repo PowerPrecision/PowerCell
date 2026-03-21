@@ -317,7 +317,7 @@ async def get_trello_status(user: dict = Depends(require_roles([UserRole.ADMIN, 
 @router.post("/configure")
 async def configure_trello(
     config: TrelloConfig,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Configurar credenciais do Trello."""
     # Guardar na base de dados
@@ -358,7 +358,7 @@ async def configure_trello(
 
 @router.post("/reset-and-sync")
 async def reset_and_sync_from_trello(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Apagar todos os dados existentes e importar tudo do Trello.
@@ -1290,7 +1290,7 @@ async def handle_member_removed_from_card(action: dict):
 @router.post("/webhook/setup")
 async def setup_webhook(
     callback_url: Optional[str] = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Configurar webhook para sincronização em tempo real."""
     try:
@@ -1345,7 +1345,7 @@ async def setup_webhook(
 
 
 @router.get("/webhook/list")
-async def list_webhooks(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def list_webhooks(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """Listar webhooks ativos."""
     try:
         webhooks = await trello_service.get_webhooks()
@@ -1357,7 +1357,7 @@ async def list_webhooks(user: dict = Depends(require_roles([UserRole.ADMIN]))):
 @router.delete("/webhook/{webhook_id}")
 async def delete_webhook(
     webhook_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Eliminar webhook."""
     try:
@@ -1371,7 +1371,7 @@ async def delete_webhook(
 # === Mapeamento Manual de Membros ===
 
 @router.get("/member-mappings")
-async def get_member_mappings(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def get_member_mappings(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """Obter todos os mapeamentos manuais de membros Trello → Utilizadores."""
     mappings = await db.trello_member_mappings.find({}, {"_id": 0}).to_list(100)
     return {"mappings": mappings}
@@ -1380,7 +1380,7 @@ async def get_member_mappings(user: dict = Depends(require_roles([UserRole.ADMIN
 @router.post("/member-mappings")
 async def save_member_mapping(
     mapping: MemberMapping,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Guardar um mapeamento manual de membro Trello → Utilizador."""
     logger.info(f"A guardar mapeamento: @{mapping.trello_username} → {mapping.user_id}")
@@ -1418,7 +1418,7 @@ async def save_member_mapping(
 @router.post("/member-mappings/bulk")
 async def save_member_mappings_bulk(
     data: MemberMappingList,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Guardar múltiplos mapeamentos de uma vez."""
     logger.info(f"A guardar {len(data.mappings)} mapeamentos em bulk por {user.get('name', 'admin')}")
@@ -1482,7 +1482,7 @@ async def save_member_mappings_bulk(
 @router.delete("/member-mappings/{trello_username}")
 async def delete_member_mapping(
     trello_username: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Remover um mapeamento manual."""
     result = await db.trello_member_mappings.delete_one(
