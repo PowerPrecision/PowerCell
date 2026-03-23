@@ -121,8 +121,8 @@ export default function ClientsPage() {
   });
   const [newProcessType, setNewProcessType] = useState("credito_habitacao");
   
-  // Verificar se pode eliminar clientes (apenas admin, ceo, diretor)
-  const canDeleteClients = ["admin", "ceo", "diretor"].includes(user?.role);
+  // Verificar se pode eliminar clientes (apenas admin, ceo, diretor, administrativo)
+  const canDeleteClients = ["admin", "ceo", "diretor", "administrativo"].includes(user?.role);
   
   // Verificar se pode criar processos (gestor_documentos NÃO pode)
   const canCreateProcess = user?.role !== "gestor_documentos" && user?.role !== "indexacao";
