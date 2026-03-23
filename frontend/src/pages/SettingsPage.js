@@ -234,14 +234,14 @@ const SettingsPage = () => {
     <DashboardLayout title="Definições">
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-blue-950">Definições</h1>
+          <h1 className="text-2xl font-bold text-foreground">Definições</h1>
           <p className="text-muted-foreground">
             Gerir as configurações da sua conta e preferências
           </p>
         </div>
 
         <Tabs defaultValue="perfil" className="space-y-6">
-          <TabsList className="bg-blue-50 border border-blue-200">
+          <TabsList className="bg-muted border border-border">
             <TabsTrigger value="perfil" className="data-[state=active]:bg-teal-600 data-[state=active]:text-white">
               <User className="h-4 w-4 mr-2" />
               Perfil
@@ -267,7 +267,7 @@ const SettingsPage = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <User className="h-5 w-5 text-blue-900" />
+                  <User className="h-5 w-5 text-primary" />
                   Informações do Perfil
                 </CardTitle>
                 <CardDescription>
@@ -276,13 +276,13 @@ const SettingsPage = () => {
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Informação do papel */}
-                <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg border border-border">
                   <div className="h-12 w-12 rounded-full bg-teal-600 flex items-center justify-center">
                     <Shield className="h-6 w-6 text-white" />
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">O seu papel no sistema</p>
-                    <p className="font-semibold text-blue-900">{getRoleLabel(user?.role)}</p>
+                    <p className="font-semibold text-foreground">{getRoleLabel(user?.role)}</p>
                   </div>
                 </div>
 
@@ -352,7 +352,7 @@ const SettingsPage = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Lock className="h-5 w-5 text-blue-900" />
+                  <Lock className="h-5 w-5 text-primary" />
                   Alterar Password
                 </CardTitle>
                 <CardDescription>
@@ -452,7 +452,7 @@ const SettingsPage = () => {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Mail className="h-5 w-5 text-blue-900" />
+                    <Mail className="h-5 w-5 text-primary" />
                     Notificações por Email
                   </CardTitle>
                   <CardDescription>
@@ -579,7 +579,7 @@ const SettingsPage = () => {
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Building2 className="h-5 w-5 text-blue-900" />
+                      <Building2 className="h-5 w-5 text-primary" />
                       Informação do Sistema
                     </CardTitle>
                     <CardDescription>

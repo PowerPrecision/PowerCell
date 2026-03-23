@@ -81,7 +81,7 @@ const LoginPage = () => {
             <div className="flex justify-center mb-4 lg:hidden">
               <Building2 className="h-10 w-10 text-blue-900" />
             </div>
-            <CardTitle className="text-2xl font-bold tracking-tight text-blue-950">
+            <CardTitle className="text-2xl font-bold tracking-tight text-foreground">
               Bem-vindo de volta
             </CardTitle>
             <CardDescription>

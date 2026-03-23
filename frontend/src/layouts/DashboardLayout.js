@@ -656,7 +656,7 @@ const DashboardLayout = ({ children, title }) => {
           </ScrollArea>
 
           {/* User section */}
-          <div className="p-4 border-t border-blue-800">
+          <div className="p-4 border-t border-slate-700">
             <div className="flex items-center gap-3 px-2">
               <div className="h-9 w-9 rounded-full bg-amber-500/20 flex items-center justify-center">
                 <User className="h-5 w-5 text-amber-400" />

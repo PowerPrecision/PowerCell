@@ -216,7 +216,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
           {formData.assinatura && (
             <div className="space-y-2">
               <Label>Assinatura Guardada</Label>
-              <div className="border rounded p-2 bg-gray-50">
+              <div className="border rounded p-2 bg-muted/30">
                 <img
                   src={formData.assinatura}
                   alt="Assinatura"
@@ -324,7 +324,7 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
                     <img
                       src={rgpd.consent_data.assinatura}
                       alt="Assinatura"
-                      className="border rounded p-2 bg-gray-50 max-h-32"
+                      className="border rounded p-2 bg-muted/30 max-h-32"
                     />
                   </div>
                 )}
