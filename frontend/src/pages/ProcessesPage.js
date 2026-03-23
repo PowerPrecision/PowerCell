@@ -59,7 +59,7 @@ const ProcessesPage = () => {
   if (loading) {
     return (
       <DashboardLayout title="Todos os Processos">
-        <div className="space-y-6 p-6">
+        <div className="space-y-6">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -85,7 +85,7 @@ const ProcessesPage = () => {
 
   return (
     <DashboardLayout title="Todos os Processos">
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">

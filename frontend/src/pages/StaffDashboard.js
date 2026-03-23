@@ -134,26 +134,27 @@ const StaffDashboard = () => {
     <DashboardLayout>
       <div className="space-y-6" data-testid="staff-dashboard">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Olá, {user?.name?.split(' ')[0]}</h1>
-            <div className="text-muted-foreground flex items-center gap-2">
-              <Badge variant="outline">{roleLabels[user?.role] || user?.role}</Badge>
-              <span>{canSeeAllStats ? `${stats.total_processes || 0} processos no sistema` : "Os seus processos atribuídos"}</span>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-bold truncate">Olá, {user?.name?.split(' ')[0]}</h1>
+            <div className="text-muted-foreground flex items-center flex-wrap gap-2 mt-0.5">
+              <Badge variant="outline" className="shrink-0">{roleLabels[user?.role] || user?.role}</Badge>
+              <span className="text-sm">{canSeeAllStats ? `${stats.total_processes || 0} processos no sistema` : "Os seus processos atribuídos"}</span>
             </div>
           </div>
           {/* Botão Nova Lead */}
           <Button 
             onClick={() => setShowLeadDialog(true)}
-            className="bg-teal-600 hover:bg-teal-700"
+            className="bg-teal-600 hover:bg-teal-700 shrink-0"
+            size="sm"
           >
-            <Plus className="h-4 w-4 mr-2" />
-            Nova Lead
+            <Plus className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Nova Lead</span>
           </Button>
         </div>
 
         {/* Quick Stats - Clickable cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <Card 
             className="cursor-pointer hover:shadow-md transition-shadow"
             onClick={() => navigate('/processos')}
