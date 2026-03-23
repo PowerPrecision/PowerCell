@@ -47,9 +47,13 @@ const AdminDashboard = () => {
   const [isCreateEventDialogOpen, setIsCreateEventDialogOpen] = useState(false);
   const [selectedDateForEvent, setSelectedDateForEvent] = useState(new Date());
 
-  // Get staff users for assignment
-  const staffUsers = useMemo(() => users.filter(u => u.role !== "cliente"), [users]);
-  const consultors = useMemo(() => users.filter(u => ["consultor", "diretor", "ceo"].includes(u.role)), [users]);
+  // Get staff users for assignment (excluindo admin e ceo)
+  const staffUsers = useMemo(() => users.filter(u => 
+    u.role !== "cliente" && 
+    u.role !== "admin" && 
+    u.role !== "ceo"
+  ), [users]);
+  const consultors = useMemo(() => users.filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
   const intermediarios = useMemo(() => users.filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
 
   // Filter processes

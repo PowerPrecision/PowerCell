@@ -282,7 +282,12 @@ const ProcessDetails = () => {
       });
       if (response.ok) {
         const users = await response.json();
-        const activeUsers = users.filter(u => u.is_active !== false);
+        // Filtrar: ativos, não admin, não ceo
+        const activeUsers = users.filter(u => 
+          u.is_active !== false && 
+          u.role !== "admin" && 
+          u.role !== "ceo"
+        );
         setAppUsers(activeUsers);
         return activeUsers;
       }

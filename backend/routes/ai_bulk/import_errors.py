@@ -218,7 +218,7 @@ async def list_import_errors(
     severity: Optional[str] = None,
     resolved: Optional[bool] = None,
     limit: int = Query(100, le=500),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Lista erros de importação com filtros."""
     errors = await get_import_errors(
@@ -236,7 +236,7 @@ async def list_import_errors(
 @router.get("/import-errors/stats")
 async def get_error_stats(
     days: int = Query(7, ge=1, le=90),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém estatísticas de erros de importação."""
     return await get_error_statistics(days)
@@ -245,7 +245,7 @@ async def get_error_stats(
 @router.get("/import-errors/{error_id}")
 async def get_import_error(
     error_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém detalhes de um erro específico."""
     error = await db.import_errors.find_one({"id": error_id}, {"_id": 0})
@@ -260,7 +260,7 @@ async def get_import_error(
 async def resolve_error(
     error_id: str,
     request: ErrorResolutionRequest,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Marca erro como resolvido."""
     success = await resolve_import_error(
@@ -278,7 +278,7 @@ async def resolve_error(
 @router.delete("/import-errors/{error_id}")
 async def delete_import_error(
     error_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Remove um erro de importação."""
     result = await db.import_errors.delete_one({"id": error_id})
@@ -288,7 +288,7 @@ async def delete_import_error(
 
 @router.post("/import-errors/clear-resolved")
 async def clear_resolved_errors(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Remove todos os erros resolvidos."""
     result = await db.import_errors.delete_many({"resolved": True})
@@ -299,7 +299,7 @@ async def clear_resolved_errors(
 @router.post("/import-errors/bulk-resolve")
 async def bulk_resolve_errors(
     error_ids: List[str],
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Resolve múltiplos erros de uma vez."""
     resolved_count = 0

@@ -100,8 +100,8 @@ const DashboardRedirect = () => {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin e CEO vão para /admin, todos os outros staff vão para /staff
-  if (user.role === "admin" || user.role === "ceo") {
+  // Admin vai para /admin, CEO vai para /staff (menu limitado)
+  if (user.role === "admin") {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/staff" replace />;
@@ -121,7 +121,7 @@ const RootRedirect = () => {
 
   // Se autenticado, redireciona para o dashboard apropriado
   if (user) {
-    if (user.role === "admin" || user.role === "ceo") {
+    if (user.role === "admin") {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/staff" replace />;
@@ -189,11 +189,11 @@ function App() {
             }
           />
           
-          {/* Users Management Page - Admin only */}
+          {/* Users Management Page - Admin and CEO */}
           <Route
             path="/utilizadores"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <UsersManagementPage />
               </ProtectedRoute>
             }

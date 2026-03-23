@@ -132,7 +132,12 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
       });
       if (response.ok) {
         const users = await response.json();
-        setAppUsers(users.filter(u => u.is_active !== false));
+        // Filtrar: ativos, não admin, não ceo
+        setAppUsers(users.filter(u => 
+          u.is_active !== false && 
+          u.role !== "admin" && 
+          u.role !== "ceo"
+        ));
       }
     } catch (error) {
       console.error("Erro ao buscar utilizadores:", error);

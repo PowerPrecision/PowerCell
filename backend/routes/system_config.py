@@ -458,7 +458,7 @@ CONFIG_FIELDS = {
 
 
 @router.get("")
-async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     Obter todas as configurações do sistema.
     Apenas admin pode aceder.
@@ -493,7 +493,7 @@ async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN, UserRol
 
 
 @router.get("/fields")
-async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     Obter definição dos campos de configuração.
     Útil para o frontend construir os formulários.
@@ -505,7 +505,7 @@ async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN, 
 async def update_config(
     section: str,
     data: Dict[str, Any],
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Actualizar uma secção da configuração.
@@ -530,7 +530,7 @@ async def update_config(
 @router.post("/test-connection/{service}")
 async def test_service_connection(
     service: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Testar ligação a um serviço (email, storage, etc.).
@@ -711,7 +711,7 @@ async def test_service_connection(
 
 
 @router.post("/complete-setup")
-async def complete_setup(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def complete_setup(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     Marcar a configuração inicial como concluída.
     """
@@ -783,7 +783,7 @@ async def get_storage_info(user: dict = Depends(get_current_user)):
 
 
 @router.post("/reset-cache")
-async def reset_cache(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def reset_cache(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     Forçar recarga das configurações do sistema.
     """
