@@ -142,7 +142,7 @@ async def delete_workflow_status(status_id: str, user: dict = Depends(require_ro
 
 
 @router.post("/workflow-statuses/fix-duplicates")
-async def fix_duplicate_workflow_statuses(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def fix_duplicate_workflow_statuses(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     Remove fases de workflow duplicadas causadas por merge.
     Mantém apenas a primeira ocorrência de cada fase (por nome).
@@ -207,7 +207,7 @@ async def fix_duplicate_workflow_statuses(user: dict = Depends(require_roles([Us
 
 
 @router.post("/processes/fix-duplicates")
-async def fix_duplicate_processes(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def fix_duplicate_processes(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     Remove processos duplicados causados por merge.
     
@@ -672,7 +672,7 @@ async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, U
 # ============== PROCESS NUMBER MIGRATION ==============
 
 @router.post("/migrate-process-numbers")
-async def migrate_process_numbers(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def migrate_process_numbers(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     Atribuir números sequenciais a todos os processos que não têm.
     Os processos são ordenados por data de criação (mais antigos primeiro).
@@ -713,7 +713,7 @@ async def migrate_process_numbers(user: dict = Depends(require_roles([UserRole.A
 
 
 @router.post("/update-process-active-status")
-async def update_process_active_status(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def update_process_active_status(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     Atualizar o campo is_active de todos os processos baseado no status.
     Processos em 'desistencias' ou 'concluidos' são marcados como inativos.
@@ -767,7 +767,7 @@ DEFAULT_NOTIFICATION_PREFS = {
 @router.get("/ai-training")
 async def get_ai_training_data(
     category: str = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém os dados de treino personalizados do agente IA.
@@ -802,7 +802,7 @@ async def get_ai_training_data(
 @router.post("/ai-training")
 async def add_ai_training_entry(
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Adiciona uma nova entrada de treino para o agente IA.
@@ -850,7 +850,7 @@ async def add_ai_training_entry(
 async def update_ai_training_entry(
     entry_id: str,
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Actualiza uma entrada de treino existente.
@@ -889,7 +889,7 @@ async def update_ai_training_entry(
 @router.delete("/ai-training/{entry_id}")
 async def delete_ai_training_entry(
     entry_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Remove uma entrada de treino.
@@ -905,7 +905,7 @@ async def delete_ai_training_entry(
 @router.get("/ai-training/prompt")
 async def get_ai_training_prompt(
     category: str = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Gera o prompt de treino consolidado a partir das entradas activas.
@@ -963,7 +963,7 @@ async def get_ai_training_prompt(
 @router.get("/notification-preferences/{user_id}")
 async def get_notification_preferences(
     user_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém as preferências de notificação de um utilizador.
@@ -991,7 +991,7 @@ async def get_notification_preferences(
 async def update_notification_preferences(
     user_id: str,
     preferences: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Actualiza as preferências de notificação de um utilizador.
@@ -1020,7 +1020,7 @@ async def update_notification_preferences(
 
 @router.get("/notification-preferences")
 async def get_all_notification_preferences(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Lista preferências de todos os utilizadores."""
     users = await db.users.find({}, {"_id": 0, "id": 1, "email": 1, "name": 1, "role": 1}).to_list(500)
@@ -1050,7 +1050,7 @@ async def get_all_notification_preferences(
 @router.post("/notification-preferences/bulk-update")
 async def bulk_update_notification_preferences(
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Actualiza preferências de múltiplos utilizadores de uma vez.
@@ -1096,7 +1096,7 @@ async def get_system_error_logs(
     error_type: str = None,
     resolved: bool = None,
     days: int = 7,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém logs de erros do sistema com filtros e paginação.
@@ -1125,7 +1125,7 @@ async def get_system_error_logs(
 @router.get("/system-logs/stats")
 async def get_system_logs_stats(
     days: int = 7,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém estatísticas de erros dos últimos N dias."""
     from services.system_error_logger import system_error_logger
@@ -1135,7 +1135,7 @@ async def get_system_logs_stats(
 @router.get("/system-logs/{error_id}")
 async def get_system_log_detail(
     error_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém detalhes de um erro específico."""
     from services.system_error_logger import system_error_logger
@@ -1148,7 +1148,7 @@ async def get_system_log_detail(
 @router.post("/system-logs/mark-read")
 async def mark_errors_as_read(
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Marca erros como lidos.
@@ -1168,7 +1168,7 @@ async def mark_errors_as_read(
 async def resolve_system_error(
     error_id: str,
     data: dict = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Marca um erro como resolvido.
@@ -1194,7 +1194,7 @@ async def resolve_system_error(
 @router.post("/system-logs/bulk-resolve")
 async def bulk_resolve_system_errors(
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Marca múltiplos erros como resolvidos em massa.
@@ -1221,7 +1221,7 @@ async def bulk_resolve_system_errors(
 
 @router.post("/system-logs/resolve-all")
 async def resolve_all_system_errors(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Marca TODOS os erros não resolvidos como resolvidos.
@@ -1242,7 +1242,7 @@ async def resolve_all_system_errors(
 @router.delete("/system-logs/cleanup")
 async def cleanup_old_system_logs(
     days: int = 90,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Remove logs antigos (mais de N dias)."""
     from services.system_error_logger import system_error_logger
@@ -1255,7 +1255,7 @@ async def cleanup_old_system_logs(
 
 @router.get("/db/indexes")
 async def get_database_indexes(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Lista todos os índices de todas as colecções principais.
@@ -1275,7 +1275,7 @@ async def get_ai_import_logs(
     status: str = None,
     days: int = 7,
     client_name: str = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém logs de importação massiva IA para integração no menu de Logs do sistema.
@@ -1352,7 +1352,7 @@ async def get_ai_import_logs(
 @router.post("/ai-import-logs/{log_id}/resolve")
 async def resolve_ai_import_log(
     log_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Marca um log de importação como resolvido.
@@ -1389,7 +1389,7 @@ async def resolve_ai_import_log(
 @router.post("/ai-import-logs/bulk-resolve")
 async def bulk_resolve_ai_import_logs(
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Marca múltiplos logs de importação como resolvidos em massa.
@@ -1439,7 +1439,7 @@ async def bulk_resolve_ai_import_logs(
 async def get_ai_import_logs_grouped(
     days: int = 7,
     status: str = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém logs de importação IA agrupados por cliente.
@@ -1520,7 +1520,7 @@ async def get_ai_import_logs_v2(
     days: int = 7,
     client_name: str = None,
     document_type: str = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém logs de importação IA com dados categorizados.
@@ -1615,7 +1615,7 @@ async def get_ai_import_logs_v2(
 @router.get("/ai-import-logs-v2/{log_id}")
 async def get_ai_import_log_detail(
     log_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém detalhes de um log de importação específico.
@@ -1634,7 +1634,7 @@ async def get_ai_import_log_detail(
 
 @router.post("/db/indexes/repair")
 async def repair_database_indexes(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Remove índices antigos/incorretos e recria os correctos.
@@ -1659,7 +1659,7 @@ async def repair_database_indexes(
 async def drop_specific_index(
     collection: str,
     index_name: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Remove um índice específico de uma colecção.
@@ -1734,7 +1734,7 @@ async def cleanup_old_error_logs(
 
 @router.get("/jobs/health")
 async def get_jobs_health(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Verifica o estado dos jobs em background.
@@ -1823,7 +1823,7 @@ async def get_jobs_health(
 @router.post("/jobs/cancel/{job_id}")
 async def cancel_stuck_job(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Cancela/marca um job travado como falhado.

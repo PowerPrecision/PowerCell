@@ -25,14 +25,13 @@ const LoginPage = () => {
       toast.success("Login efetuado com sucesso!");
       
       // Redirecionar baseado no role
-      if (user.role === "admin" || user.role === "ceo") {
+      if (user.role === "admin") {
         navigate("/admin");
       } else if (user.role === "cliente") {
         navigate("/cliente");
-      } else if (["consultor", "mediador", "intermediario", "consultor_intermediario", "consultor_mediador", "diretor", "administrativo", "indexacao", "gestor_documentos"].includes(user.role)) {
-        navigate("/staff");
       } else {
-        navigate("/");
+        // CEO e outros staff vão para /staff
+        navigate("/staff");
       }
     } catch (error) {
       console.error("Login error:", error);

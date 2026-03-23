@@ -364,7 +364,7 @@ async def extract_from_html(
 
 @router.get("/cache/stats")
 async def get_cache_stats(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Retorna estatísticas do cache de scraping.
@@ -428,7 +428,7 @@ async def get_cache_stats(
 @router.delete("/cache/clear")
 async def clear_scraper_cache(
     url: Optional[str] = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Limpa o cache de scraping.
