@@ -53,6 +53,7 @@ const TasksPanel = ({
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [showCreatedByMe, setShowCreatedByMe] = useState(false);  // Filtro para tarefas criadas por mim
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   
@@ -66,7 +67,7 @@ const TasksPanel = ({
 
   useEffect(() => {
     fetchData();
-  }, [processId, showCompleted, showOnlyMyTasks]);
+  }, [processId, showCompleted, showOnlyMyTasks, showCreatedByMe]);
 
   const fetchData = async () => {
     try {
@@ -75,11 +76,16 @@ const TasksPanel = ({
       let tasksRes;
       if (processId) {
         tasksRes = await getProcessTasks(processId);
-      } else if (showOnlyMyTasks) {
+      } else if (showOnlyMyTasks && !showCreatedByMe) {
         // Buscar apenas tarefas atribuídas ao utilizador actual
         tasksRes = await getMyTasks();
       } else {
-        tasksRes = await getTasks({ include_completed: showCompleted });
+        // Buscar tarefas com filtros
+        const params = { include_completed: showCompleted };
+        if (showCreatedByMe) {
+          params.created_by_me = true;
+        }
+        tasksRes = await getTasks(params);
       }
       
       const usersRes = await getUsers();
@@ -293,16 +299,30 @@ const TasksPanel = ({
           </div>
         </CardHeader>
         <CardContent>
-          {/* Filtro de concluídas */}
-          <div className="flex items-center gap-2 mb-4">
-            <Checkbox
-              id="showCompleted"
-              checked={showCompleted}
-              onCheckedChange={setShowCompleted}
-            />
-            <Label htmlFor="showCompleted" className="text-sm text-muted-foreground cursor-pointer">
-              Mostrar concluídas
-            </Label>
+          {/* Filtros */}
+          <div className="flex items-center gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="showCompleted"
+                checked={showCompleted}
+                onCheckedChange={setShowCompleted}
+              />
+              <Label htmlFor="showCompleted" className="text-sm text-muted-foreground cursor-pointer">
+                Mostrar concluídas
+              </Label>
+            </div>
+            {!processId && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="showCreatedByMe"
+                  checked={showCreatedByMe}
+                  onCheckedChange={setShowCreatedByMe}
+                />
+                <Label htmlFor="showCreatedByMe" className="text-sm text-muted-foreground cursor-pointer">
+                  Criadas por mim
+                </Label>
+              </div>
+            )}
           </div>
 
           {/* Lista de tarefas */}

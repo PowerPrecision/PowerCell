@@ -330,7 +330,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     if user["role"] in [UserRole.INTERMEDIARIO, UserRole.MEDIADOR]:
         process_doc["assigned_mediador_id"] = user["id"]
         process_doc["mediador_name"] = user["name"]
-    elif user["role"] == UserRole.CONSULTOR:
+    elif user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR]:
         process_doc["assigned_consultor_id"] = user["id"]
         process_doc["consultor_name"] = user["name"]
     
@@ -389,18 +389,13 @@ async def get_processes(user: dict = Depends(get_current_user)):
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO]:
-        # Admin, CEO e Administrativo vêem todos os processos
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+        # Admin, CEO, Administrativo e Diretor vêem todos os processos
         pass
     elif role == UserRole.CONSULTOR:
         query["assigned_consultor_id"] = user["id"]
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
         query["assigned_mediador_id"] = user["id"]
-    elif role == UserRole.DIRETOR:
-        query["$or"] = [
-            {"assigned_consultor_id": user["id"]},
-            {"assigned_mediador_id": user["id"]}
-        ]
     
     processes = await db.processes.find(query, {"_id": 0}).sort("client_name", 1).to_list(1000)
     # Desencriptar dados sensíveis
@@ -440,17 +435,13 @@ async def get_processes_paginated(
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO]:
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+        # Admin, CEO, Administrativo e Diretor vêem todos os processos
         pass
     elif role == UserRole.CONSULTOR:
         query["assigned_consultor_id"] = user["id"]
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
         query["assigned_mediador_id"] = user["id"]
-    elif role == UserRole.DIRETOR:
-        query["$or"] = [
-            {"assigned_consultor_id": user["id"]},
-            {"assigned_mediador_id": user["id"]}
-        ]
     
     # Adicionar filtros opcionais
     if status:
@@ -519,15 +510,10 @@ async def get_kanban_board(
         query["assigned_consultor_id"] = user["id"]
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
         query["assigned_mediador_id"] = user["id"]
-    elif role == UserRole.DIRETOR:
-        query["$or"] = [
-            {"assigned_consultor_id": user["id"]},
-            {"assigned_mediador_id": user["id"]}
-        ]
-    # Admin, CEO e Administrativo see all (no base filter)
+    # Admin, CEO, Administrativo e Diretor see all (no base filter)
     
     # Apply additional filters (only for roles that can see all)
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO]:
+    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         if consultor_id:
             if consultor_id == "none":
                 # Sem consultor atribuído = null, undefined, ou string vazia

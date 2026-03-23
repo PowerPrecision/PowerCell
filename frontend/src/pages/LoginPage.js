@@ -25,11 +25,11 @@ const LoginPage = () => {
       toast.success("Login efetuado com sucesso!");
       
       // Redirecionar baseado no role
-      if (user.role === "admin") {
+      if (user.role === "admin" || user.role === "ceo") {
         navigate("/admin");
       } else if (user.role === "cliente") {
         navigate("/cliente");
-      } else if (["consultor", "mediador", "intermediario", "consultor_intermediario", "consultor_mediador", "ceo", "diretor", "administrativo", "indexacao", "gestor_documentos"].includes(user.role)) {
+      } else if (["consultor", "mediador", "intermediario", "consultor_intermediario", "consultor_mediador", "diretor", "administrativo", "indexacao", "gestor_documentos"].includes(user.role)) {
         navigate("/staff");
       } else {
         navigate("/");

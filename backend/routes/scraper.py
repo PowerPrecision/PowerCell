@@ -428,7 +428,7 @@ async def get_cache_stats(
 @router.delete("/cache/clear")
 async def clear_scraper_cache(
     url: Optional[str] = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Limpa o cache de scraping.

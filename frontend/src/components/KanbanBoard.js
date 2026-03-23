@@ -423,16 +423,6 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
           </p>
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          {/* Botão para criar novo cliente */}
-          {canCreateClient && (
-            <Button 
-              onClick={() => setShowCreateDialog(true)}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Novo Cliente</span>
-            </Button>
-          )}
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input

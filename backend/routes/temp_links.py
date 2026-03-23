@@ -202,7 +202,7 @@ async def cancel_temp_link(
 @router.delete("/{link_id}")
 async def delete_temp_link(
     link_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Elimina um link temporário (apenas admin).

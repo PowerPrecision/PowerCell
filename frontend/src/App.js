@@ -48,6 +48,7 @@ const DiagnosticsPage = React.lazy(() => import("./pages/DiagnosticsPage"));
 const ExpiringDocumentsDashboard = React.lazy(() => import("./pages/ExpiringDocumentsDashboard"));
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const ClientRegistrationsPage = React.lazy(() => import("./pages/ClientRegistrationsPage"));
+const WorkflowStatusesPage = React.lazy(() => import("./pages/WorkflowStatusesPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -99,8 +100,8 @@ const DashboardRedirect = () => {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin vai para /admin, todos os outros staff vão para /staff
-  if (user.role === "admin") {
+  // Admin e CEO vão para /admin, todos os outros staff vão para /staff
+  if (user.role === "admin" || user.role === "ceo") {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/staff" replace />;
@@ -120,7 +121,7 @@ const RootRedirect = () => {
 
   // Se autenticado, redireciona para o dashboard apropriado
   if (user) {
-    if (user.role === "admin") {
+    if (user.role === "admin" || user.role === "ceo") {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/staff" replace />;
@@ -272,6 +273,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
                 <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Workflow Statuses - Admin and CEO */}
+          <Route
+            path="/workflow-estados"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <WorkflowStatusesPage />
               </ProtectedRoute>
             }
           />
