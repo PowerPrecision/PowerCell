@@ -40,9 +40,13 @@ const CalendarTab = ({
   // Verificar se é CEO ou Admin (pode ver todos os calendários)
   const canViewAllCalendars = currentUser?.role === "ceo" || currentUser?.role === "admin";
 
-  // Lista de utilizadores para filtro (excluindo clientes)
+  // Lista de utilizadores para filtro (excluindo clientes, admin e ceo)
   const staffUsers = useMemo(() => {
-    return users?.filter(u => u.role !== "cliente") || [];
+    return users?.filter(u => 
+      u.role !== "cliente" && 
+      u.role !== "admin" && 
+      u.role !== "ceo"
+    ) || [];
   }, [users]);
 
   // Ordenar e filtrar eventos do calendário

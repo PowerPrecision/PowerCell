@@ -97,7 +97,12 @@ const TasksPanel = ({
       }
       
       setTasks(filteredTasks);
-      setUsers(usersRes.data.filter(u => u.role !== "cliente"));
+      // Filtrar: não clientes, não admin, não ceo
+      setUsers(usersRes.data.filter(u => 
+        u.role !== "cliente" && 
+        u.role !== "admin" && 
+        u.role !== "ceo"
+      ));
     } catch (error) {
       console.error("Erro ao carregar tarefas:", error);
       toast.error("Erro ao carregar tarefas");

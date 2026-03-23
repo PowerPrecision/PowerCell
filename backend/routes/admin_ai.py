@@ -22,7 +22,7 @@ router = APIRouter(prefix="/admin", tags=["Admin - AI"])
 # ============== AI CONFIGURATION ==============
 
 @router.get("/ai-config")
-async def get_ai_configuration(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_ai_configuration(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """Obtém a configuração actual de IA."""
     from config import AI_MODELS, AI_CONFIG_DEFAULTS, GEMINI_API_KEY, EMERGENT_LLM_KEY
     from services.ai_page_analyzer import get_ai_config
@@ -75,7 +75,7 @@ async def get_ai_configuration(user: dict = Depends(require_roles([UserRole.ADMI
 @router.put("/ai-config")
 async def update_ai_configuration(
     config: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Actualiza a configuração de IA."""
     from services.system_config import get_system_config, update_config_section
@@ -93,7 +93,7 @@ async def update_ai_configuration(
 
 
 @router.get("/ai-models")
-async def list_ai_models(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def list_ai_models(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """Lista todos os modelos de IA configurados."""
     from config import AI_MODELS
     
@@ -119,7 +119,7 @@ async def create_ai_model(
     cost_per_1k_input: float = 0.0,
     cost_per_1k_output: float = 0.0,
     max_tokens: int = 4096,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Cria um novo modelo de IA."""
     existing = await db.ai_models.find_one({"key": key})
@@ -153,7 +153,7 @@ async def update_ai_model(
     cost_per_1k_input: float = None,
     cost_per_1k_output: float = None,
     is_active: bool = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Actualiza um modelo de IA."""
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
@@ -180,7 +180,7 @@ async def update_ai_model(
 @router.delete("/ai-models/{model_key}")
 async def delete_ai_model(
     model_key: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Remove um modelo de IA."""
     result = await db.ai_models.delete_one({"key": model_key})
@@ -194,7 +194,7 @@ async def delete_ai_model(
 # ============== AI TASKS CRUD ==============
 
 @router.get("/ai-tasks")
-async def list_ai_tasks(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def list_ai_tasks(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """Lista todas as tarefas de IA configuradas."""
     db_tasks = await db.ai_tasks.find({}, {"_id": 0}).to_list(100)
     
@@ -215,7 +215,7 @@ async def create_ai_task(
     key: str,
     description: str,
     default_model: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Cria uma nova tarefa de IA."""
     existing = await db.ai_tasks.find_one({"key": key})
@@ -240,7 +240,7 @@ async def update_ai_task(
     task_key: str,
     description: str = None,
     default_model: str = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Actualiza uma tarefa de IA."""
     update_data = {}
@@ -263,7 +263,7 @@ async def update_ai_task(
 @router.delete("/ai-tasks/{task_key}")
 async def delete_ai_task(
     task_key: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Remove uma tarefa de IA."""
     result = await db.ai_tasks.delete_one({"key": task_key})
@@ -277,7 +277,7 @@ async def delete_ai_task(
 # ============== CACHE SETTINGS ==============
 
 @router.get("/cache-settings")
-async def get_cache_settings(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_cache_settings(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """Obtém configurações de cache."""
     config = await db.system_config.find_one({"type": "cache_settings"}, {"_id": 0})
     return config or {"cache_limit": 1000, "notify_at_percentage": 80}
@@ -287,7 +287,7 @@ async def get_cache_settings(user: dict = Depends(require_roles([UserRole.ADMIN,
 async def update_cache_settings(
     cache_limit: int = None,
     notify_at_percentage: int = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Actualiza configurações de cache."""
     settings = {}
@@ -318,7 +318,7 @@ async def get_ai_usage_summary(
     period: str = "month",
     task: str = None,
     model: str = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém resumo de uso de IA."""
     from services.ai_usage_tracker import ai_usage_tracker
@@ -328,7 +328,7 @@ async def get_ai_usage_summary(
 @router.get("/ai-usage/by-task")
 async def get_ai_usage_by_task(
     period: str = "month",
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém uso agregado por tarefa."""
     from services.ai_usage_tracker import ai_usage_tracker
@@ -338,7 +338,7 @@ async def get_ai_usage_by_task(
 @router.get("/ai-usage/by-model")
 async def get_ai_usage_by_model(
     period: str = "month",
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém uso agregado por modelo."""
     from services.ai_usage_tracker import ai_usage_tracker
@@ -348,7 +348,7 @@ async def get_ai_usage_by_model(
 @router.get("/ai-usage/trend")
 async def get_ai_usage_trend(
     days: int = 30,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém tendência diária de uso."""
     from services.ai_usage_tracker import ai_usage_tracker
@@ -359,7 +359,7 @@ async def get_ai_usage_trend(
 async def get_ai_usage_logs(
     limit: int = 50,
     task: str = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém logs recentes de chamadas à IA."""
     from services.ai_usage_tracker import ai_usage_tracker
@@ -369,7 +369,7 @@ async def get_ai_usage_logs(
 # ============== AI WEEKLY REPORT ==============
 
 @router.get("/ai-report-recipients")
-async def get_ai_report_recipients(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_ai_report_recipients(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """Obtém lista de destinatários do relatório semanal de IA."""
     config = await db.system_config.find_one({"type": "ai_report_config"}, {"_id": 0})
     
@@ -386,7 +386,7 @@ async def get_ai_report_recipients(user: dict = Depends(require_roles([UserRole.
 @router.post("/ai-report-recipients")
 async def update_ai_report_recipients(
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Actualiza lista de destinatários do relatório semanal."""
     recipients = data.get("recipients", [])
@@ -412,7 +412,7 @@ async def update_ai_report_recipients(
 
 
 @router.get("/ai-report-config")
-async def get_ai_report_config(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_ai_report_config(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """Obtém configuração completa do relatório semanal de IA."""
     config = await db.system_config.find_one({"type": "ai_report_config"}, {"_id": 0})
     
@@ -434,7 +434,7 @@ async def get_ai_report_config(user: dict = Depends(require_roles([UserRole.ADMI
 @router.put("/ai-report-config")
 async def update_ai_report_config(
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Actualiza configuração do relatório semanal."""
     data["type"] = "ai_report_config"
@@ -452,7 +452,7 @@ async def update_ai_report_config(
 
 @router.get("/ai-weekly-report")
 async def get_current_ai_weekly_report(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém o último relatório semanal de IA."""
     from services.ai_usage_tracker import ai_usage_tracker
@@ -489,7 +489,7 @@ async def get_current_ai_weekly_report(
 
 @router.post("/ai-weekly-report/generate")
 async def generate_ai_weekly_report(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Gera relatório semanal de IA manualmente."""
     from services.ai_usage_tracker import ai_usage_tracker
@@ -522,7 +522,7 @@ async def generate_ai_weekly_report(
 @router.get("/ai-weekly-report/history")
 async def get_ai_weekly_report_history(
     limit: int = 10,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém histórico de relatórios semanais."""
     reports = await db.ai_weekly_reports.find(

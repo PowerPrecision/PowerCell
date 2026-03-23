@@ -81,7 +81,12 @@ const TrelloIntegration = () => {
       });
       if (usersResponse.ok) {
         const usersData = await usersResponse.json();
-        setAppUsers(usersData.filter(u => u.is_active !== false));
+        // Filtrar: ativos, não admin, não ceo
+        setAppUsers(usersData.filter(u => 
+          u.is_active !== false && 
+          u.role !== "admin" && 
+          u.role !== "ceo"
+        ));
       }
     } catch (error) {
       console.error("Erro ao verificar Trello:", error);
