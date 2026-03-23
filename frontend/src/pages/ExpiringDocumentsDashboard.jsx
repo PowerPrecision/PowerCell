@@ -213,8 +213,8 @@ const ExpiringDocumentsDashboard = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSearch} className="flex flex-wrap gap-4">
-              <div className="flex-1 min-w-[200px]">
+            <form onSubmit={handleSearch} className="flex flex-wrap gap-3">
+              <div className="w-full sm:flex-1 sm:min-w-[200px]">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -228,7 +228,7 @@ const ExpiringDocumentsDashboard = () => {
               </div>
               
               <Select value={urgencyFilter} onValueChange={setUrgencyFilter}>
-                <SelectTrigger className="w-[180px]" data-testid="urgency-filter">
+                <SelectTrigger className="w-full sm:w-[160px]" data-testid="urgency-filter">
                   <SelectValue placeholder="Urgência" />
                 </SelectTrigger>
                 <SelectContent>
@@ -241,7 +241,7 @@ const ExpiringDocumentsDashboard = () => {
               
               {data?.is_management && data?.consultors_filter?.length > 0 && (
                 <Select value={consultorFilter} onValueChange={setConsultorFilter}>
-                  <SelectTrigger className="w-[200px]" data-testid="consultor-filter">
+                  <SelectTrigger className="w-full sm:w-[180px]" data-testid="consultor-filter">
                     <SelectValue placeholder="Consultor" />
                   </SelectTrigger>
                   <SelectContent>
@@ -256,7 +256,7 @@ const ExpiringDocumentsDashboard = () => {
               )}
               
               <Select value={String(daysAhead)} onValueChange={(v) => setDaysAhead(Number(v))}>
-                <SelectTrigger className="w-[150px]" data-testid="days-filter">
+                <SelectTrigger className="w-full sm:w-[130px]" data-testid="days-filter">
                   <SelectValue placeholder="Período" />
                 </SelectTrigger>
                 <SelectContent>

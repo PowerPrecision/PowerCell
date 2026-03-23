@@ -682,25 +682,23 @@ const DashboardLayout = ({ children, title }) => {
         <header 
           className={`border-b border-border bg-card sticky ${impersonateOffset} z-30 h-16`}
         >
-          <div className={`flex items-center justify-between h-full px-4 lg:px-6 ${
-            headerCollapsed ? 'gap-2' : 'gap-4'
-          }`}>
-            <div className="flex items-center gap-4">
+          <div className={`flex items-center justify-between h-full px-4 lg:px-6 gap-2`}>
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <Button
                 variant="ghost"
                 size="icon"
-                className="lg:hidden"
+                className="lg:hidden flex-shrink-0"
                 onClick={() => setSidebarOpen(true)}
                 aria-label="Abrir menu"
               >
                 <Menu className="h-5 w-5" />
               </Button>
-              <h1 className={`font-semibold tracking-tight transition-all duration-300 ${
-                headerCollapsed ? 'text-base' : 'text-xl'
+              <h1 className={`font-semibold tracking-tight transition-all duration-300 truncate ${
+                headerCollapsed ? 'text-sm' : 'text-base lg:text-xl'
               }`}>{title}</h1>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 flex-shrink-0">
               {/* Search Button (Ctrl+K) */}
               {headerCollapsed ? (
                 <Button 

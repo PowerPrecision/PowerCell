@@ -337,7 +337,7 @@ export default function ClientsPage() {
           <Card className="md:col-span-2">
             <CardContent className="pt-4">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 min-w-[200px]">
+                <div className="relative w-full sm:flex-1 sm:min-w-[200px]">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="Pesquisar por nome, email ou NIF..."
@@ -347,8 +347,9 @@ export default function ClientsPage() {
                     data-testid="search-clients-input"
                   />
                 </div>
+                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[170px]" data-testid="status-filter">
+                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="status-filter">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -373,7 +374,7 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={phaseFilter} onValueChange={setPhaseFilter}>
-                  <SelectTrigger className="w-[160px]" data-testid="phase-filter">
+                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="phase-filter">
                     <Filter className="h-4 w-4 mr-2" />
                     <SelectValue placeholder="Fase" />
                   </SelectTrigger>
@@ -387,7 +388,7 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={assignmentFilter} onValueChange={setAssignmentFilter}>
-                  <SelectTrigger className="w-[160px]" data-testid="assignment-filter">
+                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="assignment-filter">
                     <Users className="h-4 w-4 mr-2" />
                     <SelectValue placeholder="Atribuição" />
                   </SelectTrigger>
@@ -404,7 +405,7 @@ export default function ClientsPage() {
                   setSortField(field);
                   setSortOrder(order);
                 }}>
-                  <SelectTrigger className="w-[150px]" data-testid="sort-field">
+                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="sort-field">
                     <ArrowUpDown className="h-4 w-4 mr-2" />
                     <SelectValue placeholder="Ordenar" />
                   </SelectTrigger>
@@ -417,6 +418,7 @@ export default function ClientsPage() {
                     <SelectItem value="process_count_asc">Menos Processos</SelectItem>
                   </SelectContent>
                 </Select>
+                </div>
               </div>
             </CardContent>
           </Card>
