@@ -100,10 +100,14 @@ class PersonalData(BaseModel):
     Dados pessoais do titular.
     
     Campos activos:
+    - nome_completo (sincronizado com client_name do processo)
     - nif (validado: 9 dígitos), documento_id, naturalidade, nacionalidade, morada_fiscal
     - birth_date/data_nascimento, estado_civil, compra_tipo, menor_35_anos
     - data_validade_cc, sexo, altura, nome_pai, nome_mae
     """
+    # Nome completo (sincronizado com client_name)
+    nome_completo: Optional[str] = Field(None, max_length=200, description="Nome completo do cliente")
+    nome: Optional[str] = Field(None, max_length=200, description="Nome completo (alias)")
     # Dados básicos (activos) com constraints
     nif: Optional[str] = Field(None, max_length=9, description="NIF - 9 dígitos")
     documento_id: Optional[str] = Field(None, max_length=30, description="Número do documento de ID")
@@ -133,7 +137,7 @@ class PersonalData(BaseModel):
             v = str(int(v))
         return validate_nif(v)
     
-    @field_validator('naturalidade', 'nacionalidade', 'nome_pai', 'nome_mae', mode='before')
+    @field_validator('nome_completo', 'nome', 'naturalidade', 'nacionalidade', 'nome_pai', 'nome_mae', mode='before')
     @classmethod
     def sanitize_text_fields(cls, v):
         """Sanitiza campos de texto."""
