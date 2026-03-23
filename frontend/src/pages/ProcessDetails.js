@@ -73,7 +73,7 @@ import CPCVModal from "../components/CPCVModal";
 import ProcessStickyHeader from "../components/ProcessStickyHeader";
 import DSTICalculator from "../components/DSTICalculator";
 import RiskCalculator from "../components/RiskCalculator";
-import TempLinksManager from "../components/TempLinksManager";
+import TempLinkButton from "../components/TempLinkButton";
 import {
   ArrowLeft,
   User,
@@ -1144,6 +1144,11 @@ const ProcessDetails = () => {
             {/* Calculadoras */}
             {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
               <>
+                <TempLinkButton
+                  processId={id}
+                  clientName={process?.client_name}
+                  clientEmail={process?.client_email}
+                />
                 <DSTICalculator
                   trigger={
                     <Button
@@ -1250,28 +1255,6 @@ const ProcessDetails = () => {
           }}
           token={token}
         />
-
-        {/* Links Temporários para Documentação */}
-        {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
-          <Card className="border-border">
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Link2 className="h-5 w-5 text-teal-600" />
-                Links Temporários
-              </CardTitle>
-              <CardDescription>
-                Crie links para o cliente carregar ou receber documentação
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <TempLinksManager
-                processId={id}
-                clientName={process?.client_name}
-                clientEmail={process?.client_email}
-              />
-            </CardContent>
-          </Card>
-        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}

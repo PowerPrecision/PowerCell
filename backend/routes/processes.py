@@ -990,6 +990,12 @@ async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depe
         if data.personal_data and can_update_personal:
             await log_data_changes(process_id, user, process.get("personal_data"), data.personal_data.model_dump(), "dados pessoais")
             update_data["personal_data"] = data.personal_data.model_dump()
+            
+            # Atualizar client_name se nome_completo ou nome for fornecido
+            personal_dict = data.personal_data.model_dump()
+            new_name = personal_dict.get("nome_completo") or personal_dict.get("nome")
+            if new_name:
+                update_data["client_name"] = new_name
         
         if data.financial_data and can_update_financial:
             await log_data_changes(process_id, user, process.get("financial_data"), data.financial_data.model_dump(), "dados financeiros")
