@@ -215,7 +215,7 @@ const NotificationsDropdown = () => {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80" data-testid="notifications-dropdown">
+      <DropdownMenuContent align="end" className="w-[min(320px,calc(100vw-1rem))]" data-testid="notifications-dropdown">
         <div className="flex items-center justify-between px-3 py-2 border-b">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-sm">Notificações</span>
