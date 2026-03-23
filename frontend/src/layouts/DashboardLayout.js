@@ -146,8 +146,8 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const getNavItems = () => {
-    // Determinar o href correcto para o dashboard
-    const dashboardHref = (user?.role === "admin" || user?.role === "ceo") ? "/admin" : "/staff";
+    // Admin vai para /admin, CEO e outros staff vão para /staff
+    const dashboardHref = user?.role === "admin" ? "/admin" : "/staff";
     
     const baseItems = [
       {
@@ -178,8 +178,84 @@ const DashboardLayout = ({ children, title }) => {
       ];
     }
 
-    // Admin e CEO têm acesso ao mesmo menu
-    if (user?.role === "admin" || user?.role === "ceo") {
+    // CEO tem menu limitado
+    if (user?.role === "ceo") {
+      return {
+        main: [
+          ...baseItems,
+          statsItem,
+          {
+            label: "Quadro Geral",
+            icon: LayoutGrid,
+            href: "/staff",
+          },
+        ],
+        groups: [
+          {
+            id: "negocio",
+            label: "Negócio",
+            icon: Building2,
+            items: [
+              {
+                label: "Utilizadores",
+                icon: Users,
+                href: "/utilizadores",
+              },
+              {
+                label: "Registo de Clientes",
+                icon: Users,
+                href: "/registos-clientes",
+              },
+              {
+                label: "Processos",
+                icon: User,
+                href: "/clientes",
+              },
+              {
+                label: "Gestor de Visitas",
+                icon: Search,
+                href: "/leads",
+              },
+              {
+                label: "Imóveis",
+                icon: Building2,
+                href: "/imoveis",
+              },
+              {
+                label: "Minutas",
+                icon: FileArchive,
+                href: "/minutas",
+              },
+              {
+                label: "Validades Docs",
+                icon: AlertCircle,
+                href: "/validades",
+              },
+            ],
+          },
+          {
+            id: "configuracoes",
+            label: "Configurações",
+            icon: Cog,
+            items: [
+              {
+                label: "Estados do Workflow",
+                icon: Settings,
+                href: "/workflow-estados",
+              },
+              {
+                label: "RGPD",
+                icon: FileSignature,
+                href: "/admin/rgpd",
+              },
+            ],
+          },
+        ],
+      };
+    }
+
+    // Admin tem menu completo
+    if (user?.role === "admin") {
       return {
         main: [
           ...baseItems,

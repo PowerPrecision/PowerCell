@@ -42,7 +42,7 @@ class BackupRequest(BaseModel):
 # ====================================================================
 @router.get("/statistics")
 async def get_statistics(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém estatísticas dos backups.
@@ -66,7 +66,7 @@ async def get_statistics(
 async def trigger_backup(
     request: BackupRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Triggera um backup manual.
@@ -132,7 +132,7 @@ async def trigger_backup(
 @router.get("/history")
 async def get_history(
     limit: int = 20,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém histórico de backups.
@@ -151,7 +151,7 @@ async def get_history(
 
 @router.post("/verify")
 async def verify_backups(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Verifica integridade dos backups.
@@ -213,7 +213,7 @@ async def verify_backups(
 
 @router.get("/config")
 async def get_backup_config(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém configuração actual do sistema de backup.
@@ -243,7 +243,7 @@ async def get_backup_config(
 @router.post("/run-now")
 async def run_backup_now(
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Executa backup imediato com upload para S3.
@@ -301,7 +301,7 @@ async def run_backup_now(
 @router.get("/status/{backup_id}")
 async def get_backup_status(
     backup_id: str,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
     Obtém estado de um backup específico.
