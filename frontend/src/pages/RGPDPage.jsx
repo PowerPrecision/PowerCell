@@ -117,8 +117,11 @@ const SignaturePad = ({ onSignatureChange }) => {
     setIsDrawing(true);
     setHasSignature(true);
     
-    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
-    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
+    // Escalar coordenadas para o tamanho do buffer do canvas
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = ((e.clientX || e.touches?.[0]?.clientX) - rect.left) * scaleX;
+    const y = ((e.clientY || e.touches?.[0]?.clientY) - rect.top) * scaleY;
     
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -131,8 +134,11 @@ const SignaturePad = ({ onSignatureChange }) => {
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
     
-    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
-    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
+    // Escalar coordenadas para o tamanho do buffer do canvas
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = ((e.clientX || e.touches?.[0]?.clientX) - rect.left) * scaleX;
+    const y = ((e.clientY || e.touches?.[0]?.clientY) - rect.top) * scaleY;
     
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -159,11 +165,11 @@ const SignaturePad = ({ onSignatureChange }) => {
   return (
     <div className="space-y-2">
       <Label>Assinatura *</Label>
-      <div className="border rounded-lg overflow-hidden bg-white">
+      <div className="border border-border rounded-lg overflow-hidden bg-white dark:bg-slate-100">
         <canvas
           ref={canvasRef}
-          width={400}
-          height={150}
+          width={600}
+          height={180}
           className="w-full cursor-crosshair touch-none"
           onMouseDown={startDrawing}
           onMouseMove={draw}
@@ -174,6 +180,7 @@ const SignaturePad = ({ onSignatureChange }) => {
           onTouchEnd={stopDrawing}
         />
       </div>
+      <p className="text-xs text-muted-foreground">Desenhe a sua assinatura na área acima</p>
       {hasSignature && (
         <Button type="button" variant="outline" size="sm" onClick={clearSignature}>
           Limpar Assinatura
@@ -322,10 +329,10 @@ const RGPDPage = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-          <p className="mt-4 text-gray-600">A verificar token...</p>
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+          <p className="mt-4 text-muted-foreground">A verificar token...</p>
         </div>
       </div>
     );
@@ -334,14 +341,14 @@ const RGPDPage = () => {
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardContent className="pt-6">
             <div className="text-center">
-              <AlertTriangle className="h-12 w-12 text-red-500 mx-auto" />
-              <h2 className="mt-4 text-xl font-semibold text-gray-900">Link Inválido</h2>
-              <p className="mt-2 text-gray-600">{error}</p>
-              <p className="mt-4 text-sm text-gray-500">
+              <AlertTriangle className="h-12 w-12 text-destructive mx-auto" />
+              <h2 className="mt-4 text-xl font-semibold text-foreground">Link Inválido</h2>
+              <p className="mt-2 text-muted-foreground">{error}</p>
+              <p className="mt-4 text-sm text-muted-foreground">
                 O link pode ter expirado (24h) ou já ter sido utilizado.
                 Por favor contacte o seu intermediário de crédito.
               </p>
@@ -355,13 +362,13 @@ const RGPDPage = () => {
   // Success state
   if (success) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardContent className="pt-6">
             <div className="text-center">
               <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
-              <h2 className="mt-4 text-xl font-semibold text-gray-900">RGPD Assinado!</h2>
-              <p className="mt-2 text-gray-600">
+              <h2 className="mt-4 text-xl font-semibold text-foreground">RGPD Assinado!</h2>
+              <p className="mt-2 text-muted-foreground">
                 O seu documento RGPD foi assinado com sucesso.
                 Uma cópia foi enviada para o seu intermediário de crédito.
               </p>
@@ -374,70 +381,70 @@ const RGPDPage = () => {
 
   // Form
   return (
-    <div className="min-h-screen bg-gray-100 py-8 px-4">
+    <div className="min-h-screen bg-muted/30 py-8 px-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+        <div className="bg-card rounded-lg shadow-sm p-5 mb-6 border border-border">
           <div className="flex items-center justify-between">
             <img 
               src="https://5af40e69fb2205f1674bdd6edbe227cd.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1744120174601x242645494868973340/logo-transp-crm-ok-300x90%20%281%29.png" 
               alt="Precision Crédito" 
-              className="h-12"
+              className="h-10"
             />
             <div className="flex items-center gap-2">
               <img 
                 src="https://f0e785c1333181247df815fb60475618.cdn.bubble.io/cdn-cgi/image/w=64,h=64,f=auto,dpr=1,fit=contain/f1701108491434x891671701074144900/bandeira%20%281%29.png"
                 alt="Portugal"
-                className="h-6"
+                className="h-5"
               />
-              <span className="text-sm text-gray-600">Português</span>
+              <span className="text-sm text-muted-foreground">Português</span>
             </div>
           </div>
         </div>
 
         {/* Alerta de segurança */}
-        <Alert className="mb-6 border-amber-200 bg-amber-50">
-          <Clock className="h-4 w-4 text-amber-600" />
-          <AlertDescription className="text-amber-800">
+        <Alert className="mb-6 border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800">
+          <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <AlertDescription className="text-amber-800 dark:text-amber-300">
             <strong>Atenção:</strong> Este link expira em 24 horas por motivos de segurança.
           </AlertDescription>
         </Alert>
 
         {/* Informação ao consumidor */}
         <Card className="mb-6">
-          <CardHeader className="bg-blue-50">
-            <CardTitle className="text-center text-base">
+          <CardHeader className="bg-primary/10 dark:bg-primary/5 border-b border-border rounded-t-lg">
+            <CardTitle className="text-center text-base text-foreground">
               INFORMAÇÃO AO CONSUMIDOR NO ÂMBITO DA ATIVIDADE DE INTERMEDIÁRIO DE CRÉDITO
             </CardTitle>
-            <p className="text-center text-sm text-gray-600">
+            <p className="text-center text-sm text-muted-foreground">
               Art.º 54.º do Decreto-Lei n.º81-C/2017 de 7 de Julho – Regime Jurídico dos Intermediários de Crédito
             </p>
-            <p className="text-center text-sm font-semibold">
+            <p className="text-center text-sm font-semibold text-foreground">
               Atividade sujeita à supervisão do Banco de Portugal
             </p>
           </CardHeader>
-          <CardContent className="prose prose-sm max-w-none pt-4">
-            <p>
-              <strong>Precisiontime, Lda</strong>, com sede na Rua de Santa Cruz do Castelo, n.º 22, 1.º Andar, 
-              1100-480, Lisboa, <strong>Intermediário de crédito, autorizado pelo Banco de Portugal na categoria 
+          <CardContent className="prose prose-sm max-w-none pt-4 text-foreground">
+            <p className="text-sm text-muted-foreground">
+              <strong className="text-foreground">Precisiontime, Lda</strong>, com sede na Rua de Santa Cruz do Castelo, n.º 22, 1.º Andar, 
+              1100-480, Lisboa, <strong className="text-foreground">Intermediário de crédito, autorizado pelo Banco de Portugal na categoria 
               de intermediários de crédito Vinculado, com o número de registo 0008026</strong> (consulta pública 
               da lista de intermediários de crédito autorizados pelo Banco de Portugal em{' '}
-              <a href="https://www.bportugal.pt/intermediariocreditofar/precisiontime-lda" target="_blank" rel="noopener noreferrer" className="text-blue-600">
+              <a href="https://www.bportugal.pt/intermediariocreditofar/precisiontime-lda" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
                 www.bportugal.pt
               </a>)
             </p>
-            <p>
+            <p className="text-sm text-muted-foreground">
               No âmbito da atividade que desenvolve, encontra-se habilitado para a intermediação de contratos 
               de Crédito Hipotecário e está autorizado a prestar os serviços de: apresentação ou proposta de 
               contratos de crédito a consumidores; assistência a consumidores, mediante a realização de atos 
               preparatórios ou de outros trabalhos de gestão pré-contratual relativamente a contratos de crédito 
               que não tenham sido por si apresentados ou propostos.
             </p>
-            <p>
-              <strong>Mutuantes com quem o intermediário de crédito tem contrato de vinculação:</strong>{' '}
+            <p className="text-sm text-muted-foreground">
+              <strong className="text-foreground">Mutuantes com quem o intermediário de crédito tem contrato de vinculação:</strong>{' '}
               NovoBanco S.A, Caixa Geral de Depósitos, Banco CTT, Banco Santander Totta SA, Eurobic/Abanca, Bankinter SA
             </p>
-            <p>
+            <p className="text-sm text-muted-foreground">
               O intermediário de crédito está interdito de receber ou entregar quaisquer valores relacionados 
               com a formação, execução e o cumprimento antecipado dos contratos de crédito.
             </p>
@@ -448,15 +455,15 @@ const RGPDPage = () => {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
+              <FileText className="h-5 w-5 text-primary" />
               RGPD - Regulamento Geral sobre a Proteção de Dados
             </CardTitle>
-            <p className="text-gray-600">Para darmos seguimento ao seu processo deverás preencher o RGPD.</p>
+            <p className="text-muted-foreground text-sm">Para darmos seguimento ao seu processo deverá preencher o RGPD.</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Dados pessoais */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="nome">Nome *</Label>
                   <Input
@@ -464,12 +471,12 @@ const RGPDPage = () => {
                     name="nome"
                     value={form.nome}
                     onChange={handleInputChange}
-                    placeholder="Insere o teu nome"
+                    placeholder="Insira o seu nome completo"
                     required
                   />
                 </div>
                 <div>
-                  <Label htmlFor="contribuinte">Contribuinte *</Label>
+                  <Label htmlFor="contribuinte">NIF (Contribuinte) *</Label>
                   <Input
                     id="contribuinte"
                     name="contribuinte"
@@ -478,14 +485,14 @@ const RGPDPage = () => {
                       const value = e.target.value.replace(/\D/g, '').slice(0, 9);
                       setForm(prev => ({ ...prev, contribuinte: value }));
                     }}
-                    placeholder="Insere o teu contribuinte"
+                    placeholder="9 dígitos"
                     maxLength={9}
                     required
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="tipo_documento">Tipo de Documento *</Label>
                   <Select
@@ -493,7 +500,7 @@ const RGPDPage = () => {
                     onValueChange={(value) => handleSelectChange('tipo_documento', value)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione" />
+                      <SelectValue placeholder="Selecione o tipo" />
                     </SelectTrigger>
                     <SelectContent>
                       {TIPOS_DOCUMENTO.map(doc => (
@@ -517,7 +524,7 @@ const RGPDPage = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="validade_documento">Validade do Documento</Label>
                   <Input
@@ -539,7 +546,7 @@ const RGPDPage = () => {
                     onValueChange={(value) => handleSelectChange('concelho', value)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Insere a tua Cidade" />
+                      <SelectValue placeholder="Selecione o concelho" />
                     </SelectTrigger>
                     <SelectContent>
                       {CONCELHOS.map(c => (
@@ -550,15 +557,15 @@ const RGPDPage = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
                   <Label htmlFor="morada">Morada *</Label>
                   <Input
                     id="morada"
                     name="morada"
                     value={form.morada}
                     onChange={handleInputChange}
-                    placeholder="Insere a tua morada"
+                    placeholder="Rua, número, localidade"
                     required
                   />
                 </div>
@@ -579,24 +586,24 @@ const RGPDPage = () => {
               </div>
 
               {/* Política de Privacidade */}
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <h3 className="font-semibold mb-2">POLÍTICA DE PRIVACIDADE</h3>
-                <p className="text-sm text-gray-700 mb-2">
+              <div className="bg-primary/5 dark:bg-primary/10 border border-primary/20 p-4 rounded-lg">
+                <h3 className="font-semibold mb-2 text-foreground">POLÍTICA DE PRIVACIDADE</h3>
+                <p className="text-xs text-muted-foreground mb-2">
                   (Ao abrigo do Regulamento Geral sobre a Proteção de Dados Pessoais)
                 </p>
-                <div className="text-sm text-gray-600 space-y-2 max-h-40 overflow-y-auto">
+                <div className="text-xs text-muted-foreground space-y-2 max-h-36 overflow-y-auto pr-2">
                   <p>
                     No seguimento do contacto para a prestação de um serviço de intermediação de crédito, 
                     com a licença nº 0008026 da Precisiontime, Lda, no âmbito do qual terão que ser 
                     recolhidos e tratados dados pessoais dos quais é titular, informa-se:
                   </p>
                   <p>
-                    <strong>1. IDENTIFICAÇÃO DO RESPONSÁVEL PELO TRATAMENTO:</strong><br />
+                    <strong className="text-foreground">1. IDENTIFICAÇÃO DO RESPONSÁVEL PELO TRATAMENTO:</strong><br />
                     Precisiontime, Lda, Rua de Santa Cruz do Castelo, n.º 22, 1.º Andar, 1100-480, Lisboa<br />
                     E-mail: precisiontime.geral@gmail.com | Telefone: (+351) 961405170
                   </p>
                   <p>
-                    <strong>2. DADOS PESSOAIS RECOLHIDOS:</strong><br />
+                    <strong className="text-foreground">2. DADOS PESSOAIS RECOLHIDOS:</strong><br />
                     a) Dados de identificação (nome completo, data de nascimento, documento de identificação, NIF)<br />
                     b) Dados de contacto (telefone, morada)<br />
                     c) Dados bancários (IBAN, extratos, declarações)<br />
@@ -605,7 +612,7 @@ const RGPDPage = () => {
                     f) Documentação relacionada com a habitação
                   </p>
                   <p>
-                    <strong>3. FINALIDADE DO TRATAMENTO:</strong><br />
+                    <strong className="text-foreground">3. FINALIDADE DO TRATAMENTO:</strong><br />
                     Os dados pessoais são recolhidos para a prestação do serviço de intermediação de crédito, 
                     incluindo a transferência para Instituições de Crédito para análise da situação jurídica 
                     e financeira.
@@ -616,11 +623,11 @@ const RGPDPage = () => {
               {/* Assinatura */}
               <SignaturePad onSignatureChange={handleSignatureChange} />
 
-              <p className="text-sm text-red-600">* Todos os campos são obrigatórios</p>
+              <p className="text-xs text-muted-foreground">* Campos obrigatórios</p>
 
               {/* Botões */}
               <div className="flex gap-4 justify-end">
-                <Button type="submit" disabled={submitting} className="bg-blue-600 hover:bg-blue-700">
+                <Button type="submit" disabled={submitting} className="bg-primary hover:bg-primary/90 text-primary-foreground">
                   {submitting ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -636,12 +643,12 @@ const RGPDPage = () => {
         </Card>
 
         {/* Footer */}
-        <div className="text-center text-sm text-gray-500">
+        <div className="text-center text-sm text-muted-foreground pb-4">
           <p>
-            <strong>Precisiontime, Lda</strong><br />
+            <strong className="text-foreground">Precisiontime, Lda</strong><br />
             Rua de Santa Cruz do Castelo, n.º 22, 1.º Andar<br />
             1100-480, Lisboa<br />
-            E-mail: precisiontime.geral@gmail.com | Telefone: (+351) 961405170
+            precisiontime.geral@gmail.com | (+351) 961405170
           </p>
         </div>
       </div>
