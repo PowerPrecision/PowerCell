@@ -224,14 +224,14 @@ const UsersManagementPage = () => {
 
   return (
     <DashboardLayout title="Gestão de Utilizadores">
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Users className="h-5 w-5" />
-                  Gestão de Utilizadores
+                  <Users className="h-5 w-5 shrink-0" />
+                  <span className="truncate">Gestão de Utilizadores</span>
                 </CardTitle>
                 <CardDescription>Criar, editar e eliminar utilizadores do sistema</CardDescription>
               </div>
@@ -239,9 +239,9 @@ const UsersManagementPage = () => {
                 {/* Esconder botão para roles sem permissão de criar utilizadores */}
                 {currentUser?.role !== "indexacao" && currentUser?.role !== "gestor_documentos" && (
                 <DialogTrigger asChild>
-                  <Button>
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Novo Utilizador
+                  <Button size="sm" className="shrink-0">
+                    <UserPlus className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Novo Utilizador</span>
                   </Button>
                 </DialogTrigger>
                 )}

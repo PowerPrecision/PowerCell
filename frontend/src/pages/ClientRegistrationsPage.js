@@ -234,7 +234,7 @@ const ClientRegistrationsPage = () => {
         <Card>
           <CardContent className="pt-4">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="relative flex-1 min-w-[250px]">
+              <div className="relative w-full sm:flex-1 sm:min-w-[200px]">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Pesquisar por nome, email ou NIF..."
@@ -245,7 +245,7 @@ const ClientRegistrationsPage = () => {
               </div>
               
               <Select value={hasProcessFilter} onValueChange={setHasProcessFilter}>
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-full sm:w-[160px]">
                   <Filter className="h-4 w-4 mr-2" />
                   <SelectValue placeholder="Filtrar..." />
                 </SelectTrigger>
@@ -271,7 +271,7 @@ const ClientRegistrationsPage = () => {
                 setSortField(field);
                 setSortOrder(order);
               }}>
-                <SelectTrigger className="w-[170px]">
+                <SelectTrigger className="w-full sm:w-[155px]">
                   <ArrowUpDown className="h-4 w-4 mr-2" />
                   <SelectValue placeholder="Ordenar" />
                 </SelectTrigger>
