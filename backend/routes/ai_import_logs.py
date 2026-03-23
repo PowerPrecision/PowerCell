@@ -158,9 +158,9 @@ async def delete_ai_import_log(
     user: dict = Depends(get_current_user)
 ):
     """
-    Elimina um log de importação (apenas admin).
+    Elimina um log de importação (apenas admin/ceo).
     """
-    if user.get("role") != "admin":
+    if user.get("role") not in ["admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Apenas administradores podem eliminar logs")
     
     result = await db.ai_import_logs.delete_one({"id": log_id})

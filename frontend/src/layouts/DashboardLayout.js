@@ -147,7 +147,7 @@ const DashboardLayout = ({ children, title }) => {
 
   const getNavItems = () => {
     // Determinar o href correcto para o dashboard
-    const dashboardHref = user?.role === "admin" ? "/admin" : "/staff";
+    const dashboardHref = (user?.role === "admin" || user?.role === "ceo") ? "/admin" : "/staff";
     
     const baseItems = [
       {
@@ -164,7 +164,7 @@ const DashboardLayout = ({ children, title }) => {
       href: "/estatisticas",
     };
 
-    // Definições apenas para admin
+    // Definições para admin e ceo
     const settingsItem = {
       label: "Definições",
       icon: Settings,
@@ -178,7 +178,8 @@ const DashboardLayout = ({ children, title }) => {
       ];
     }
 
-    if (user?.role === "admin") {
+    // Admin e CEO têm acesso ao mesmo menu
+    if (user?.role === "admin" || user?.role === "ceo") {
       return {
         main: [
           ...baseItems,
@@ -304,6 +305,11 @@ const DashboardLayout = ({ children, title }) => {
                 icon: FileSignature,
                 href: "/admin/rgpd",
               },
+              {
+                label: "Estados do Workflow",
+                icon: Settings,
+                href: "/workflow-estados",
+              },
             ],
           },
         ],
@@ -398,16 +404,32 @@ const DashboardLayout = ({ children, title }) => {
         href: "/validades",
       });
       
+      // Estados do Workflow apenas para Admin e CEO
+      const configItems = [];
+      if (["admin", "ceo"].includes(user?.role)) {
+        configItems.push({
+          label: "Estados do Workflow",
+          icon: Settings,
+          href: "/workflow-estados",
+        });
+      }
+      
       return {
         main: mainItems,
-        groups: negocioItems.length > 0 ? [
-          {
+        groups: [
+          ...(negocioItems.length > 0 ? [{
             id: "negocio",
             label: "Negócio",
             icon: Building2,
             items: negocioItems,
-          },
-        ] : [],
+          }] : []),
+          ...(configItems.length > 0 ? [{
+            id: "configuracoes",
+            label: "Configurações",
+            icon: Cog,
+            items: configItems,
+          }] : []),
+        ],
       };
     }
 

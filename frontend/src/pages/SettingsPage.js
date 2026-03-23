@@ -254,7 +254,7 @@ const SettingsPage = () => {
               <Bell className="h-4 w-4 mr-2" />
               Notificações
             </TabsTrigger>
-            {user?.role === "admin" && (
+            {(user?.role === "admin" || user?.role === "ceo") && (
               <TabsTrigger value="sistema" className="data-[state=active]:bg-teal-600 data-[state=active]:text-white">
                 <Settings className="h-4 w-4 mr-2" />
                 Sistema
@@ -541,8 +541,8 @@ const SettingsPage = () => {
             </div>
           </TabsContent>
 
-          {/* Tab Sistema (apenas Admin) */}
-          {user?.role === "admin" && (
+          {/* Tab Sistema (Admin e CEO) */}
+          {(user?.role === "admin" || user?.role === "ceo") && (
             <TabsContent value="sistema">
               <div className="space-y-6">
                 {/* Análise de Documentos com IA */}

@@ -66,7 +66,7 @@ async def get_statistics(
 async def trigger_backup(
     request: BackupRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Triggera um backup manual.
@@ -151,7 +151,7 @@ async def get_history(
 
 @router.post("/verify")
 async def verify_backups(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Verifica integridade dos backups.
@@ -213,7 +213,7 @@ async def verify_backups(
 
 @router.get("/config")
 async def get_backup_config(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Obtém configuração actual do sistema de backup.
@@ -243,7 +243,7 @@ async def get_backup_config(
 @router.post("/run-now")
 async def run_backup_now(
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Executa backup imediato com upload para S3.

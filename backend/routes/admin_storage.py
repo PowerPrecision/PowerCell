@@ -49,7 +49,7 @@ async def get_client_s3_mappings_alias(
 async def update_client_s3_mapping_alias(
     process_id: str = Query(...),
     s3_folder: str = Query(None),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Alias para process-s3-mappings (retrocompatibilidade)."""
     return await update_process_s3_mapping(process_id=process_id, s3_folder=s3_folder, user=user)
@@ -58,7 +58,7 @@ async def update_client_s3_mapping_alias(
 @router.post("/client-s3-mappings/bulk")
 async def batch_update_client_s3_mappings_alias(
     mappings: List[dict] = Body(...),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Alias para batch update (retrocompatibilidade)."""
     return await batch_update_process_s3_mappings(mappings=mappings, user=user)
@@ -66,7 +66,7 @@ async def batch_update_client_s3_mappings_alias(
 
 @router.post("/client-s3-mappings/fix-missing-names")
 async def fix_missing_client_names_alias(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Alias para fix-missing-names (retrocompatibilidade)."""
     return await fix_missing_client_names(user=user)
@@ -74,7 +74,7 @@ async def fix_missing_client_names_alias(
 
 @router.post("/client-s3-mappings/auto-map")
 async def auto_map_client_s3_folders(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Mapeamento automático de pastas S3 para processos baseado em nome.
@@ -165,7 +165,7 @@ async def auto_map_client_s3_folders(
 
 @router.get("/user-s3-mappings")
 async def get_user_s3_mappings(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Lista mapeamentos de utilizadores para pastas S3."""
     users = await db.users.find(
@@ -206,7 +206,7 @@ async def get_user_s3_mappings(
 async def update_user_s3_mapping(
     user_id: str = Query(...),
     s3_folder: str = Query(None),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Atualiza o mapeamento de um utilizador para uma pasta S3."""
     target_user = await db.users.find_one({"id": user_id})
@@ -238,7 +238,7 @@ async def update_user_s3_mapping(
 @router.get("/user-s3-mappings/{user_id}")
 async def get_user_s3_mapping(
     user_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Obtém mapeamento S3 de um utilizador específico."""
     target_user = await db.users.find_one(
@@ -262,7 +262,7 @@ async def get_process_s3_mappings(
     include_closed: bool = Query(False, description="Incluir processos concluídos e desistências"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Lista mapeamentos de processos para pastas S3."""
     query = {}
@@ -358,7 +358,7 @@ async def get_process_s3_mappings(
 async def update_process_s3_mapping(
     process_id: str = Query(...),
     s3_folder: str = Query(None),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Atualiza o mapeamento de um processo para uma pasta S3."""
     process = await db.processes.find_one({"id": process_id})
@@ -394,7 +394,7 @@ async def update_process_s3_mapping(
 
 @router.post("/process-s3-mappings/fix-missing-names")
 async def fix_missing_client_names(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Corrige processos que não têm client_name definido.
@@ -463,7 +463,7 @@ async def fix_missing_client_names(
 @router.post("/process-s3-mappings/batch")
 async def batch_update_process_s3_mappings(
     mappings: List[dict] = Body(...),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Atualiza mapeamentos S3 em batch para múltiplos processos."""
     results = {"updated": 0, "failed": 0, "errors": []}
@@ -518,7 +518,7 @@ async def batch_update_process_s3_mappings(
 @router.get("/s3-folder-contents")
 async def get_s3_folder_contents(
     folder_path: str = Query(...),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Lista conteúdo de uma pasta S3."""
     from services.s3_storage import s3_service

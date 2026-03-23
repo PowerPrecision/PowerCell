@@ -6,10 +6,15 @@ import KanbanBoard from "../components/KanbanBoard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Badge } from "../components/ui/badge";
-import { Loader2, LayoutGrid, Calendar, Users, FileText, CheckCircle, XCircle, TrendingUp, ClipboardList } from "lucide-react";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Loader2, LayoutGrid, Calendar, Users, FileText, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus } from "lucide-react";
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
-import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines } from "../services/api";
+import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess } from "../services/api";
 
 const roleLabels = {
   admin: "Administrador",
@@ -31,11 +36,22 @@ const StaffDashboard = () => {
   const [expiries, setExpiries] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [activeTab, setActiveTab] = useState("kanban");
+  
+  // Estado para criação de nova lead
+  const [showLeadDialog, setShowLeadDialog] = useState(false);
+  const [creatingLead, setCreatingLead] = useState(false);
+  const [newLead, setNewLead] = useState({
+    client_name: "",
+    client_email: "",
+    client_phone: "",
+    process_type: "credito_habitacao"
+  });
 
   const isAdmin = user?.role === "admin";
   const isCeo = user?.role === "ceo";
-  const canManageUsers = isAdmin;
-  const canSeeAllStats = isAdmin || isCeo;
+  const isAdminOrCeo = isAdmin || isCeo;
+  const canManageUsers = isAdminOrCeo;
+  const canSeeAllStats = isAdminOrCeo;
 
   useEffect(() => {
     fetchData();
@@ -67,6 +83,43 @@ const StaffDashboard = () => {
     navigate(`/processos-filtrados?filter=${filter}`);
   };
 
+  // Criar nova lead
+  const handleCreateLead = async () => {
+    if (!newLead.client_name.trim()) {
+      toast.error("Por favor, introduza o nome do cliente");
+      return;
+    }
+    
+    setCreatingLead(true);
+    try {
+      await createClientProcess({
+        client_name: newLead.client_name,
+        client_email: newLead.client_email,
+        process_type: newLead.process_type,
+        personal_data: {
+          nome_completo: newLead.client_name,
+          email: newLead.client_email,
+          telefone: newLead.client_phone
+        }
+      });
+      
+      toast.success(`Lead "${newLead.client_name}" criada com sucesso!`);
+      setShowLeadDialog(false);
+      setNewLead({
+        client_name: "",
+        client_email: "",
+        client_phone: "",
+        process_type: "credito_habitacao"
+      });
+      fetchData(); // Atualizar dados
+    } catch (error) {
+      console.error("Erro ao criar lead:", error);
+      toast.error(error.response?.data?.detail || "Erro ao criar lead");
+    } finally {
+      setCreatingLead(false);
+    }
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -89,6 +142,14 @@ const StaffDashboard = () => {
               <span>{canSeeAllStats ? `${stats.total_processes || 0} processos no sistema` : "Os seus processos atribuídos"}</span>
             </div>
           </div>
+          {/* Botão Nova Lead */}
+          <Button 
+            onClick={() => setShowLeadDialog(true)}
+            className="bg-teal-600 hover:bg-teal-700"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Nova Lead
+          </Button>
         </div>
 
         {/* Quick Stats - Clickable cards */}
@@ -380,6 +441,93 @@ const StaffDashboard = () => {
           )}
 
         </Tabs>
+
+        {/* Dialog para criar nova lead */}
+        <Dialog open={showLeadDialog} onOpenChange={setShowLeadDialog}>
+          <DialogContent className="sm:max-w-[500px]" aria-describedby="create-lead-description">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5" />
+                Nova Lead
+              </DialogTitle>
+              <DialogDescription id="create-lead-description">
+                Preencha os dados para criar uma nova lead. A lead aparecerá nos Registos de Clientes.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="client_name">Nome do Cliente *</Label>
+                <Input
+                  id="client_name"
+                  placeholder="Nome completo do cliente"
+                  value={newLead.client_name}
+                  onChange={(e) => setNewLead({ ...newLead, client_name: e.target.value })}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="client_email">Email</Label>
+                  <Input
+                    id="client_email"
+                    type="email"
+                    placeholder="email@exemplo.com"
+                    value={newLead.client_email}
+                    onChange={(e) => setNewLead({ ...newLead, client_email: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="client_phone">Telefone</Label>
+                  <Input
+                    id="client_phone"
+                    placeholder="+351 000 000 000"
+                    value={newLead.client_phone}
+                    onChange={(e) => setNewLead({ ...newLead, client_phone: e.target.value })}
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="process_type">Tipo de Processo</Label>
+                <Select 
+                  value={newLead.process_type} 
+                  onValueChange={(v) => setNewLead({ ...newLead, process_type: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="credito_habitacao">Crédito Habitação</SelectItem>
+                    <SelectItem value="credito_pessoal">Crédito Pessoal</SelectItem>
+                    <SelectItem value="credito_consolidado">Crédito Consolidado</SelectItem>
+                    <SelectItem value="credito_automovel">Crédito Automóvel</SelectItem>
+                    <SelectItem value="transferencia_credito">Transferência de Crédito</SelectItem>
+                    <SelectItem value="imobiliario">Imobiliário</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowLeadDialog(false)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleCreateLead} 
+                disabled={creatingLead || !newLead.client_name.trim()}
+                className="bg-teal-600 hover:bg-teal-700"
+              >
+                {creatingLead ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    A criar...
+                  </>
+                ) : "Criar Lead"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );
