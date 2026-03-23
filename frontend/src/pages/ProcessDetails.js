@@ -498,7 +498,7 @@ const ProcessDetails = () => {
     }
 
     // Verificar se o utilizador pode mudar o status
-    const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "diretor"].includes(user?.role);
+    const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "diretor", "administrativo"].includes(user?.role);
     if (!canChangeStatus) {
       return;
     }
@@ -942,15 +942,15 @@ const ProcessDetails = () => {
     return statusInfo || { label: statusName, color: "blue" };
   };
 
-  const canEditPersonal = ["cliente", "consultor", "mediador", "admin", "ceo"].includes(user?.role) && user?.role !== "indexacao";
-  const canEditFinancial = ["cliente", "consultor", "mediador", "admin", "ceo"].includes(user?.role) && user?.role !== "indexacao";
-  const canEditRealEstate = ["consultor", "admin", "ceo"].includes(user?.role) && user?.role !== "indexacao";
-  const canEditCredit = ["mediador", "admin", "ceo"].includes(user?.role) && user?.role !== "indexacao" && 
+  const canEditPersonal = ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
+  const canEditFinancial = ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
+  const canEditRealEstate = ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
+  const canEditCredit = ["mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao" && 
     (workflowStatuses.filter(s => s.order >= 3).map(s => s.name).includes(process?.status) || 
      process?.status === "ch_aprovado" || process?.status === "fase_bancaria");
-  const canChangeStatus = ["consultor", "mediador", "admin", "ceo"].includes(user?.role) && user?.role !== "indexacao";
-  const canManageDeadlines = ["consultor", "mediador", "admin", "ceo"].includes(user?.role) && user?.role !== "indexacao";
-  const canDeleteClient = ["admin", "ceo", "diretor"].includes(user?.role);
+  const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
+  const canManageDeadlines = ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
+  const canDeleteClient = ["admin", "ceo", "diretor", "administrativo"].includes(user?.role);
   
   // Role INDEXACAO: só pode ver dados e gerir documentos (upload/delete)
   const isIndexacaoRole = user?.role === "indexacao";
