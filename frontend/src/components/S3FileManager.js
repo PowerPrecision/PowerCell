@@ -75,6 +75,23 @@ import { pt } from "date-fns/locale";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+// Calcula cor de texto com contraste adequado para a cor de fundo
+const getContrastColor = (bgColor) => {
+  if (!bgColor) return '#ffffff';
+  const namedColors = {
+    yellow: '#EAB308', orange: '#F97316', blue: '#3B82F6',
+    green: '#22C55E', red: '#EF4444', purple: '#A855F7', gray: '#6B7280',
+  };
+  let hex = namedColors[bgColor?.toLowerCase()] || bgColor;
+  if (!hex.startsWith('#')) return '#ffffff';
+  const clean = hex.replace('#', '');
+  const r = parseInt(clean.substring(0, 2), 16);
+  const g = parseInt(clean.substring(2, 4), 16);
+  const b = parseInt(clean.substring(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.55 ? '#1a1a1a' : '#ffffff';
+};
+
 // Categorias com ícones e cores
 const CATEGORIES = [
   { id: "Documentos Pessoais", label: "Pessoais", icon: User, color: "blue" },
@@ -1662,7 +1679,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             <Badge 
                               style={{ 
                                 backgroundColor: proc.status_color || '#6B7280',
-                                color: 'white',
+                                color: getContrastColor(proc.status_color),
                                 fontSize: '10px'
                               }}
                             >
