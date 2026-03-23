@@ -105,7 +105,7 @@ const FormProgressBar = ({ currentStep, totalSteps, completedFields, totalFields
                 ? "bg-teal-600 text-white" 
                 : idx + 1 === currentStep 
                   ? "bg-teal-100 text-teal-700 border-2 border-teal-600" 
-                  : "bg-gray-100 text-gray-400"
+                  : "bg-muted text-muted-foreground"
             }`}
           >
             {idx + 1 < currentStep ? <Check className="h-4 w-4" /> : idx + 1}
@@ -597,11 +597,11 @@ const PublicClientForm = () => {
         <div key={s} className="flex items-center">
           <div
             className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors
-              ${step >= s ? "bg-teal-600 text-white" : "bg-gray-200 text-gray-500"}`}
+              ${step >= s ? "bg-teal-600 text-white" : "bg-muted text-muted-foreground"}`}
           >
             {step > s ? <Check className="h-4 w-4" /> : s}
           </div>
-          {s < 6 && <div className={`w-8 md:w-12 h-0.5 ${step > s ? "bg-teal-600" : "bg-gray-200"}`} />}
+          {s < 6 && <div className={`w-8 md:w-12 h-0.5 ${step > s ? "bg-teal-600" : "bg-muted"}`} />}
         </div>
       ))}
     </div>
@@ -611,8 +611,8 @@ const PublicClientForm = () => {
   const renderStep1 = () => (
     <div className="space-y-6">
       <div className="text-center mb-6">
-        <User className="h-10 w-10 mx-auto mb-2 text-blue-900" />
-        <h2 className="text-xl font-semibold mb-2 text-blue-950">Dados Pessoais - Titular</h2>
+        <User className="h-10 w-10 mx-auto mb-2 text-primary" />
+        <h2 className="text-xl font-semibold mb-2 text-foreground">Dados Pessoais - Titular</h2>
         <p className="text-muted-foreground">Informações do titular principal</p>
       </div>
       
@@ -1626,12 +1626,12 @@ const PublicClientForm = () => {
       <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
         <Info className="h-8 w-8 text-amber-600" />
       </div>
-      <h2 className="text-2xl font-semibold mb-2 text-amber-800">Processo Já Existente</h2>
+      <h2 className="text-2xl font-semibold mb-2 text-amber-700 dark:text-amber-400">Processo Já Existente</h2>
       <p className="text-muted-foreground mb-6 max-w-md mx-auto">
         {blockedMessage}
       </p>
       <div className="space-y-3">
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted-foreground">
           Caso tenha dúvidas, pode contactar-nos diretamente:
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -1908,8 +1908,6 @@ const PublicClientForm = () => {
               <AutoSaveIndicator lastSaved={lastSaved} isSaving={isSaving} />
             </div>
             
-            {renderStepIndicator()}
-            
             {step === 1 && renderStep1()}
             {step === 2 && renderStep2()}
             {step === 3 && renderStep3()}
@@ -1917,12 +1915,11 @@ const PublicClientForm = () => {
             {step === 5 && renderStep5()}
             {step === 6 && renderStep6()}
 
-            <div className="flex justify-between mt-8 pt-6 border-t border-blue-100">
+            <div className="flex justify-between mt-8 pt-6 border-t border-border">
               <Button
                 variant="outline"
                 onClick={() => setStep(Math.max(1, step - 1))}
                 disabled={step === 1}
-                className="border-blue-300 text-blue-900 hover:bg-blue-50"
               >
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Voltar
@@ -1961,10 +1958,10 @@ const PublicClientForm = () => {
         </Card>
         
         {/* Footer com informação das empresas */}
-        <div className="max-w-4xl mx-auto mt-8 text-center text-sm text-gray-600">
+        <div className="max-w-4xl mx-auto mt-8 text-center text-sm text-muted-foreground">
           <p>
-            <span className="font-semibold text-blue-900">PowerCell</span> - Consultoria Imobiliária | 
-            <span className="font-semibold text-amber-600 ml-1">PowerCell</span> - Intermediação de Crédito
+            <span className="font-semibold text-foreground">PowerCell</span> - Consultoria Imobiliária | 
+            <span className="font-semibold text-primary ml-1">PowerCell</span> - Intermediação de Crédito
           </p>
         </div>
       </main>

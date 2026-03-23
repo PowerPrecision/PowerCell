@@ -64,6 +64,38 @@ import { TableSkeleton, StatsCardSkeleton } from "../components/ui/skeletons";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+/**
+ * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
+ * Garante contraste legível independentemente da cor do badge.
+ */
+const getContrastColor = (bgColor) => {
+  if (!bgColor) return '#ffffff';
+
+  // Mapeamento de nomes de cor para hex
+  const namedColors = {
+    yellow: '#EAB308',
+    orange: '#F97316',
+    blue: '#3B82F6',
+    green: '#22C55E',
+    red: '#EF4444',
+    purple: '#A855F7',
+    gray: '#6B7280',
+    grey: '#6B7280',
+  };
+
+  let hex = namedColors[bgColor?.toLowerCase()] || bgColor;
+  if (!hex.startsWith('#')) return '#ffffff';
+
+  const clean = hex.replace('#', '');
+  const r = parseInt(clean.substring(0, 2), 16);
+  const g = parseInt(clean.substring(2, 4), 16);
+  const b = parseInt(clean.substring(4, 6), 16);
+
+  // Fórmula de luminosidade relativa (WCAG)
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.55 ? '#1a1a1a' : '#ffffff';
+};
+
 export default function ClientsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -537,7 +569,7 @@ export default function ClientsPage() {
                             <Badge 
                               style={{ 
                                 backgroundColor: client.fase_principal.status_color || '#6B7280',
-                                color: 'white',
+                                color: getContrastColor(client.fase_principal.status_color),
                                 fontSize: '11px'
                               }}
                             >

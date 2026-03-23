@@ -51,81 +51,96 @@ code {
  */
 @layer base {
     :root {
-        /* Fundos */
-        --background: 180 10% 98%;             /* Fundo com tom suave teal */
-        --foreground: 222 47% 11%;             /* Texto principal escuro */
+        /* Fundos - Branco limpo com toque suave */
+        --background: 0 0% 98%;                /* Branco muito suave */
+        --foreground: 224 30% 15%;             /* Texto azul escuro profundo */
         
-        /* Cartões e Popovers */
+        /* Cartões e Popovers - Branco puro */
         --card: 0 0% 100%;
-        --card-foreground: 222 47% 11%;
+        --card-foreground: 224 30% 15%;
         --popover: 0 0% 100%;
-        --popover-foreground: 222 47% 11%;
+        --popover-foreground: 224 30% 15%;
         
-        /* Cor Primária - Teal Precision Crédito (#0D9488) */
-        --primary: 175 84% 32%;                /* Teal principal */
+        /* Cor Primária - Teal rico e acessível */
+        --primary: 174 70% 34%;                /* Teal principal #0C9588 */
         --primary-foreground: 0 0% 100%;
         
-        /* Cor Secundária - Teal mais claro */
-        --secondary: 175 60% 45%;              /* Teal médio */
-        --secondary-foreground: 0 0% 100%;
+        /* Cor Secundária - Teal suave para fundos */
+        --secondary: 174 40% 92%;              /* Fundo teal muito claro */
+        --secondary-foreground: 174 70% 24%;   /* Teal escuro para texto */
         
-        /* Tons neutros */
-        --muted: 180 10% 96%;
-        --muted-foreground: 215 20% 40%;
+        /* Tons neutros - Gray-Blue suave */
+        --muted: 220 15% 95%;
+        --muted-foreground: 220 12% 46%;
         
-        /* Cor de Destaque - Dourado Power Real Estate (#D4AF37) */
-        --accent: 43 74% 52%;                  /* Dourado premium */
-        --accent-foreground: 222 47% 11%;
+        /* Cor de Destaque - Dourado Power Real Estate */
+        --accent: 43 85% 50%;                  /* Dourado vibrante */
+        --accent-foreground: 0 0% 100%;
         
         /* Cor de erro */
-        --destructive: 0 84% 60%;
-        --destructive-foreground: 0 0% 98%;
+        --destructive: 0 80% 56%;
+        --destructive-foreground: 0 0% 100%;
         
-        /* Bordas e inputs */
-        --border: 214 32% 91%;
-        --input: 214 32% 91%;
-        --ring: 224 76% 33%;
+        /* Bordas e inputs - Suaves */
+        --border: 220 14% 88%;
+        --input: 220 14% 88%;
+        --ring: 174 70% 34%;
         
         /* Cores para gráficos */
-        --chart-1: 224 76% 33%;              /* Azul Power */
-        --chart-2: 43 74% 52%;               /* Dourado Precision */
-        --chart-3: 160 84% 39%;              /* Verde sucesso */
+        --chart-1: 174 70% 34%;              /* Teal principal */
+        --chart-2: 43 85% 50%;               /* Dourado */
+        --chart-3: 142 72% 42%;              /* Verde sucesso */
         --chart-4: 217 91% 60%;              /* Azul claro */
-        --chart-5: 0 84% 60%;                /* Vermelho */
+        --chart-5: 0 78% 58%;                /* Vermelho */
         
         /* Raio de borda padrão */
         --radius: 0.5rem;
         
         /* Cores semânticas */
-        --success: 160 84% 39%;              /* Verde */
+        --success: 142 72% 42%;              /* Verde */
         --warning: 38 92% 50%;               /* Âmbar */
         
         /* Cores das empresas */
-        --power-blue: 224 76% 33%;           /* Power Real Estate */
-        --precision-gold: 43 74% 52%;        /* Precision Crédito */
+        --power-blue: 224 70% 30%;           /* Power Real Estate */
+        --precision-gold: 43 85% 50%;        /* Precision Crédito */
     }
     
-    /* TEMA ESCURO - Melhorado para legibilidade */
+    /* TEMA ESCURO - Redesenhado para legibilidade e conforto visual */
     .dark {
-        --background: 220 20% 10%;
-        --foreground: 0 0% 95%;
-        --card: 220 20% 14%;
-        --card-foreground: 0 0% 95%;
-        --popover: 220 20% 14%;
-        --popover-foreground: 0 0% 95%;
-        --primary: 175 70% 45%;
+        /* Fundo escuro neutro - não muito azulado, não pitch black */
+        --background: 222 16% 11%;
+        --foreground: 210 20% 94%;
+        
+        /* Cartões levemente mais claros que o fundo */
+        --card: 222 16% 15%;
+        --card-foreground: 210 20% 94%;
+        --popover: 222 16% 16%;
+        --popover-foreground: 210 20% 94%;
+        
+        /* Teal mais brilhante para dark mode */
+        --primary: 174 62% 50%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 175 50% 35%;
-        --secondary-foreground: 0 0% 100%;
-        --muted: 220 15% 20%;
-        --muted-foreground: 220 10% 70%;
-        --accent: 43 80% 55%;
-        --accent-foreground: 220 20% 10%;
-        --destructive: 0 70% 50%;
+        
+        /* Secundária mais subtil */
+        --secondary: 222 16% 22%;
+        --secondary-foreground: 210 20% 85%;
+        
+        /* Tons neutros dark */
+        --muted: 222 16% 20%;
+        --muted-foreground: 215 14% 62%;
+        
+        /* Dourado ligeiramente mais brilhante */
+        --accent: 43 88% 58%;
+        --accent-foreground: 222 16% 11%;
+        
+        /* Erros - vermelho menos saturado */
+        --destructive: 0 62% 52%;
         --destructive-foreground: 0 0% 100%;
-        --border: 220 15% 25%;
-        --input: 220 15% 20%;
-        --ring: 175 70% 45%;
+        
+        /* Bordas e inputs escuros mas visíveis */
+        --border: 222 14% 24%;
+        --input: 222 16% 18%;
+        --ring: 174 62% 50%;
     }
 }
 
@@ -376,7 +391,7 @@ code {
 
 /* Melhorar contraste de texto em modo escuro */
 .dark .text-muted-foreground {
-    color: hsl(220 10% 75%);
+    color: hsl(215 14% 65%);
 }
 
 /* Cartões do Kanban em dark mode */
@@ -397,22 +412,22 @@ code {
 
 /* Cartões internos em dark mode */
 .dark [data-testid*="process-card"] {
-    background-color: hsl(220 20% 18%) !important;
-    border-color: hsl(220 15% 28%) !important;
+    background-color: hsl(222 16% 18%) !important;
+    border-color: hsl(222 14% 26%) !important;
 }
 
 .dark [data-testid*="process-card"]:hover {
-    background-color: hsl(220 20% 22%) !important;
+    background-color: hsl(222 16% 21%) !important;
 }
 
 /* Badges em dark mode - texto legível */
-.dark .bg-gray-100 { background-color: hsl(220 15% 25%); }
-.dark .bg-gray-800 { background-color: hsl(220 15% 22%); }
+.dark .bg-gray-100 { background-color: hsl(222 14% 22%); }
+.dark .bg-gray-800 { background-color: hsl(222 14% 20%); }
 
 /* Ícones em dark mode - aumentar visibilidade */
 .dark .text-muted-foreground svg,
 .dark svg.text-muted-foreground {
-    color: hsl(220 10% 70%);
+    color: hsl(215 14% 65%);
 }
 
 /* Badges de status em dark mode */
@@ -435,28 +450,28 @@ code {
 .dark input,
 .dark textarea,
 .dark select {
-    background-color: hsl(220 20% 14%);
-    border-color: hsl(220 15% 25%);
-    color: hsl(0 0% 95%);
+    background-color: hsl(222 16% 16%);
+    border-color: hsl(222 14% 24%);
+    color: hsl(210 20% 94%);
 }
 
 .dark input::placeholder,
 .dark textarea::placeholder {
-    color: hsl(220 10% 50%);
+    color: hsl(215 14% 48%);
 }
 
 /* Tabelas em dark mode */
 .dark table th {
-    background-color: hsl(220 20% 16%);
-    color: hsl(0 0% 90%);
+    background-color: hsl(222 16% 17%);
+    color: hsl(210 20% 90%);
 }
 
 .dark table td {
-    border-color: hsl(220 15% 22%);
+    border-color: hsl(222 14% 20%);
 }
 
 .dark table tr:hover {
-    background-color: hsl(220 20% 18%);
+    background-color: hsl(222 16% 18%);
 }
 
 /* Cursor pointer para elementos interactivos */
@@ -547,22 +562,22 @@ select:focus {
 .dark .text-blue-950,
 .dark .text-blue-900,
 .dark .text-blue-800 {
-    color: hsl(210 40% 85%) !important;
+    color: hsl(210 40% 82%) !important;
 }
 
 /* Corrigir fundos azuis claros em dark mode */
 .dark .bg-blue-50 {
-    background-color: hsl(220 30% 18%) !important;
+    background-color: hsl(222 20% 17%) !important;
 }
 
 .dark .bg-blue-100 {
-    background-color: hsl(220 30% 20%) !important;
+    background-color: hsl(222 20% 19%) !important;
 }
 
 /* Corrigir bordas azuis em dark mode */
 .dark .border-blue-200,
 .dark .border-blue-100 {
-    border-color: hsl(220 20% 30%) !important;
+    border-color: hsl(222 16% 28%) !important;
 }
 
 /* Corrigir texto teal em dark mode */
@@ -665,10 +680,30 @@ select:focus {
 /* Label text em dark mode */
 .dark label,
 .dark .text-muted-foreground {
-    color: hsl(220 10% 70%);
+    color: hsl(215 14% 65%);
 }
 
 /* Melhorar legibilidade de Cards em dark mode */
 .dark .bg-muted\/50 {
-    background-color: hsl(220 20% 16%);
+    background-color: hsl(222 16% 17%);
 }
+
+/* Melhorar sidebar dark mode */
+.dark aside {
+    background-color: hsl(222 20% 9%);
+}
+
+/* Cobertura abrangente de cores cinza em dark mode */
+.dark .bg-gray-50 { background-color: hsl(222 16% 15%) !important; }
+.dark .bg-gray-200 { background-color: hsl(222 14% 24%) !important; }
+.dark .bg-gray-300 { background-color: hsl(222 14% 28%) !important; }
+
+.dark .text-gray-400 { color: hsl(215 14% 54%) !important; }
+.dark .text-gray-500 { color: hsl(215 14% 58%) !important; }
+.dark .text-gray-600 { color: hsl(215 14% 65%) !important; }
+.dark .text-gray-700 { color: hsl(215 14% 70%) !important; }
+.dark .text-gray-800 { color: hsl(215 14% 76%) !important; }
+.dark .text-gray-900 { color: hsl(215 14% 85%) !important; }
+
+.dark .border-gray-200 { border-color: hsl(222 14% 24%) !important; }
+.dark .border-gray-300 { border-color: hsl(222 14% 28%) !important; }
