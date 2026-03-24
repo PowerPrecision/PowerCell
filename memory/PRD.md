@@ -43,6 +43,9 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 ## Tarefas Pendentes
 - Nenhuma tarefa prioritária pendente (P1/P2 removidos por opção do utilizador)
 
+## Correções Recentes
+- **2026-03-24**: Corrigido `backend/Dockerfile` — adicionado `--extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/` ao comando `pip install` para resolver falha de build em produção causada pela dependência privada `emergentintegrations`.
+
 ## Credenciais de Teste
 - Admin: admin@sistema.pt / admin
 - CEO: pedroborges@powerealestate.pt / power2026
