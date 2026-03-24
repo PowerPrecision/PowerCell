@@ -30,7 +30,6 @@ from models.process import PublicClientRegistration
 from services.email import send_registration_confirmation, send_new_client_notification
 from services.alerts import notify_new_client_registration
 from services.process_service import get_next_process_number
-from services.s3_storage import s3_service
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -179,7 +178,8 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         "updated_at": now,
         "registration_completed": True,  # Marcar que completou o registo
         "assigned_to": None,  # Atribuído a nenhum utilizador inicialmente
-        "assigned_at": None
+        "assigned_at": None,
+        "custom_fields": data.custom_fields if data.custom_fields else {},
     }
     
     await db.clients.insert_one(client_doc)
@@ -258,7 +258,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
                 title="Novo Cliente Registado",
                 body=f"{data.name} registou-se via formulário",
                 tag="new_client",
-                url=f"/clientes",  # Link para página de registos
+                url="/clientes",  # Link para página de registos
                 data={
                     "type": "new_client",
                     "client_id": client_id,
@@ -313,3 +313,21 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
 async def public_health(request: Request):
     """Health check público."""
     return {"status": "ok", "public": True}
+
+
+@router.get("/form-config")
+@limiter.limit("60/minute")
+async def get_public_form_config(request: Request):
+    """Obter configuração do formulário público (campos personalizados incluídos)."""
+    config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
+    if not config:
+        return {"custom_fields": []}
+    
+    # Retornar apenas campos personalizados e visíveis
+    fields = config.get("fields", [])
+    custom_fields = [
+        f for f in fields 
+        if f.get("is_custom") and f.get("is_visible")
+    ]
+    
+    return {"custom_fields": custom_fields}

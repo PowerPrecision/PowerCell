@@ -381,6 +381,7 @@ class PublicClientRegistration(BaseModel):
     titular2_data: Optional[Titular2Data] = None
     real_estate_data: Optional[RealEstateData] = None
     financial_data: Optional[FinancialData] = None
+    custom_fields: Optional[dict] = None  # Campos personalizados dinâmicos
     
     @field_validator('name', mode='before')
     @classmethod
