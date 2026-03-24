@@ -452,9 +452,17 @@ class ProcessResponse(BaseModel):
     financial_data: Optional[dict] = None
     real_estate_data: Optional[dict] = None
     credit_data: Optional[dict] = None
-    assigned_consultor_id: Optional[str] = None
-    assigned_mediador_id: Optional[str] = None
+    # Suporte a múltiplos consultores e intermediários
+    assigned_consultor_ids: Optional[List[str]] = None  # Lista de IDs de consultores (novo)
+    assigned_mediador_ids: Optional[List[str]] = None  # Lista de IDs de intermediários (novo)
+    assigned_consultor_id: Optional[str] = None  # Compatibilidade - primeiro consultor
+    assigned_mediador_id: Optional[str] = None  # Compatibilidade - primeiro intermediário
+    consultor_names: Optional[List[str]] = None  # Nomes dos consultores
+    mediador_names: Optional[List[str]] = None  # Nomes dos intermediários
+    consultor_name: Optional[str] = None  # Compatibilidade
+    mediador_name: Optional[str] = None  # Compatibilidade
     assigned_indexacao_id: Optional[str] = None  # Utilizador responsável pela indexação de documentos
+    indexacao_name: Optional[str] = None  # Nome do utilizador de indexação
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     notes: Optional[str] = None

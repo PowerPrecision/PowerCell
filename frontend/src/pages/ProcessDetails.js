@@ -252,8 +252,8 @@ const ProcessDetails = () => {
   // Estado para atribuição de utilizadores
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [appUsers, setAppUsers] = useState([]);
-  const [selectedConsultor, setSelectedConsultor] = useState("");
-  const [selectedMediador, setSelectedMediador] = useState("");
+  const [selectedConsultores, setSelectedConsultores] = useState([]);  // Array para múltiplos
+  const [selectedMediadores, setSelectedMediadores] = useState([]);    // Array para múltiplos
   const [selectedIndexacao, setSelectedIndexacao] = useState("");
   const [savingAssignment, setSavingAssignment] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -366,8 +366,16 @@ const ProcessDetails = () => {
   // Abrir dialog de atribuição
   const openAssignDialog = async () => {
     if (process) {
-      setSelectedConsultor(process.assigned_consultor_id || "");
-      setSelectedMediador(process.assigned_mediador_id || "");
+      // Suporte a múltiplos consultores - converter para array
+      const consultorIds = process.assigned_consultor_ids || 
+        (process.assigned_consultor_id ? [process.assigned_consultor_id] : []);
+      setSelectedConsultores(consultorIds);
+      
+      // Suporte a múltiplos intermediários - converter para array
+      const mediadorIds = process.assigned_mediador_ids || 
+        (process.assigned_mediador_id ? [process.assigned_mediador_id] : []);
+      setSelectedMediadores(mediadorIds);
+      
       setSelectedIndexacao(process.assigned_indexacao_id || "");
       
       // Abrir dialog e buscar utilizadores se necessário
@@ -383,8 +391,10 @@ const ProcessDetails = () => {
     setSavingAssignment(true);
     try {
       const params = new URLSearchParams();
-      params.append("consultor_id", selectedConsultor || "");
-      params.append("mediador_id", selectedMediador || "");
+      // Enviar múltiplos consultores separados por vírgula
+      params.append("consultor_ids", selectedConsultores.filter(Boolean).join(","));
+      // Enviar múltiplos intermediários separados por vírgula
+      params.append("mediador_ids", selectedMediadores.filter(Boolean).join(","));
       params.append("indexacao_id", selectedIndexacao || "");
       
       const response = await fetch(`${API_URL}/api/processes/${id}/assign?${params.toString()}`, {
@@ -1229,8 +1239,10 @@ const ProcessDetails = () => {
         <ProcessSummaryCard 
           process={process}
           statusInfo={currentStatusInfo}
-          consultorName={process.assigned_consultor_name}
-          mediadorName={process.assigned_mediador_name}
+          consultorNames={process.consultor_names}
+          mediadorNames={process.mediador_names}
+          consultorName={process.consultor_name || process.assigned_consultor_name}
+          mediadorName={process.mediador_name || process.assigned_mediador_name}
         />
 
         {/* Timeline do Processo */}
@@ -2650,47 +2662,106 @@ const ProcessDetails = () => {
                 <span className="ml-2 text-sm text-muted-foreground">A carregar utilizadores...</span>
               </div>
             ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              {/* Consultores - Seleção Múltipla */}
               <div>
-                <Label className="text-sm font-medium">Consultor</Label>
-                <Select value={selectedConsultor || "none"} onValueChange={(v) => setSelectedConsultor(v === "none" ? "" : v)}>
-                  <SelectTrigger className="mt-1" data-testid="consultor-select">
-                    <SelectValue placeholder="Seleccionar consultor..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {appUsers
-                      .filter(u => ["consultor", "diretor", "admin", "ceo"].includes(u.role))
-                      .map(u => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.name} ({u.role})
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
+                <Label className="text-sm font-medium mb-2 block">Consultores</Label>
+                <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                  {appUsers
+                    .filter(u => ["consultor", "diretor", "admin", "ceo", "administrativo"].includes(u.role))
+                    .map(u => (
+                      <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
+                        <input
+                          type="checkbox"
+                          checked={selectedConsultores.includes(u.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedConsultores([...selectedConsultores, u.id]);
+                            } else {
+                              setSelectedConsultores(selectedConsultores.filter(id => id !== u.id));
+                            }
+                          }}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="text-sm">{u.name}</span>
+                        <Badge variant="outline" className="text-xs ml-auto">{u.role}</Badge>
+                      </label>
+                    ))
+                  }
+                  {appUsers.filter(u => ["consultor", "diretor", "admin", "ceo", "administrativo"].includes(u.role)).length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-2">Nenhum consultor disponível</p>
+                  )}
+                </div>
+                {selectedConsultores.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {selectedConsultores.map(cid => {
+                      const user = appUsers.find(u => u.id === cid);
+                      return user ? (
+                        <Badge key={cid} variant="secondary" className="flex items-center gap-1">
+                          {user.name}
+                          <button
+                            onClick={() => setSelectedConsultores(selectedConsultores.filter(id => id !== cid))}
+                            className="ml-1 hover:text-destructive"
+                          >
+                            ×
+                          </button>
+                        </Badge>
+                      ) : null;
+                    })}
+                  </div>
+                )}
               </div>
               
+              {/* Intermediários - Seleção Múltipla */}
               <div>
-                <Label className="text-sm font-medium">Intermediário / Mediador</Label>
-                <Select value={selectedMediador || "none"} onValueChange={(v) => setSelectedMediador(v === "none" ? "" : v)}>
-                  <SelectTrigger className="mt-1" data-testid="mediador-select">
-                    <SelectValue placeholder="Seleccionar intermediário..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {appUsers
-                      .filter(u => ["mediador", "intermediario", "intermediario_credito", "diretor"].includes(u.role))
-                      .map(u => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.name} ({u.role})
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
+                <Label className="text-sm font-medium mb-2 block">Intermediários / Mediadores</Label>
+                <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+                  {appUsers
+                    .filter(u => ["mediador", "intermediario", "intermediario_credito", "diretor"].includes(u.role))
+                    .map(u => (
+                      <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
+                        <input
+                          type="checkbox"
+                          checked={selectedMediadores.includes(u.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedMediadores([...selectedMediadores, u.id]);
+                            } else {
+                              setSelectedMediadores(selectedMediadores.filter(id => id !== u.id));
+                            }
+                          }}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="text-sm">{u.name}</span>
+                        <Badge variant="outline" className="text-xs ml-auto">{u.role}</Badge>
+                      </label>
+                    ))
+                  }
+                  {appUsers.filter(u => ["mediador", "intermediario", "intermediario_credito", "diretor"].includes(u.role)).length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-2">Nenhum intermediário disponível</p>
+                  )}
+                </div>
+                {selectedMediadores.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {selectedMediadores.map(mid => {
+                      const user = appUsers.find(u => u.id === mid);
+                      return user ? (
+                        <Badge key={mid} variant="secondary" className="flex items-center gap-1">
+                          {user.name}
+                          <button
+                            onClick={() => setSelectedMediadores(selectedMediadores.filter(id => id !== mid))}
+                            className="ml-1 hover:text-destructive"
+                          >
+                            ×
+                          </button>
+                        </Badge>
+                      ) : null;
+                    })}
+                  </div>
+                )}
               </div>
               
+              {/* Indexação - Seleção Única */}
               <div>
                 <Label className="text-sm font-medium">Indexação (Documentos)</Label>
                 <Select value={selectedIndexacao || "none"} onValueChange={(v) => setSelectedIndexacao(v === "none" ? "" : v)}>

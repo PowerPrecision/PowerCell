@@ -11,8 +11,16 @@ import {
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 
-const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName }) => {
+const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, consultorNames, mediadorNames }) => {
   if (!process) return null;
+
+  // Usar arrays se disponíveis, senão usar nomes únicos
+  const consultoresDisplay = consultorNames?.length > 0 
+    ? consultorNames 
+    : (consultorName ? [consultorName] : []);
+  const mediadoresDisplay = mediadorNames?.length > 0 
+    ? mediadorNames 
+    : (mediadorName ? [mediadorName] : []);
 
   // Calcular dias no sistema
   const createdDate = process.created_at ? parseISO(process.created_at) : null;
@@ -104,17 +112,17 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName }
               Equipa
             </div>
             <div className="space-y-0.5">
-              {consultorName && (
+              {consultoresDisplay.length > 0 && (
                 <p className="text-xs">
-                  <span className="text-blue-600">C:</span> {consultorName.split(' ')[0]}
+                  <span className="text-blue-600">C:</span> {consultoresDisplay.map(n => n.split(' ')[0]).join(', ')}
                 </p>
               )}
-              {mediadorName && (
+              {mediadoresDisplay.length > 0 && (
                 <p className="text-xs">
-                  <span className="text-emerald-600">I:</span> {mediadorName.split(' ')[0]}
+                  <span className="text-emerald-600">I:</span> {mediadoresDisplay.map(n => n.split(' ')[0]).join(', ')}
                 </p>
               )}
-              {!consultorName && !mediadorName && (
+              {consultoresDisplay.length === 0 && mediadoresDisplay.length === 0 && (
                 <p className="text-xs text-muted-foreground">Não atribuído</p>
               )}
             </div>
