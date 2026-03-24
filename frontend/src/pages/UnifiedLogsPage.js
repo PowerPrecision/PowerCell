@@ -361,8 +361,14 @@ const SystemLogsTab = ({ token }) => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {[1,2,3,4,5].map(i => <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />)}
+        </div>
+        <div className="h-10 bg-muted animate-pulse rounded" />
+        <div className="space-y-2">
+          {[1,2,3,4,5].map(i => <div key={i} className="h-14 bg-muted animate-pulse rounded" />)}
+        </div>
       </div>
     );
   }

@@ -1099,6 +1099,148 @@ class ScheduledTasksService:
         else:
             return f"⚠️ Taxa de sucesso baixa ({success_rate:.0f}%). Verifique a qualidade das imagens e PDFs enviados."
     
+    async def check_stale_processes(self, stale_days: int = 14, urgent_days: int = 7) -> int:
+        """
+        Verificar processos sem atualização há mais de X dias.
+        
+        Cria notificações para os consultores/mediadores atribuídos quando um processo
+        não é atualizado há mais de `stale_days` dias.
+        
+        Níveis:
+        - > 14 dias sem atualização: Processo atrasado (notifica consultor + mediador + diretor)
+        - > 7 dias sem atualização: Processo urgente (notifica consultor + mediador)
+        
+        Args:
+            stale_days: Dias sem atualização para considerar atrasado (default 14)
+            urgent_days: Dias sem atualização para considerar urgente (default 7)
+        
+        Returns:
+            Número de notificações criadas
+        """
+        logger.info(f"A verificar processos sem atualização há mais de {urgent_days} dias...")
+        
+        today = datetime.now(timezone.utc)
+        stale_cutoff = (today - timedelta(days=stale_days)).isoformat()
+        urgent_cutoff = (today - timedelta(days=urgent_days)).isoformat()
+        
+        # Excluir processos em estados finais (concluídos, cancelados, etc.)
+        final_statuses = ["concluido", "cancelado", "recusado", "desistiu", "escritura_feita"]
+        
+        # Buscar processos com updated_at antigo (ou sem updated_at, usar created_at)
+        stale_processes = await self.db.processes.find({
+            "status": {"$nin": final_statuses},
+            "$or": [
+                {"updated_at": {"$lte": stale_cutoff}},
+                {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_cutoff}}
+            ]
+        }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_id": 1, 
+            "mediador_id": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1,
+            "updated_at": 1, "created_at": 1}).to_list(500)
+        
+        urgent_processes = await self.db.processes.find({
+            "status": {"$nin": final_statuses},
+            "$or": [
+                {"updated_at": {"$lte": urgent_cutoff, "$gt": stale_cutoff}},
+                {"updated_at": {"$exists": False}, "created_at": {"$lte": urgent_cutoff, "$gt": stale_cutoff}}
+            ]
+        }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_id": 1, 
+            "mediador_id": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1,
+            "updated_at": 1, "created_at": 1}).to_list(500)
+        
+        notifications_created = 0
+        
+        # Processar processos atrasados (> stale_days)
+        for process in stale_processes:
+            last_update = process.get("updated_at") or process.get("created_at", "")
+            try:
+                last_date = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                days_since = (today - last_date).days
+            except (ValueError, TypeError, AttributeError):
+                days_since = stale_days
+            
+            users_to_notify = set()
+            if process.get("consultor_id"):
+                users_to_notify.add(process["consultor_id"])
+            if process.get("assigned_consultor_id"):
+                users_to_notify.add(process["assigned_consultor_id"])
+            if process.get("mediador_id"):
+                users_to_notify.add(process["mediador_id"])
+            if process.get("assigned_mediador_id"):
+                users_to_notify.add(process["assigned_mediador_id"])
+            
+            # Também notificar diretores para processos muito atrasados
+            if days_since > 21:
+                directors = await self.db.users.find(
+                    {"role": {"$in": ["diretor", "ceo"]}, "is_active": {"$ne": False}},
+                    {"_id": 0, "id": 1}
+                ).to_list(10)
+                for d in directors:
+                    users_to_notify.add(d["id"])
+            
+            client_name = process.get("client_name", "Cliente")
+            
+            for user_id in users_to_notify:
+                existing = await self.db.notifications.find_one({
+                    "user_id": user_id,
+                    "process_id": process.get("id"),
+                    "type": "process_stale",
+                    "created_at": {"$gte": (today - timedelta(days=1)).isoformat()}
+                })
+                
+                if not existing:
+                    await self.create_notification(
+                        user_id=user_id,
+                        message=f"Processo de {client_name} sem atualização há {days_since} dias. Requer atenção!",
+                        notification_type="process_stale",
+                        process_id=process.get("id"),
+                        client_name=client_name,
+                        link=f"/process/{process.get('id')}"
+                    )
+                    notifications_created += 1
+        
+        # Processar processos urgentes (> urgent_days mas < stale_days)
+        for process in urgent_processes:
+            last_update = process.get("updated_at") or process.get("created_at", "")
+            try:
+                last_date = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                days_since = (today - last_date).days
+            except (ValueError, TypeError, AttributeError):
+                days_since = urgent_days
+            
+            users_to_notify = set()
+            if process.get("consultor_id"):
+                users_to_notify.add(process["consultor_id"])
+            if process.get("assigned_consultor_id"):
+                users_to_notify.add(process["assigned_consultor_id"])
+            if process.get("mediador_id"):
+                users_to_notify.add(process["mediador_id"])
+            if process.get("assigned_mediador_id"):
+                users_to_notify.add(process["assigned_mediador_id"])
+            
+            client_name = process.get("client_name", "Cliente")
+            
+            for user_id in users_to_notify:
+                existing = await self.db.notifications.find_one({
+                    "user_id": user_id,
+                    "process_id": process.get("id"),
+                    "type": "process_urgent",
+                    "created_at": {"$gte": (today - timedelta(days=1)).isoformat()}
+                })
+                
+                if not existing:
+                    await self.create_notification(
+                        user_id=user_id,
+                        message=f"Processo de {client_name} sem atualização há {days_since} dias.",
+                        notification_type="process_urgent",
+                        process_id=process.get("id"),
+                        client_name=client_name,
+                        link=f"/process/{process.get('id')}"
+                    )
+                    notifications_created += 1
+        
+        logger.info(f"Processos atrasados: {len(stale_processes)} atrasados, {len(urgent_processes)} urgentes, {notifications_created} notificações criadas")
+        return notifications_created
+    
     async def run_all_tasks(self):
         """Executar todas as tarefas agendadas."""
         logger.info("=" * 50)
@@ -1117,6 +1259,7 @@ class ScheduledTasksService:
             waiting_count = await self.check_clients_waiting_too_long()
             watchdog_count = await self.check_document_expirations_watchdog()  # NOVA TAREFA
             monthly_count = await self.send_monthly_document_reminder()
+            stale_count = await self.check_stale_processes()  # Processos atrasados
             cleanup_count = await self.cleanup_old_notifications()
             temp_files_count = await self.cleanup_temp_files()
             cache_count = await self.cleanup_scraper_cache()
@@ -1131,6 +1274,7 @@ class ScheduledTasksService:
             logger.info(f"- Alertas clientes em espera: {waiting_count}")
             logger.info(f"- Watchdog expiração docs: {watchdog_count}")  # NOVA LINHA
             logger.info(f"- Lembretes mensais: {monthly_count}")
+            logger.info(f"- Processos atrasados/urgentes: {stale_count}")
             logger.info(f"- Notificações limpas: {cleanup_count}")
             logger.info(f"- Ficheiros temp. limpos: {temp_files_count}")
             logger.info(f"- Cache scraper limpo: {cache_count}")

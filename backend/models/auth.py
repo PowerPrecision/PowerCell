@@ -154,6 +154,7 @@ class UserResponse(BaseModel):
     is_active: Optional[bool] = True
     created_at: Optional[str] = None
     onedrive_folder: Optional[str] = None
+    permissions: Optional[dict] = None  # Permissões específicas do utilizador
 
 
 class TokenResponse(BaseModel):
@@ -180,3 +181,4 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     onedrive_folder: Optional[str] = None
     password: Optional[str] = None  # Nova password (apenas admin pode alterar)
+    permissions: Optional[dict] = None  # Permissões específicas do utilizador

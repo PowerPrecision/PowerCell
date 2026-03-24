@@ -360,6 +360,12 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     if existing:
         raise HTTPException(status_code=400, detail="Email já registado")
     
+    # O17 - Validar força da password
+    from services.auth import validate_password_strength
+    is_valid, error_msg = validate_password_strength(data.password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
     # Cliente não é um utilizador do sistema - é um processo
     if data.role == UserRole.CLIENTE:
         raise HTTPException(status_code=400, detail="Cliente não pode ser criado como utilizador. O cliente é representado pelo processo.")
@@ -383,6 +389,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     }
     
     await db.users.insert_one(user_doc)
+    await _audit_log("user_created", "user", user_id, user, {"email": data.email, "role": data.role, "name": data.name})
     
     # Enviar email de boas-vindas com dados de acesso
     try:
@@ -524,6 +531,24 @@ Equipa PowerCell
     )
 
 
+async def _audit_log(action: str, entity: str, entity_id: str, performed_by: dict, details: dict = None):
+    """O18 - Regista uma acção crítica no audit log."""
+    try:
+        await db.audit_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "action": action,
+            "entity": entity,
+            "entity_id": entity_id,
+            "performed_by_id": performed_by.get("id"),
+            "performed_by_name": performed_by.get("name"),
+            "performed_by_email": performed_by.get("email"),
+            "details": details or {},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        logger.warning(f"Audit log falhou: {e}")
+
+
 @router.put("/users/{user_id}", response_model=UserResponse)
 async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
@@ -550,6 +575,9 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
     # Processar alteração de password (apenas admin pode alterar password de outros)
     if data.password is not None and data.password.strip():
         update_data["password"] = hash_password(data.password)
+    # Processar permissões
+    if data.permissions is not None:
+        update_data["permissions"] = data.permissions
     
     if update_data:
         await db.users.update_one({"id": user_id}, {"$set": update_data})
@@ -563,9 +591,12 @@ async def delete_user(user_id: str, user: dict = Depends(require_roles([UserRole
     if user_id == user["id"]:
         raise HTTPException(status_code=400, detail="Não pode eliminar a própria conta")
     
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "email": 1, "name": 1, "role": 1})
     result = await db.users.delete_one({"id": user_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    
+    await _audit_log("user_deleted", "user", user_id, user, {"deleted_email": target.get("email"), "deleted_name": target.get("name"), "deleted_role": target.get("role")})
     return {"message": "Utilizador eliminado"}
 
 
@@ -957,6 +988,53 @@ async def get_ai_training_prompt(
         "prompt": full_prompt,
         "entries_count": len(entries),
         "categories": list(by_category.keys())
+    }
+
+
+@router.post("/ai-training/prompt/execute")
+async def record_ai_prompt_execution(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    O23 - Regista uma execução do prompt de treino de IA.
+    Incrementa o contador de execuções.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Incrementar contador global de execuções
+    await db.ai_config.update_one(
+        {"type": "execution_stats"},
+        {
+            "$inc": {"total_executions": 1},
+            "$set": {"last_executed_at": now, "last_executed_by": user.get("name", "unknown")},
+            "$setOnInsert": {"type": "execution_stats", "created_at": now}
+        },
+        upsert=True
+    )
+    
+    # Retornar stats actualizadas
+    stats = await db.ai_config.find_one({"type": "execution_stats"}, {"_id": 0})
+    return {
+        "success": True,
+        "total_executions": stats.get("total_executions", 1),
+        "last_executed_at": stats.get("last_executed_at"),
+        "last_executed_by": stats.get("last_executed_by")
+    }
+
+
+@router.get("/ai-training/stats")
+async def get_ai_training_stats(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """O23 - Obtém estatísticas de uso do AI Training."""
+    stats = await db.ai_config.find_one({"type": "execution_stats"}, {"_id": 0}) or {}
+    entries_count = await db.ai_training.count_documents({"type": "ai_training", "is_active": True})
+    
+    return {
+        "total_executions": stats.get("total_executions", 0),
+        "last_executed_at": stats.get("last_executed_at"),
+        "last_executed_by": stats.get("last_executed_by"),
+        "active_entries": entries_count
     }
 
 
@@ -2099,3 +2177,83 @@ async def get_client_registrations_stats(
         "by_source": {item["_id"] or "unknown": item["count"] for item in by_source},
         "by_status": {item["_id"] or "unknown": item["count"] for item in by_status}
     }
+
+
+# ============== AUDIT LOGS (O18) ==============
+
+@router.get("/audit-logs")
+async def get_audit_logs(
+    limit: int = Query(100, le=500),
+    skip: int = Query(0, ge=0),
+    action: Optional[str] = Query(None),
+    entity: Optional[str] = Query(None),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """O18 - Lista de audit logs para acções críticas do sistema."""
+    query = {}
+    if action:
+        query["action"] = action
+    if entity:
+        query["entity"] = entity
+    
+    logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(limit).to_list(length=limit)
+    total = await db.audit_logs.count_documents(query)
+    
+    return {"logs": logs, "total": total, "limit": limit, "skip": skip}
+
+
+# ============== STALE PROCESSES STATS ==============
+
+@router.get("/stale-processes")
+async def get_stale_processes(
+    days: int = Query(14, ge=1, le=90),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+):
+    """
+    Obter estatísticas de processos sem atualização.
+    Retorna processos agrupados por nível de urgência.
+    """
+    now = datetime.now(timezone.utc)
+    final_statuses = ["concluido", "cancelado", "recusado", "desistiu", "escritura_feita"]
+    
+    cutoff = (now - timedelta(days=days)).isoformat()
+    
+    stale = await db.processes.find({
+        "status": {"$nin": final_statuses},
+        "$or": [
+            {"updated_at": {"$lte": cutoff}},
+            {"updated_at": {"$exists": False}, "created_at": {"$lte": cutoff}}
+        ]
+    }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_name": 1, 
+        "mediador_name": 1, "updated_at": 1, "created_at": 1}).to_list(500)
+    
+    # Calcular dias desde última atualização
+    results = []
+    for p in stale:
+        last = p.get("updated_at") or p.get("created_at", "")
+        try:
+            last_date = datetime.fromisoformat(last.replace('Z', '+00:00'))
+            days_since = (now - last_date).days
+        except (ValueError, TypeError, AttributeError):
+            days_since = days
+        
+        results.append({
+            "id": p["id"],
+            "client_name": p.get("client_name", ""),
+            "status": p.get("status", ""),
+            "consultor_name": p.get("consultor_name", ""),
+            "mediador_name": p.get("mediador_name", ""),
+            "days_since_update": days_since,
+            "urgency": "critical" if days_since > 21 else "high" if days_since > 14 else "medium"
+        })
+    
+    results.sort(key=lambda x: x["days_since_update"], reverse=True)
+    
+    return {
+        "total": len(results),
+        "critical": len([r for r in results if r["urgency"] == "critical"]),
+        "high": len([r for r in results if r["urgency"] == "high"]),
+        "medium": len([r for r in results if r["urgency"] == "medium"]),
+        "processes": results[:100]
+    }
+

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
+import { TableSkeleton } from "../components/ui/skeletons";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -175,18 +176,35 @@ const UsersManagementPage = () => {
     }
   };
 
-  const handleDeleteUser = async (userId) => {
-    if (!window.confirm("Tem a certeza que deseja eliminar este utilizador? Esta ação não pode ser revertida.")) {
-      return;
-    }
-    try {
-      await deleteUser(userId);
-      toast.success("Utilizador eliminado com sucesso");
-      fetchUsers();
-    } catch (error) {
-      console.error("Erro ao eliminar:", error);
-      toast.error(error.response?.data?.detail || "Erro ao eliminar utilizador");
-    }
+  const handleDeleteUser = async (userId, userName) => {
+    // O8 - Usar undo toast em vez de window.confirm para micro-ações
+    const userToDelete = users.find(u => u.id === userId);
+    if (!userToDelete) return;
+
+    // Remover otimisticamente da lista
+    setUsers(prev => prev.filter(u => u.id !== userId));
+
+    toast.success(`Utilizador "${userName}" eliminado`, {
+      action: {
+        label: 'Desfazer',
+        onClick: () => {
+          // Restaurar na lista (undo)
+          setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
+          toast.success("Ação desfeita");
+        },
+      },
+      duration: 5000,
+      onAutoClose: async () => {
+        // Commit: efetuar a eliminação real no backend
+        try {
+          await deleteUser(userId);
+        } catch (error) {
+          // Se falhar, restaurar o utilizador
+          setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
+          toast.error(error.response?.data?.detail || "Erro ao eliminar utilizador");
+        }
+      },
+    });
   };
 
   const handleToggleUserStatus = async (userId, currentStatus) => {
@@ -215,8 +233,12 @@ const UsersManagementPage = () => {
   if (loading) {
     return (
       <DashboardLayout title="Gestão de Utilizadores">
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="space-y-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="h-8 w-48 bg-muted animate-pulse rounded" />
+            <div className="h-9 w-36 bg-muted animate-pulse rounded" />
+          </div>
+          <TableSkeleton rows={8} columns={6} />
         </div>
       </DashboardLayout>
     );
@@ -317,9 +339,35 @@ const UsersManagementPage = () => {
                       </div>
                       {generatedPassword && (
                         <p className="text-xs text-green-600 font-medium">
-                          ✓ Password gerada. Copie e envie ao utilizador.
+                          Password gerada. Copie e envie ao utilizador.
                         </p>
                       )}
+                      {/* O17 - Password strength indicator */}
+                      {formData.password && !generatedPassword && (() => {
+                        const pw = formData.password;
+                        let score = 0;
+                        if (pw.length >= 8) score++;
+                        if (pw.length >= 12) score++;
+                        if (/[A-Z]/.test(pw)) score++;
+                        if (/[0-9]/.test(pw)) score++;
+                        if (/[^A-Za-z0-9]/.test(pw)) score++;
+                        const levels = [
+                          { label: "Muito fraca", color: "bg-red-500", width: "w-1/5" },
+                          { label: "Fraca", color: "bg-orange-500", width: "w-2/5" },
+                          { label: "Razoável", color: "bg-yellow-500", width: "w-3/5" },
+                          { label: "Forte", color: "bg-green-500", width: "w-4/5" },
+                          { label: "Muito forte", color: "bg-emerald-600", width: "w-full" },
+                        ];
+                        const level = levels[Math.min(score, 4)];
+                        return (
+                          <div className="space-y-1">
+                            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div className={`h-full rounded-full transition-all ${level.color} ${level.width}`} />
+                            </div>
+                            <p className={`text-xs ${score >= 3 ? "text-green-600" : "text-orange-600"}`}>{level.label}</p>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="space-y-2">
                       <Label>Telefone</Label>
@@ -391,7 +439,52 @@ const UsersManagementPage = () => {
               </Select>
             </div>
 
-            <div className="rounded-md border">
+            {/* O9 - Mobile: Card view */}
+            {filteredUsers.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">Nenhum utilizador encontrado</div>
+            ) : (
+              <>
+                <div className="md:hidden space-y-3">
+                  {filteredUsers.map((u) => (
+                    <div key={u.id} className="border rounded-lg p-4 bg-card space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium truncate">{u.name}</p>
+                          <p className="text-sm text-muted-foreground truncate">{u.email}</p>
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <Badge className={`${roleColors[u.role]} border text-xs`}>{roleLabels[u.role]}</Badge>
+                          <Badge className={u.is_active ? "bg-green-100 text-green-800 text-xs" : "bg-red-100 text-red-800 text-xs"}>
+                            {u.is_active ? "Ativo" : "Inativo"}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex gap-1 justify-end">
+                        {(currentUser?.role === "admin" || currentUser?.role === "ceo") && u.id !== currentUser?.id && u.role !== "admin" && u.role !== "ceo" && (
+                          <Button variant="ghost" size="icon" onClick={async () => { try { await impersonate(u.id); toast.success(`A ver como ${u.name}`); } catch { toast.error("Erro"); } }}>
+                            <Eye className="h-4 w-4 text-blue-600" />
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="icon" onClick={() => handleToggleUserStatus(u.id, u.is_active)}>
+                          {u.is_active ? <UserX className="h-4 w-4 text-orange-600" /> : <UserCheck className="h-4 w-4 text-green-600" />}
+                        </Button>
+                        {currentUser?.role !== "indexacao" && currentUser?.role !== "gestor_documentos" && (
+                          <>
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id, u.name)}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* O9 - Desktop: Table */}
+                <div className="hidden md:block rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -404,15 +497,8 @@ const UsersManagementPage = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredUsers.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                        Nenhum utilizador encontrado
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredUsers.map((user) => (
-                      <TableRow key={user.id}>
+                  {filteredUsers.map((user) => (
+                    <TableRow key={user.id}>
                         <TableCell className="font-medium">{user.name}</TableCell>
                         <TableCell>{user.email}</TableCell>
                         <TableCell>
@@ -466,18 +552,19 @@ const UsersManagementPage = () => {
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(user)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(user.id)}>
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(user.id, user.name)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                           </>
                           )}
                         </TableCell>
-                      </TableRow>
-                    ))
-                  )}
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

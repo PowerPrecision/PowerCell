@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from database import db
 from models.auth import UserRole
 from services.auth import get_current_user, require_staff
+from services.redis_cache import cache_get, cache_set
 
 
 router = APIRouter(tags=["Stats"])
@@ -12,6 +13,12 @@ router = APIRouter(tags=["Stats"])
 @router.get("/stats")
 async def get_stats(user: dict = Depends(get_current_user)):
     """Get statistics based on user role. Staff see only their assigned processes."""
+    # O13 - Redis cache: TTL 60s por role+user
+    cache_key = f"stats:{user['role']}:{user['id']}"
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+    
     stats = {}
     role = user["role"]
     user_id = user["id"]
@@ -100,6 +107,8 @@ async def get_stats(user: dict = Depends(get_current_user)):
         stats["consultors"] = await db.users.count_documents({"role": {"$in": [UserRole.CONSULTOR, UserRole.DIRETOR]}})
         stats["intermediarios"] = await db.users.count_documents({"role": {"$in": [UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR]}})
     
+    # O13 - Cache result for 60 seconds
+    await cache_set(cache_key, stats, ttl=60)
     return stats
 
 
@@ -109,6 +118,12 @@ async def get_leads_stats(user: dict = Depends(require_staff())):
     Estatísticas de leads para a página de Estatísticas.
     Retorna contagens por estado, origem e ranking de consultores.
     """
+    # O13 - Redis cache: TTL 120s
+    cache_key = f"stats:leads:{user['id']}"
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+    
     # Contagem de leads por estado
     lead_statuses = ["novo", "contactado", "visita_agendada", "proposta", "reservado", "descartado"]
     leads_by_status = {}
@@ -155,7 +170,7 @@ async def get_leads_stats(user: dict = Depends(require_staff())):
                 "leads_count": item["leads_count"]
             })
     
-    return {
+    result = {
         "total_leads": total_leads,
         "leads_by_status": leads_by_status,
         "leads_by_source": leads_by_source,
@@ -168,6 +183,10 @@ async def get_leads_stats(user: dict = Depends(require_staff())):
             {"stage": "Reservado", "count": leads_by_status.get("reservado", 0)},
         ]
     }
+    
+    # O13 - Cache result for 120 seconds
+    await cache_set(cache_key, result, ttl=120)
+    return result
 
 
 @router.get("/stats/conversion")
@@ -176,6 +195,12 @@ async def get_conversion_stats(user: dict = Depends(require_staff())):
     Estatísticas de tempo de conversão de leads.
     Calcula o tempo médio desde criação até proposta.
     """
+    # O13 - Redis cache: TTL 300s (conversion stats change slowly)
+    cache_key = "stats:conversion"
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+    
     # Buscar leads que chegaram a proposta ou reservado
     pipeline = [
         {"$match": {"status": {"$in": ["proposta", "reservado"]}}},
@@ -202,14 +227,24 @@ async def get_conversion_stats(user: dict = Depends(require_staff())):
     
     avg_conversion_days = sum(conversion_times) / len(conversion_times) if conversion_times else 0
     
-    return {
+    result = {
         "avg_conversion_days": round(avg_conversion_days, 1),
         "total_converted": len(conversion_times),
         "min_days": min(conversion_times) if conversion_times else 0,
         "max_days": max(conversion_times) if conversion_times else 0
     }
+    
+    # O13 - Cache result for 300 seconds
+    await cache_set(cache_key, result, ttl=300)
+    return result
 
 
 @router.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+    from services.redis_cache import health_check as redis_health
+    redis_status = await redis_health()
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "redis": redis_status
+    }

@@ -49,7 +49,10 @@ const ExpiringDocumentsDashboard = React.lazy(() => import("./pages/ExpiringDocu
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const ClientRegistrationsPage = React.lazy(() => import("./pages/ClientRegistrationsPage"));
 const WorkflowStatusesPage = React.lazy(() => import("./pages/WorkflowStatusesPage"));
+const AutomationPage = React.lazy(() => import("./pages/AutomationPage"));
 const ProfilePage = React.lazy(() => import("./pages/ProfilePage"));
+const ProfileSettingsPage = React.lazy(() => import("./pages/ProfileSettingsPage"));
+const FormManagementPage = React.lazy(() => import("./pages/FormManagementPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -65,6 +68,9 @@ import "./App.css";
 
 // Staff roles that can access the Kanban dashboard
 const STAFF_ROLES = ["consultor", "mediador", "intermediario", "consultor_intermediario", "gestor_documentos", "indexacao", "diretor", "administrativo", "ceo", "admin"];
+
+// Admin roles for automation and system config
+const ADMIN_ROLES = ["admin", "ceo"];
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading } = useAuth();
@@ -294,6 +300,31 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <WorkflowStatusesPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/automation" element={
+              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                <AutomationPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Profile Settings - Admin and CEO */}
+          <Route
+            path="/configuracoes-perfis"
+            element={
+              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                <ProfileSettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Form Management - Admin and CEO */}
+          <Route
+            path="/gestao-formulario"
+            element={
+              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                <FormManagementPage />
               </ProtectedRoute>
             }
           />

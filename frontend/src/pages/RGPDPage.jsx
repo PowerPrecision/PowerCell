@@ -330,9 +330,10 @@ const RGPDPage = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-          <p className="mt-4 text-muted-foreground">A verificar token...</p>
+        <div className="max-w-lg w-full mx-auto space-y-4 p-6">
+          <div className="h-8 w-48 bg-muted animate-pulse rounded mx-auto" />
+          <div className="h-4 w-72 bg-muted animate-pulse rounded mx-auto" />
+          <div className="h-40 bg-muted animate-pulse rounded-lg" />
         </div>
       </div>
     );

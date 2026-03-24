@@ -41,6 +41,14 @@ const FieldError = ({ children }) => (
   </p>
 );
 
+// Helper for required field labels
+const RequiredLabel = ({ htmlFor, children }) => (
+  <Label htmlFor={htmlFor}>
+    {children} <span className="text-red-600 font-semibold">*</span>
+    <span className="text-red-600 text-[10px] ml-1 font-medium">(obrigatório)</span>
+  </Label>
+);
+
 // Validated Input Component
 const ValidatedInput = ({ 
   error, 
@@ -180,6 +188,23 @@ const BANCOS = [
   "CTT", "Millennium bcp", "Novo Banco", "Popular", "Santander Totta", "Outro"
 ];
 
+// E1.3 - Cores dos bancos (bg / text)
+const BANCO_COLORS = {
+  "BPI":              { bg: "#003E7E", text: "#fff" },
+  "CGD":              { bg: "#008552", text: "#fff" },
+  "Santander Totta":  { bg: "#EC0000", text: "#fff" },
+  "Millennium bcp":   { bg: "#C8102E", text: "#fff" },
+  "Novo Banco":       { bg: "#E30613", text: "#fff" },
+  "Crédito Agrícola": { bg: "#006633", text: "#fff" },
+  "CTT":              { bg: "#E2001A", text: "#fff" },
+  "BBVA":             { bg: "#004481", text: "#fff" },
+  "ABANCA":           { bg: "#00718F", text: "#fff" },
+  "BEST":             { bg: "#002D62", text: "#fff" },
+  "BIG":              { bg: "#1A1A2E", text: "#fff" },
+  "Popular":          { bg: "#DD0031", text: "#fff" },
+  "Outro":            { bg: "#6B7280", text: "#fff" },
+};
+
 // Campos obrigatórios para calcular progresso
 const REQUIRED_FIELDS = [
   "name", "email", "nif", "phone", "birth_date", "estado_civil",
@@ -241,12 +266,7 @@ const PublicClientForm = () => {
   }, []);
   
   const [formData, setFormData] = useState(() => {
-    // Tentar carregar rascunho ao iniciar
-    const draft = loadDraft();
-    if (draft?.data) {
-      return draft.data;
-    }
-    return {
+    const defaults = {
       // Dados Pessoais - Titular
       name: "",
       email: "",
@@ -311,6 +331,7 @@ const PublicClientForm = () => {
       employment_duration: "",
       employer_name: "",
       employer_nif: "",
+      trabalha_estrangeiro: "",
     
     // Bancos com créditos ativos
     bancos_creditos: [],
@@ -329,6 +350,16 @@ const PublicClientForm = () => {
     consent_data: false,
     consent_contact: false,
   };
+    // Tentar carregar rascunho ao iniciar - merge com defaults para garantir que campos novos existem
+    const draft = loadDraft();
+    if (draft?.data) {
+      return { ...defaults, ...draft.data, 
+        caracteristicas: Array.isArray(draft.data.caracteristicas) ? draft.data.caracteristicas : defaults.caracteristicas,
+        bancos_creditos: Array.isArray(draft.data.bancos_creditos) ? draft.data.bancos_creditos : defaults.bancos_creditos,
+        bancos_simulacoes: Array.isArray(draft.data.bancos_simulacoes) ? draft.data.bancos_simulacoes : defaults.bancos_simulacoes,
+      };
+    }
+    return defaults;
   });
 
   // Calcular campos preenchidos para progresso
@@ -374,6 +405,132 @@ const PublicClientForm = () => {
       }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Carregar campos personalizados do backend
+  const [customFields, setCustomFields] = useState([]);
+  useEffect(() => {
+    const fetchCustomFields = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/public/form-config`);
+        setCustomFields(res.data.custom_fields || []);
+      } catch (e) {
+        console.warn("Não foi possível carregar campos personalizados:", e);
+      }
+    };
+    fetchCustomFields();
+  }, []);
+
+  // Renderizar um campo personalizado dinâmico
+  const renderCustomField = (field) => {
+    const value = formData[field.field_key] || "";
+    const updateCustom = (v) => updateField(field.field_key, v);
+
+    return (
+      <div key={field.field_key} className="space-y-2" data-testid={`custom-field-${field.field_key}`}>
+        {field.is_required ? (
+          <RequiredLabel htmlFor={field.field_key}>{field.label}</RequiredLabel>
+        ) : (
+          <Label htmlFor={field.field_key}>{field.label}</Label>
+        )}
+
+        {field.field_type === "text" && (
+          <Input
+            id={field.field_key}
+            value={value}
+            onChange={(e) => updateCustom(e.target.value)}
+            placeholder={field.placeholder || ""}
+          />
+        )}
+
+        {field.field_type === "number" && (
+          <Input
+            id={field.field_key}
+            type="number"
+            value={value}
+            onChange={(e) => updateCustom(e.target.value)}
+            placeholder={field.placeholder || ""}
+          />
+        )}
+
+        {field.field_type === "date" && (
+          <Input
+            id={field.field_key}
+            type="date"
+            value={value}
+            onChange={(e) => updateCustom(e.target.value)}
+          />
+        )}
+
+        {field.field_type === "select" && field.options && (
+          <Select value={value} onValueChange={updateCustom}>
+            <SelectTrigger>
+              <SelectValue placeholder={field.placeholder || "Selecione"} />
+            </SelectTrigger>
+            <SelectContent>
+              {field.options.map((opt) => (
+                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {field.field_type === "checkbox" && field.options && (
+          <div className="flex flex-wrap gap-2">
+            {field.options.map((opt) => {
+              const arr = Array.isArray(formData[field.field_key]) ? formData[field.field_key] : [];
+              const checked = arr.includes(opt);
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => {
+                    const updated = checked ? arr.filter(v => v !== opt) : [...arr, opt];
+                    updateCustom(updated);
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                    checked
+                      ? "ring-2 ring-offset-1 ring-primary scale-105 bg-primary text-primary-foreground border-primary"
+                      : "opacity-60 hover:opacity-80 bg-transparent text-foreground border-border"
+                  }`}
+                >
+                  {checked && <span className="mr-1">&#10003;</span>}
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {field.field_type === "radio" && (
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              variant={value === "sim" ? "default" : "outline"}
+              className="flex-1"
+              onClick={() => updateCustom("sim")}
+            >
+              Sim
+            </Button>
+            <Button
+              type="button"
+              variant={value === "nao" ? "default" : "outline"}
+              className="flex-1"
+              onClick={() => updateCustom("nao")}
+            >
+              Não
+            </Button>
+          </div>
+        )}
+
+        {field.hint && <FieldHint>{field.hint}</FieldHint>}
+      </div>
+    );
+  };
+
+  // Obter campos personalizados para um passo específico
+  const getCustomFieldsForStep = (stepNum) => {
+    return customFields.filter(f => f.step === stepNum);
+  };
 
   // Validação de NIF português
   const validateNIF = (nif) => {
@@ -526,7 +683,15 @@ const PublicClientForm = () => {
           employment_duration: formData.employment_duration,
           employer_name: formData.employer_name,
           employer_nif: formData.employer_nif,
+          trabalha_estrangeiro: formData.trabalha_estrangeiro,
         },
+        // Campos personalizados
+        custom_fields: customFields.length > 0 ? customFields.reduce((acc, f) => {
+          if (formData[f.field_key] !== undefined && formData[f.field_key] !== "") {
+            acc[f.field_key] = formData[f.field_key];
+          }
+          return acc;
+        }, {}) : null,
       });
 
       // Verificar se o registo foi bloqueado por duplicado
@@ -567,27 +732,27 @@ const PublicClientForm = () => {
   const toggleCaracteristica = (value) => {
     setFormData(prev => ({
       ...prev,
-      caracteristicas: prev.caracteristicas.includes(value)
+      caracteristicas: (prev.caracteristicas || []).includes(value)
         ? prev.caracteristicas.filter(c => c !== value)
-        : [...prev.caracteristicas, value]
+        : [...(prev.caracteristicas || []), value]
     }));
   };
 
   const toggleBanco = (banco) => {
     setFormData(prev => ({
       ...prev,
-      bancos_creditos: prev.bancos_creditos.includes(banco)
+      bancos_creditos: (prev.bancos_creditos || []).includes(banco)
         ? prev.bancos_creditos.filter(b => b !== banco)
-        : [...prev.bancos_creditos, banco]
+        : [...(prev.bancos_creditos || []), banco]
     }));
   };
 
   const toggleBancoSimulacoes = (banco) => {
     setFormData(prev => ({
       ...prev,
-      bancos_simulacoes: prev.bancos_simulacoes.includes(banco)
+      bancos_simulacoes: (prev.bancos_simulacoes || []).includes(banco)
         ? prev.bancos_simulacoes.filter(b => b !== banco)
-        : [...prev.bancos_simulacoes, banco]
+        : [...(prev.bancos_simulacoes || []), banco]
     }));
   };
 
@@ -618,7 +783,7 @@ const PublicClientForm = () => {
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2 md:col-span-2">
-          <Label htmlFor="name">Nome completo *</Label>
+          <RequiredLabel htmlFor="name">Nome completo</RequiredLabel>
           <Input
             id="name"
             name="name"
@@ -633,7 +798,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="email">Email *</Label>
+          <RequiredLabel htmlFor="email">Email</RequiredLabel>
           <Input
             id="email"
             name="email"
@@ -650,7 +815,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="phone">Telemóvel *</Label>
+          <RequiredLabel htmlFor="phone">Telemóvel</RequiredLabel>
           <Input
             id="phone"
             name="phone"
@@ -667,7 +832,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="nif">NIF *</Label>
+          <RequiredLabel htmlFor="nif">NIF</RequiredLabel>
           <Input
             id="nif"
             name="nif"
@@ -685,7 +850,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="documento_id">Cartão de Cidadão/Passaporte *</Label>
+          <RequiredLabel htmlFor="documento_id">Cartão de Cidadão/Passaporte</RequiredLabel>
           <Input
             id="documento_id"
             name="documento_id"
@@ -701,7 +866,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="naturalidade">Naturalidade *</Label>
+          <RequiredLabel htmlFor="naturalidade">Naturalidade</RequiredLabel>
           <Input
             id="naturalidade"
             name="naturalidade"
@@ -717,7 +882,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="nacionalidade">Nacionalidade *</Label>
+          <RequiredLabel htmlFor="nacionalidade">Nacionalidade</RequiredLabel>
           <Input
             id="nacionalidade"
             name="nacionalidade"
@@ -730,7 +895,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2 md:col-span-2">
-          <Label htmlFor="morada_fiscal">Morada Fiscal *</Label>
+          <RequiredLabel htmlFor="morada_fiscal">Morada Fiscal</RequiredLabel>
           <Input
             id="morada_fiscal"
             value={formData.morada_fiscal}
@@ -743,7 +908,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="birth_date">Data de Nascimento *</Label>
+          <RequiredLabel htmlFor="birth_date">Data de Nascimento</RequiredLabel>
           <Input
             id="birth_date"
             type="date"
@@ -755,7 +920,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="estado_civil">Estado Civil *</Label>
+          <RequiredLabel htmlFor="estado_civil">Estado Civil</RequiredLabel>
           <Select value={formData.estado_civil} onValueChange={(v) => updateField("estado_civil", v)}>
             <SelectTrigger data-testid="client-estado-civil">
               <SelectValue placeholder="Selecione" />
@@ -789,7 +954,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2 md:col-span-2">
-          <Label>Compra individualmente ou com outra pessoa? *</Label>
+          <RequiredLabel>Compra individualmente ou com outra pessoa?</RequiredLabel>
           <Select value={formData.compra_tipo} onValueChange={(v) => updateField("compra_tipo", v)}>
             <SelectTrigger data-testid="client-compra-tipo">
               <SelectValue placeholder="Selecione" />
@@ -821,7 +986,7 @@ const PublicClientForm = () => {
       {formData.compra_tipo === "outra_pessoa" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="titular2_name">Nome completo *</Label>
+            <RequiredLabel htmlFor="titular2_name">Nome completo</RequiredLabel>
             <Input
               id="titular2_name"
               value={formData.titular2_name}
@@ -982,7 +1147,7 @@ const PublicClientForm = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* FINALIDADE PRIMEIRO */}
         <div className="space-y-2 md:col-span-2">
-          <Label>Finalidade do pedido *</Label>
+          <RequiredLabel>Finalidade do pedido</RequiredLabel>
           <Select value={formData.finalidade} onValueChange={(v) => updateField("finalidade", v)}>
             <SelectTrigger data-testid="imovel-finalidade">
               <SelectValue placeholder="Selecione a finalidade" />
@@ -1003,7 +1168,7 @@ const PublicClientForm = () => {
         {formData.finalidade !== "refinanciamento" && (
           <>
             <div className="space-y-2">
-              <Label>O que procura? *</Label>
+              <RequiredLabel>O que procura?</RequiredLabel>
               <Select value={formData.tipo_imovel} onValueChange={(v) => updateField("tipo_imovel", v)}>
                 <SelectTrigger data-testid="imovel-tipo">
                   <SelectValue placeholder="Selecione" />
@@ -1017,7 +1182,7 @@ const PublicClientForm = () => {
             </div>
             
             <div className="space-y-2">
-              <Label>Número de quartos *</Label>
+              <RequiredLabel>Número de quartos</RequiredLabel>
               <Select value={formData.num_quartos} onValueChange={(v) => updateField("num_quartos", v)}>
                 <SelectTrigger data-testid="imovel-quartos">
                   <SelectValue placeholder="Selecione" />
@@ -1032,7 +1197,7 @@ const PublicClientForm = () => {
             </div>
             
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="localizacao">Localização/Zona(s) preferida(s) *</Label>
+              <RequiredLabel htmlFor="localizacao">Localização/Zona(s) preferida(s)</RequiredLabel>
               <Input
                 id="localizacao"
                 value={formData.localizacao}
@@ -1052,7 +1217,7 @@ const PublicClientForm = () => {
                   <div key={c.value} className="flex items-center space-x-2">
                     <Checkbox
                       id={c.value}
-                      checked={formData.caracteristicas.includes(c.value)}
+                      checked={(formData.caracteristicas || []).includes(c.value)}
                       onCheckedChange={() => toggleCaracteristica(c.value)}
                       data-testid={`caracteristica-${c.value}`}
                     />
@@ -1062,7 +1227,7 @@ const PublicClientForm = () => {
               </div>
             </div>
             
-            {formData.caracteristicas.includes("outro") && (
+            {(formData.caracteristicas || []).includes("outro") && (
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="outras_caracteristicas">Outras características</Label>
                 <Input
@@ -1160,7 +1325,7 @@ const PublicClientForm = () => {
         {formData.finalidade === "refinanciamento" && (
           <>
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="valor_transferencia">Valor a Transferir/Consolidar (€) *</Label>
+              <RequiredLabel htmlFor="valor_transferencia">Valor a Transferir/Consolidar (€)</RequiredLabel>
               <Input
                 id="valor_transferencia"
                 type="number"
@@ -1186,7 +1351,7 @@ const PublicClientForm = () => {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="prazo_pretendido">Prazo Pretendido (anos) *</Label>
+              <RequiredLabel htmlFor="prazo_pretendido">Prazo Pretendido (anos)</RequiredLabel>
               <Select value={formData.prazo_pretendido} onValueChange={(v) => updateField("prazo_pretendido", v)}>
                 <SelectTrigger data-testid="imovel-prazo">
                   <SelectValue placeholder="Selecione" />
@@ -1257,7 +1422,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label>Chave Móvel Digital? *</Label>
+          <RequiredLabel>Chave Móvel Digital?</RequiredLabel>
           <Select value={formData.chave_movel_digital} onValueChange={(v) => updateField("chave_movel_digital", v)}>
             <SelectTrigger data-testid="fin-chave-movel">
               <SelectValue placeholder="Selecione" />
@@ -1312,7 +1477,21 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label>Tipo de Contrato de Trabalho *</Label>
+          <Label>Trabalha no estrangeiro?</Label>
+          <Select value={formData.trabalha_estrangeiro} onValueChange={(v) => updateField("trabalha_estrangeiro", v)}>
+            <SelectTrigger data-testid="fin-trabalha-estrangeiro">
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sim">Sim</SelectItem>
+              <SelectItem value="nao">Não</SelectItem>
+            </SelectContent>
+          </Select>
+          <FieldHint>Indique se trabalha fora de Portugal. Pode influenciar as condições do crédito.</FieldHint>
+        </div>
+        
+        <div className="space-y-2">
+          <RequiredLabel>Tipo de Contrato de Trabalho</RequiredLabel>
           <Select value={formData.employment_type} onValueChange={(v) => updateField("employment_type", v)}>
             <SelectTrigger data-testid="fin-employment-type">
               <SelectValue placeholder="Selecione" />
@@ -1381,7 +1560,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2 md:col-span-2">
-          <Label htmlFor="salario_liquido">Salário mensal líquido (já com descontos) * (€)</Label>
+          <RequiredLabel htmlFor="salario_liquido">Salário mensal líquido (já com descontos) (€)</RequiredLabel>
           <Input
             id="salario_liquido"
             type="number"
@@ -1407,38 +1586,82 @@ const PublicClientForm = () => {
       
       <div className="space-y-6">
         <div className="space-y-3">
-          <Label>Bancos onde tem créditos ativos *</Label>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {BANCOS.map((banco) => (
-              <div key={banco} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`banco-${banco}`}
-                  checked={formData.bancos_creditos.includes(banco)}
-                  onCheckedChange={() => toggleBanco(banco)}
+          <RequiredLabel>Bancos onde tem créditos ativos</RequiredLabel>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData(prev => ({ ...prev, bancos_creditos: [] }))}
+              data-testid="banco-nenhuma"
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                (formData.bancos_creditos || []).length === 0 
+                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700' 
+                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+              }`}
+            >
+              {(formData.bancos_creditos || []).length === 0 && <span className="mr-1">✓</span>}
+              Nenhuma
+            </button>
+            {BANCOS.map((banco) => {
+              const selected = (formData.bancos_creditos || []).includes(banco);
+              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+              return (
+                <button
+                  key={banco}
+                  type="button"
+                  onClick={() => toggleBanco(banco)}
                   data-testid={`banco-${banco.toLowerCase().replace(/\s+/g, '-')}`}
-                />
-                <Label htmlFor={`banco-${banco}`} className="text-sm cursor-pointer">{banco}</Label>
-              </div>
-            ))}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
+                  style={selected
+                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
+                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
+                  }
+                >
+                  {selected && <span className="mr-1">✓</span>}
+                  {banco}
+                </button>
+              );
+            })}
           </div>
           <FieldHint>Inclui crédito habitação, automóvel, pessoal, ou cartões de crédito com saldo em dívida.</FieldHint>
         </div>
         
         {/* Pergunta sobre simulações de crédito */}
         <div className="space-y-3">
-          <Label>Efetou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {BANCOS.map((banco) => (
-              <div key={`sim-${banco}`} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`banco-sim-${banco}`}
-                  checked={formData.bancos_simulacoes.includes(banco)}
-                  onCheckedChange={() => toggleBancoSimulacoes(banco)}
+          <Label>Efetuou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData(prev => ({ ...prev, bancos_simulacoes: [] }))}
+              data-testid="banco-sim-nenhuma"
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                (formData.bancos_simulacoes || []).length === 0 
+                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700' 
+                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+              }`}
+            >
+              {(formData.bancos_simulacoes || []).length === 0 && <span className="mr-1">✓</span>}
+              Nenhuma
+            </button>
+            {BANCOS.map((banco) => {
+              const selected = (formData.bancos_simulacoes || []).includes(banco);
+              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+              return (
+                <button
+                  key={`sim-${banco}`}
+                  type="button"
+                  onClick={() => toggleBancoSimulacoes(banco)}
                   data-testid={`banco-sim-${banco.toLowerCase().replace(/\s+/g, '-')}`}
-                />
-                <Label htmlFor={`banco-sim-${banco}`} className="text-sm cursor-pointer">{banco}</Label>
-              </div>
-            ))}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
+                  style={selected
+                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
+                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
+                  }
+                >
+                  {selected && <span className="mr-1">✓</span>}
+                  {banco}
+                </button>
+              );
+            })}
           </div>
           <FieldHint>Indique os bancos onde já efetuou simulações ou pedidos de crédito habitação.</FieldHint>
         </div>
@@ -1446,7 +1669,7 @@ const PublicClientForm = () => {
         {/* Pergunta sobre tempo restante do crédito (apenas para refinanciamento) */}
         {formData.finalidade === "refinanciamento" && (
           <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <Label htmlFor="tempo_restante_credito">Quanto tempo falta para acabar de pagar o crédito atual? *</Label>
+            <RequiredLabel htmlFor="tempo_restante_credito">Quanto tempo falta para acabar de pagar o crédito atual?</RequiredLabel>
             <Select 
               value={formData.tempo_restante_credito} 
               onValueChange={(v) => updateField("tempo_restante_credito", v)}
@@ -1469,7 +1692,7 @@ const PublicClientForm = () => {
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="capital_proprio">Capital próprio disponível * (€)</Label>
+            <RequiredLabel htmlFor="capital_proprio">Capital próprio disponível (€)</RequiredLabel>
             <Input
               id="capital_proprio"
               type="number"
@@ -1483,7 +1706,7 @@ const PublicClientForm = () => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="valor_financiado">Valor a financiar * (€)</Label>
+            <RequiredLabel htmlFor="valor_financiado">Valor a financiar (€)</RequiredLabel>
             <Input
               id="valor_financiado"
               value={formData.valor_financiado}
@@ -1530,7 +1753,7 @@ const PublicClientForm = () => {
             <p><strong>Tipo:</strong> {TIPOS_IMOVEL.find(t => t.value === formData.tipo_imovel)?.label || "-"}</p>
             <p><strong>Quartos:</strong> {formData.num_quartos || "-"}</p>
             <p><strong>Localização:</strong> {formData.localizacao || "-"}</p>
-            <p><strong>Características:</strong> {formData.caracteristicas.length > 0 ? formData.caracteristicas.join(", ") : "-"}</p>
+            <p><strong>Características:</strong> {(formData.caracteristicas || []).length > 0 ? formData.caracteristicas.join(", ") : "-"}</p>
           </CardContent>
         </Card>
         
@@ -1543,6 +1766,7 @@ const PublicClientForm = () => {
             <p><strong>Capital próprio:</strong> {formData.capital_proprio ? `€${formData.capital_proprio}` : "-"}</p>
             <p><strong>Valor a financiar:</strong> {formData.valor_financiado || "-"}</p>
             <p><strong>Efetivo:</strong> {formData.efetivo === "sim" ? "Sim" : formData.efetivo === "nao" ? "Não" : "-"}</p>
+            <p><strong>Trabalha no Estrangeiro:</strong> {formData.trabalha_estrangeiro === "sim" ? "Sim" : formData.trabalha_estrangeiro === "nao" ? "Não" : "-"}</p>
           </CardContent>
         </Card>
         
@@ -1551,7 +1775,7 @@ const PublicClientForm = () => {
             <CardTitle className="text-sm font-medium text-muted-foreground">Créditos Ativos</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
-            <p>{formData.bancos_creditos.length > 0 ? formData.bancos_creditos.join(", ") : "Nenhum banco selecionado"}</p>
+            <p>{(formData.bancos_creditos || []).length > 0 ? formData.bancos_creditos.join(", ") : "Nenhum banco selecionado"}</p>
           </CardContent>
         </Card>
         
@@ -1560,7 +1784,7 @@ const PublicClientForm = () => {
             <CardTitle className="text-sm font-medium text-muted-foreground">Simulações de Crédito</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
-            <p>{formData.bancos_simulacoes.length > 0 ? formData.bancos_simulacoes.join(", ") : "Nenhuma simulação efetuada"}</p>
+            <p>{(formData.bancos_simulacoes || []).length > 0 ? formData.bancos_simulacoes.join(", ") : "Nenhuma simulação efetuada"}</p>
           </CardContent>
         </Card>
         
@@ -1914,6 +2138,14 @@ const PublicClientForm = () => {
             {step === 4 && renderStep4()}
             {step === 5 && renderStep5()}
             {step === 6 && renderStep6()}
+
+            {/* Campos personalizados para o passo atual */}
+            {getCustomFieldsForStep(step).length > 0 && (
+              <div className="mt-6 pt-4 border-t border-dashed border-emerald-300 space-y-4">
+                <p className="text-xs text-emerald-600 font-medium uppercase tracking-wide">Campos adicionais</p>
+                {getCustomFieldsForStep(step).map(renderCustomField)}
+              </div>
+            )}
 
             <div className="flex justify-between mt-8 pt-6 border-t border-border">
               <Button

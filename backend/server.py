@@ -80,6 +80,8 @@ from routes.rgpd import router as rgpd_router
 from routes.temp_links import router as temp_links_router
 from routes.admin_encryption import router as admin_encryption_router
 from routes.restore import router as restore_router
+from routes.automation import router as automation_router
+from routes.form_config import router as form_config_router
 
 # Configuração Sentry
 if SENTRY_DSN:
@@ -377,6 +379,8 @@ app.include_router(diagnostics_router, prefix="/api")
 app.include_router(rgpd_router, prefix="/api")
 app.include_router(temp_links_router, prefix="/api")
 app.include_router(admin_encryption_router, prefix="/api")
+app.include_router(automation_router, prefix="/api")
+app.include_router(form_config_router, prefix="/api")
 app.include_router(restore_router, prefix="/api")
 
 @app.get("/health")
