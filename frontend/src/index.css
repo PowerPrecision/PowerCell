@@ -522,6 +522,54 @@ select:focus {
     padding-top: env(safe-area-inset-top, 0);
 }
 
+.safe-area-top {
+    padding-top: max(env(safe-area-inset-top, 0), 4px);
+}
+
+.safe-area-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom, 0), 4px);
+}
+
+/* Correção para conteúdo mobile não ser cortado pelo header fixo */
+@media (max-width: 768px) {
+    /* Espaço extra no topo para acomodar header + safe-area */
+    .main-content-mobile {
+        padding-top: max(env(safe-area-inset-top, 0), 0px);
+    }
+    
+    /* Garantir que o header não corta conteúdo */
+    header.sticky {
+        top: 0 !important;
+    }
+    
+    /* Banner de impersonate em mobile */
+    .impersonate-active header.sticky {
+        top: 48px !important;
+    }
+}
+
+/* Correção para títulos não serem cortados */
+h1, .title-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+/* Garantir que botões no header têm tamanho adequado em mobile */
+@media (max-width: 640px) {
+    header button {
+        min-width: 32px;
+        min-height: 32px;
+    }
+    
+    /* Reduzir padding do conteúdo principal em mobile */
+    main {
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+    }
+}
+
 /* Scrollbar estilizada */
 ::-webkit-scrollbar {
     width: 8px;

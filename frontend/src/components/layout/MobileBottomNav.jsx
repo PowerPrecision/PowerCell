@@ -40,7 +40,7 @@ const MobileBottomNav = () => {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-background border-t safe-area-pb">
-      <div className="flex items-center justify-around h-16">
+      <div className="flex items-center justify-around h-14 safe-area-bottom">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path || 
                           location.pathname.startsWith(item.path + "/");
@@ -60,10 +60,10 @@ const MobileBottomNav = () => {
               data-testid={`mobile-nav-${item.label.toLowerCase()}`}
             >
               <item.icon className={cn(
-                "h-5 w-5 mb-1",
+                "h-5 w-5 mb-0.5",
                 isActive && "scale-110"
               )} />
-              <span className="text-xs font-medium">{item.label}</span>
+              <span className="text-[10px] sm:text-xs font-medium">{item.label}</span>
             </Link>
           );
         })}
