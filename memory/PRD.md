@@ -1,34 +1,58 @@
 # PowerCell CRM - PRD
 
 ## Problema Original
-CRM para gestao de processos de credito imobiliario com formulario publico dinamico.
+CRM para gestão de processos de crédito imobiliário com formulário público dinâmico, gestão de clientes/processos/documentos, automação e monitorização.
 
-## Stack
-- Backend: FastAPI, MongoDB, JWT, AWS S3, Sentry, Redis
-- Frontend: React, TailwindCSS, Shadcn UI, Lucide Icons
+## Stack Tecnológica
+- **Backend**: FastAPI, MongoDB, Pydantic, JWT Auth, AWS S3, slowapi, sentry-sdk, upstash-redis
+- **Frontend**: React 18, Vite, TailwindCSS, Shadcn UI, Sonner, Lucide Icons, @sentry/react, @axe-core/react
+- **DB**: MongoDB (via MONGO_URL)
+- **Observabilidade**: Sentry (backend + frontend)
+- **Cache**: Upstash Redis (REST API, degradação graciosa)
 
-## Implementacao Completa
+## Estado de Implementação — COMPLETO
 
-### Core
-- Todos os bugs (E#), melhorias (M#) e outras (O#) implementados
-- Automacao No-Code, WebSocket fallback, axe-core, Sentry, Redis cache
+### Core CRM
+- CRUD completo de processos, clientes, documentos
+- Quadro Kanban com filtros (data, urgência)
+- Dashboard admin/staff com estatísticas
+- Sistema de notificações (WebSocket + polling fallback)
+- Cursor pagination, rate limiting, JWT lifecycle
 
-### Formulario
-- Required Labels com * vermelho + "(obrigatorio)"
-- Campo "Trabalha no Estrangeiro"
-- Opcao "Nenhuma" nos bancos (Step 5)
-- Campos personalizados dinamicos (6 tipos: texto, dropdown, checkbox, numero, data, sim/nao)
-- **Templates de formulario** (3 sistema + personalizados)
-- **Pre-visualizacao de templates** antes de ativar
+### Formulário Público
+- Multi-step (6 passos) com validação e rascunho automático
+- Campos obrigatórios com `*` vermelho + "(obrigatório)"
+- Campo "Trabalha no estrangeiro?" (Step 4)
+- Opção "Nenhuma" nos bancos (Step 5)
+- Campos personalizados dinâmicos (6 tipos)
+- Editor de opções inline para dropdowns/checkboxes
+- 3 templates de sistema + templates personalizados
+- Pré-visualização de templates antes de ativar
 
-### Admin
-- Configuracoes de Perfis com gestao de permissoes (/configuracoes-perfis)
-- Gestao do Formulario com campos personalizados (/gestao-formulario)
-- Templates: Credito Habitacao, Refinanciamento, Credito Pessoal
+### Administração
+- Configurações de Perfis (`/configuracoes-perfis`): Permissões por utilizador
+- Gestão do Formulário (`/gestao-formulario`): Campos + templates
+- Motor de Automação No-Code (`/automation`): Regras "Se X, Então Y"
+- Gestão de Estados do Workflow
+
+### Segurança e Observabilidade
+- Encriptação AES (Fernet), DOMPurify, MIME validation
+- Sentry, Redis cache, axe-core, audit trail unificado
+- Todos os bugs (E#), melhorias (M#) e outras (O#) do documento original implementados
 
 ## Tarefas Pendentes
-- Nenhuma tarefa prioritaria pendente (P1/P2 removidos por opcao do utilizador)
+- Nenhuma tarefa prioritária pendente (P1/P2 removidos por opção do utilizador)
 
-## Credenciais
+## Credenciais de Teste
 - Admin: admin@sistema.pt / admin
 - CEO: pedroborges@powerealestate.pt / power2026
+- Consultor: tiagoborges@powerealestate.pt / power2026
+
+## Rotas Principais
+- Formulário público: `/` (raiz)
+- Form config público: `GET /api/public/form-config`
+- Form config admin: `/api/admin/form-config/*`
+- Templates: `/api/admin/form-config/templates/*`
+- Automação: `/api/admin/automation/*`
+- Perfis: `/configuracoes-perfis`
+- Gestão formulário: `/gestao-formulario`
