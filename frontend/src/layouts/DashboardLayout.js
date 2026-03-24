@@ -57,6 +57,7 @@ import {
   MessageSquare,
   Activity,
   FileSignature,
+  Zap,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import MobileBottomNav from "../components/layout/MobileBottomNav";
@@ -487,6 +488,11 @@ const DashboardLayout = ({ children, title }) => {
           label: "Estados do Workflow",
           icon: Settings,
           href: "/workflow-estados",
+        });
+        configItems.push({
+          label: "Automacoes",
+          icon: Zap,
+          href: "/automation",
         });
       }
       

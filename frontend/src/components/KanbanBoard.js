@@ -499,10 +499,10 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
             </div>
           )}
           <div className="flex gap-1">
-            <Button variant="outline" size="icon" onClick={() => scrollContainer("left")}>
+            <Button variant="outline" size="icon" onClick={() => scrollContainer("left")} aria-label="Deslocar para a esquerda">
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="icon" onClick={() => scrollContainer("right")}>
+            <Button variant="outline" size="icon" onClick={() => scrollContainer("right")} aria-label="Deslocar para a direita">
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>

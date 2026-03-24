@@ -167,6 +167,47 @@ export function useWebSocket(options = {}) {
     }
   }, [onNotification, onProcessUpdate, onDeadlineReminder]);
 
+  // O11 - Polling fallback quando WebSocket falha
+  const pollingIntervalRef = useRef(null);
+  const wsFailCountRef = useRef(0);
+  const MAX_WS_FAILS = 3;
+  const POLLING_INTERVAL = 30000; // 30 seconds
+  
+  const startPollingFallback = useCallback(() => {
+    if (pollingIntervalRef.current) return; // Already polling
+    
+    console.log('WebSocket: Iniciando polling fallback (30s)');
+    pollingIntervalRef.current = setInterval(async () => {
+      if (!token) return;
+      try {
+        const apiUrl = process.env.REACT_APP_BACKEND_URL;
+        const response = await fetch(`${apiUrl}/api/notifications?unread=true&limit=10`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const notifications = data.notifications || data;
+          if (Array.isArray(notifications)) {
+            notifications.forEach(n => {
+              onNotification?.(n);
+            });
+          }
+        }
+      } catch (e) {
+        // Silent fail - polling is best-effort
+      }
+    }, POLLING_INTERVAL);
+  }, [token, onNotification]);
+  
+  const stopPollingFallback = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+      wsFailCountRef.current = 0;
+      console.log('WebSocket: Polling fallback parado');
+    }
+  }, []);
+
   // Conectar ao WebSocket
   const connect = useCallback(() => {
     if (!token) {
@@ -196,6 +237,8 @@ export function useWebSocket(options = {}) {
         console.log('WebSocket: Conexão estabelecida');
         setIsConnected(true);
         setConnectionError(null);
+        wsFailCountRef.current = 0;
+        stopPollingFallback(); // O11 - Parar polling quando WS conecta
         startHeartbeat();
         onConnect?.();
       };
@@ -218,6 +261,11 @@ export function useWebSocket(options = {}) {
       wsRef.current.onerror = (error) => {
         console.error('WebSocket: Erro:', error);
         setConnectionError('Erro na conexão WebSocket');
+        // O11 - Contar falhas e ativar polling fallback
+        wsFailCountRef.current++;
+        if (wsFailCountRef.current >= MAX_WS_FAILS) {
+          startPollingFallback();
+        }
       };
       
     } catch (error) {
@@ -295,11 +343,13 @@ export function useWebSocket(options = {}) {
     
     return () => {
       disconnect();
+      stopPollingFallback(); // O11 - Limpar polling ao desmontar
     };
-  }, [autoConnect, token, connect, disconnect]);
+  }, [autoConnect, token, connect, disconnect, stopPollingFallback]);
 
   return {
     isConnected,
+    isPolling: !!pollingIntervalRef.current,
     lastMessage,
     connectionError,
     connect,

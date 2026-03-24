@@ -37,7 +37,7 @@ export default defineConfig({
   /* Configuração global */
   use: {
     /* URL base da aplicação */
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'https://undo-toast-ui.preview.emergentagent.com',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'https://workflow-builder-95.preview.emergentagent.com',
     
     /* Recolher trace em caso de falha */
     trace: 'on-first-retry',

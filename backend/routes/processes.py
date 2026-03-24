@@ -1094,6 +1094,19 @@ async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depe
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
+    # O22 - Executar regras de automação após atualização
+    if data.status and can_update_status:
+        try:
+            from services.workflow_engine import process_trigger
+            await process_trigger("process_status_changed", {
+                "process_id": process_id,
+                "old_status": process.get("status"),
+                "new_status": data.status,
+                "client_name": process.get("client_name", ""),
+            })
+        except Exception as e:
+            logger.warning(f"Erro ao processar automações: {e}")
+    
     # Desencriptar dados para a resposta
     updated = decrypt_sensitive_data(updated)
     
