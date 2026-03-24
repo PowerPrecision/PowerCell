@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
+import { TableSkeleton } from "../components/ui/skeletons";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -121,8 +122,9 @@ const MyClientsPage = () => {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-64" data-testid="loading-spinner">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="space-y-6" data-testid="loading-spinner">
+          <div className="h-8 w-48 bg-muted animate-pulse rounded" />
+          <TableSkeleton rows={8} columns={5} />
         </div>
       </DashboardLayout>
     );

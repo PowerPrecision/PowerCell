@@ -96,8 +96,8 @@ async def list_registered_clients(
     search: Optional[str] = Query(None, description="Pesquisar por nome, email ou NIF"),
     has_process: Optional[bool] = Query(None, description="Filtrar por ter processo criado"),
     assigned_to_me: bool = Query(False, description="Mostrar apenas clientes atribuídos ao utilizador atual"),
-    sort_field: str = Query("created_at", description="Campo de ordenação"),
-    sort_order: str = Query("desc", description="Ordem: asc ou desc"),
+    sort_field: str = Query("nome", description="Campo de ordenação"),
+    sort_order: str = Query("asc", description="Ordem: asc ou desc"),
     limit: int = Query(50, le=200),
     skip: int = Query(0),
     user: dict = Depends(get_current_user)
@@ -519,6 +519,9 @@ async def list_clients(
         
         clients = list(clients_map.values())
         
+        # M5 - Ordenar por nome alfabeticamente (padrão)
+        clients.sort(key=lambda c: (c.get("nome") or "").lower())
+        
         # Filtrar por ter processo activo
         if has_active_process is not None:
             clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
@@ -601,6 +604,9 @@ async def list_clients(
             clients_map[key]["active_processes_count"] += 1
     
     clients = list(clients_map.values())
+    
+    # M5 - Ordenar por nome alfabeticamente (padrão)
+    clients.sort(key=lambda c: (c.get("nome") or "").lower())
     
     # Filtrar por ter processo activo
     if has_active_process is not None:

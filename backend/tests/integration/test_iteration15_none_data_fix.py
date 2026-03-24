@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import the function directly to test
 from services.ai_document import build_update_data_from_extraction
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://gdpr-compliance-fix.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://undo-toast-ui.preview.emergentagent.com')
 
 
 class TestBuildUpdateDataFromExtraction:

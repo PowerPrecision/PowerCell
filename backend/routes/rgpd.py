@@ -8,6 +8,8 @@ Endpoints para gestão de consentimentos RGPD:
 - Verificar estado do RGPD para um processo
 """
 import logging
+import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 
@@ -26,6 +28,25 @@ from services.rgpd_service import (
     RGPD_REQUESTS_COLLECTION,
     TOKEN_EXPIRY_HOURS
 )
+
+async def _add_process_activity(process_id: str, user_id: str, user_name: str, action: str, details: str = ""):
+    """Insere uma atividade/comentário automático na timeline do processo."""
+    try:
+        activity = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "user_name": user_name,
+            "action": action,
+            "details": details,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": "system"
+        }
+        await db.processes.update_one(
+            {"id": process_id},
+            {"$push": {"activities": activity}}
+        )
+    except Exception as e:
+        logger.warning(f"Não foi possível registar atividade RGPD no processo {process_id}: {e}")
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +137,16 @@ async def request_rgpd(
     if not email_sent:
         logger.warning("RGPD created but email failed to send")
     
+    # M8 - Registar atividade no processo
+    email_status = "enviado" if email_sent else "falhou"
+    await _add_process_activity(
+        process_id=data.process_id,
+        user_id=user.get("id", "system"),
+        user_name=user.get("name", "Sistema"),
+        action=f"RGPD solicitado — email {email_status} para {data.client_email}",
+        details=f"Link de assinatura enviado para o cliente. Expira em {TOKEN_EXPIRY_HOURS}h."
+    )
+    
     return RGPDResponse(
         id=result["request_id"],
         process_id=data.process_id,
@@ -168,6 +199,17 @@ async def sign_rgpd_form(
     
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Erro ao assinar RGPD"))
+    
+    # M8 - Registar atividade de assinatura no processo
+    process_id = result.get("process_id")
+    if process_id:
+        await _add_process_activity(
+            process_id=process_id,
+            user_id="client",
+            user_name=consent_data.nome or "Cliente",
+            action="RGPD assinado pelo cliente",
+            details=f"Documento RGPD assinado digitalmente. NIF: {consent_data.contribuinte or 'N/A'}."
+        )
     
     return {
         "success": True,

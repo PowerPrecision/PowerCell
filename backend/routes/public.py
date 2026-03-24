@@ -24,6 +24,7 @@ from slowapi.util import get_remote_address
 logger = logging.getLogger(__name__)
 
 from database import db
+from services.s3_storage import s3_service
 from models.auth import UserRole
 from models.process import PublicClientRegistration
 from services.email import send_registration_confirmation, send_new_client_notification
@@ -182,6 +183,26 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     }
     
     await db.clients.insert_one(client_doc)
+    
+    # =========================================
+    # M3 - CRIAR PASTA S3 PARA O CLIENTE
+    # =========================================
+    try:
+        import asyncio
+        s3_folder_name = await asyncio.to_thread(
+            s3_service.initialize_client_folders,
+            client_id,
+            data.name,
+            second_client_name
+        )
+        if s3_folder_name:
+            await db.clients.update_one(
+                {"id": client_id},
+                {"$set": {"s3_folder": s3_folder_name}}
+            )
+            logger.info(f"Pasta S3 criada para cliente {client_id}: {s3_folder_name}")
+    except Exception as e:
+        logger.warning(f"Não foi possível criar pasta S3 para cliente {client_id}: {e}")
     
     # =========================================
     # ENVIAR EMAIL DE CONFIRMAÇÃO AO CLIENTE
