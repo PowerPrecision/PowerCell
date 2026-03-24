@@ -35,7 +35,7 @@ const MobileBottomNav = () => {
     { path: getDashboardPath(), icon: LayoutGrid, label: "Kanban" },
     { path: getClientsPath(), icon: Users, label: "Clientes" },
     { path: "/leads", icon: Calendar, label: "Visitas" },
-    { path: "/definicoes", icon: User, label: "Perfil" },
+    { path: "/perfil", icon: User, label: "Perfil" },
   ];
 
   return (
