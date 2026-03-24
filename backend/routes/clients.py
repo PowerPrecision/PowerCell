@@ -328,6 +328,10 @@ async def assign_client_to_user(
             personal_data["nome"] = client_name
         
         # Criar documento do processo
+        # Gerar link S3 com nome do cliente (espaços substituídos por underscores)
+        safe_name = "_".join(w.capitalize() for w in client_name.strip().split()) if client_name else process_id[:8]
+        s3_folder = f"s3://powerprecision-docs-storage/Documentação Clientes/{safe_name}/"
+        
         process_doc = {
             "id": process_id,
             "process_number": process_number,
@@ -347,6 +351,7 @@ async def assign_client_to_user(
             "credit_data": None,
             "has_property": client.get("has_property", False),
             "idade_menos_35": client.get("idade_menos_35", False),
+            "s3_folder": s3_folder,
             "source": "client_assignment",
             "created_at": now,
             "updated_at": now,

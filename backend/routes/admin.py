@@ -2214,7 +2214,11 @@ async def get_stale_processes(
     Retorna processos agrupados por nível de urgência.
     """
     now = datetime.now(timezone.utc)
-    final_statuses = ["concluido", "cancelado", "recusado", "desistiu", "escritura_feita"]
+    final_statuses = [
+        "concluido", "concluidos", "cancelado", "recusado", 
+        "desistiu", "desistencia", "desistencias", "desistência",
+        "escritura_feita", "arquivado", "perdido", "eliminado"
+    ]
     
     cutoff = (now - timedelta(days=days)).isoformat()
     
