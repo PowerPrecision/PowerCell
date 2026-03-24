@@ -42,6 +42,7 @@ const AdminDashboard = () => {
   const [calendarDeadlines, setCalendarDeadlines] = useState([]);
   const [upcomingExpiries, setUpcomingExpiries] = useState([]);
   const [staleStats, setStaleStats] = useState(null);
+  const [showStaleList, setShowStaleList] = useState(false);
   
   const [activeTab, setActiveTab] = useState("overview");
   const [consultorFilter, setConsultorFilter] = useState("all");
@@ -255,15 +256,47 @@ const AdminDashboard = () => {
                   variant="outline"
                   size="sm"
                   className="border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300 hover:bg-orange-100 dark:hover:bg-orange-900/30 shrink-0"
-                  onClick={() => {
-                    setActiveTab("overview");
-                    toast.info(`${staleStats.total} processos requerem atenção. Verifique o Kanban com o filtro de urgência.`);
-                  }}
+                  onClick={() => setShowStaleList(!showStaleList)}
                   data-testid="stale-processes-action-btn"
                 >
-                  Ver processos
+                  {showStaleList ? 'Esconder' : 'Ver processos'}
                 </Button>
               </div>
+              {showStaleList && staleStats.processes && (
+                <div className="mt-4 border-t border-orange-200 dark:border-orange-800 pt-3 space-y-1 max-h-[400px] overflow-y-auto" data-testid="stale-processes-list">
+                  <div className="grid grid-cols-12 gap-2 px-2 py-1.5 text-xs font-medium text-orange-800 dark:text-orange-300 border-b border-orange-200 dark:border-orange-700">
+                    <div className="col-span-3">Cliente</div>
+                    <div className="col-span-2">Estado</div>
+                    <div className="col-span-3">Consultor</div>
+                    <div className="col-span-2">Dias s/ atualização</div>
+                    <div className="col-span-2 text-right">Urgência</div>
+                  </div>
+                  {staleStats.processes.map((p) => (
+                    <div
+                      key={p.id}
+                      className="grid grid-cols-12 gap-2 px-2 py-2 items-center rounded hover:bg-orange-100 dark:hover:bg-orange-900/30 cursor-pointer transition-colors"
+                      onClick={() => navigate(`/process/${p.id}`)}
+                      data-testid={`stale-process-${p.id}`}
+                    >
+                      <div className="col-span-3 text-sm font-medium truncate">{p.client_name || '—'}</div>
+                      <div className="col-span-2">
+                        <Badge variant="outline" className="text-xs">{p.status || '—'}</Badge>
+                      </div>
+                      <div className="col-span-3 text-sm text-muted-foreground truncate">{p.consultor_name || p.mediador_name || '—'}</div>
+                      <div className="col-span-2 text-sm text-center">{p.days_since_update} dias</div>
+                      <div className="col-span-2 text-right">
+                        <Badge className={
+                          p.urgency === 'critical' ? 'bg-red-600 text-white' :
+                          p.urgency === 'high' ? 'bg-orange-500 text-white' :
+                          'bg-yellow-500 text-white'
+                        }>
+                          {p.urgency === 'critical' ? 'Crítico' : p.urgency === 'high' ? 'Atrasado' : 'Urgente'}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
