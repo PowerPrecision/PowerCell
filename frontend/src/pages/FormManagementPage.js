@@ -29,7 +29,7 @@ import {
 import { toast } from "sonner";
 import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
-  Plus, Trash2, GripVertical, X, PenLine
+  Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -82,6 +82,14 @@ const FormManagementPage = () => {
   const [newOption, setNewOption] = useState("");
   const [creating, setCreating] = useState(false);
 
+  // Templates state
+  const [templates, setTemplates] = useState([]);
+  const [templateDialog, setTemplateDialog] = useState(false);
+  const [saveTemplateDialog, setSaveTemplateDialog] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateDesc, setTemplateDesc] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+
   const fetchConfig = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
@@ -101,6 +109,22 @@ const FormManagementPage = () => {
   }, [token]);
 
   useEffect(() => { fetchConfig(); }, [fetchConfig]);
+
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTemplates(data.templates || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, [token]);
+
+  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
   const updateField = (idx, key, value) => {
     setFields(prev => {
@@ -227,6 +251,93 @@ const FormManagementPage = () => {
     }
   };
 
+  // Template actions
+  const handleActivateTemplate = async (templateId, templateName) => {
+    if (!window.confirm(`Ativar o template "${templateName}"? A configuração atual será substituída.`)) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${templateId}/activate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast.success(`Template "${templateName}" ativado`);
+        setTemplateDialog(false);
+        fetchConfig();
+      } else {
+        const err = await res.json();
+        toast.error(err.detail || "Erro ao ativar template");
+      }
+    } catch {
+      toast.error("Erro de rede");
+    }
+  };
+
+  const handleDuplicateTemplate = async (templateId) => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${templateId}/duplicate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast.success("Template duplicado");
+        fetchTemplates();
+      } else {
+        const err = await res.json();
+        toast.error(err.detail || "Erro ao duplicar");
+      }
+    } catch {
+      toast.error("Erro de rede");
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId) => {
+    if (!window.confirm("Eliminar este template?")) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${templateId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast.success("Template eliminado");
+        fetchTemplates();
+      } else {
+        const err = await res.json();
+        toast.error(err.detail || "Erro ao eliminar");
+      }
+    } catch {
+      toast.error("Erro de rede");
+    }
+  };
+
+  const handleSaveAsTemplate = async () => {
+    if (!templateName.trim()) {
+      toast.error("Nome do template é obrigatório");
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: templateName, description: templateDesc }),
+      });
+      if (res.ok) {
+        toast.success("Template guardado com sucesso");
+        setSaveTemplateDialog(false);
+        setTemplateName("");
+        setTemplateDesc("");
+        fetchTemplates();
+      } else {
+        const err = await res.json();
+        toast.error(err.detail || "Erro ao guardar");
+      }
+    } catch {
+      toast.error("Erro de rede");
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   const groupedByStep = fields.reduce((acc, field, idx) => {
     const step = field.step || 1;
     if (!acc[step]) acc[step] = [];
@@ -247,7 +358,23 @@ const FormManagementPage = () => {
             </h1>
             <p className="text-muted-foreground mt-1">Controlar campos do formulário público e criar campos personalizados</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              onClick={() => setTemplateDialog(true)}
+              data-testid="templates-btn"
+            >
+              <LayoutTemplate className="h-4 w-4 mr-2" />
+              Templates
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setSaveTemplateDialog(true)}
+              data-testid="save-as-template-btn"
+            >
+              <Bookmark className="h-4 w-4 mr-2" />
+              Guardar como Template
+            </Button>
             <Button
               variant="outline"
               onClick={handleReset}
@@ -527,6 +654,128 @@ const FormManagementPage = () => {
               >
                 {creating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
                 Criar Campo
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Templates Dialog */}
+        <Dialog open={templateDialog} onOpenChange={setTemplateDialog}>
+          <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <LayoutTemplate className="h-5 w-5" />
+                Templates de Formulário
+              </DialogTitle>
+              <DialogDescription>
+                Ative um template para substituir a configuração atual do formulário
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-4">
+              {templates.length === 0 ? (
+                <p className="text-center text-muted-foreground py-6">A carregar templates...</p>
+              ) : (
+                templates.map((tpl) => (
+                  <div
+                    key={tpl.id}
+                    className={`p-4 rounded-lg border transition-all ${
+                      tpl.is_system
+                        ? "bg-blue-50/50 dark:bg-blue-900/10 border-blue-200/50"
+                        : "bg-card border-border"
+                    }`}
+                    data-testid={`template-${tpl.id}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm">{tpl.name}</p>
+                          {tpl.is_system && (
+                            <Badge className="bg-blue-100 text-blue-700 text-[10px]">Sistema</Badge>
+                          )}
+                        </div>
+                        {tpl.description && (
+                          <p className="text-xs text-muted-foreground mt-1">{tpl.description}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1">{tpl.field_count} campos</p>
+                      </div>
+                      <div className="flex gap-1.5 shrink-0">
+                        <Button
+                          size="sm"
+                          onClick={() => handleActivateTemplate(tpl.id, tpl.name)}
+                          data-testid={`activate-${tpl.id}`}
+                          className="h-8"
+                        >
+                          <Zap className="h-3 w-3 mr-1" />
+                          Ativar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDuplicateTemplate(tpl.id)}
+                          className="h-8"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                        {!tpl.is_system && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-red-500 hover:text-red-700"
+                            onClick={() => handleDeleteTemplate(tpl.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Save as Template Dialog */}
+        <Dialog open={saveTemplateDialog} onOpenChange={setSaveTemplateDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Bookmark className="h-5 w-5" />
+                Guardar como Template
+              </DialogTitle>
+              <DialogDescription>
+                Guardar a configuração atual do formulário como um template reutilizável
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Nome do template <span className="text-red-500">*</span></Label>
+                <Input
+                  placeholder="Ex: Crédito Habitação Personalizado"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  data-testid="template-name-input"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Descrição</Label>
+                <Input
+                  placeholder="Breve descrição do template"
+                  value={templateDesc}
+                  onChange={(e) => setTemplateDesc(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSaveTemplateDialog(false)}>Cancelar</Button>
+              <Button
+                onClick={handleSaveAsTemplate}
+                disabled={savingTemplate || !templateName.trim()}
+                data-testid="confirm-save-template"
+              >
+                {savingTemplate ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Bookmark className="h-4 w-4 mr-2" />}
+                Guardar
               </Button>
             </DialogFooter>
           </DialogContent>
