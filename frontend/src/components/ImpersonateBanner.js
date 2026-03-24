@@ -9,7 +9,7 @@
 
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "./ui/button";
-import { Eye, X, User } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import { toast } from "sonner";
 
 const ImpersonateBanner = () => {
@@ -32,16 +32,16 @@ const ImpersonateBanner = () => {
     <>
       {/* Banner fixo no topo - z-index alto para estar acima de tudo */}
       <div 
-        className="fixed top-0 left-0 right-0 bg-amber-500 text-amber-950 h-12 shadow-md flex items-center"
+        className="fixed top-0 left-0 right-0 bg-amber-500 text-amber-950 h-12 shadow-md flex items-center safe-area-top"
         style={{ zIndex: 9999 }}
       >
-        <div className="max-w-7xl mx-auto flex items-center justify-between w-full px-4">
-          <div className="flex items-center gap-3">
-            <Eye className="h-5 w-5 flex-shrink-0" />
-            <span className="font-medium text-sm sm:text-base truncate">
-              A ver como: <strong>{user?.name}</strong> ({user?.role})
+        <div className="flex items-center justify-between w-full px-2 sm:px-4">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Eye className="h-4 w-4 flex-shrink-0" />
+            <span className="font-medium text-xs sm:text-sm truncate">
+              A ver como: <strong>{user?.name}</strong>
             </span>
-            <span className="text-amber-800 text-xs sm:text-sm hidden sm:inline truncate">
+            <span className="text-amber-800 text-xs hidden md:inline truncate">
               • Sessão iniciada por {originalAdminName}
             </span>
           </div>
@@ -49,11 +49,11 @@ const ImpersonateBanner = () => {
             size="sm"
             variant="outline"
             onClick={handleStopImpersonating}
-            className="bg-white hover:bg-amber-50 text-amber-900 border-amber-600 flex-shrink-0"
+            className="bg-white hover:bg-amber-50 text-amber-900 border-amber-600 flex-shrink-0 h-8 px-2 sm:px-3"
             data-testid="stop-impersonate-btn"
           >
             <X className="h-4 w-4 sm:mr-1" />
-            <span className="hidden sm:inline">Terminar Visualização</span>
+            <span className="hidden sm:inline text-xs">Terminar</span>
           </Button>
         </div>
       </div>

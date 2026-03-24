@@ -562,19 +562,19 @@ const DashboardLayout = ({ children, title }) => {
       >
         <div className="flex flex-col h-full">
           {/* Logo - PowerCell */}
-          <div className="h-16 flex items-center justify-between px-6 border-b border-slate-700 bg-slate-900">
+          <div className="h-14 flex items-center justify-between px-4 lg:px-6 border-b border-slate-700 bg-slate-900">
             <div className="flex items-center gap-2">
-              <Building2 className="h-6 w-6 text-amber-400" />
+              <Building2 className="h-5 w-5 text-amber-400" />
               <span className="font-bold text-sm tracking-tight text-white">PowerCell</span>
             </div>
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden text-white hover:bg-slate-700"
+              className="lg:hidden text-white hover:bg-slate-700 h-8 w-8"
               onClick={() => setSidebarOpen(false)}
               aria-label="Fechar menu"
             >
-              <X className="h-5 w-5" />
+              <X className="h-4 w-4" />
             </Button>
           </div>
 
@@ -680,51 +680,36 @@ const DashboardLayout = ({ children, title }) => {
       <div className="lg:pl-64">
         {/* Top bar - Fixed height to prevent layout shift */}
         <header 
-          className={`border-b border-border bg-card sticky ${impersonateOffset} z-30 h-16`}
+          className={`border-b border-border bg-card sticky ${impersonateOffset} z-30 h-14`}
         >
-          <div className={`flex items-center justify-between h-full px-4 lg:px-6 gap-2`}>
-            <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className={`flex items-center justify-between h-full px-2 lg:px-6 gap-1 sm:gap-2`}>
+            <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">
               <Button
                 variant="ghost"
                 size="icon"
-                className="lg:hidden flex-shrink-0"
+                className="lg:hidden flex-shrink-0 h-8 w-8"
                 onClick={() => setSidebarOpen(true)}
                 aria-label="Abrir menu"
               >
-                <Menu className="h-5 w-5" />
+                <Menu className="h-4 w-4" />
               </Button>
-              <h1 className={`font-semibold tracking-tight transition-all duration-300 truncate ${
-                headerCollapsed ? 'text-sm' : 'text-base lg:text-xl'
+              <h1 className={`font-semibold tracking-tight transition-all duration-300 truncate text-sm ${
+                headerCollapsed ? 'text-xs' : 'text-sm lg:text-xl'
               }`}>{title}</h1>
             </div>
 
-            <div className="flex items-center gap-1 flex-shrink-0">
+            <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
               {/* Search Button (Ctrl+K) */}
-              {headerCollapsed ? (
-                <Button 
-                  variant="ghost" 
-                  size="icon"
-                  onClick={() => setShowSearchModal(true)}
-                  title="Pesquisar (Ctrl+K)"
-                  aria-label="Pesquisar"
-                  className="h-8 w-8"
-                >
-                  <Search className="h-4 w-4" />
-                </Button>
-              ) : (
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setShowSearchModal(true)}
-                  className="hidden sm:flex items-center gap-2 text-muted-foreground h-8"
-                >
-                  <Search className="h-4 w-4" />
-                  <span className="text-xs">Pesquisar...</span>
-                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">
-                    Ctrl+K
-                  </kbd>
-                </Button>
-              )}
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => setShowSearchModal(true)}
+                title="Pesquisar (Ctrl+K)"
+                aria-label="Pesquisar"
+                className="h-8 w-8"
+              >
+                <Search className="h-4 w-4" />
+              </Button>
               
               {/* Dark Mode Toggle */}
               <Button
@@ -801,6 +786,11 @@ const DashboardLayout = ({ children, title }) => {
                     <p className="text-sm font-medium">{user?.name}</p>
                     <p className="text-xs text-muted-foreground">{user?.email}</p>
                   </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigate("/perfil")}>
+                    <User className="h-4 w-4 mr-2" />
+                    Área Pessoal
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="text-destructive">
                     <LogOut className="h-4 w-4 mr-2" />
