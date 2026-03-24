@@ -413,8 +413,8 @@ const PublicClientForm = () => {
       try {
         const res = await axios.get(`${API_URL}/public/form-config`);
         setCustomFields(res.data.custom_fields || []);
-      } catch (e) {
-        console.warn("Não foi possível carregar campos personalizados:", e);
+      } catch {
+        // Endpoint pode não existir em deployments mais antigos - formulário funciona sem campos personalizados
       }
     };
     fetchCustomFields();
