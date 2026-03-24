@@ -59,6 +59,7 @@ import {
   Clock,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { TableSkeleton } from "../components/ui/skeletons";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -351,9 +352,7 @@ const ClientRegistrationsPage = () => {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
+              <TableSkeleton rows={6} columns={5} />
             ) : clients.length === 0 ? (
               <div className="text-center py-12">
                 <Users className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />

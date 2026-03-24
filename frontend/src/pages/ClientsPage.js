@@ -491,7 +491,81 @@ export default function ClientsPage() {
                 )}
               </div>
             ) : (
-              <div className="max-h-[calc(100vh-350px)] overflow-auto">
+              <>
+              {/* O9 - Mobile: Card view */}
+              <div className="md:hidden space-y-3 p-3">
+                {filteredClients.map((client, idx) => (
+                  <div key={`mobile-${client.id}-${idx}`} className="border rounded-lg p-3 bg-card space-y-2" data-testid={`client-card-${client.id}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <span className="text-xs font-medium text-primary">
+                            {client.nome?.charAt(0)?.toUpperCase() || "?"}
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <button
+                            className="font-medium text-sm text-left hover:text-primary truncate block max-w-full"
+                            onClick={() => client.process_ids?.[0] && navigate(`/process/${client.process_ids[0]}`)}
+                            disabled={!client.process_ids?.length}
+                          >
+                            {client.nome}
+                          </button>
+                          {client.contacto?.email && (
+                            <p className="text-xs text-muted-foreground truncate">{client.contacto.email}</p>
+                          )}
+                        </div>
+                      </div>
+                      {client.fase_principal ? (
+                        <Badge 
+                          className="shrink-0 text-[10px]"
+                          style={{ 
+                            backgroundColor: client.fase_principal.status_color || '#6B7280',
+                            color: getContrastColor(client.fase_principal.status_color),
+                          }}
+                        >
+                          {client.fase_principal.status_label}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <div className="flex items-center gap-3">
+                        {client.contacto?.telefone && (
+                          <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{client.contacto.telefone}</span>
+                        )}
+                        {client.dados_pessoais?.nif && (
+                          <span className="flex items-center gap-1 font-mono"><Hash className="h-3 w-3" />{client.dados_pessoais.nif}</span>
+                        )}
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-7 w-7">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => client.process_ids?.[0] && navigate(`/process/${client.process_ids[0]}`)}
+                            disabled={!client.process_ids?.length}
+                          >
+                            <Eye className="h-4 w-4 mr-2" />
+                            Ver Ficha
+                          </DropdownMenuItem>
+                          {canDeleteClients && (
+                            <DropdownMenuItem onClick={() => handleDeleteClient(client.id)} className="text-red-600">
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Eliminar
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* O9 - Desktop: Table */}
+              <div className="hidden md:block max-h-[calc(100vh-350px)] overflow-auto">
                 <Table>
                   <TableHeader className="sticky top-0 z-10 bg-card">
                     <TableRow className="bg-muted/50">
@@ -624,6 +698,7 @@ export default function ClientsPage() {
                 </TableBody>
               </Table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>

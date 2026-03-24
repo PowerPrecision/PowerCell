@@ -27,6 +27,7 @@ import {
   CalendarTab, DocumentsTab, UsersTab, ClientSearchTab, 
   CreateEventDialog, AIAnalysisTab 
 } from "../components/admin";
+import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import TasksPanel from "../components/TasksPanel";
 
 const AdminDashboard = () => {
@@ -143,8 +144,14 @@ const AdminDashboard = () => {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-96">
-          <Loader2 className="h-8 w-8 animate-spin" />
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <div className="h-7 w-64 bg-muted animate-pulse rounded" />
+            <div className="h-4 w-48 bg-muted animate-pulse rounded" />
+          </div>
+          <StatsGridSkeleton count={4} />
+          <div className="h-10 w-full bg-muted animate-pulse rounded" />
+          <TableSkeleton rows={5} columns={5} />
         </div>
       </DashboardLayout>
     );

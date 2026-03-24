@@ -2451,7 +2451,7 @@ const ProcessDetails = () => {
                     Documentos
                   </span>
                 </AccordionTrigger>
-                <AccordionContent className="px-3 pb-3">
+                <AccordionContent className="px-3 pb-3 overflow-x-auto">
                   <UnifiedDocumentsPanel 
                     key={documentsRefreshKey}
                     processId={id}

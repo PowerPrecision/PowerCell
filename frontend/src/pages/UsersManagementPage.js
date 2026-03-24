@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { TableSkeleton } from "../components/ui/skeletons";
-import { useUndoToast } from "../components/UndoToast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -177,18 +176,35 @@ const UsersManagementPage = () => {
     }
   };
 
-  const handleDeleteUser = async (userId) => {
-    if (!window.confirm("Tem a certeza que deseja eliminar este utilizador? Esta ação não pode ser revertida.")) {
-      return;
-    }
-    try {
-      await deleteUser(userId);
-      toast.success("Utilizador eliminado com sucesso");
-      fetchUsers();
-    } catch (error) {
-      console.error("Erro ao eliminar:", error);
-      toast.error(error.response?.data?.detail || "Erro ao eliminar utilizador");
-    }
+  const handleDeleteUser = async (userId, userName) => {
+    // O8 - Usar undo toast em vez de window.confirm para micro-ações
+    const userToDelete = users.find(u => u.id === userId);
+    if (!userToDelete) return;
+
+    // Remover otimisticamente da lista
+    setUsers(prev => prev.filter(u => u.id !== userId));
+
+    toast.success(`Utilizador "${userName}" eliminado`, {
+      action: {
+        label: 'Desfazer',
+        onClick: () => {
+          // Restaurar na lista (undo)
+          setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
+          toast.success("Ação desfeita");
+        },
+      },
+      duration: 5000,
+      onAutoClose: async () => {
+        // Commit: efetuar a eliminação real no backend
+        try {
+          await deleteUser(userId);
+        } catch (error) {
+          // Se falhar, restaurar o utilizador
+          setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
+          toast.error(error.response?.data?.detail || "Erro ao eliminar utilizador");
+        }
+      },
+    });
   };
 
   const handleToggleUserStatus = async (userId, currentStatus) => {
@@ -323,9 +339,35 @@ const UsersManagementPage = () => {
                       </div>
                       {generatedPassword && (
                         <p className="text-xs text-green-600 font-medium">
-                          ✓ Password gerada. Copie e envie ao utilizador.
+                          Password gerada. Copie e envie ao utilizador.
                         </p>
                       )}
+                      {/* O17 - Password strength indicator */}
+                      {formData.password && !generatedPassword && (() => {
+                        const pw = formData.password;
+                        let score = 0;
+                        if (pw.length >= 8) score++;
+                        if (pw.length >= 12) score++;
+                        if (/[A-Z]/.test(pw)) score++;
+                        if (/[0-9]/.test(pw)) score++;
+                        if (/[^A-Za-z0-9]/.test(pw)) score++;
+                        const levels = [
+                          { label: "Muito fraca", color: "bg-red-500", width: "w-1/5" },
+                          { label: "Fraca", color: "bg-orange-500", width: "w-2/5" },
+                          { label: "Razoável", color: "bg-yellow-500", width: "w-3/5" },
+                          { label: "Forte", color: "bg-green-500", width: "w-4/5" },
+                          { label: "Muito forte", color: "bg-emerald-600", width: "w-full" },
+                        ];
+                        const level = levels[Math.min(score, 4)];
+                        return (
+                          <div className="space-y-1">
+                            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div className={`h-full rounded-full transition-all ${level.color} ${level.width}`} />
+                            </div>
+                            <p className={`text-xs ${score >= 3 ? "text-green-600" : "text-orange-600"}`}>{level.label}</p>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="space-y-2">
                       <Label>Telefone</Label>
@@ -431,7 +473,7 @@ const UsersManagementPage = () => {
                             <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}>
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)}>
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id, u.name)}>
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           </>
@@ -510,7 +552,7 @@ const UsersManagementPage = () => {
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(user)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(user.id)}>
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(user.id, user.name)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                           </>
