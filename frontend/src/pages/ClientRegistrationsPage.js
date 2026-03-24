@@ -70,7 +70,7 @@ const ClientRegistrationsPage = () => {
   const [clients, setClients] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
-  const [hasProcessFilter, setHasProcessFilter] = useState("all");
+  const [hasProcessFilter, setHasProcessFilter] = useState("false");
   const [sortField, setSortField] = useState("created_at");
   const [sortOrder, setSortOrder] = useState("desc");
   const [assignedToMe, setAssignedToMe] = useState(false);
