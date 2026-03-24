@@ -150,6 +150,8 @@ function App() {
           <Route path="/" element={<RootRedirect />} />
           {/* Public client registration form - explicit route */}
           <Route path="/registo" element={<PublicClientForm />} />
+          {/* Consultant form preview - view form without filling */}
+          <Route path="/formulario-consultor" element={<PublicClientForm previewMode={true} />} />
           
           {/* RGPD Public Page - for client consent signature */}
           <Route path="/rgpd/:token" element={<RGPDPage />} />

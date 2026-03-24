@@ -5,6 +5,19 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 ## [Não publicado]
 
+## [2026-03-24] - Pré-visualização para Consultores e Correções de Build
+
+### Adicionado
+- **Pré-visualização do Formulário para Consultores**: Botão "Pré-visualizar Formulário" na página de Registos de Clientes. Abre o formulário completo (6 passos) em modo navegável sem obrigar a preencher campos. Rota: `/formulario-consultor`
+- Banner "Modo de Pré-visualização" com botão de voltar
+
+### Alterado
+- **Tabela de Registos de Clientes**: Filtro por defeito alterado para mostrar apenas clientes **sem processo**. Quando o processo é criado, o cliente desaparece da vista principal
+- **Header do formulário**: Link "Acesso Colaborador" escondido no modo de pré-visualização
+
+### Corrigido
+- **Build de produção**: Separada a instalação de dependências no Dockerfile em 2 passos (PyPI público + índice privado para `emergentintegrations`). Removidos pacotes conflituosos do `requirements.txt` (`scraperapi-sdk`, `litellm`)
+
 ## [2026-03-24] - Templates e Pré-visualização
 
 ### Adicionado

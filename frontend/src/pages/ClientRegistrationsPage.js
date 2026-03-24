@@ -70,7 +70,7 @@ const ClientRegistrationsPage = () => {
   const [clients, setClients] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
-  const [hasProcessFilter, setHasProcessFilter] = useState("all");
+  const [hasProcessFilter, setHasProcessFilter] = useState("false");
   const [sortField, setSortField] = useState("created_at");
   const [sortOrder, setSortOrder] = useState("desc");
   const [assignedToMe, setAssignedToMe] = useState(false);
@@ -219,15 +219,27 @@ const ClientRegistrationsPage = () => {
               Clientes que completaram o formulário de registo
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchClients}
-            className="gap-2"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Actualizar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/formulario-consultor')}
+              className="gap-2"
+              data-testid="preview-form-btn"
+            >
+              <Eye className="h-4 w-4" />
+              Pré-visualizar Formulário
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchClients}
+              className="gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Actualizar
+            </Button>
+          </div>
         </div>
 
         {/* Stats */}
