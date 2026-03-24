@@ -41,6 +41,7 @@ const AdminDashboard = () => {
   const [storageStatus, setStorageStatus] = useState(null);
   const [calendarDeadlines, setCalendarDeadlines] = useState([]);
   const [upcomingExpiries, setUpcomingExpiries] = useState([]);
+  const [staleStats, setStaleStats] = useState(null);
   
   const [activeTab, setActiveTab] = useState("overview");
   const [consultorFilter, setConsultorFilter] = useState("all");
@@ -94,6 +95,14 @@ const AdminDashboard = () => {
       setWorkflowStatuses(statusesRes.data);
       setStorageStatus(storageRes);
       setUpcomingExpiries(expiriesRes.data);
+      
+      // Fetch stale processes stats
+      try {
+        const staleRes = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/stale-processes?days=7`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (staleRes.ok) setStaleStats(await staleRes.json());
+      } catch { /* silent */ }
     } catch (error) {
       console.error("Error fetching data:", error);
       toast.error("Erro ao carregar dados");
@@ -219,6 +228,45 @@ const AdminDashboard = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Stale Processes Alert */}
+        {staleStats && staleStats.total > 0 && (
+          <Card className="border-orange-200 dark:border-orange-800 bg-orange-50/50 dark:bg-orange-950/20" data-testid="stale-processes-alert">
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-orange-100 dark:bg-orange-900/50 flex items-center justify-center shrink-0">
+                    <CalendarIcon className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-orange-900 dark:text-orange-200">
+                      {staleStats.total} processo{staleStats.total !== 1 ? 's' : ''} sem atualização
+                    </p>
+                    <p className="text-xs text-orange-700 dark:text-orange-400">
+                      {staleStats.critical > 0 && <span className="font-medium">{staleStats.critical} crítico{staleStats.critical !== 1 ? 's' : ''}</span>}
+                      {staleStats.critical > 0 && staleStats.high > 0 && ' · '}
+                      {staleStats.high > 0 && <span>{staleStats.high} atrasado{staleStats.high !== 1 ? 's' : ''}</span>}
+                      {(staleStats.critical > 0 || staleStats.high > 0) && staleStats.medium > 0 && ' · '}
+                      {staleStats.medium > 0 && <span>{staleStats.medium} urgente{staleStats.medium !== 1 ? 's' : ''}</span>}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300 hover:bg-orange-100 dark:hover:bg-orange-900/30 shrink-0"
+                  onClick={() => {
+                    setActiveTab("overview");
+                    toast.info(`${staleStats.total} processos requerem atenção. Verifique o Kanban com o filtro de urgência.`);
+                  }}
+                  data-testid="stale-processes-action-btn"
+                >
+                  Ver processos
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Main Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
