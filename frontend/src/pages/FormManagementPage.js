@@ -90,6 +90,11 @@ const FormManagementPage = () => {
   const [templateDesc, setTemplateDesc] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
 
+  // Preview state
+  const [previewDialog, setPreviewDialog] = useState(false);
+  const [previewData, setPreviewData] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   const fetchConfig = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
@@ -337,6 +342,37 @@ const FormManagementPage = () => {
       setSavingTemplate(false);
     }
   };
+
+  // Preview handler
+  const handlePreviewTemplate = async (templateId) => {
+    setPreviewLoading(true);
+    setPreviewDialog(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${templateId}/preview`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewData({ ...data, _templateId: templateId });
+      } else {
+        toast.error("Erro ao carregar pré-visualização");
+        setPreviewDialog(false);
+      }
+    } catch {
+      toast.error("Erro de rede");
+      setPreviewDialog(false);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const previewGroupedByStep = previewData?.fields?.reduce((acc, field) => {
+    if (!field.is_visible) return acc;
+    const step = field.step || 1;
+    if (!acc[step]) acc[step] = [];
+    acc[step].push(field);
+    return acc;
+  }, {}) || {};
 
   const groupedByStep = fields.reduce((acc, field, idx) => {
     const step = field.step || 1;
@@ -702,6 +738,16 @@ const FormManagementPage = () => {
                       <div className="flex gap-1.5 shrink-0">
                         <Button
                           size="sm"
+                          variant="outline"
+                          onClick={() => handlePreviewTemplate(tpl.id)}
+                          data-testid={`preview-${tpl.id}`}
+                          className="h-8"
+                        >
+                          <Eye className="h-3 w-3 mr-1" />
+                          Ver
+                        </Button>
+                        <Button
+                          size="sm"
                           onClick={() => handleActivateTemplate(tpl.id, tpl.name)}
                           data-testid={`activate-${tpl.id}`}
                           className="h-8"
@@ -778,6 +824,139 @@ const FormManagementPage = () => {
                 Guardar
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Template Preview Dialog */}
+        <Dialog open={previewDialog} onOpenChange={(open) => { setPreviewDialog(open); if (!open) setPreviewData(null); }}>
+          <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+            {previewLoading ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
+                <p className="text-sm text-muted-foreground">A carregar pré-visualização...</p>
+              </div>
+            ) : previewData ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Eye className="h-5 w-5" />
+                    Pré-visualização: {previewData.name}
+                  </DialogTitle>
+                  {previewData.description && (
+                    <DialogDescription>{previewData.description}</DialogDescription>
+                  )}
+                </DialogHeader>
+
+                <div className="py-4 space-y-6" data-testid="template-preview-content">
+                  {/* Summary bar */}
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
+                    <span>{previewData.fields?.length || 0} campos totais</span>
+                    <span>{previewData.fields?.filter(f => f.is_required).length || 0} obrigatórios</span>
+                    <span>{previewData.fields?.filter(f => f.is_custom).length || 0} personalizados</span>
+                    {previewData.is_system && <Badge className="bg-blue-100 text-blue-700 text-xs">Sistema</Badge>}
+                  </div>
+
+                  {/* Steps preview */}
+                  {Object.entries(previewGroupedByStep)
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([step, stepFields]) => (
+                      <div key={step} className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <span className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground">{step}</span>
+                          <h3 className="font-semibold text-sm">
+                            {STEP_LABELS[Number(step)] || `Passo ${step}`}
+                          </h3>
+                          <Badge variant="outline" className="text-[10px]">{stepFields.length} campos</Badge>
+                        </div>
+
+                        <div className="ml-9 space-y-2">
+                          {stepFields.sort((a, b) => (a.order || 0) - (b.order || 0)).map((field) => (
+                            <div
+                              key={field.field_key}
+                              className={`p-3 rounded-lg border ${
+                                field.is_custom
+                                  ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50"
+                                  : "bg-card border-border"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium">{field.label}</span>
+                                  {field.is_required && (
+                                    <span className="text-red-600 text-xs font-semibold">* obrigatório</span>
+                                  )}
+                                  {field.is_custom && (
+                                    <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">Personalizado</Badge>
+                                  )}
+                                </div>
+                                <Badge variant="outline" className="text-[10px]">
+                                  {FIELD_TYPE_LABELS[field.field_type] || field.field_type}
+                                </Badge>
+                              </div>
+
+                              {/* Mock field rendering */}
+                              <div className="mt-2">
+                                {field.field_type === "text" && (
+                                  <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center px-3">
+                                    <span className="text-xs text-muted-foreground">{field.placeholder || field.label}</span>
+                                  </div>
+                                )}
+                                {field.field_type === "number" && (
+                                  <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center px-3">
+                                    <span className="text-xs text-muted-foreground">0.00</span>
+                                  </div>
+                                )}
+                                {field.field_type === "date" && (
+                                  <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center px-3">
+                                    <span className="text-xs text-muted-foreground">dd/mm/aaaa</span>
+                                  </div>
+                                )}
+                                {field.field_type === "select" && (
+                                  <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center justify-between px-3">
+                                    <span className="text-xs text-muted-foreground">Selecione...</span>
+                                    <span className="text-xs text-muted-foreground">&#9662;</span>
+                                  </div>
+                                )}
+                                {field.field_type === "radio" && (
+                                  <div className="flex gap-2 mt-1">
+                                    <div className="flex-1 h-8 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center justify-center">
+                                      <span className="text-xs text-muted-foreground">Sim</span>
+                                    </div>
+                                    <div className="flex-1 h-8 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center justify-center">
+                                      <span className="text-xs text-muted-foreground">Não</span>
+                                    </div>
+                                  </div>
+                                )}
+                                {field.field_type === "checkbox" && field.options && (
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {field.options.map((opt) => (
+                                      <span key={opt} className="px-2.5 py-1 rounded-full text-xs border border-dashed border-muted-foreground/30 bg-muted/20 text-muted-foreground">
+                                        {opt}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {field.hint && (
+                                <p className="text-[10px] text-muted-foreground mt-1">{field.hint}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setPreviewDialog(false)}>Fechar</Button>
+                  <Button onClick={() => { const tid = previewData._templateId; const tname = previewData.name; setPreviewDialog(false); handleActivateTemplate(tid, tname); }} data-testid="activate-from-preview">
+                    <Zap className="h-4 w-4 mr-2" />
+                    Ativar este Template
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : null}
           </DialogContent>
         </Dialog>
       </div>

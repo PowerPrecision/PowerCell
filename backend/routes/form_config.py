@@ -310,6 +310,39 @@ async def list_templates(user: dict = Depends(require_roles([UserRole.ADMIN, Use
     return {"templates": system + custom_templates}
 
 
+@router.get("/templates/{template_id}/preview")
+async def preview_template(
+    template_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """Obter campos de um template para pré-visualização (sem ativar)."""
+    if template_id.startswith("system_"):
+        system_name = template_id.replace("system_", "").replace("_", " ")
+        template = next(
+            (t for t in SYSTEM_TEMPLATES if t["name"].lower() == system_name),
+            None
+        )
+        if not template:
+            raise HTTPException(status_code=404, detail="Template não encontrado")
+        return {
+            "name": template["name"],
+            "description": template["description"],
+            "fields": template["fields"],
+            "is_system": True,
+        }
+    
+    tpl = await db.form_templates.find_one({"id": template_id}, {"_id": 0})
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+    
+    return {
+        "name": tpl.get("name"),
+        "description": tpl.get("description", ""),
+        "fields": tpl.get("fields", []),
+        "is_system": False,
+    }
+
+
 @router.post("/templates")
 async def save_as_template(
     data: TemplateSave,
