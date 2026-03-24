@@ -13,7 +13,6 @@ Aplicacao CRM para gestao de processos de credito imobiliario. O utilizador soli
 ## Estado de Implementacao - COMPLETO
 
 ### Todos os Bugs (E#), Melhorias (M#) e Outras (O#) - IMPLEMENTADOS
-Consultar CHANGELOG.md para detalhes.
 
 ### Funcionalidades Extra Implementadas
 - Notificacoes automaticas de processos atrasados
@@ -23,14 +22,23 @@ Consultar CHANGELOG.md para detalhes.
 - Testes acessibilidade axe-core (O19)
 - Encriptacao formulario publico (O5)
 
-### Novas Funcionalidades (Sessao Atual)
-- **Bug fix**: Erro `.includes()` no PublicClientForm corrigido (merge draft com defaults)
-- **Required Labels**: Campos obrigatorios com * vermelho e texto "(obrigatorio)"
-- **Trabalha no Estrangeiro**: Novo campo no formulario (Step 4) e ProcessDetails
-- **Opcao Nenhuma**: Botao "Nenhuma" nos bancos do Step 5
-- **Configuracoes de Perfis** (`/configuracoes-perfis`): Gestao de permissoes por utilizador (admin/CEO)
-- **Gestao do Formulario** (`/gestao-formulario`): Controlo total sobre campos do formulario publico
-- **Client Details**: Dialog mostra TODOS os campos mesmo sem preenchimento
+### Sessao Anterior
+- Bug fix: Erro `.includes()` no PublicClientForm
+- Required Labels com * vermelho e texto "(obrigatorio)"
+- Campo "Trabalha no Estrangeiro" no formulario
+- Opcao "Nenhuma" nos bancos (Step 5)
+- Configuracoes de Perfis (`/configuracoes-perfis`)
+- Gestao do Formulario (`/gestao-formulario`)
+- Client Details mostra todos os campos
+
+### Sessao Atual - Campos Personalizados
+- **Criacao de campos personalizados**: Admin pode criar campos com tipos texto, dropdown, checkbox, numero, data, sim/nao
+- **Editor de opcoes inline**: Para dropdowns e checkboxes, opcoes sao adicionadas via editor inline
+- **Atribuicao a qualquer passo**: Campos podem ser adicionados a qualquer passo (1-5) ou ao passo 6 "Informacoes Adicionais"
+- **Renderizacao dinamica**: Campos personalizados sao automaticamente mostrados no formulario publico
+- **Eliminacao de campos**: Campos personalizados podem ser eliminados (campos do sistema nao podem)
+- **Dados guardados**: Valores dos campos personalizados sao guardados com o registo do cliente
+- **API publica**: GET /api/public/form-config retorna campos personalizados sem autenticacao
 
 ## Tarefas Pendentes
 
@@ -46,9 +54,8 @@ Consultar CHANGELOG.md para detalhes.
 - CEO: pedroborges@powerealestate.pt / power2026
 
 ## Notas Tecnicas
-- Redis mostra 'error' no preview (DNS bloqueado) - funciona em producao
+- Redis mostra 'error' no preview (DNS bloqueado)
 - axe-core reports na consola do browser em modo dev
-- Automation routes: /api/admin/automation/*
-- Form config routes: /api/admin/form-config/*
-- ProfileSettings: /configuracoes-perfis
-- FormManagement: /gestao-formulario
+- Form config routes: /api/admin/form-config/* (admin), /api/public/form-config (publico)
+- Custom fields sao armazenados na colecao `form_config` com type="public_form"
+- Custom field_key gerado com prefixo `custom_` + uuid hex

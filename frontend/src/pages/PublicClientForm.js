@@ -44,8 +44,8 @@ const FieldError = ({ children }) => (
 // Helper for required field labels
 const RequiredLabel = ({ htmlFor, children }) => (
   <Label htmlFor={htmlFor}>
-    {children} <span className="text-red-500 font-semibold">*</span>
-    <span className="text-red-400 text-[10px] ml-1">(obrigatório)</span>
+    {children} <span className="text-red-600 font-semibold">*</span>
+    <span className="text-red-600 text-[10px] ml-1 font-medium">(obrigatório)</span>
   </Label>
 );
 
