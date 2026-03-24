@@ -470,8 +470,8 @@ export const useDashboardData = () => {
   const filteredProcesses = useMemo(() => {
     return processes.filter(process => {
       const matchesSearch =
-        process.client_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        process.client_email.toLowerCase().includes(searchTerm.toLowerCase());
+        (process.client_name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (process.client_email || "").toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === "all" || process.status === statusFilter;
       return matchesSearch && matchesStatus;
     });

@@ -16,7 +16,7 @@ import pytest
 import requests
 
 # Use public URL from environment
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://gdpr-compliance-fix.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://workflow-builder-95.preview.emergentagent.com')
 
 # Test credentials
 ADMIN_EMAIL = "admin@sistema.pt"

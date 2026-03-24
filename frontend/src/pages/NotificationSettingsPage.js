@@ -234,8 +234,14 @@ export default function NotificationSettingsPage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-96">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="space-y-6">
+          <div className="space-y-1.5">
+            <div className="h-7 w-56 bg-muted animate-pulse rounded" />
+            <div className="h-4 w-72 bg-muted animate-pulse rounded" />
+          </div>
+          <div className="space-y-4">
+            {[1,2,3].map(i => <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />)}
+          </div>
         </div>
       </DashboardLayout>
     );

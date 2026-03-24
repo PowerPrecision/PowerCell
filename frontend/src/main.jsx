@@ -4,6 +4,14 @@ import * as Sentry from "@sentry/react";
 import "./index.css";
 import App from "./App";
 
+// O19 - Accessibility testing in development
+if (import.meta.env.DEV) {
+  import("@axe-core/react").then((axe) => {
+    axe.default(React, ReactDOM, 3000);
+    console.log("axe-core a11y testing enabled (dev only)");
+  }).catch(() => {});
+}
+
 // ====================================================================
 // SENTRY INITIALIZATION - Observabilidade e tracking de erros
 // Suporta: VITE_DSN_SENTRY_FRONTEND (preferido) e VITE_SENTRY_DSN (legado)

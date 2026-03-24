@@ -304,6 +304,40 @@ async def upload_via_temp_link(
             # Ler conteúdo
             content = await file.read()
             
+            # O1 - Validação de MIME type pelos magic bytes
+            ALLOWED_EXTENSIONS = {
+                "pdf", "jpg", "jpeg", "png", "gif", "webp",
+                "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+                "txt", "csv", "zip", "rar", "7z"
+            }
+            MIME_MAGIC_BYTES = {
+                b"%PDF": "pdf",
+                b"\xFF\xD8\xFF": "jpg",
+                b"\x89PNG": "png",
+                b"GIF8": "gif",
+                b"RIFF": "webp",  # simplified
+                b"PK\x03\x04": "docx/xlsx/zip",  # Office Open XML / ZIP
+                b"\xD0\xCF\x11\xE0": "doc/xls",  # OLE2 compound
+            }
+            ext = (file.filename.rsplit('.', 1)[1] if '.' in file.filename else '').lower()
+            if ext not in ALLOWED_EXTENSIONS:
+                uploaded_files.append({"filename": file.filename, "error": f"Tipo de ficheiro não permitido: .{ext}"})
+                continue
+            
+            # Verificar magic bytes vs extensão (apenas para tipos suportados)
+            if len(content) >= 4:
+                header = content[:4]
+                detected_ok = True
+                if ext == "pdf" and not content.startswith(b"%PDF"):
+                    detected_ok = False
+                elif ext in ("jpg", "jpeg") and not content[:3] == b"\xFF\xD8\xFF":
+                    detected_ok = False
+                elif ext == "png" and not content[:4] == b"\x89PNG":
+                    detected_ok = False
+                if not detected_ok:
+                    uploaded_files.append({"filename": file.filename, "error": "Conteúdo do ficheiro não corresponde à extensão"})
+                    continue
+            
             # Determinar categoria (padrão: "Cliente Upload")
             category = "Cliente_Upload"
             

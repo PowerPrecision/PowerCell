@@ -224,8 +224,13 @@ const PendingItemsList = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      <div className="min-h-screen bg-background p-6">
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div className="h-7 w-48 bg-muted animate-pulse rounded" />
+          <div className="space-y-3">
+            {[1,2,3,4,5].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}
+          </div>
+        </div>
       </div>
     );
   }

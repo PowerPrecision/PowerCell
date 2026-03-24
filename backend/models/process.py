@@ -295,6 +295,7 @@ class FinancialData(BaseModel):
     employment_duration: Optional[str] = None  # Tempo de emprego
     employer_name: Optional[str] = None  # Entidade empregadora
     employer_nif: Optional[str] = None  # NIF da entidade empregadora
+    trabalha_estrangeiro: Optional[str] = None  # Trabalha no estrangeiro (sim/nao)
     monthly_income: Optional[float] = None  # Rendimento mensal
     # Dados do CPCV - Valores
     valor_pretendido: Optional[float] = None
@@ -380,6 +381,7 @@ class PublicClientRegistration(BaseModel):
     titular2_data: Optional[Titular2Data] = None
     real_estate_data: Optional[RealEstateData] = None
     financial_data: Optional[FinancialData] = None
+    custom_fields: Optional[dict] = None  # Campos personalizados dinâmicos
     
     @field_validator('name', mode='before')
     @classmethod

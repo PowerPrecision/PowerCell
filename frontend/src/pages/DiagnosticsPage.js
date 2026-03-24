@@ -168,8 +168,11 @@ const DiagnosticsPage = () => {
   if (loading && !diagnostics) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
-          <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="space-y-6">
+          <div className="h-7 w-48 bg-muted animate-pulse rounded" />
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[1,2,3,4,5,6].map(i => <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />)}
+          </div>
         </div>
       </DashboardLayout>
     );

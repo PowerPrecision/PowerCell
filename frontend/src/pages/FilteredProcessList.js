@@ -15,6 +15,7 @@ import {
   ArrowLeft, Search, Eye, Loader2, Users, CheckCircle, 
   XCircle, Clock, TrendingUp, AlertTriangle 
 } from "lucide-react";
+import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -183,8 +184,15 @@ const FilteredProcessList = () => {
   if (loading) {
     return (
       <DashboardLayout title="Processos">
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin" />
+        <div className="space-y-6">
+          <div className="flex items-center gap-4">
+            <div className="h-9 w-9 bg-muted animate-pulse rounded" />
+            <div className="space-y-1">
+              <div className="h-6 w-48 bg-muted animate-pulse rounded" />
+              <div className="h-4 w-64 bg-muted animate-pulse rounded" />
+            </div>
+          </div>
+          <TableSkeleton rows={6} columns={5} />
         </div>
       </DashboardLayout>
     );
@@ -224,6 +232,55 @@ const FilteredProcessList = () => {
         {/* Lista */}
         <Card className="border-border">
           <CardContent className="p-0">
+            {filteredProcesses.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <IconComponent className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                <p>Nenhum processo encontrado</p>
+              </div>
+            ) : (
+              <>
+              {/* O9 - Mobile: Card view */}
+              <div className="md:hidden space-y-3 p-3">
+                {filteredProcesses.map((process) => {
+                  const statusInfo = getStatusInfo(process.status);
+                  const deadlineInfo = config.showDeadlineInfo ? getDeadlineInfo(process.id) : null;
+                  return (
+                    <div
+                      key={`mobile-${process.id}`}
+                      className="border rounded-lg p-3 bg-card space-y-2 cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => navigate(`/process/${process.id}`)}
+                      data-testid={`process-card-${process.id}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm truncate">{process.client_name}</p>
+                          <p className="text-xs text-muted-foreground">{process.client_phone || process.client_email || "-"}</p>
+                        </div>
+                        <Badge 
+                          variant="outline"
+                          className={`shrink-0 text-[10px] bg-${statusInfo.color}-50 text-${statusInfo.color}-700 border-${statusInfo.color}-200`}
+                        >
+                          {statusInfo.label}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{formatCurrency(process.property_value)}</span>
+                        <div className="flex items-center gap-2">
+                          {deadlineInfo && (
+                            <Badge variant="outline" className={`text-[10px] ${deadlineInfo.daysUntil <= 0 ? "bg-red-100 text-red-800" : deadlineInfo.daysUntil <= 3 ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"}`}>
+                              {deadlineInfo.daysUntil <= 0 ? "Vencido" : `${deadlineInfo.daysUntil}d`}
+                            </Badge>
+                          )}
+                          <span>{process.created_at ? format(parseISO(process.created_at), "dd/MM/yy", { locale: pt }) : "-"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* O9 - Desktop: Table */}
+              <div className="hidden md:block">
             <ScrollArea className="h-[600px]">
               <Table>
                 <TableHeader>
@@ -238,17 +295,7 @@ const FilteredProcessList = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProcesses.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={config.showDeadlineInfo ? 7 : 6} className="text-center py-12">
-                        <div className="text-muted-foreground">
-                          <IconComponent className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                          <p>Nenhum processo encontrado</p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredProcesses.map((process) => {
+                  {filteredProcesses.map((process) => {
                       const statusInfo = getStatusInfo(process.status);
                       const deadlineInfo = config.showDeadlineInfo ? getDeadlineInfo(process.id) : null;
                       
@@ -336,11 +383,13 @@ const FilteredProcessList = () => {
                           </TableCell>
                         </TableRow>
                       );
-                    })
-                  )}
+                    })}
                 </TableBody>
               </Table>
             </ScrollArea>
+              </div>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

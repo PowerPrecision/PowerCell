@@ -67,6 +67,7 @@ import ProcessSummaryCard from "../components/ProcessSummaryCard";
 import EmailHistoryPanel from "../components/EmailHistoryPanel";
 import UnifiedDocumentsPanel from "../components/UnifiedDocumentsPanel";
 import ProcessTimeline from "../components/ProcessTimeline";
+import UnifiedAuditTrail from "../components/UnifiedAuditTrail";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
@@ -984,8 +985,19 @@ const ProcessDetails = () => {
   if (loading) {
     return (
       <DashboardLayout title="Detalhes do Processo">
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
+            <div className="space-y-1.5">
+              <div className="h-6 w-64 bg-muted animate-pulse rounded" />
+              <div className="h-4 w-40 bg-muted animate-pulse rounded" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[1, 2, 3].map(i => <div key={i} className="h-28 bg-muted animate-pulse rounded-lg" />)}
+          </div>
+          <div className="h-10 bg-muted animate-pulse rounded" />
+          <div className="h-64 bg-muted animate-pulse rounded-lg" />
         </div>
       </DashboardLayout>
     );
@@ -1752,6 +1764,20 @@ const ProcessDetails = () => {
                               </Select>
                             </div>
                             <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Trabalha no Estrangeiro?</Label>
+                              <Select
+                                value={financialData.trabalha_estrangeiro || ""}
+                                onValueChange={(value) => setFinancialData({ ...financialData, trabalha_estrangeiro: value })}
+                                disabled={!canEditFinancial}
+                              >
+                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="sim">Sim</SelectItem>
+                                  <SelectItem value="nao">Não</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Precisa Vender Casa?</Label>
                               <Select
                                 value={financialData.precisa_vender_casa || ""}
@@ -2451,7 +2477,7 @@ const ProcessDetails = () => {
                     Documentos
                   </span>
                 </AccordionTrigger>
-                <AccordionContent className="px-3 pb-3">
+                <AccordionContent className="px-3 pb-3 overflow-x-auto">
                   <UnifiedDocumentsPanel 
                     key={documentsRefreshKey}
                     processId={id}
@@ -2604,28 +2630,12 @@ const ProcessDetails = () => {
 
                   {/* History Tab */}
                   <TabsContent value="history" className="p-4 pt-2">
-                    <h3 className="font-medium mb-4">Histórico de Alterações</h3>
-                    <ScrollArea className="h-[400px]">
-                      {history.length === 0 ? (
-                        <p className="text-center text-muted-foreground text-sm py-4">Sem histórico</p>
-                      ) : (
-                        <div className="space-y-3">
-                          {history.map((entry) => (
-                            <div key={entry.id} className="border-l-2 border-primary/30 pl-3 py-1">
-                              <p className="text-sm font-medium">{entry.action}</p>
-                              {entry.field && (
-                                <p className="text-xs text-muted-foreground">
-                                  {entry.field}: {entry.old_value || "vazio"} → {entry.new_value}
-                                </p>
-                              )}
-                              <p className="text-xs text-muted-foreground">
-                                {entry.user_name} • {format(parseISO(entry.created_at), "dd/MM HH:mm", { locale: pt })}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </ScrollArea>
+                    <h3 className="font-medium mb-3">Filme da Lead</h3>
+                    <UnifiedAuditTrail 
+                      history={history} 
+                      activities={activities}
+                      maxHeight="400px"
+                    />
                   </TabsContent>
                 </Tabs>
               </CardContent>
