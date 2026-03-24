@@ -984,8 +984,19 @@ const ProcessDetails = () => {
   if (loading) {
     return (
       <DashboardLayout title="Detalhes do Processo">
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
+            <div className="space-y-1.5">
+              <div className="h-6 w-64 bg-muted animate-pulse rounded" />
+              <div className="h-4 w-40 bg-muted animate-pulse rounded" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[1, 2, 3].map(i => <div key={i} className="h-28 bg-muted animate-pulse rounded-lg" />)}
+          </div>
+          <div className="h-10 bg-muted animate-pulse rounded" />
+          <div className="h-64 bg-muted animate-pulse rounded-lg" />
         </div>
       </DashboardLayout>
     );

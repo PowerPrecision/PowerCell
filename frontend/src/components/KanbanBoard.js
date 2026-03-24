@@ -63,6 +63,10 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
   const [showProcessDialog, setShowProcessDialog] = useState(false);
   const [collapsedColumns, setCollapsedColumns] = useState(new Set()); // Colunas colapsadas
   
+  // O7 - Filtros do Kanban
+  const [dateFilter, setDateFilter] = useState("all"); // all, today, week, month
+  const [urgencyFilter, setUrgencyFilter] = useState("all"); // all, overdue, urgent, normal
+  
   // Estado para aviso de bancos com créditos ativos
   const [showBankWarning, setShowBankWarning] = useState(false);
   const [pendingMove, setPendingMove] = useState(null);
@@ -357,13 +361,49 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
 
   const filteredColumns = kanbanData.columns.map((column) => ({
     ...column,
-    processes: column.processes.filter((process) =>
-      process.client_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      process.client_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      process.client_phone?.includes(searchTerm) ||
-      process.consultor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      process.mediador_name?.toLowerCase().includes(searchTerm.toLowerCase())
-    ),
+    processes: column.processes.filter((process) => {
+      // Text search filter
+      const matchesSearch = 
+        process.client_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        process.client_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        process.client_phone?.includes(searchTerm) ||
+        process.consultor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        process.mediador_name?.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      // O7 - Date filter
+      let matchesDate = true;
+      if (dateFilter !== "all" && process.created_at) {
+        const created = new Date(process.created_at);
+        const now = new Date();
+        if (dateFilter === "today") {
+          matchesDate = created.toDateString() === now.toDateString();
+        } else if (dateFilter === "week") {
+          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          matchesDate = created >= weekAgo;
+        } else if (dateFilter === "month") {
+          const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          matchesDate = created >= monthAgo;
+        }
+      }
+      
+      // O7 - Urgency filter (based on days since creation without update)
+      let matchesUrgency = true;
+      if (urgencyFilter !== "all") {
+        const lastUpdate = process.updated_at || process.created_at;
+        if (lastUpdate) {
+          const daysSinceUpdate = Math.floor((Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24));
+          if (urgencyFilter === "overdue") {
+            matchesUrgency = daysSinceUpdate > 14;
+          } else if (urgencyFilter === "urgent") {
+            matchesUrgency = daysSinceUpdate > 7 && daysSinceUpdate <= 14;
+          } else if (urgencyFilter === "normal") {
+            matchesUrgency = daysSinceUpdate <= 7;
+          }
+        }
+      }
+      
+      return matchesSearch && matchesDate && matchesUrgency;
+    }),
   }));
 
   // Obter todos os processos filtrados para vista de lista
@@ -467,6 +507,48 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
             </Button>
           </div>
         </div>
+      </div>
+
+      {/* O7 - Kanban Filters */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="kanban-filters">
+        <Select value={dateFilter} onValueChange={setDateFilter}>
+          <SelectTrigger className="h-8 w-[130px] text-xs" data-testid="kanban-date-filter">
+            <Calendar className="h-3 w-3 mr-1" />
+            <SelectValue placeholder="Data" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas as datas</SelectItem>
+            <SelectItem value="today">Hoje</SelectItem>
+            <SelectItem value="week">Última semana</SelectItem>
+            <SelectItem value="month">Último mês</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={urgencyFilter} onValueChange={setUrgencyFilter}>
+          <SelectTrigger className="h-8 w-[130px] text-xs" data-testid="kanban-urgency-filter">
+            <AlertCircle className="h-3 w-3 mr-1" />
+            <SelectValue placeholder="Urgência" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas</SelectItem>
+            <SelectItem value="overdue">Atrasados (&gt;14d)</SelectItem>
+            <SelectItem value="urgent">Urgentes (7-14d)</SelectItem>
+            <SelectItem value="normal">Recentes (&lt;7d)</SelectItem>
+          </SelectContent>
+        </Select>
+        {(dateFilter !== "all" || urgencyFilter !== "all") && (
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-8 text-xs"
+            onClick={() => { setDateFilter("all"); setUrgencyFilter("all"); }}
+            data-testid="kanban-clear-filters"
+          >
+            Limpar filtros
+          </Button>
+        )}
+        <span className="text-xs text-muted-foreground ml-auto">
+          {filteredColumns.reduce((acc, col) => acc + col.processes.length, 0)} processos visíveis
+        </span>
       </div>
 
       {/* Search Results List View */}
