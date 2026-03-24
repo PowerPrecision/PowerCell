@@ -10,6 +10,8 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 ### Adicionado
 - **Pré-visualização do Formulário para Consultores**: Botão "Pré-visualizar Formulário" na página de Registos de Clientes. Abre o formulário completo (6 passos) em modo navegável sem obrigar a preencher campos. Rota: `/formulario-consultor`
 - Banner "Modo de Pré-visualização" com botão de voltar
+- **Ver processos sem atualização**: Botão "Ver processos" no Dashboard expande lista detalhada com Cliente, Estado, Consultor, Dias sem atualização e Urgência. Cada linha é clicável e redireciona para o processo
+- **Link S3 automático**: Ao criar processo (atribuir cliente), é gerado automaticamente o campo `s3_folder` no formato `s3://powerprecision-docs-storage/Documentação Clientes/Nome_Do_Cliente/`
 
 ### Alterado
 - **Tabela de Registos de Clientes**: Filtro por defeito alterado para mostrar apenas clientes **sem processo**. Quando o processo é criado, o cliente desaparece da vista principal
@@ -17,6 +19,7 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 ### Corrigido
 - **Build de produção**: Separada a instalação de dependências no Dockerfile em 2 passos (PyPI público + índice privado para `emergentintegrations`). Removidos pacotes conflituosos do `requirements.txt` (`scraperapi-sdk`, `litellm`)
+- **Processos sem atualização**: Lista de estados finais corrigida para incluir todas as variações (`concluidos`, `desistencias`, `desistência`, `arquivado`, `perdido`, `eliminado`). Processos concluídos e desistências já não aparecem no alerta
 
 ## [2026-03-24] - Templates e Pré-visualização
 
