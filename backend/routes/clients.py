@@ -796,9 +796,9 @@ async def link_process_to_client(
 async def unlink_process_from_client(
     client_id: str,
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO]))
 ):
-    """Desvincular um processo de um cliente (apenas admin/CEO)."""
+    """Desvincular um processo de um cliente (apenas admin/CEO/Administrativo)."""
     client = await db.clients.find_one({"id": client_id})
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -1067,7 +1067,7 @@ async def find_or_create_client(
 async def delete_client(
     client_id: str,
     hard_delete: bool = False,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Eliminar um cliente/processo (soft delete por defeito).
@@ -1078,10 +1078,10 @@ async def delete_client(
     Por defeito, usa soft delete (status='eliminado') para permitir undo.
     Com hard_delete=True, elimina permanentemente.
     
-    Apenas Admin, CEO e Diretor podem eliminar.
+    Apenas Admin, CEO, Diretor e Administrativo podem eliminar.
     """
-    # Verificar também se é diretor
-    if user.get("role") not in ["admin", "ceo", "diretor"]:
+    # Verificar também se é diretor ou administrativo
+    if user.get("role") not in ["admin", "ceo", "diretor", "administrativo"]:
         raise HTTPException(status_code=403, detail="Sem permissão para eliminar clientes")
     
     now = datetime.now(timezone.utc).isoformat()

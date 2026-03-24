@@ -43,7 +43,7 @@ async def create_temp_link(
     description: Optional[str] = Form(default=None),
     file_paths: Optional[str] = Form(default=None),  # JSON string ou comma-separated
     notify_email: bool = Form(default=True),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR]))
 ):
     """
     Cria um link temporário para upload ou download de documentação.
@@ -169,7 +169,7 @@ async def list_process_temp_links(
 @router.post("/{link_id}/cancel")
 async def cancel_temp_link(
     link_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR]))
 ):
     """
     Cancela um link temporário.
@@ -180,7 +180,7 @@ async def cancel_temp_link(
         raise HTTPException(status_code=404, detail="Link não encontrado")
     
     # Verificar permissões
-    if user.get("role") not in [UserRole.ADMIN, UserRole.CEO]:
+    if user.get("role") not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         # Verificar se é o criador do link
         if link.get("created_by") != user.get("id"):
             raise HTTPException(
