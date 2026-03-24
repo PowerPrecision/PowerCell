@@ -295,6 +295,7 @@ class FinancialData(BaseModel):
     employment_duration: Optional[str] = None  # Tempo de emprego
     employer_name: Optional[str] = None  # Entidade empregadora
     employer_nif: Optional[str] = None  # NIF da entidade empregadora
+    trabalha_estrangeiro: Optional[str] = None  # Trabalha no estrangeiro (sim/nao)
     monthly_income: Optional[float] = None  # Rendimento mensal
     # Dados do CPCV - Valores
     valor_pretendido: Optional[float] = None

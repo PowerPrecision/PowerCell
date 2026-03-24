@@ -1764,6 +1764,20 @@ const ProcessDetails = () => {
                               </Select>
                             </div>
                             <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Trabalha no Estrangeiro?</Label>
+                              <Select
+                                value={financialData.trabalha_estrangeiro || ""}
+                                onValueChange={(value) => setFinancialData({ ...financialData, trabalha_estrangeiro: value })}
+                                disabled={!canEditFinancial}
+                              >
+                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="sim">Sim</SelectItem>
+                                  <SelectItem value="nao">Não</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Precisa Vender Casa?</Label>
                               <Select
                                 value={financialData.precisa_vender_casa || ""}

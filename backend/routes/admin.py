@@ -575,6 +575,9 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
     # Processar alteração de password (apenas admin pode alterar password de outros)
     if data.password is not None and data.password.strip():
         update_data["password"] = hash_password(data.password)
+    # Processar permissões
+    if data.permissions is not None:
+        update_data["permissions"] = data.permissions
     
     if update_data:
         await db.users.update_one({"id": user_id}, {"$set": update_data})

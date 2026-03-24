@@ -41,6 +41,14 @@ const FieldError = ({ children }) => (
   </p>
 );
 
+// Helper for required field labels
+const RequiredLabel = ({ htmlFor, children }) => (
+  <Label htmlFor={htmlFor}>
+    {children} <span className="text-red-500 font-semibold">*</span>
+    <span className="text-red-400 text-[10px] ml-1">(obrigatório)</span>
+  </Label>
+);
+
 // Validated Input Component
 const ValidatedInput = ({ 
   error, 
@@ -258,12 +266,7 @@ const PublicClientForm = () => {
   }, []);
   
   const [formData, setFormData] = useState(() => {
-    // Tentar carregar rascunho ao iniciar
-    const draft = loadDraft();
-    if (draft?.data) {
-      return draft.data;
-    }
-    return {
+    const defaults = {
       // Dados Pessoais - Titular
       name: "",
       email: "",
@@ -328,6 +331,7 @@ const PublicClientForm = () => {
       employment_duration: "",
       employer_name: "",
       employer_nif: "",
+      trabalha_estrangeiro: "",
     
     // Bancos com créditos ativos
     bancos_creditos: [],
@@ -346,6 +350,16 @@ const PublicClientForm = () => {
     consent_data: false,
     consent_contact: false,
   };
+    // Tentar carregar rascunho ao iniciar - merge com defaults para garantir que campos novos existem
+    const draft = loadDraft();
+    if (draft?.data) {
+      return { ...defaults, ...draft.data, 
+        caracteristicas: Array.isArray(draft.data.caracteristicas) ? draft.data.caracteristicas : defaults.caracteristicas,
+        bancos_creditos: Array.isArray(draft.data.bancos_creditos) ? draft.data.bancos_creditos : defaults.bancos_creditos,
+        bancos_simulacoes: Array.isArray(draft.data.bancos_simulacoes) ? draft.data.bancos_simulacoes : defaults.bancos_simulacoes,
+      };
+    }
+    return defaults;
   });
 
   // Calcular campos preenchidos para progresso
@@ -543,6 +557,7 @@ const PublicClientForm = () => {
           employment_duration: formData.employment_duration,
           employer_name: formData.employer_name,
           employer_nif: formData.employer_nif,
+          trabalha_estrangeiro: formData.trabalha_estrangeiro,
         },
       });
 
@@ -584,27 +599,27 @@ const PublicClientForm = () => {
   const toggleCaracteristica = (value) => {
     setFormData(prev => ({
       ...prev,
-      caracteristicas: prev.caracteristicas.includes(value)
+      caracteristicas: (prev.caracteristicas || []).includes(value)
         ? prev.caracteristicas.filter(c => c !== value)
-        : [...prev.caracteristicas, value]
+        : [...(prev.caracteristicas || []), value]
     }));
   };
 
   const toggleBanco = (banco) => {
     setFormData(prev => ({
       ...prev,
-      bancos_creditos: prev.bancos_creditos.includes(banco)
+      bancos_creditos: (prev.bancos_creditos || []).includes(banco)
         ? prev.bancos_creditos.filter(b => b !== banco)
-        : [...prev.bancos_creditos, banco]
+        : [...(prev.bancos_creditos || []), banco]
     }));
   };
 
   const toggleBancoSimulacoes = (banco) => {
     setFormData(prev => ({
       ...prev,
-      bancos_simulacoes: prev.bancos_simulacoes.includes(banco)
+      bancos_simulacoes: (prev.bancos_simulacoes || []).includes(banco)
         ? prev.bancos_simulacoes.filter(b => b !== banco)
-        : [...prev.bancos_simulacoes, banco]
+        : [...(prev.bancos_simulacoes || []), banco]
     }));
   };
 
@@ -635,7 +650,7 @@ const PublicClientForm = () => {
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2 md:col-span-2">
-          <Label htmlFor="name">Nome completo *</Label>
+          <RequiredLabel htmlFor="name">Nome completo</RequiredLabel>
           <Input
             id="name"
             name="name"
@@ -650,7 +665,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="email">Email *</Label>
+          <RequiredLabel htmlFor="email">Email</RequiredLabel>
           <Input
             id="email"
             name="email"
@@ -667,7 +682,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="phone">Telemóvel *</Label>
+          <RequiredLabel htmlFor="phone">Telemóvel</RequiredLabel>
           <Input
             id="phone"
             name="phone"
@@ -684,7 +699,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="nif">NIF *</Label>
+          <RequiredLabel htmlFor="nif">NIF</RequiredLabel>
           <Input
             id="nif"
             name="nif"
@@ -702,7 +717,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="documento_id">Cartão de Cidadão/Passaporte *</Label>
+          <RequiredLabel htmlFor="documento_id">Cartão de Cidadão/Passaporte</RequiredLabel>
           <Input
             id="documento_id"
             name="documento_id"
@@ -718,7 +733,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="naturalidade">Naturalidade *</Label>
+          <RequiredLabel htmlFor="naturalidade">Naturalidade</RequiredLabel>
           <Input
             id="naturalidade"
             name="naturalidade"
@@ -734,7 +749,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="nacionalidade">Nacionalidade *</Label>
+          <RequiredLabel htmlFor="nacionalidade">Nacionalidade</RequiredLabel>
           <Input
             id="nacionalidade"
             name="nacionalidade"
@@ -747,7 +762,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2 md:col-span-2">
-          <Label htmlFor="morada_fiscal">Morada Fiscal *</Label>
+          <RequiredLabel htmlFor="morada_fiscal">Morada Fiscal</RequiredLabel>
           <Input
             id="morada_fiscal"
             value={formData.morada_fiscal}
@@ -760,7 +775,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="birth_date">Data de Nascimento *</Label>
+          <RequiredLabel htmlFor="birth_date">Data de Nascimento</RequiredLabel>
           <Input
             id="birth_date"
             type="date"
@@ -772,7 +787,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="estado_civil">Estado Civil *</Label>
+          <RequiredLabel htmlFor="estado_civil">Estado Civil</RequiredLabel>
           <Select value={formData.estado_civil} onValueChange={(v) => updateField("estado_civil", v)}>
             <SelectTrigger data-testid="client-estado-civil">
               <SelectValue placeholder="Selecione" />
@@ -806,7 +821,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2 md:col-span-2">
-          <Label>Compra individualmente ou com outra pessoa? *</Label>
+          <RequiredLabel>Compra individualmente ou com outra pessoa?</RequiredLabel>
           <Select value={formData.compra_tipo} onValueChange={(v) => updateField("compra_tipo", v)}>
             <SelectTrigger data-testid="client-compra-tipo">
               <SelectValue placeholder="Selecione" />
@@ -838,7 +853,7 @@ const PublicClientForm = () => {
       {formData.compra_tipo === "outra_pessoa" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="titular2_name">Nome completo *</Label>
+            <RequiredLabel htmlFor="titular2_name">Nome completo</RequiredLabel>
             <Input
               id="titular2_name"
               value={formData.titular2_name}
@@ -999,7 +1014,7 @@ const PublicClientForm = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* FINALIDADE PRIMEIRO */}
         <div className="space-y-2 md:col-span-2">
-          <Label>Finalidade do pedido *</Label>
+          <RequiredLabel>Finalidade do pedido</RequiredLabel>
           <Select value={formData.finalidade} onValueChange={(v) => updateField("finalidade", v)}>
             <SelectTrigger data-testid="imovel-finalidade">
               <SelectValue placeholder="Selecione a finalidade" />
@@ -1020,7 +1035,7 @@ const PublicClientForm = () => {
         {formData.finalidade !== "refinanciamento" && (
           <>
             <div className="space-y-2">
-              <Label>O que procura? *</Label>
+              <RequiredLabel>O que procura?</RequiredLabel>
               <Select value={formData.tipo_imovel} onValueChange={(v) => updateField("tipo_imovel", v)}>
                 <SelectTrigger data-testid="imovel-tipo">
                   <SelectValue placeholder="Selecione" />
@@ -1034,7 +1049,7 @@ const PublicClientForm = () => {
             </div>
             
             <div className="space-y-2">
-              <Label>Número de quartos *</Label>
+              <RequiredLabel>Número de quartos</RequiredLabel>
               <Select value={formData.num_quartos} onValueChange={(v) => updateField("num_quartos", v)}>
                 <SelectTrigger data-testid="imovel-quartos">
                   <SelectValue placeholder="Selecione" />
@@ -1049,7 +1064,7 @@ const PublicClientForm = () => {
             </div>
             
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="localizacao">Localização/Zona(s) preferida(s) *</Label>
+              <RequiredLabel htmlFor="localizacao">Localização/Zona(s) preferida(s)</RequiredLabel>
               <Input
                 id="localizacao"
                 value={formData.localizacao}
@@ -1069,7 +1084,7 @@ const PublicClientForm = () => {
                   <div key={c.value} className="flex items-center space-x-2">
                     <Checkbox
                       id={c.value}
-                      checked={formData.caracteristicas.includes(c.value)}
+                      checked={(formData.caracteristicas || []).includes(c.value)}
                       onCheckedChange={() => toggleCaracteristica(c.value)}
                       data-testid={`caracteristica-${c.value}`}
                     />
@@ -1079,7 +1094,7 @@ const PublicClientForm = () => {
               </div>
             </div>
             
-            {formData.caracteristicas.includes("outro") && (
+            {(formData.caracteristicas || []).includes("outro") && (
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="outras_caracteristicas">Outras características</Label>
                 <Input
@@ -1177,7 +1192,7 @@ const PublicClientForm = () => {
         {formData.finalidade === "refinanciamento" && (
           <>
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="valor_transferencia">Valor a Transferir/Consolidar (€) *</Label>
+              <RequiredLabel htmlFor="valor_transferencia">Valor a Transferir/Consolidar (€)</RequiredLabel>
               <Input
                 id="valor_transferencia"
                 type="number"
@@ -1203,7 +1218,7 @@ const PublicClientForm = () => {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="prazo_pretendido">Prazo Pretendido (anos) *</Label>
+              <RequiredLabel htmlFor="prazo_pretendido">Prazo Pretendido (anos)</RequiredLabel>
               <Select value={formData.prazo_pretendido} onValueChange={(v) => updateField("prazo_pretendido", v)}>
                 <SelectTrigger data-testid="imovel-prazo">
                   <SelectValue placeholder="Selecione" />
@@ -1274,7 +1289,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label>Chave Móvel Digital? *</Label>
+          <RequiredLabel>Chave Móvel Digital?</RequiredLabel>
           <Select value={formData.chave_movel_digital} onValueChange={(v) => updateField("chave_movel_digital", v)}>
             <SelectTrigger data-testid="fin-chave-movel">
               <SelectValue placeholder="Selecione" />
@@ -1329,7 +1344,21 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2">
-          <Label>Tipo de Contrato de Trabalho *</Label>
+          <Label>Trabalha no estrangeiro?</Label>
+          <Select value={formData.trabalha_estrangeiro} onValueChange={(v) => updateField("trabalha_estrangeiro", v)}>
+            <SelectTrigger data-testid="fin-trabalha-estrangeiro">
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sim">Sim</SelectItem>
+              <SelectItem value="nao">Não</SelectItem>
+            </SelectContent>
+          </Select>
+          <FieldHint>Indique se trabalha fora de Portugal. Pode influenciar as condições do crédito.</FieldHint>
+        </div>
+        
+        <div className="space-y-2">
+          <RequiredLabel>Tipo de Contrato de Trabalho</RequiredLabel>
           <Select value={formData.employment_type} onValueChange={(v) => updateField("employment_type", v)}>
             <SelectTrigger data-testid="fin-employment-type">
               <SelectValue placeholder="Selecione" />
@@ -1398,7 +1427,7 @@ const PublicClientForm = () => {
         </div>
         
         <div className="space-y-2 md:col-span-2">
-          <Label htmlFor="salario_liquido">Salário mensal líquido (já com descontos) * (€)</Label>
+          <RequiredLabel htmlFor="salario_liquido">Salário mensal líquido (já com descontos) (€)</RequiredLabel>
           <Input
             id="salario_liquido"
             type="number"
@@ -1424,10 +1453,23 @@ const PublicClientForm = () => {
       
       <div className="space-y-6">
         <div className="space-y-3">
-          <Label>Bancos onde tem créditos ativos *</Label>
+          <RequiredLabel>Bancos onde tem créditos ativos</RequiredLabel>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData(prev => ({ ...prev, bancos_creditos: [] }))}
+              data-testid="banco-nenhuma"
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                (formData.bancos_creditos || []).length === 0 
+                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700' 
+                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+              }`}
+            >
+              {(formData.bancos_creditos || []).length === 0 && <span className="mr-1">✓</span>}
+              Nenhuma
+            </button>
             {BANCOS.map((banco) => {
-              const selected = formData.bancos_creditos.includes(banco);
+              const selected = (formData.bancos_creditos || []).includes(banco);
               const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
               return (
                 <button
@@ -1452,10 +1494,23 @@ const PublicClientForm = () => {
         
         {/* Pergunta sobre simulações de crédito */}
         <div className="space-y-3">
-          <Label>Efetou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
+          <Label>Efetuou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData(prev => ({ ...prev, bancos_simulacoes: [] }))}
+              data-testid="banco-sim-nenhuma"
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                (formData.bancos_simulacoes || []).length === 0 
+                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700' 
+                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+              }`}
+            >
+              {(formData.bancos_simulacoes || []).length === 0 && <span className="mr-1">✓</span>}
+              Nenhuma
+            </button>
             {BANCOS.map((banco) => {
-              const selected = formData.bancos_simulacoes.includes(banco);
+              const selected = (formData.bancos_simulacoes || []).includes(banco);
               const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
               return (
                 <button
@@ -1481,7 +1536,7 @@ const PublicClientForm = () => {
         {/* Pergunta sobre tempo restante do crédito (apenas para refinanciamento) */}
         {formData.finalidade === "refinanciamento" && (
           <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <Label htmlFor="tempo_restante_credito">Quanto tempo falta para acabar de pagar o crédito atual? *</Label>
+            <RequiredLabel htmlFor="tempo_restante_credito">Quanto tempo falta para acabar de pagar o crédito atual?</RequiredLabel>
             <Select 
               value={formData.tempo_restante_credito} 
               onValueChange={(v) => updateField("tempo_restante_credito", v)}
@@ -1504,7 +1559,7 @@ const PublicClientForm = () => {
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="capital_proprio">Capital próprio disponível * (€)</Label>
+            <RequiredLabel htmlFor="capital_proprio">Capital próprio disponível (€)</RequiredLabel>
             <Input
               id="capital_proprio"
               type="number"
@@ -1518,7 +1573,7 @@ const PublicClientForm = () => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="valor_financiado">Valor a financiar * (€)</Label>
+            <RequiredLabel htmlFor="valor_financiado">Valor a financiar (€)</RequiredLabel>
             <Input
               id="valor_financiado"
               value={formData.valor_financiado}
@@ -1565,7 +1620,7 @@ const PublicClientForm = () => {
             <p><strong>Tipo:</strong> {TIPOS_IMOVEL.find(t => t.value === formData.tipo_imovel)?.label || "-"}</p>
             <p><strong>Quartos:</strong> {formData.num_quartos || "-"}</p>
             <p><strong>Localização:</strong> {formData.localizacao || "-"}</p>
-            <p><strong>Características:</strong> {formData.caracteristicas.length > 0 ? formData.caracteristicas.join(", ") : "-"}</p>
+            <p><strong>Características:</strong> {(formData.caracteristicas || []).length > 0 ? formData.caracteristicas.join(", ") : "-"}</p>
           </CardContent>
         </Card>
         
@@ -1578,6 +1633,7 @@ const PublicClientForm = () => {
             <p><strong>Capital próprio:</strong> {formData.capital_proprio ? `€${formData.capital_proprio}` : "-"}</p>
             <p><strong>Valor a financiar:</strong> {formData.valor_financiado || "-"}</p>
             <p><strong>Efetivo:</strong> {formData.efetivo === "sim" ? "Sim" : formData.efetivo === "nao" ? "Não" : "-"}</p>
+            <p><strong>Trabalha no Estrangeiro:</strong> {formData.trabalha_estrangeiro === "sim" ? "Sim" : formData.trabalha_estrangeiro === "nao" ? "Não" : "-"}</p>
           </CardContent>
         </Card>
         
@@ -1586,7 +1642,7 @@ const PublicClientForm = () => {
             <CardTitle className="text-sm font-medium text-muted-foreground">Créditos Ativos</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
-            <p>{formData.bancos_creditos.length > 0 ? formData.bancos_creditos.join(", ") : "Nenhum banco selecionado"}</p>
+            <p>{(formData.bancos_creditos || []).length > 0 ? formData.bancos_creditos.join(", ") : "Nenhum banco selecionado"}</p>
           </CardContent>
         </Card>
         
@@ -1595,7 +1651,7 @@ const PublicClientForm = () => {
             <CardTitle className="text-sm font-medium text-muted-foreground">Simulações de Crédito</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
-            <p>{formData.bancos_simulacoes.length > 0 ? formData.bancos_simulacoes.join(", ") : "Nenhuma simulação efetuada"}</p>
+            <p>{(formData.bancos_simulacoes || []).length > 0 ? formData.bancos_simulacoes.join(", ") : "Nenhuma simulação efetuada"}</p>
           </CardContent>
         </Card>
         

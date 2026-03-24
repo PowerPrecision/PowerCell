@@ -51,6 +51,8 @@ const ClientRegistrationsPage = React.lazy(() => import("./pages/ClientRegistrat
 const WorkflowStatusesPage = React.lazy(() => import("./pages/WorkflowStatusesPage"));
 const AutomationPage = React.lazy(() => import("./pages/AutomationPage"));
 const ProfilePage = React.lazy(() => import("./pages/ProfilePage"));
+const ProfileSettingsPage = React.lazy(() => import("./pages/ProfileSettingsPage"));
+const FormManagementPage = React.lazy(() => import("./pages/FormManagementPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -303,6 +305,26 @@ function App() {
             <Route path="/automation" element={
               <ProtectedRoute allowedRoles={ADMIN_ROLES}>
                 <AutomationPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Profile Settings - Admin and CEO */}
+          <Route
+            path="/configuracoes-perfis"
+            element={
+              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                <ProfileSettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Form Management - Admin and CEO */}
+          <Route
+            path="/gestao-formulario"
+            element={
+              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                <FormManagementPage />
               </ProtectedRoute>
             }
           />
