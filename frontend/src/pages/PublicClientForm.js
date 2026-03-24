@@ -406,6 +406,132 @@ const PublicClientForm = () => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Carregar campos personalizados do backend
+  const [customFields, setCustomFields] = useState([]);
+  useEffect(() => {
+    const fetchCustomFields = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/public/form-config`);
+        setCustomFields(res.data.custom_fields || []);
+      } catch (e) {
+        console.warn("Não foi possível carregar campos personalizados:", e);
+      }
+    };
+    fetchCustomFields();
+  }, []);
+
+  // Renderizar um campo personalizado dinâmico
+  const renderCustomField = (field) => {
+    const value = formData[field.field_key] || "";
+    const updateCustom = (v) => updateField(field.field_key, v);
+
+    return (
+      <div key={field.field_key} className="space-y-2" data-testid={`custom-field-${field.field_key}`}>
+        {field.is_required ? (
+          <RequiredLabel htmlFor={field.field_key}>{field.label}</RequiredLabel>
+        ) : (
+          <Label htmlFor={field.field_key}>{field.label}</Label>
+        )}
+
+        {field.field_type === "text" && (
+          <Input
+            id={field.field_key}
+            value={value}
+            onChange={(e) => updateCustom(e.target.value)}
+            placeholder={field.placeholder || ""}
+          />
+        )}
+
+        {field.field_type === "number" && (
+          <Input
+            id={field.field_key}
+            type="number"
+            value={value}
+            onChange={(e) => updateCustom(e.target.value)}
+            placeholder={field.placeholder || ""}
+          />
+        )}
+
+        {field.field_type === "date" && (
+          <Input
+            id={field.field_key}
+            type="date"
+            value={value}
+            onChange={(e) => updateCustom(e.target.value)}
+          />
+        )}
+
+        {field.field_type === "select" && field.options && (
+          <Select value={value} onValueChange={updateCustom}>
+            <SelectTrigger>
+              <SelectValue placeholder={field.placeholder || "Selecione"} />
+            </SelectTrigger>
+            <SelectContent>
+              {field.options.map((opt) => (
+                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {field.field_type === "checkbox" && field.options && (
+          <div className="flex flex-wrap gap-2">
+            {field.options.map((opt) => {
+              const arr = Array.isArray(formData[field.field_key]) ? formData[field.field_key] : [];
+              const checked = arr.includes(opt);
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => {
+                    const updated = checked ? arr.filter(v => v !== opt) : [...arr, opt];
+                    updateCustom(updated);
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                    checked
+                      ? "ring-2 ring-offset-1 ring-primary scale-105 bg-primary text-primary-foreground border-primary"
+                      : "opacity-60 hover:opacity-80 bg-transparent text-foreground border-border"
+                  }`}
+                >
+                  {checked && <span className="mr-1">&#10003;</span>}
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {field.field_type === "radio" && (
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              variant={value === "sim" ? "default" : "outline"}
+              className="flex-1"
+              onClick={() => updateCustom("sim")}
+            >
+              Sim
+            </Button>
+            <Button
+              type="button"
+              variant={value === "nao" ? "default" : "outline"}
+              className="flex-1"
+              onClick={() => updateCustom("nao")}
+            >
+              Não
+            </Button>
+          </div>
+        )}
+
+        {field.hint && <FieldHint>{field.hint}</FieldHint>}
+      </div>
+    );
+  };
+
+  // Obter campos personalizados para um passo específico
+  const getCustomFieldsForStep = (stepNum) => {
+    return customFields.filter(f => f.step === stepNum);
+  };
+
   // Validação de NIF português
   const validateNIF = (nif) => {
     if (!nif) return { valid: false, message: "NIF é obrigatório" };
@@ -559,6 +685,13 @@ const PublicClientForm = () => {
           employer_nif: formData.employer_nif,
           trabalha_estrangeiro: formData.trabalha_estrangeiro,
         },
+        // Campos personalizados
+        custom_fields: customFields.length > 0 ? customFields.reduce((acc, f) => {
+          if (formData[f.field_key] !== undefined && formData[f.field_key] !== "") {
+            acc[f.field_key] = formData[f.field_key];
+          }
+          return acc;
+        }, {}) : null,
       });
 
       // Verificar se o registo foi bloqueado por duplicado
@@ -2005,6 +2138,14 @@ const PublicClientForm = () => {
             {step === 4 && renderStep4()}
             {step === 5 && renderStep5()}
             {step === 6 && renderStep6()}
+
+            {/* Campos personalizados para o passo atual */}
+            {getCustomFieldsForStep(step).length > 0 && (
+              <div className="mt-6 pt-4 border-t border-dashed border-emerald-300 space-y-4">
+                <p className="text-xs text-emerald-600 font-medium uppercase tracking-wide">Campos adicionais</p>
+                {getCustomFieldsForStep(step).map(renderCustomField)}
+              </div>
+            )}
 
             <div className="flex justify-between mt-8 pt-6 border-t border-border">
               <Button
