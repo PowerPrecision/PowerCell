@@ -89,7 +89,6 @@ Levenshtein==0.27.3
 librt==0.7.7
 license-expression==30.4.4
 limits==5.8.0
-litellm==1.80.0
 locust==2.43.2
 lxml==6.0.2
 markdown-it-py==4.0.0
