@@ -1,145 +1,230 @@
 <analysis>**original_problem_statement:**
-O utilizador solicitou a implementação de uma lista exaustiva de correções de bugs (E#), melhorias (M#) e outras alterações (O#) para a aplicação PowerCell, detalhadas num ficheiro de texto (). O objetivo final era implementar **todos** os itens pendentes do documento, incluindo tarefas de backlogs futuros (P2), bem como novas funcionalidades sugeridas pelo agente e aprovadas pelo utilizador, como integração com Sentry, Redis e notificações de processos parados.
+O utilizador reportou um erro na consola do navegador () após a implementação anterior ter sido concluída. Adicionalmente, solicitou um conjunto de novas melhorias:
+1.  Permitir que os utilizadores vejam o formulário de registo completo, mesmo que não esteja preenchido.
+2.  Criar uma área de configurações de perfis (para admin/CEO) para gerir permissões de acesso.
+3.  Criar uma forma de o administrador gerir as perguntas do formulário.
+4.  Adicionar melhorias específicas ao formulário:
+    *   Adicionar a pergunta Trabalha no estrangeiro?.
+    *   Marcar os campos obrigatórios com o texto obrigatório e um asterisco vermelho.
+    *   No passo 5 (bancos), adicionar a opção Nenhuma.
+
+Subsequentemente, o agente sugeriu e o utilizador aceitou a implementação de campos personalizados, templates de formulário e pré-visualização de templates. No final, o utilizador reportou um erro de build no ambiente de produção relacionado com a dependência .
 
 **User's preferred language**: Portuguese (Portugal)
 
 **what currently exists?**
-O agente implementou com sucesso a esmagadora maioria das tarefas solicitadas em várias fases, cada uma verificada por testes automatizados. Foram implementadas correções de UI, a funcionalidade de undo com toasts, vistas de card para mobile, skeletons para loading, filtros para o Kanban, integração com Sentry para monitorização de erros e Redis para cache.
+O agente corrigiu com sucesso o erro  ao garantir que os  no estado do formulário () são sempre inicializados, mesmo ao carregar um rascunho do . Implementou todas as melhorias e novas funcionalidades solicitadas:
+-   **Melhorias no Formulário**: Adicionou o campo Trabalha no estrangeiro?, um componente  para destacar campos obrigatórios e a opção Nenhuma nas listas de bancos.
+-   **Visualização Completa**: Modificou a página  para mostrar todos os campos do formulário de um cliente, preenchidos ou não.
+-   **Gestão de Permissões**: Criou a página  e atualizou o backend (, ) para permitir a gestão de permissões granulares por utilizador.
+-   **Gestão de Formulário**: Criou a página  e as rotas de API em  para permitir que o administrador ative/desative campos.
+-   **Campos Personalizados**: Expandiu a gestão do formulário para permitir a criação de campos customizados (texto, select, checkbox, etc.).
+-   **Templates de Formulário**: Implementou um sistema de templates que permite guardar e ativar diferentes configurações de formulário (ex: Crédito Habitação, Refinanciamento).
+-   **Pré-visualização de Template**: Adicionou a funcionalidade de pré-visualizar um template antes de o ativar.
+-   **Documentação**: Atualizou  e .
 
-A última fase de trabalho focou-se nos itens do backlog P2, onde o agente implementou:
--   **O5 (Encriptação):** Verificou a encriptação existente e estendeu-a ao formulário de registo público.
--   **O11 (WebSocket Fallback):** Adicionou um mecanismo de polling HTTP como fallback quando a conexão WebSocket falha.
--   **O19 (Acessibilidade):** Integrou  para testes de acessibilidade automatizados no ambiente de desenvolvimento.
--   **O22 (Motor de Workflow):** Criou a base para um motor de automação No-Code (Se X, Então Y), incluindo o serviço de backend, rotas de API e a página frontend para a construção de regras.
+O agente identificou que o erro de build em produção ( não encontrado) se deve ao facto de ser um pacote privado.
 
 **Last working item**:
--   **Last item agent was working**: O agente estava a finalizar a implementação do último lote de itens do backlog P2, nomeadamente o motor de automação (O22), o fallback de WebSocket (O11) e os testes de acessibilidade (O19). O código foi escrito, mas foram encontrados erros de linting e o ciclo de testes ainda não foi executado.
--   **Status**: IN PROGRESS
--   **Agent Testing Done**: N
--   **Which testing method agent to use?**: both (O novo motor de automação e as alterações de encriptação exigem testes de backend, enquanto a nova página de automação e o fallback de WebSocket exigem testes de frontend).
+-   **Last item agent was working**: Investigar e resolver o erro de build na produção (). O agente identificou que  é uma dependência privada e é usada em vários locais do backend, mas não encontrou a solução para a sua instalação durante o processo de build.
+-   **Status**: BLOCKED
+-   **Agent Testing Done**: N/A (É um erro de build, não de runtime no ambiente de preview).
+-   **Which testing method agent to use?**: O próximo agente não precisa de testes, mas sim de corrigir o processo de instalação de dependências. Deverá modificar o  ou  para usar o índice de pacotes privado.
 -   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
--   **Issue 1**: Finalizar e verificar a implementação dos itens do backlog P2. (PRIORITY: P0)
+-   **Issue 1**: Falha no build de produção devido à dependência . (PRIORITY: P0)
 
 **Issues Detail**:
--   **Issue 1: Finalizar e verificar a implementação dos itens do backlog P2**
-    -   **Attempted fixes**: O agente escreveu todo o código necessário para as funcionalidades O5, O11, O19 e O22, incluindo novos ficheiros de serviço, rotas de API e componentes de frontend. Corrigiu alguns erros de linting, mas não todos.
+-   **Issue 1: Falha no build de produção devido à dependência **
+    -   **Attempted fixes**: O agente confirmou que o erro vem dos logs de build e que a dependência é usada no código. Tentou limpar o  mas o erro de linting mostrou que a dependência era necessária.
     -   **Next debug checklist**:
-        1.  Corrigir o erro de linting pendente em  (variável  não utilizada na linha 159).
-        2.  Executar o  para uma validação completa das novas funcionalidades:
-            *   **Backend**: Testar a criação, leitura e execução de regras de automação.
-            *   **Frontend**: Verificar a UI da nova página . Confirmar que o fallback de polling para notificações é ativado quando a conexão WebSocket falha. Verificar a consola do browser no modo de desenvolvimento por relatórios do .
-    -   **Why fix this issue and what will be achieved with the fix?**: Para concluir a implementação de todos os requisitos solicitados pelo utilizador, entregando uma aplicação funcionalmente completa conforme o planeado.
+        1.  A instalação de  requer um . A instrução para instalar pacotes privados da Emergent está no system prompt: Looking in indexes: https://pypi.org/simple, https://d33sy5i8bnduwe.cloudfront.net/simple/, https://d33sy5i8bnduwe.cloudfront.net/simple/
+Requirement already satisfied: emergentintegrations in /root/.venv/lib/python3.11/site-packages (0.1.0)
+Requirement already satisfied: openai==1.99.9 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (1.99.9)
+Requirement already satisfied: litellm>=1.0.0 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (1.80.0)
+Requirement already satisfied: fastapi>=0.100.0 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (0.129.0)
+Requirement already satisfied: uvicorn>=0.22.0 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (0.25.0)
+Requirement already satisfied: aiohttp>=3.8.0 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (3.13.3)
+Requirement already satisfied: google-generativeai>=0.3.0 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (0.8.6)
+Requirement already satisfied: Pillow>=10.0.0 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (12.1.1)
+Requirement already satisfied: google-genai in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (1.57.0)
+Requirement already satisfied: stripe>=13.0.0 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (14.1.0)
+Requirement already satisfied: requests>=2.25.0 in /root/.venv/lib/python3.11/site-packages (from emergentintegrations) (2.32.5)
+Requirement already satisfied: anyio<5,>=3.5.0 in /root/.venv/lib/python3.11/site-packages (from openai==1.99.9->emergentintegrations) (4.12.0)
+Requirement already satisfied: distro<2,>=1.7.0 in /root/.venv/lib/python3.11/site-packages (from openai==1.99.9->emergentintegrations) (1.9.0)
+Requirement already satisfied: httpx<1,>=0.23.0 in /root/.venv/lib/python3.11/site-packages (from openai==1.99.9->emergentintegrations) (0.28.1)
+Requirement already satisfied: jiter<1,>=0.4.0 in /root/.venv/lib/python3.11/site-packages (from openai==1.99.9->emergentintegrations) (0.12.0)
+Requirement already satisfied: pydantic<3,>=1.9.0 in /root/.venv/lib/python3.11/site-packages (from openai==1.99.9->emergentintegrations) (2.12.5)
+Requirement already satisfied: sniffio in /root/.venv/lib/python3.11/site-packages (from openai==1.99.9->emergentintegrations) (1.3.1)
+Requirement already satisfied: tqdm>4 in /root/.venv/lib/python3.11/site-packages (from openai==1.99.9->emergentintegrations) (4.67.1)
+Requirement already satisfied: typing-extensions<5,>=4.11 in /root/.venv/lib/python3.11/site-packages (from openai==1.99.9->emergentintegrations) (4.15.0)
+Requirement already satisfied: idna>=2.8 in /root/.venv/lib/python3.11/site-packages (from anyio<5,>=3.5.0->openai==1.99.9->emergentintegrations) (3.11)
+Requirement already satisfied: certifi in /root/.venv/lib/python3.11/site-packages (from httpx<1,>=0.23.0->openai==1.99.9->emergentintegrations) (2026.1.4)
+Requirement already satisfied: httpcore==1.* in /root/.venv/lib/python3.11/site-packages (from httpx<1,>=0.23.0->openai==1.99.9->emergentintegrations) (1.0.9)
+Requirement already satisfied: h11>=0.16 in /root/.venv/lib/python3.11/site-packages (from httpcore==1.*->httpx<1,>=0.23.0->openai==1.99.9->emergentintegrations) (0.16.0)
+Requirement already satisfied: annotated-types>=0.6.0 in /root/.venv/lib/python3.11/site-packages (from pydantic<3,>=1.9.0->openai==1.99.9->emergentintegrations) (0.7.0)
+Requirement already satisfied: pydantic-core==2.41.5 in /root/.venv/lib/python3.11/site-packages (from pydantic<3,>=1.9.0->openai==1.99.9->emergentintegrations) (2.41.5)
+Requirement already satisfied: typing-inspection>=0.4.2 in /root/.venv/lib/python3.11/site-packages (from pydantic<3,>=1.9.0->openai==1.99.9->emergentintegrations) (0.4.2)
+Requirement already satisfied: aiohappyeyeballs>=2.5.0 in /root/.venv/lib/python3.11/site-packages (from aiohttp>=3.8.0->emergentintegrations) (2.6.1)
+Requirement already satisfied: aiosignal>=1.4.0 in /root/.venv/lib/python3.11/site-packages (from aiohttp>=3.8.0->emergentintegrations) (1.4.0)
+Requirement already satisfied: attrs>=17.3.0 in /root/.venv/lib/python3.11/site-packages (from aiohttp>=3.8.0->emergentintegrations) (25.4.0)
+Requirement already satisfied: frozenlist>=1.1.1 in /root/.venv/lib/python3.11/site-packages (from aiohttp>=3.8.0->emergentintegrations) (1.8.0)
+Requirement already satisfied: multidict<7.0,>=4.5 in /root/.venv/lib/python3.11/site-packages (from aiohttp>=3.8.0->emergentintegrations) (6.7.0)
+Requirement already satisfied: propcache>=0.2.0 in /root/.venv/lib/python3.11/site-packages (from aiohttp>=3.8.0->emergentintegrations) (0.4.1)
+Requirement already satisfied: yarl<2.0,>=1.17.0 in /root/.venv/lib/python3.11/site-packages (from aiohttp>=3.8.0->emergentintegrations) (1.22.0)
+Requirement already satisfied: starlette<1.0.0,>=0.40.0 in /root/.venv/lib/python3.11/site-packages (from fastapi>=0.100.0->emergentintegrations) (0.52.1)
+Requirement already satisfied: annotated-doc>=0.0.2 in /root/.venv/lib/python3.11/site-packages (from fastapi>=0.100.0->emergentintegrations) (0.0.4)
+Requirement already satisfied: google-ai-generativelanguage==0.6.15 in /root/.venv/lib/python3.11/site-packages (from google-generativeai>=0.3.0->emergentintegrations) (0.6.15)
+Requirement already satisfied: google-api-core in /root/.venv/lib/python3.11/site-packages (from google-generativeai>=0.3.0->emergentintegrations) (2.29.0)
+Requirement already satisfied: google-api-python-client in /root/.venv/lib/python3.11/site-packages (from google-generativeai>=0.3.0->emergentintegrations) (2.187.0)
+Requirement already satisfied: google-auth>=2.15.0 in /root/.venv/lib/python3.11/site-packages (from google-generativeai>=0.3.0->emergentintegrations) (2.47.0)
+Requirement already satisfied: protobuf in /root/.venv/lib/python3.11/site-packages (from google-generativeai>=0.3.0->emergentintegrations) (5.29.6)
+Requirement already satisfied: proto-plus<2.0.0dev,>=1.22.3 in /root/.venv/lib/python3.11/site-packages (from google-ai-generativelanguage==0.6.15->google-generativeai>=0.3.0->emergentintegrations) (1.27.0)
+Requirement already satisfied: googleapis-common-protos<2.0.0,>=1.56.2 in /root/.venv/lib/python3.11/site-packages (from google-api-core->google-generativeai>=0.3.0->emergentintegrations) (1.72.0)
+Requirement already satisfied: grpcio<2.0.0,>=1.33.2 in /root/.venv/lib/python3.11/site-packages (from google-api-core[grpc]!=2.0.*,!=2.1.*,!=2.10.*,!=2.2.*,!=2.3.*,!=2.4.*,!=2.5.*,!=2.6.*,!=2.7.*,!=2.8.*,!=2.9.*,<3.0.0dev,>=1.34.1->google-ai-generativelanguage==0.6.15->google-generativeai>=0.3.0->emergentintegrations) (1.76.0)
+Requirement already satisfied: grpcio-status<2.0.0,>=1.33.2 in /root/.venv/lib/python3.11/site-packages (from google-api-core[grpc]!=2.0.*,!=2.1.*,!=2.10.*,!=2.2.*,!=2.3.*,!=2.4.*,!=2.5.*,!=2.6.*,!=2.7.*,!=2.8.*,!=2.9.*,<3.0.0dev,>=1.34.1->google-ai-generativelanguage==0.6.15->google-generativeai>=0.3.0->emergentintegrations) (1.71.2)
+Requirement already satisfied: pyasn1-modules>=0.2.1 in /root/.venv/lib/python3.11/site-packages (from google-auth>=2.15.0->google-generativeai>=0.3.0->emergentintegrations) (0.4.2)
+Requirement already satisfied: rsa<5,>=3.1.4 in /root/.venv/lib/python3.11/site-packages (from google-auth>=2.15.0->google-generativeai>=0.3.0->emergentintegrations) (4.9.1)
+Requirement already satisfied: charset_normalizer<4,>=2 in /root/.venv/lib/python3.11/site-packages (from requests>=2.25.0->emergentintegrations) (3.4.4)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /root/.venv/lib/python3.11/site-packages (from requests>=2.25.0->emergentintegrations) (2.6.3)
+Requirement already satisfied: pyasn1>=0.1.3 in /root/.venv/lib/python3.11/site-packages (from rsa<5,>=3.1.4->google-auth>=2.15.0->google-generativeai>=0.3.0->emergentintegrations) (0.6.2)
+Requirement already satisfied: click in /root/.venv/lib/python3.11/site-packages (from litellm>=1.0.0->emergentintegrations) (8.3.1)
+Requirement already satisfied: fastuuid>=0.13.0 in /root/.venv/lib/python3.11/site-packages (from litellm>=1.0.0->emergentintegrations) (0.14.0)
+Requirement already satisfied: importlib-metadata>=6.8.0 in /root/.venv/lib/python3.11/site-packages (from litellm>=1.0.0->emergentintegrations) (8.7.1)
+Requirement already satisfied: jinja2<4.0.0,>=3.1.2 in /root/.venv/lib/python3.11/site-packages (from litellm>=1.0.0->emergentintegrations) (3.1.6)
+Requirement already satisfied: jsonschema<5.0.0,>=4.22.0 in /root/.venv/lib/python3.11/site-packages (from litellm>=1.0.0->emergentintegrations) (4.26.0)
+Requirement already satisfied: python-dotenv>=0.2.0 in /root/.venv/lib/python3.11/site-packages (from litellm>=1.0.0->emergentintegrations) (1.2.1)
+Requirement already satisfied: tiktoken>=0.7.0 in /root/.venv/lib/python3.11/site-packages (from litellm>=1.0.0->emergentintegrations) (0.12.0)
+Requirement already satisfied: tokenizers in /root/.venv/lib/python3.11/site-packages (from litellm>=1.0.0->emergentintegrations) (0.22.2)
+Requirement already satisfied: MarkupSafe>=2.0 in /root/.venv/lib/python3.11/site-packages (from jinja2<4.0.0,>=3.1.2->litellm>=1.0.0->emergentintegrations) (3.0.3)
+Requirement already satisfied: jsonschema-specifications>=2023.03.6 in /root/.venv/lib/python3.11/site-packages (from jsonschema<5.0.0,>=4.22.0->litellm>=1.0.0->emergentintegrations) (2025.9.1)
+Requirement already satisfied: referencing>=0.28.4 in /root/.venv/lib/python3.11/site-packages (from jsonschema<5.0.0,>=4.22.0->litellm>=1.0.0->emergentintegrations) (0.37.0)
+Requirement already satisfied: rpds-py>=0.25.0 in /root/.venv/lib/python3.11/site-packages (from jsonschema<5.0.0,>=4.22.0->litellm>=1.0.0->emergentintegrations) (0.30.0)
+Requirement already satisfied: zipp>=3.20 in /root/.venv/lib/python3.11/site-packages (from importlib-metadata>=6.8.0->litellm>=1.0.0->emergentintegrations) (3.23.0)
+Requirement already satisfied: regex>=2022.1.18 in /root/.venv/lib/python3.11/site-packages (from tiktoken>=0.7.0->litellm>=1.0.0->emergentintegrations) (2025.11.3)
+Requirement already satisfied: httplib2<1.0.0,>=0.19.0 in /root/.venv/lib/python3.11/site-packages (from google-api-python-client->google-generativeai>=0.3.0->emergentintegrations) (0.31.0)
+Requirement already satisfied: google-auth-httplib2<1.0.0,>=0.2.0 in /root/.venv/lib/python3.11/site-packages (from google-api-python-client->google-generativeai>=0.3.0->emergentintegrations) (0.3.0)
+Requirement already satisfied: uritemplate<5,>=3.0.1 in /root/.venv/lib/python3.11/site-packages (from google-api-python-client->google-generativeai>=0.3.0->emergentintegrations) (4.2.0)
+Requirement already satisfied: pyparsing<4,>=3.0.4 in /root/.venv/lib/python3.11/site-packages (from httplib2<1.0.0,>=0.19.0->google-api-python-client->google-generativeai>=0.3.0->emergentintegrations) (3.3.1)
+Requirement already satisfied: tenacity<9.2.0,>=8.2.3 in /root/.venv/lib/python3.11/site-packages (from google-genai->emergentintegrations) (9.1.2)
+Requirement already satisfied: websockets<15.1.0,>=13.0.0 in /root/.venv/lib/python3.11/site-packages (from google-genai->emergentintegrations) (15.0.1)
+Requirement already satisfied: huggingface-hub<2.0,>=0.16.4 in /root/.venv/lib/python3.11/site-packages (from tokenizers->litellm>=1.0.0->emergentintegrations) (1.2.4)
+Requirement already satisfied: filelock in /root/.venv/lib/python3.11/site-packages (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.0.0->emergentintegrations) (3.21.0)
+Requirement already satisfied: fsspec>=2023.5.0 in /root/.venv/lib/python3.11/site-packages (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.0.0->emergentintegrations) (2025.12.0)
+Requirement already satisfied: hf-xet<2.0.0,>=1.2.0 in /root/.venv/lib/python3.11/site-packages (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.0.0->emergentintegrations) (1.2.0)
+Requirement already satisfied: packaging>=20.9 in /root/.venv/lib/python3.11/site-packages (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.0.0->emergentintegrations) (25.0)
+Requirement already satisfied: pyyaml>=5.1 in /root/.venv/lib/python3.11/site-packages (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.0.0->emergentintegrations) (6.0.3)
+Requirement already satisfied: shellingham in /root/.venv/lib/python3.11/site-packages (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.0.0->emergentintegrations) (1.5.4)
+Requirement already satisfied: typer-slim in /root/.venv/lib/python3.11/site-packages (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.0.0->emergentintegrations) (0.21.1).
+        2.  Modificar o  para usar este comando. Em vez de , deve dividir em dois passos ou adicionar o  ao comando existente. A melhor abordagem é alterar a linha  no  para incluir o URL do índice.
+    -   **Why fix this issue and what will be achieved with the fix?**: Para permitir que o código mais recente seja compilado e implementado com sucesso no ambiente de produção (Render), desbloqueando todas as novas funcionalidades para o utilizador.
     -   **Status**: IN PROGRESS
     -   **Is recurring issue?**: N
-    -   **Should Test frontend/backend/both after fix?**: both
+    -   **Should Test frontend/backend/both after fix?**: N/A (A correção é no processo de build).
 
 **In progress Task List**:
--   **Task 1**: Implementar todos os pontos pendentes do  (último lote P2).
-    -   **Where to resume**: Corrigir o erro de linting em  e depois invocar o agente de testes.
-    -   **What will be achieved with this?**: A conclusão de todo o backlog de funcionalidades solicitado pelo utilizador.
-    -   **Status**: IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?**: both
+-   Nenhum.
 
 **Upcoming and Future Tasks**
-*   **Sugestões Aprovadas (P1):**
-    *   Configurar alertas de email no Sentry para erros críticos.
-    *   Criar um relatório semanal automático enviado por email aos gestores (resumo de processos atrasados, performance, etc.), utilizando a base do .
-*   **Future Tasks (P2):**
-    *   Construir um dashboard de performance por consultor (tempo de resposta, taxa de conversão, NPS).
+*   **Future Tasks (P2)**:
+    *   Adicionar drag & drop na página de gestão do formulário para reordenar campos (sugestão do agente, ainda sem confirmação do utilizador).
+*   **Rejeitados pelo Utilizador**:
+    *   Alertas de email no Sentry.
+    *   Relatório semanal automático.
+    *   Dashboard de performance por consultor.
 
 **Completed work in this session**
--   **Implementação em Lote (P0/P1)**: Implementadas e testadas dezenas de correções e melhorias, incluindo Undo com Toast, vistas mobile, skeletons, filtros de Kanban, e mais.
--   **Notificações de Processos Parados**: Criada uma tarefa agendada e um endpoint para detetar e notificar sobre processos sem atividade.
--   **Integração de Sentry (O2)**: Sentry SDK configurado no frontend e backend para monitorização de erros em tempo real.
--   **Integração de Redis (O13)**: Cache com Redis (Upstash) adicionada aos endpoints de estatísticas mais pesados, com degradação graciosa.
--   **Finalização do Backlog P2 (parcial)**:
-    -   **O3 (Rate Limit):** Adicionado aos endpoints de upload e análise de documentos.
-    -   **O10 (Cursor Pagination):** Implementado no endpoint de listagem de clientes.
-    -   **O24 (Audit Trail Unificado):** Criado o componente  e integrado na página de detalhes do processo.
+-   **Bug Fix**: Resolvido o erro  no  ao garantir a inicialização correta dos arrays de estado.
+-   **Melhorias de Formulário**: Implementado o campo Trabalha no estrangeiro?, o componente  para campos obrigatórios, e a opção Nenhuma nos seletores de bancos.
+-   **Feature**: Criada a página de **Gestão de Perfis e Permissões** () para admin/CEO.
+-   **Feature**: Criada a página de **Gestão do Formulário** ().
+-   **Feature**: Implementada a funcionalidade completa de **Campos Personalizados** no formulário.
+-   **Feature**: Implementada a funcionalidade de **Templates de Formulário**.
+-   **Feature**: Implementada a funcionalidade de **Pré-visualização de Templates**.
+-   **Bug Fix (Produção)**: Silenciada a mensagem de erro na consola quando o endpoint  devolve um 404 em ambientes de produção mais antigos.
+-   **Documentação**: Atualizados os ficheiros  e  para refletir todas as novas funcionalidades.
 
 **Earlier issues found/mentioned but not fixed**
--   Nenhum. Todos os problemas relatados foram investigados e resolvidos ou considerados inválidos (como o bug E1.4).
+-   Nenhum.
 
 **Known issue recurrence from previous fork**
--   A ferramenta de screenshot () foi reportada como avariada no handoff inicial. O agente atual evitou corretamente o seu uso, utilizando o agente de testes para validação.
+-   Nenhum.
 
 **Code Architecture**
-
+permissionstrabalha_estrangeirocustom_fieldscustom_fieldsupdate_userpermissions
 
 **Key Technical Concepts**
--   **Observability**: Integração com Sentry para monitorização de erros.
--   **Caching**: Utilização de Redis (Upstash) para cache de dados com degradação graciosa.
--   **Real-time & Fallback**: WebSockets para notificações em tempo real com um fallback para polling HTTP.
--   **Accessibility (a11y)**: Testes automatizados com  no ambiente de desenvolvimento.
--   **Automation**: Implementação de um motor de regras No-Code (trigger/action).
--   **API Design**: Implementação de Cursor Pagination para listagens de grande volume.
--   **Security**: Aplicação de Rate Limiting a endpoints sensíveis/caros.
+-   **Deployment & CI/CD**: Debugging de erros de build em Docker e gestão de dependências privadas (PyPI com ).
+-   **Dynamic Forms**: A UI do formulário público é agora controlada por uma configuração no backend, incluindo campos standard, campos personalizados e a sua visibilidade/obrigatoriedade.
+-   **Feature Templating**: Sistema para guardar e carregar configurações de formulário como templates.
+-   **Granular Permissions**: O modelo de utilizador foi estendido para além do  para incluir um dicionário de  para controlo de acesso mais fino.
 
 **key DB schema**
--   **automations**:  (Esquema conceptual para o novo motor de workflow)
+-   **users**:  foi adicionado.
+-   **clients**:  foi adicionado para guardar os dados dos campos personalizados.
+-   **form_config**: Nova coleção para guardar a configuração do formulário, incluindo a lista de campos () e o template ativo ().
+-   **form_templates**: Nova coleção para guardar os templates de formulário .
 
 **changes in tech stack**
--   Adicionado **Sentry** para monitorização de erros.
--   Adicionado **Upstash Redis** para caching.
--   Adicionada a dependência  no frontend para testes de acessibilidade.
+-   Nenhuma nova tecnologia, mas foi identificada a criticidade da dependência privada .
 
 **All files of reference**
--   : **Novo**, contém a lógica para o motor de automação.
--   : **Novo**, expõe a API para gerir as regras de automação.
--   : **Novo**, página de UI para o construtor de automações.
--   : Modificado para incluir o fallback de polling.
--   : Modificado para suportar cursor pagination.
--   : Modificado para incluir rate limiting.
--   : **Novo**, serviço para interagir com o cache Redis.
--   : Modificado para utilizar o cache Redis.
--   : Modificado para inicializar Sentry e .
--   : **Novo**, para o filme da lead.
--   : Modificado para usar o .
--   , : Atualizados com as credenciais do Sentry e Redis.
+-   : Ficheiro a ser modificado para corrigir o build.
+-   : Contém toda a lógica de backend para a gestão de formulários.
+-   : UI principal para gestão de formulários.
+-   : Consome a configuração dinâmica e renderiza o formulário.
+-   : UI para gestão de permissões.
+-   : Modelo Pydantic do utilizador, modificado para incluir permissões.
+-   : Endpoint de atualização de utilizador.
 
 **Critical Info for New Agent**
--   A sua primeira tarefa é finalizar a implementação dos itens P2. Comece por corrigir o erro de linting em  e, de seguida, execute o  para validar todas as novas funcionalidades.
--   A conexão com o Redis falhará no ambiente de preview devido a restrições de DNS. Isto é esperado e a aplicação deve continuar a funcionar normalmente, sem cache. Verifique se a degradação graciosa funciona.
--   Os relatórios de acessibilidade do  aparecerão na consola do browser no ambiente de desenvolvimento.
--   As credenciais para Sentry e Redis foram fornecidas pelo utilizador e já se encontram nos ficheiros .
+-   A sua única e principal tarefa é corrigir o erro de build da produção.
+-   O erro é que a dependência  não pode ser encontrada no PyPI público.
+-   A solução está no system prompt: tem de modificar o comando  no  para incluir o URL do índice privado: .
+-   Depois de corrigir o , o build deverá passar. Não há outras tarefas de desenvolvimento pendentes.
 
 **documents and test reports created in this job**
 -   
 -   
 -   
 -   
--    (atualizado múltiplas vezes)
+-   
+-    (atualizado)
+-    (atualizado)
+-    (atualizado)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **faz os items pendentes**: O utilizador pediu para continuar e implementar os itens restantes do backlog P2. (EM PROGRESSO)
-2.  **User provided Sentry/Redis keys**: O utilizador forneceu as credenciais para as novas integrações. (CONCLUÍDO)
-3.  **termina o planeado**: O utilizador pediu para terminar as tarefas planeadas (implementação do backlog P2). (EM PROGRESSO)
-4.  **aceito a sugestao. Termina o que tens para fazer**: O utilizador aceitou a sugestão de notificação para processos parados e pediu para continuar. (CONCLUÍDO)
-5.  **CONCORDO**: O utilizador aprovou o plano inicial do agente. (CONCLUÍDO)
-6.  **confirmo**: O utilizador confirmou o plano do agente para implementar os itens P2. (CONCLUÍDO)
-7.  **continua**: O utilizador pediu para o agente continuar a sua exploração de ficheiros. (CONCLUÍDO)
+1.  **actualiza a documentacao**: Pedido para atualizar a documentação. (CONCLUÍDO)
+2.  **aceito a sugestao**: Aceitou a sugestão para implementar a pré-visualização de templates. (CONCLUÍDO)
+3.  **o p1 e o p2 nao preciso**: Rejeitou as sugestões anteriores de P1/P2. (CONCLUÍDO)
+4.  **aceito a sugestão**: Aceitou a sugestão para implementar templates de formulário. (CONCLUÍDO)
+5.  **1.a**: Escolheu a opção de implementação para os templates. (CONCLUÍDO)
+6.  **aceito a sugestão**: Aceitou a sugestão para implementar campos personalizados. (CONCLUÍDO)
+7.  **1.c, 2.a**: Escolheu opções de implementação para os campos personalizados. (CONCLUÍDO)
+8.  **continua**: Pedido para continuar a implementação das melhorias no formulário. (CONCLUÍDO)
+9.  **Erro consola: ...**: Reportou o bug inicial . (CONCLUÍDO)
+10. **index-DXLTl1kb.js:46 GET ... 404 (Not Found)**: Reportou um erro 404 em produção. (CONCLUÍDO)
+11. **Log de build com erro **: Forneceu o log de erro do build de produção. (PENDENTE)
 
 **Project Health Check:**
--   **Broken**: A ferramenta  está inoperacional e deve ser evitada.
--   **Mocked**: A integração com Redis está funcional, mas degradada no ambiente de preview devido a restrições de DNS, operando sem cache.
+-   **Broken**: O processo de build para produção está quebrado devido à dependência privada  não ser encontrada.
 
 **3rd Party Integrations**
 -   **AWS S3**: Armazenamento de ficheiros.
 -   **Trello**: Integração legada.
--   **Sentry**: Monitorização de erros (frontend e backend).
--   **Upstash Redis**: Cache de dados para o backend.
+-   **Sentry**: Monitorização de erros.
+-   **Upstash Redis**: Cache de dados.
+-   **emergentintegrations**: Biblioteca privada para integrações de LLM (causa do erro de build).
 
 **Testing status**
--   **Testing agent used after significant changes**: YES (usado extensivamente após cada fase de implementação, com sucesso).
+-   **Testing agent used after significant changes**: YES (usado com sucesso após cada uma das 5 fases de implementação de novas funcionalidades).
 -   **Troubleshoot agent used after agent stuck in loop**: NO.
--   **Test files created**: Nenhum.
--   **Known regressions**: Nenhuma identificada.
+-   **Test files created**: Nenhuns.
+-   **Known regressions**: Nenhuma.
 
 **Credentials to test flow:**
--   As credenciais de utilizador para os perfis  e  não foram partilhadas, o que limita os testes manuais de fluxos específicos de cada perfil. O agente de testes deve ser utilizado para cobrir estes cenários.
--   As chaves para **Sentry** e **Upstash Redis** foram fornecidas e estão nos ficheiros .
+-   As credenciais de utilizador ( / ) foram criadas pelo script  e estão disponíveis para testes.
 
 **What agent forgot to execute**
--   O agente estava no processo de finalizar a implementação dos últimos itens do backlog P2. Ele escreveu o código, mas não corrigiu um erro de linting final em  nem executou a bateria de testes de verificação final para este lote de funcionalidades antes do término da sessão.</analysis>
+-   O agente anterior não utilizou a informação do system prompt sobre como instalar dependências privadas () para resolver o problema de build, focando-se em analisar o código em vez do processo de build.</analysis>
