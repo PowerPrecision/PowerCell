@@ -105,9 +105,15 @@ export const EmptyState = ({ icon: Icon, message, action }) => (
 /**
  * LoadingState - Estado de loading para listas
  */
-export const LoadingState = () => (
-  <div className="flex items-center justify-center py-12">
-    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+export const LoadingState = ({ rows = 6, cols = 4 }) => (
+  <div className="space-y-2 py-4">
+    {Array.from({ length: rows }).map((_, i) => (
+      <div key={i} className="flex gap-3">
+        {Array.from({ length: cols }).map((_, j) => (
+          <div key={j} className={`h-8 bg-muted animate-pulse rounded ${j === 0 ? 'flex-[2]' : 'flex-1'}`} />
+        ))}
+      </div>
+    ))}
   </div>
 );
 

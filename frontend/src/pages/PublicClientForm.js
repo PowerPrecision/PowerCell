@@ -180,6 +180,23 @@ const BANCOS = [
   "CTT", "Millennium bcp", "Novo Banco", "Popular", "Santander Totta", "Outro"
 ];
 
+// E1.3 - Cores dos bancos (bg / text)
+const BANCO_COLORS = {
+  "BPI":              { bg: "#003E7E", text: "#fff" },
+  "CGD":              { bg: "#008552", text: "#fff" },
+  "Santander Totta":  { bg: "#EC0000", text: "#fff" },
+  "Millennium bcp":   { bg: "#C8102E", text: "#fff" },
+  "Novo Banco":       { bg: "#E30613", text: "#fff" },
+  "Crédito Agrícola": { bg: "#006633", text: "#fff" },
+  "CTT":              { bg: "#E2001A", text: "#fff" },
+  "BBVA":             { bg: "#004481", text: "#fff" },
+  "ABANCA":           { bg: "#00718F", text: "#fff" },
+  "BEST":             { bg: "#002D62", text: "#fff" },
+  "BIG":              { bg: "#1A1A2E", text: "#fff" },
+  "Popular":          { bg: "#DD0031", text: "#fff" },
+  "Outro":            { bg: "#6B7280", text: "#fff" },
+};
+
 // Campos obrigatórios para calcular progresso
 const REQUIRED_FIELDS = [
   "name", "email", "nif", "phone", "birth_date", "estado_civil",
@@ -1408,18 +1425,27 @@ const PublicClientForm = () => {
       <div className="space-y-6">
         <div className="space-y-3">
           <Label>Bancos onde tem créditos ativos *</Label>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {BANCOS.map((banco) => (
-              <div key={banco} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`banco-${banco}`}
-                  checked={formData.bancos_creditos.includes(banco)}
-                  onCheckedChange={() => toggleBanco(banco)}
+          <div className="flex flex-wrap gap-2">
+            {BANCOS.map((banco) => {
+              const selected = formData.bancos_creditos.includes(banco);
+              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+              return (
+                <button
+                  key={banco}
+                  type="button"
+                  onClick={() => toggleBanco(banco)}
                   data-testid={`banco-${banco.toLowerCase().replace(/\s+/g, '-')}`}
-                />
-                <Label htmlFor={`banco-${banco}`} className="text-sm cursor-pointer">{banco}</Label>
-              </div>
-            ))}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
+                  style={selected
+                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
+                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
+                  }
+                >
+                  {selected && <span className="mr-1">✓</span>}
+                  {banco}
+                </button>
+              );
+            })}
           </div>
           <FieldHint>Inclui crédito habitação, automóvel, pessoal, ou cartões de crédito com saldo em dívida.</FieldHint>
         </div>
@@ -1427,18 +1453,27 @@ const PublicClientForm = () => {
         {/* Pergunta sobre simulações de crédito */}
         <div className="space-y-3">
           <Label>Efetou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {BANCOS.map((banco) => (
-              <div key={`sim-${banco}`} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`banco-sim-${banco}`}
-                  checked={formData.bancos_simulacoes.includes(banco)}
-                  onCheckedChange={() => toggleBancoSimulacoes(banco)}
+          <div className="flex flex-wrap gap-2">
+            {BANCOS.map((banco) => {
+              const selected = formData.bancos_simulacoes.includes(banco);
+              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+              return (
+                <button
+                  key={`sim-${banco}`}
+                  type="button"
+                  onClick={() => toggleBancoSimulacoes(banco)}
                   data-testid={`banco-sim-${banco.toLowerCase().replace(/\s+/g, '-')}`}
-                />
-                <Label htmlFor={`banco-sim-${banco}`} className="text-sm cursor-pointer">{banco}</Label>
-              </div>
-            ))}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
+                  style={selected
+                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
+                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
+                  }
+                >
+                  {selected && <span className="mr-1">✓</span>}
+                  {banco}
+                </button>
+              );
+            })}
           </div>
           <FieldHint>Indique os bancos onde já efetuou simulações ou pedidos de crédito habitação.</FieldHint>
         </div>
