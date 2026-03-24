@@ -58,6 +58,7 @@ import {
   Activity,
   FileSignature,
   Zap,
+  Shield,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import MobileBottomNav from "../components/layout/MobileBottomNav";
@@ -245,6 +246,21 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/workflow-estados",
               },
               {
+                label: "Automacoes",
+                icon: Zap,
+                href: "/automation",
+              },
+              {
+                label: "Perfis e Permissoes",
+                icon: Shield,
+                href: "/configuracoes-perfis",
+              },
+              {
+                label: "Gestao do Formulario",
+                icon: FileSignature,
+                href: "/gestao-formulario",
+              },
+              {
                 label: "RGPD",
                 icon: FileSignature,
                 href: "/admin/rgpd",
@@ -387,6 +403,21 @@ const DashboardLayout = ({ children, title }) => {
                 icon: Settings,
                 href: "/workflow-estados",
               },
+              {
+                label: "Automacoes",
+                icon: Zap,
+                href: "/automation",
+              },
+              {
+                label: "Perfis e Permissoes",
+                icon: Shield,
+                href: "/configuracoes-perfis",
+              },
+              {
+                label: "Gestao do Formulario",
+                icon: FileSignature,
+                href: "/gestao-formulario",
+              },
             ],
           },
         ],
@@ -493,6 +524,16 @@ const DashboardLayout = ({ children, title }) => {
           label: "Automacoes",
           icon: Zap,
           href: "/automation",
+        });
+        configItems.push({
+          label: "Perfis e Permissoes",
+          icon: Shield,
+          href: "/configuracoes-perfis",
+        });
+        configItems.push({
+          label: "Gestao do Formulario",
+          icon: FileSignature,
+          href: "/gestao-formulario",
         });
       }
       

@@ -634,77 +634,62 @@ const ClientRegistrationsPage = () => {
                   Dados Pessoais
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {detailsDialog.client.dados_pessoais?.data_nascimento && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Data de Nascimento</p>
-                        <p className="text-sm">{formatDateOnly(detailsDialog.client.dados_pessoais.data_nascimento)}</p>
-                      </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Data de Nascimento</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.data_nascimento ? formatDateOnly(detailsDialog.client.dados_pessoais.data_nascimento) : <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_pessoais?.naturalidade && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Naturalidade</p>
-                        <p className="text-sm">{detailsDialog.client.dados_pessoais.naturalidade}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Naturalidade</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.naturalidade || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_pessoais?.nacionalidade && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Nacionalidade</p>
-                        <p className="text-sm">{detailsDialog.client.dados_pessoais.nacionalidade}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Nacionalidade</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.nacionalidade || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_pessoais?.estado_civil && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <Heart className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Estado Civil</p>
-                        <p className="text-sm">{detailsDialog.client.dados_pessoais.estado_civil}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <Heart className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Estado Civil</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.estado_civil || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_pessoais?.profissao && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <Briefcase className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Profissão</p>
-                        <p className="text-sm">{detailsDialog.client.dados_pessoais.profissao}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <Briefcase className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Profissão</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.profissao || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_pessoais?.documento_id && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Documento ID</p>
-                        <p className="text-sm">{detailsDialog.client.dados_pessoais.documento_id}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Documento ID</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.documento_id || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_pessoais?.morada_fiscal && (
-                    <div className="flex items-start gap-2 p-2 bg-muted/50 rounded-lg col-span-2">
-                      <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Morada Fiscal</p>
-                        <p className="text-sm">{detailsDialog.client.dados_pessoais.morada_fiscal}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <Hash className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">NIF</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.nif || detailsDialog.client.nif || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {!detailsDialog.client.dados_pessoais?.data_nascimento &&
-                   !detailsDialog.client.dados_pessoais?.naturalidade &&
-                   !detailsDialog.client.dados_pessoais?.nacionalidade &&
-                   !detailsDialog.client.dados_pessoais?.estado_civil &&
-                   !detailsDialog.client.dados_pessoais?.profissao &&
-                   !detailsDialog.client.dados_pessoais?.morada_fiscal && (
-                    <p className="text-sm text-muted-foreground col-span-2">Sem dados pessoais registados</p>
-                  )}
+                  </div>
+                  <div className="flex items-start gap-2 p-2 bg-muted/50 rounded-lg">
+                    <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Morada Fiscal</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.morada_fiscal || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -715,84 +700,121 @@ const ClientRegistrationsPage = () => {
                   Dados Financeiros
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {detailsDialog.client.dados_financeiros?.rendimento_mensal && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <DollarSign className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Rendimento Mensal</p>
-                        <p className="text-sm font-medium">
-                          {new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.rendimento_mensal)}
-                        </p>
-                      </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <DollarSign className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Rendimento Mensal</p>
+                      <p className="text-sm font-medium">
+                        {detailsDialog.client.dados_financeiros?.rendimento_mensal
+                          ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.rendimento_mensal)
+                          : <span className="text-muted-foreground italic">Não preenchido</span>}
+                      </p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_financeiros?.rendimento_anual && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <DollarSign className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Rendimento Anual</p>
-                        <p className="text-sm font-medium">
-                          {new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.rendimento_anual)}
-                        </p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <DollarSign className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Rendimento Anual</p>
+                      <p className="text-sm font-medium">
+                        {detailsDialog.client.dados_financeiros?.rendimento_anual
+                          ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.rendimento_anual)
+                          : <span className="text-muted-foreground italic">Não preenchido</span>}
+                      </p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_financeiros?.tipo_contrato && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Tipo de Contrato</p>
-                        <p className="text-sm">{detailsDialog.client.dados_financeiros.tipo_contrato}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Tipo de Contrato</p>
+                      <p className="text-sm">{detailsDialog.client.dados_financeiros?.tipo_contrato || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_financeiros?.empresa && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <Building className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Empresa</p>
-                        <p className="text-sm">{detailsDialog.client.dados_financeiros.empresa}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <Building className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Empresa</p>
+                      <p className="text-sm">{detailsDialog.client.dados_financeiros?.empresa || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_financeiros?.antiguidade_emprego && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <Clock className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Antiguidade no Emprego</p>
-                        <p className="text-sm">{detailsDialog.client.dados_financeiros.antiguidade_emprego}</p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Antiguidade no Emprego</p>
+                      <p className="text-sm">{detailsDialog.client.dados_financeiros?.antiguidade_emprego || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {detailsDialog.client.dados_financeiros?.tem_creditos_activos !== undefined && (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                      <CreditCard className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Créditos Activos</p>
-                        <p className="text-sm">
-                          {detailsDialog.client.dados_financeiros.tem_creditos_activos ? (
-                            <span className="text-orange-600">
-                              Sim - {detailsDialog.client.dados_financeiros.valor_creditos_activos
-                                ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.valor_creditos_activos)
-                                : 'Valor não especificado'}
-                            </span>
-                          ) : (
-                            <span className="text-green-600">Não</span>
-                          )}
-                        </p>
-                      </div>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Trabalha no Estrangeiro</p>
+                      <p className="text-sm">{detailsDialog.client.dados_financeiros?.trabalha_estrangeiro === "sim" ? "Sim" : detailsDialog.client.dados_financeiros?.trabalha_estrangeiro === "nao" ? "Não" : <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
-                  )}
-                  {!detailsDialog.client.dados_financeiros?.rendimento_mensal &&
-                   !detailsDialog.client.dados_financeiros?.tipo_contrato &&
-                   !detailsDialog.client.dados_financeiros?.empresa && (
-                    <p className="text-sm text-muted-foreground col-span-2">Sem dados financeiros registados</p>
-                  )}
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg col-span-2">
+                    <CreditCard className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Créditos Activos</p>
+                      <p className="text-sm">
+                        {detailsDialog.client.dados_financeiros?.tem_creditos_activos !== undefined
+                          ? detailsDialog.client.dados_financeiros.tem_creditos_activos
+                            ? <span className="text-orange-600">Sim - {detailsDialog.client.dados_financeiros.valor_creditos_activos ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.valor_creditos_activos) : 'Valor não especificado'}</span>
+                            : <span className="text-green-600">Não</span>
+                          : <span className="text-muted-foreground italic">Não preenchido</span>}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {/* Metadados */}
               <div className="pt-4 border-t">
+
+                {/* Dados Imobiliários */}
+                {detailsDialog.client.dados_imobiliarios && Object.keys(detailsDialog.client.dados_imobiliarios).length > 0 && (
+                  <div className="mb-6">
+                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                      <Building className="h-4 w-4" />
+                      Dados do Imóvel / Projeto
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {Object.entries(detailsDialog.client.dados_imobiliarios).map(([key, value]) => (
+                        value !== null && value !== undefined && value !== "" && (
+                          <div key={key} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                            <FileText className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <p className="text-xs text-muted-foreground capitalize">{key.replace(/_/g, " ")}</p>
+                              <p className="text-sm">{typeof value === "boolean" ? (value ? "Sim" : "Não") : Array.isArray(value) ? value.join(", ") : String(value)}</p>
+                            </div>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2º Titular */}
+                {detailsDialog.client.titular2_data && (
+                  <div className="mb-6">
+                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      2.º Titular
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {Object.entries(detailsDialog.client.titular2_data).map(([key, value]) => (
+                        value !== null && value !== undefined && value !== "" && (
+                          <div key={key} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                            <User className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <p className="text-xs text-muted-foreground capitalize">{key.replace(/_/g, " ")}</p>
+                              <p className="text-sm">{String(value)}</p>
+                            </div>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-4 text-sm text-muted-foreground">
                   <div className="flex items-center gap-2">
                     <Calendar className="h-4 w-4" />
