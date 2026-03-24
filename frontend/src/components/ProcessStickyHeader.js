@@ -246,16 +246,22 @@ const ProcessStickyHeader = ({
                 )}
 
                 {/* Consultor/Mediador */}
-                {process?.assigned_consultor_name && (
+                {/* Consultores (suporte a múltiplos) */}
+                {(process?.consultor_names?.length > 0 || process?.assigned_consultor_name) && (
                   <div className="flex items-center gap-1">
-                    <span className="text-gray-500">Consultor:</span>
-                    <span className="font-medium">{process.assigned_consultor_name}</span>
+                    <span className="text-gray-500">Consultores:</span>
+                    <span className="font-medium">
+                      {process.consultor_names?.join(", ") || process.assigned_consultor_name}
+                    </span>
                   </div>
                 )}
-                {process?.assigned_mediador_name && (
+                {/* Mediadores (suporte a múltiplos) */}
+                {(process?.mediador_names?.length > 0 || process?.assigned_mediador_name) && (
                   <div className="flex items-center gap-1">
-                    <span className="text-gray-500">Mediador:</span>
-                    <span className="font-medium">{process.assigned_mediador_name}</span>
+                    <span className="text-gray-500">Intermediários:</span>
+                    <span className="font-medium">
+                      {process.mediador_names?.join(", ") || process.assigned_mediador_name}
+                    </span>
                   </div>
                 )}
                 {process?.indexacao_name && (

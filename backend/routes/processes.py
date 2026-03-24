@@ -393,9 +393,17 @@ async def get_processes(user: dict = Depends(get_current_user)):
         # Admin, CEO, Administrativo e Diretor vêem todos os processos
         pass
     elif role == UserRole.CONSULTOR:
-        query["assigned_consultor_id"] = user["id"]
+        # Suporte a múltiplos consultores: verificar no array ou campo único
+        query["$or"] = [
+            {"assigned_consultor_ids": user["id"]},
+            {"assigned_consultor_id": user["id"]}
+        ]
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
-        query["assigned_mediador_id"] = user["id"]
+        # Suporte a múltiplos intermediários: verificar no array ou campo único
+        query["$or"] = [
+            {"assigned_mediador_ids": user["id"]},
+            {"assigned_mediador_id": user["id"]}
+        ]
     
     processes = await db.processes.find(query, {"_id": 0}).sort("client_name", 1).to_list(1000)
     # Desencriptar dados sensíveis
@@ -439,9 +447,17 @@ async def get_processes_paginated(
         # Admin, CEO, Administrativo e Diretor vêem todos os processos
         pass
     elif role == UserRole.CONSULTOR:
-        query["assigned_consultor_id"] = user["id"]
+        # Suporte a múltiplos consultores
+        query["$or"] = [
+            {"assigned_consultor_ids": user["id"]},
+            {"assigned_consultor_id": user["id"]}
+        ]
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
-        query["assigned_mediador_id"] = user["id"]
+        # Suporte a múltiplos intermediários
+        query["$or"] = [
+            {"assigned_mediador_ids": user["id"]},
+            {"assigned_mediador_id": user["id"]}
+        ]
     
     # Adicionar filtros opcionais
     if status:
@@ -500,54 +516,79 @@ async def get_kanban_board(
     Get processes organized by status for Kanban board.
     Admin/CEO see all, others see only their assigned processes.
     Supports filtering by consultor_id and mediador_id.
+    Supports multiple consultants and intermediaries per process.
     """
     role = user["role"]
     user_id = user["id"]
     query = {}
     
-    # Filter by role (base visibility)
+    # Filter by role (base visibility) - suporte a múltiplos
     if role == UserRole.CONSULTOR:
-        query["assigned_consultor_id"] = user["id"]
+        query["$or"] = [
+            {"assigned_consultor_ids": user_id},
+            {"assigned_consultor_id": user_id}
+        ]
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
-        query["assigned_mediador_id"] = user["id"]
+        query["$or"] = [
+            {"assigned_mediador_ids": user_id},
+            {"assigned_mediador_id": user_id}
+        ]
     # Admin, CEO, Administrativo e Diretor see all (no base filter)
     
     # Apply additional filters (only for roles that can see all)
     if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         if consultor_id:
             if consultor_id == "none":
-                # Sem consultor atribuído = null, undefined, ou string vazia
-                query["$or"] = [
-                    {"assigned_consultor_id": None},
-                    {"assigned_consultor_id": ""},
-                    {"assigned_consultor_id": {"$exists": False}}
-                ]
+                # Sem consultor atribuído
+                query["$and"] = query.get("$and", [])
+                query["$and"].append({
+                    "$or": [
+                        {"assigned_consultor_ids": {"$in": [None, [], ""]}},
+                        {"assigned_consultor_ids": {"$exists": False}},
+                        {"assigned_consultor_id": None},
+                        {"assigned_consultor_id": ""},
+                        {"assigned_consultor_id": {"$exists": False}}
+                    ]
+                })
             else:
-                query["assigned_consultor_id"] = consultor_id
+                # Filtro por consultor específico - verificar no array ou campo único
+                query["$or"] = [
+                    {"assigned_consultor_ids": consultor_id},
+                    {"assigned_consultor_id": consultor_id}
+                ]
         
         if mediador_id:
             if mediador_id == "none":
                 # Sem mediador atribuído
-                if "assigned_consultor_id" in query:
-                    # Se já há filtro de consultor, usar $and
+                if "$and" not in query:
+                    query["$and"] = []
+                query["$and"].append({
+                    "$or": [
+                        {"assigned_mediador_ids": {"$in": [None, [], ""]}},
+                        {"assigned_mediador_ids": {"$exists": False}},
+                        {"assigned_mediador_id": None},
+                        {"assigned_mediador_id": ""},
+                        {"assigned_mediador_id": {"$exists": False}}
+                    ]
+                })
+            else:
+                # Filtro por mediador específico - verificar no array ou campo único
+                if "$or" in query and "assigned_consultor" in str(query["$or"]):
+                    # Já tem filtro de consultor, combinar com AND
                     query = {
                         "$and": [
                             query,
                             {"$or": [
-                                {"assigned_mediador_id": None},
-                                {"assigned_mediador_id": ""},
-                                {"assigned_mediador_id": {"$exists": False}}
+                                {"assigned_mediador_ids": mediador_id},
+                                {"assigned_mediador_id": mediador_id}
                             ]}
                         ]
                     }
                 else:
                     query["$or"] = [
-                        {"assigned_mediador_id": None},
-                        {"assigned_mediador_id": ""},
-                        {"assigned_mediador_id": {"$exists": False}}
+                        {"assigned_mediador_ids": mediador_id},
+                        {"assigned_mediador_id": mediador_id}
                     ]
-            else:
-                query["assigned_mediador_id"] = mediador_id
     
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
@@ -617,9 +658,11 @@ async def get_my_clients(user: dict = Depends(require_roles([
     - Ações pendentes (tarefas, documentos a atualizar)
     
     Permissões:
-    - Consultor: Apenas os seus clientes (assigned_consultor_id)
-    - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_id ou criados por eles)
+    - Consultor: Apenas os seus clientes (assigned_consultor_ids ou assigned_consultor_id)
+    - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_ids ou criados por eles)
     - Admin/CEO: Todos os clientes (para supervisão)
+    
+    Suporta múltiplos consultores e intermediários por processo.
     """
     user_id = user["id"]
     user_email = user.get("email", "")
@@ -627,11 +670,18 @@ async def get_my_clients(user: dict = Depends(require_roles([
     
     # Construir query baseada no papel do utilizador
     if role == UserRole.CONSULTOR:
-        query = {"assigned_consultor_id": user_id}
+        # Suporte a múltiplos consultores
+        query = {
+            "$or": [
+                {"assigned_consultor_ids": user_id},
+                {"assigned_consultor_id": user_id}
+            ]
+        }
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
         # Intermediários vêem processos atribuídos a eles OU criados por eles
         query = {
             "$or": [
+                {"assigned_mediador_ids": user_id},
                 {"assigned_mediador_id": user_id},
                 {"created_by": user_email}
             ]
@@ -1056,13 +1106,22 @@ async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depe
 @router.post("/{process_id}/assign")
 async def assign_process(
     process_id: str, 
+    consultor_ids: Optional[str] = None,  # String separada por vírgulas ou ID único
+    mediador_ids: Optional[str] = None,   # String separada por vírgulas ou ID único
+    indexacao_id: Optional[str] = None,
+    # Parâmetros de compatibilidade (deprecated)
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
-    indexacao_id: Optional[str] = None,
     user: dict = Depends(require_staff())
 ):
     """
-    Atribuir consultor, mediador e/ou utilizador de indexação a um processo.
+    Atribuir consultores, intermediários e/ou utilizador de indexação a um processo.
+    
+    Suporta múltiplos consultores e intermediários:
+    - consultor_ids: String com IDs separados por vírgula (ex: "id1,id2,id3")
+    - mediador_ids: String com IDs separados por vírgula (ex: "id1,id2,id3")
+    
+    Mantém compatibilidade com os parâmetros antigos (consultor_id, mediador_id).
     Qualquer utilizador staff pode atribuir.
     """
     process = await db.processes.find_one({"id": process_id})
@@ -1070,51 +1129,123 @@ async def assign_process(
         raise HTTPException(status_code=404, detail="Processo não encontrado")
     
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    old_consultor = process.get("assigned_consultor_id")
-    old_mediador = process.get("assigned_mediador_id")
+    
+    # Obter listas atuais
+    old_consultor_ids = process.get("assigned_consultor_ids") or []
+    old_mediador_ids = process.get("assigned_mediador_ids") or []
     old_indexacao = process.get("assigned_indexacao_id")
     
-    # Atribuir consultor
-    if consultor_id is not None:
-        if consultor_id == "" or consultor_id == "null":
-            # Remover consultor
+    # Compatibilidade: se consultor_id foi passado, usar como consultor_ids
+    if consultor_id and not consultor_ids:
+        consultor_ids = consultor_id
+    if mediador_id and not mediador_ids:
+        mediador_ids = mediador_id
+    
+    # Processar consultores (suporta múltiplos)
+    if consultor_ids is not None:
+        if consultor_ids == "" or consultor_ids == "null":
+            # Remover todos os consultores
+            update_data["assigned_consultor_ids"] = []
+            update_data["consultor_names"] = []
             update_data["assigned_consultor_id"] = None
             update_data["consultor_name"] = None
-            if old_consultor:
-                old_user = await db.users.find_one({"id": old_consultor}, {"name": 1})
-                await log_history(process_id, user, "Removeu consultor", "assigned_consultor_id", old_user.get("name") if old_user else old_consultor, None)
+            if old_consultor_ids:
+                old_names = []
+                for old_id in old_consultor_ids:
+                    old_user = await db.users.find_one({"id": old_id}, {"name": 1})
+                    if old_user:
+                        old_names.append(old_user.get("name", ""))
+                await log_history(process_id, user, "Removeu todos os consultores", "assigned_consultor_ids", ", ".join(old_names), None)
         else:
-            consultor = await db.users.find_one({"id": consultor_id})
-            if consultor:
-                update_data["assigned_consultor_id"] = consultor_id
-                update_data["consultor_name"] = consultor["name"]
-                old_name = None
-                if old_consultor:
-                    old_user = await db.users.find_one({"id": old_consultor}, {"name": 1})
-                    old_name = old_user.get("name") if old_user else None
-                await log_history(process_id, user, "Atribuiu consultor", "assigned_consultor_id", old_name, consultor["name"])
+            # Converter para lista
+            new_consultor_ids = [id.strip() for id in consultor_ids.split(",") if id.strip()]
+            
+            # Validar e obter nomes
+            consultor_names = []
+            for cid in new_consultor_ids:
+                consultor = await db.users.find_one({"id": cid})
+                if consultor:
+                    consultor_names.append(consultor["name"])
+            
+            if consultor_names:
+                update_data["assigned_consultor_ids"] = new_consultor_ids
+                update_data["consultor_names"] = consultor_names
+                # Compatibilidade
+                update_data["assigned_consultor_id"] = new_consultor_ids[0]
+                update_data["consultor_name"] = consultor_names[0]
+                
+                # Log das mudanças
+                old_names = []
+                for old_id in old_consultor_ids:
+                    old_user = await db.users.find_one({"id": old_id}, {"name": 1})
+                    if old_user:
+                        old_names.append(old_user.get("name", ""))
+                
+                added = [n for n in consultor_names if n not in old_names]
+                removed = [n for n in old_names if n not in consultor_names]
+                
+                changes = []
+                if added:
+                    changes.append(f"Adicionou: {', '.join(added)}")
+                if removed:
+                    changes.append(f"Removeu: {', '.join(removed)}")
+                
+                if changes:
+                    await log_history(process_id, user, "Actualizou consultores", "assigned_consultor_ids", ", ".join(old_names), ", ".join(consultor_names))
     
-    # Atribuir mediador
-    if mediador_id is not None:
-        if mediador_id == "" or mediador_id == "null":
-            # Remover mediador
+    # Processar intermediários (suporta múltiplos)
+    if mediador_ids is not None:
+        if mediador_ids == "" or mediador_ids == "null":
+            # Remover todos os intermediários
+            update_data["assigned_mediador_ids"] = []
+            update_data["mediador_names"] = []
             update_data["assigned_mediador_id"] = None
             update_data["mediador_name"] = None
-            if old_mediador:
-                old_user = await db.users.find_one({"id": old_mediador}, {"name": 1})
-                await log_history(process_id, user, "Removeu mediador", "assigned_mediador_id", old_user.get("name") if old_user else old_mediador, None)
+            if old_mediador_ids:
+                old_names = []
+                for old_id in old_mediador_ids:
+                    old_user = await db.users.find_one({"id": old_id}, {"name": 1})
+                    if old_user:
+                        old_names.append(old_user.get("name", ""))
+                await log_history(process_id, user, "Removeu todos os intermediários", "assigned_mediador_ids", ", ".join(old_names), None)
         else:
-            mediador = await db.users.find_one({"id": mediador_id})
-            if mediador:
-                update_data["assigned_mediador_id"] = mediador_id
-                update_data["mediador_name"] = mediador["name"]
-                old_name = None
-                if old_mediador:
-                    old_user = await db.users.find_one({"id": old_mediador}, {"name": 1})
-                    old_name = old_user.get("name") if old_user else None
-                await log_history(process_id, user, "Atribuiu mediador", "assigned_mediador_id", old_name, mediador["name"])
+            # Converter para lista
+            new_mediador_ids = [id.strip() for id in mediador_ids.split(",") if id.strip()]
+            
+            # Validar e obter nomes
+            mediador_names = []
+            for mid in new_mediador_ids:
+                mediador = await db.users.find_one({"id": mid})
+                if mediador:
+                    mediador_names.append(mediador["name"])
+            
+            if mediador_names:
+                update_data["assigned_mediador_ids"] = new_mediador_ids
+                update_data["mediador_names"] = mediador_names
+                # Compatibilidade
+                update_data["assigned_mediador_id"] = new_mediador_ids[0]
+                update_data["mediador_name"] = mediador_names[0]
+                
+                # Log das mudanças
+                old_names = []
+                for old_id in old_mediador_ids:
+                    old_user = await db.users.find_one({"id": old_id}, {"name": 1})
+                    if old_user:
+                        old_names.append(old_user.get("name", ""))
+                
+                added = [n for n in mediador_names if n not in old_names]
+                removed = [n for n in old_names if n not in mediador_names]
+                
+                changes = []
+                if added:
+                    changes.append(f"Adicionou: {', '.join(added)}")
+                if removed:
+                    changes.append(f"Removeu: {', '.join(removed)}")
+                
+                if changes:
+                    await log_history(process_id, user, "Actualizou intermediários", "assigned_mediador_ids", ", ".join(old_names), ", ".join(mediador_names))
     
-    # Atribuir utilizador de indexação
+    # Atribuir utilizador de indexação (mantém single)
     if indexacao_id is not None:
         if indexacao_id == "" or indexacao_id == "null":
             # Remover indexação
@@ -1146,6 +1277,7 @@ async def assign_me_to_process(
     """
     Permite ao utilizador atribuir-se a um processo.
     O utilizador será atribuído como consultor ou mediador dependendo do seu papel.
+    Suporta múltiplos consultores e intermediários.
     """
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
@@ -1158,32 +1290,50 @@ async def assign_me_to_process(
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     assignment_type = None
     
+    # Obter listas atuais
+    current_consultor_ids = process.get("assigned_consultor_ids") or []
+    current_mediador_ids = process.get("assigned_mediador_ids") or []
+    current_consultor_names = process.get("consultor_names") or []
+    current_mediador_names = process.get("mediador_names") or []
+    
     # Determinar tipo de atribuição baseado no papel
     if UserRole.can_act_as_consultor(user_role):
-        # Verificar se já tem consultor atribuído
-        if process.get("assigned_consultor_id") and process["assigned_consultor_id"] != user_id:
-            # Já tem outro consultor, mas pode adicionar como mediador se aplicável
-            if UserRole.can_act_as_mediador(user_role) and not process.get("assigned_mediador_id"):
-                update_data["assigned_mediador_id"] = user_id
-                update_data["mediador_name"] = user_name
-                assignment_type = "mediador"
-            else:
-                raise HTTPException(status_code=400, detail="Este processo já tem um consultor atribuído")
-        else:
-            update_data["assigned_consultor_id"] = user_id
-            update_data["consultor_name"] = user_name
-            assignment_type = "consultor"
+        # Verificar se já está atribuído como consultor
+        if user_id in current_consultor_ids:
+            raise HTTPException(status_code=400, detail="Já está atribuído como consultor a este processo")
+        
+        # Adicionar à lista de consultores
+        new_consultor_ids = current_consultor_ids + [user_id]
+        new_consultor_names = current_consultor_names + [user_name]
+        
+        update_data["assigned_consultor_ids"] = new_consultor_ids
+        update_data["consultor_names"] = new_consultor_names
+        # Compatibilidade
+        update_data["assigned_consultor_id"] = new_consultor_ids[0]
+        update_data["consultor_name"] = new_consultor_names[0]
+        
+        assignment_type = "consultor"
     elif UserRole.can_act_as_mediador(user_role):
-        if process.get("assigned_mediador_id") and process["assigned_mediador_id"] != user_id:
-            raise HTTPException(status_code=400, detail="Este processo já tem um mediador atribuído")
-        update_data["assigned_mediador_id"] = user_id
-        update_data["mediador_name"] = user_name
+        # Verificar se já está atribuído como mediador
+        if user_id in current_mediador_ids:
+            raise HTTPException(status_code=400, detail="Já está atribuído como intermediário a este processo")
+        
+        # Adicionar à lista de intermediários
+        new_mediador_ids = current_mediador_ids + [user_id]
+        new_mediador_names = current_mediador_names + [user_name]
+        
+        update_data["assigned_mediador_ids"] = new_mediador_ids
+        update_data["mediador_names"] = new_mediador_names
+        # Compatibilidade
+        update_data["assigned_mediador_id"] = new_mediador_ids[0]
+        update_data["mediador_name"] = new_mediador_names[0]
+        
         assignment_type = "mediador"
     else:
         raise HTTPException(status_code=403, detail="O seu papel não permite atribuir-se a processos")
     
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
-    await log_history(process_id, user, f"Atribuiu-se como {assignment_type}", f"assigned_{assignment_type}_id", None, user_name)
+    await log_history(process_id, user, f"Atribuiu-se como {assignment_type}", f"assigned_{assignment_type}_ids", None, user_name)
     
     return {
         "success": True,
@@ -1199,6 +1349,7 @@ async def unassign_me_from_process(
 ):
     """
     Permite ao utilizador remover-se de um processo.
+    Suporta múltiplos consultores e intermediários.
     """
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
@@ -1210,19 +1361,43 @@ async def unassign_me_from_process(
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     removed_from = []
     
+    # Obter listas atuais
+    current_consultor_ids = process.get("assigned_consultor_ids") or []
+    current_mediador_ids = process.get("assigned_mediador_ids") or []
+    current_consultor_names = process.get("consultor_names") or []
+    current_mediador_names = process.get("mediador_names") or []
+    
     # Verificar se está atribuído como consultor
-    if process.get("assigned_consultor_id") == user_id:
-        update_data["assigned_consultor_id"] = None
-        update_data["consultor_name"] = None
+    if user_id in current_consultor_ids:
+        # Remover da lista
+        idx = current_consultor_ids.index(user_id)
+        new_consultor_ids = current_consultor_ids[:idx] + current_consultor_ids[idx+1:]
+        new_consultor_names = current_consultor_names[:idx] + current_consultor_names[idx+1:]
+        
+        update_data["assigned_consultor_ids"] = new_consultor_ids
+        update_data["consultor_names"] = new_consultor_names
+        # Compatibilidade
+        update_data["assigned_consultor_id"] = new_consultor_ids[0] if new_consultor_ids else None
+        update_data["consultor_name"] = new_consultor_names[0] if new_consultor_names else None
+        
         removed_from.append("consultor")
-        await log_history(process_id, user, "Removeu-se como consultor", "assigned_consultor_id", user_name, None)
+        await log_history(process_id, user, "Removeu-se como consultor", "assigned_consultor_ids", user_name, None)
     
     # Verificar se está atribuído como mediador
-    if process.get("assigned_mediador_id") == user_id:
-        update_data["assigned_mediador_id"] = None
-        update_data["mediador_name"] = None
+    if user_id in current_mediador_ids:
+        # Remover da lista
+        idx = current_mediador_ids.index(user_id)
+        new_mediador_ids = current_mediador_ids[:idx] + current_mediador_ids[idx+1:]
+        new_mediador_names = current_mediador_names[:idx] + current_mediador_names[idx+1:]
+        
+        update_data["assigned_mediador_ids"] = new_mediador_ids
+        update_data["mediador_names"] = new_mediador_names
+        # Compatibilidade
+        update_data["assigned_mediador_id"] = new_mediador_ids[0] if new_mediador_ids else None
+        update_data["mediador_name"] = new_mediador_names[0] if new_mediador_names else None
+        
         removed_from.append("mediador")
-        await log_history(process_id, user, "Removeu-se como mediador", "assigned_mediador_id", user_name, None)
+        await log_history(process_id, user, "Removeu-se como mediador", "assigned_mediador_ids", user_name, None)
     
     if not removed_from:
         raise HTTPException(status_code=400, detail="Não está atribuído a este processo")
