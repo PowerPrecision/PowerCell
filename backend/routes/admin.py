@@ -360,6 +360,12 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     if existing:
         raise HTTPException(status_code=400, detail="Email já registado")
     
+    # O17 - Validar força da password
+    from services.auth import validate_password_strength
+    is_valid, error_msg = validate_password_strength(data.password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
     # Cliente não é um utilizador do sistema - é um processo
     if data.role == UserRole.CLIENTE:
         raise HTTPException(status_code=400, detail="Cliente não pode ser criado como utilizador. O cliente é representado pelo processo.")
