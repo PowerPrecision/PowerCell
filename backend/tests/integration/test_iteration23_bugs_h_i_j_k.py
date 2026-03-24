@@ -7,7 +7,7 @@ Bugs being tested:
 - Bug j: 'Os Meus Clientes' shows clients not assigned to user
 - Bug k: Intermediários should not see 'Imóveis' and 'Todos os Processos' (frontend menu - checked via code review)
 
-Base URL: https://workflow-builder-95.preview.emergentagent.com
+Base URL: https://form-template-fix-1.preview.emergentagent.com
 """
 
 import pytest
@@ -16,7 +16,7 @@ import os
 import uuid
 from datetime import datetime
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://workflow-builder-95.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://form-template-fix-1.preview.emergentagent.com').rstrip('/')
 
 
 class TestSetup:
