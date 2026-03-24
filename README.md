@@ -76,12 +76,18 @@ PowerCell/
 
 ### Formulário Público Dinâmico
 - Formulário multi-step (6 passos) com validação
+- **Pré-visualização para consultores** (`/formulario-consultor`): Navegação livre pelo formulário sem preencher, para acompanhar o cliente
 - **Campos personalizáveis**: Admin pode criar campos de 6 tipos (texto, dropdown, checkbox, número, data, sim/não)
 - **Editor de opções inline**: Para dropdowns e checkboxes
 - **Templates de formulário**: 3 pré-definidos (Crédito Habitação, Refinanciamento, Crédito Pessoal) + personalizados
 - **Pré-visualização de templates**: Ver como o formulário ficará antes de ativar
 - Campos obrigatórios com indicador visual (* vermelho + "obrigatório")
 - Rascunho automático (localStorage)
+
+### Registo de Clientes
+- Tabela mostra por defeito apenas clientes **sem processo atribuído**
+- Quando o processo é criado, o cliente desaparece da vista principal
+- Filtro disponível para ver "Todos", "Com Processo" ou "Sem Processo"
 
 ### Administração
 - **Gestão de Perfis e Permissões** (`/configuracoes-perfis`): Controlo granular de páginas e ações por utilizador
