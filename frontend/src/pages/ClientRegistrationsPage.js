@@ -219,15 +219,27 @@ const ClientRegistrationsPage = () => {
               Clientes que completaram o formulário de registo
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchClients}
-            className="gap-2"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Actualizar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/formulario-consultor')}
+              className="gap-2"
+              data-testid="preview-form-btn"
+            >
+              <Eye className="h-4 w-4" />
+              Pré-visualizar Formulário
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchClients}
+              className="gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Actualizar
+            </Button>
+          </div>
         </div>
 
         {/* Stats */}

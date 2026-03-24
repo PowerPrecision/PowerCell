@@ -44,7 +44,8 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Nenhuma tarefa prioritária pendente (P1/P2 removidos por opção do utilizador)
 
 ## Correções Recentes
-- **2026-03-24**: Reescrito `requirements.txt` com apenas dependências diretas e versões mínimas flexíveis (eliminando conflitos de resolução como `scraperapi-sdk` vs `requests`). Dockerfile separado em 2 passos de instalação: PyPI público + índice privado para `emergentintegrations`.
+- **2026-03-24**: Corrigido `backend/Dockerfile` — separada a instalação de dependências em dois passos: PyPI público + índice privado para `emergentintegrations`. Limpo `requirements.txt` de pacotes problemáticos.
+- **2026-03-24**: Adicionada funcionalidade de **Pré-visualização do Formulário para Consultores** — botão na página de Registos de Clientes abre o formulário em modo navegável sem obrigar a preencher campos. Rota: `/formulario-consultor`.
 
 ## Credenciais de Teste
 - Admin: admin@sistema.pt / admin

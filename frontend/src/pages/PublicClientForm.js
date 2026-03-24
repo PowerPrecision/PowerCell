@@ -14,7 +14,7 @@ import {
 } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
-import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle } from "lucide-react";
+import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 import { cn } from "../lib/utils";
@@ -211,7 +211,7 @@ const REQUIRED_FIELDS = [
   "tipo_imovel", "localizacao", "profissao", "tipo_contrato"
 ];
 
-const PublicClientForm = () => {
+const PublicClientForm = ({ previewMode = false }) => {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -375,8 +375,9 @@ const PublicClientForm = () => {
 
   const progress = calculateProgress();
 
-  // Auto-save com debounce
+  // Auto-save com debounce (desativado em modo preview)
   useEffect(() => {
+    if (previewMode) return;
     const timer = setTimeout(() => {
       // Só guardar se houver dados preenchidos
       if (formData.name || formData.email || formData.nif) {
@@ -385,10 +386,11 @@ const PublicClientForm = () => {
     }, 2000); // 2 segundos de debounce
 
     return () => clearTimeout(timer);
-  }, [formData, saveDraft]);
+  }, [formData, saveDraft, previewMode]);
 
-  // Mostrar toast se existe rascunho ao carregar
+  // Mostrar toast se existe rascunho ao carregar (desativado em modo preview)
   useEffect(() => {
+    if (previewMode) return;
     const draft = loadDraft();
     if (draft?.data && draft.timestamp) {
       const timeAgo = new Date() - draft.timestamp;
@@ -2010,6 +2012,11 @@ const PublicClientForm = () => {
   };
 
   const handleNextStep = () => {
+    if (previewMode) {
+      setStep(Math.min(6, step + 1));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     const { errors, fieldErrors: newFieldErrors } = validateStep(step);
     
     // Limpar erros anteriores e definir novos
@@ -2040,6 +2047,7 @@ const PublicClientForm = () => {
   const getFieldError = (fieldName) => fieldErrors[fieldName] || null;
 
   const canProceed = () => {
+    if (previewMode) return true;
     switch (step) {
       case 1:
         return formData.name && formData.email && formData.phone && formData.nif && 
@@ -2111,6 +2119,18 @@ const PublicClientForm = () => {
       </header>
 
       <main className="container mx-auto px-4 py-8">
+        {previewMode && (
+          <div className="max-w-4xl mx-auto mb-4 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-3" data-testid="preview-mode-banner">
+            <div className="flex items-center gap-2 text-amber-800 text-sm font-medium">
+              <Eye className="h-4 w-4" />
+              Modo de Pré-visualização - Navegue pelo formulário para acompanhar o cliente
+            </div>
+            <Button variant="outline" size="sm" onClick={() => navigate('/registos-clientes')} data-testid="preview-back-btn">
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Voltar
+            </Button>
+          </div>
+        )}
         <Card className="max-w-4xl mx-auto border-blue-200 shadow-lg">
           <CardHeader className="text-center bg-gradient-to-r from-blue-900 to-blue-800 text-white rounded-t-lg">
             <CardTitle className="text-white text-2xl">Formulário de Registo</CardTitle>
@@ -2128,9 +2148,11 @@ const PublicClientForm = () => {
             />
             
             {/* Auto-save indicator */}
+            {!previewMode && (
             <div className="flex justify-end mb-4">
               <AutoSaveIndicator lastSaved={lastSaved} isSaving={isSaving} />
             </div>
+            )}
             
             {step === 1 && renderStep1()}
             {step === 2 && renderStep2()}
@@ -2165,6 +2187,15 @@ const PublicClientForm = () => {
                 >
                   Próximo
                   <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              ) : previewMode ? (
+                <Button
+                  onClick={() => navigate('/registos-clientes')}
+                  className="bg-teal-600 hover:bg-teal-700 text-white"
+                  data-testid="preview-finish-btn"
+                >
+                  <Check className="mr-2 h-4 w-4" />
+                  Fim da Pré-visualização
                 </Button>
               ) : (
                 <Button
