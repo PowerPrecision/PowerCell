@@ -184,6 +184,15 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     
     await db.clients.insert_one(client_doc)
     
+    # O5 - Encriptar dados sensíveis do cliente após inserção
+    try:
+        from services.encryption import encrypt_sensitive_data
+        encrypted = encrypt_sensitive_data(client_doc)
+        if encrypted != client_doc:
+            await db.clients.update_one({"id": client_id}, {"$set": encrypted})
+    except Exception as e:
+        logger.warning(f"Falha ao encriptar dados do cliente {client_id}: {e}")
+    
     # =========================================
     # M3 - CRIAR PASTA S3 PARA O CLIENTE
     # =========================================

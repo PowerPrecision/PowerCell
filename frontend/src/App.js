@@ -49,6 +49,7 @@ const ExpiringDocumentsDashboard = React.lazy(() => import("./pages/ExpiringDocu
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const ClientRegistrationsPage = React.lazy(() => import("./pages/ClientRegistrationsPage"));
 const WorkflowStatusesPage = React.lazy(() => import("./pages/WorkflowStatusesPage"));
+const AutomationPage = React.lazy(() => import("./pages/AutomationPage"));
 const ProfilePage = React.lazy(() => import("./pages/ProfilePage"));
 
 // ====================================================================
@@ -294,6 +295,11 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <WorkflowStatusesPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/automation" element={
+              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                <AutomationPage />
               </ProtectedRoute>
             }
           />

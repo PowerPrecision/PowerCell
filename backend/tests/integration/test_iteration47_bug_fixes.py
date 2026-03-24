@@ -18,7 +18,7 @@ import uuid
 import os
 
 # Use production URL from environment
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://undo-toast-ui.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://workflow-builder-95.preview.emergentagent.com').rstrip('/')
 
 
 class TestHealthCheck:
