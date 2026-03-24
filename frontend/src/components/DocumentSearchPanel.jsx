@@ -510,7 +510,7 @@ const DocumentSearchPanel = ({ processId, clientName }) => {
                                 expiryUrgency === "expired" ? "bg-red-600 text-white border-red-600" :
                                 expiryUrgency === "critical" ? "bg-red-500 text-white border-red-500" :
                                 expiryUrgency === "warning" ? "bg-orange-500 text-white border-orange-500" :
-                                "bg-yellow-500 text-white border-yellow-500"
+                                "bg-yellow-500 text-yellow-900 border-yellow-500"
                               }`}
                               title={`Expira em ${doc.expiry_date}`}
                             >

@@ -97,7 +97,7 @@ const ExpiringDocumentsDashboard = () => {
         label: `${daysUntil} dias`
       },
       medium: { 
-        class: "bg-yellow-500 text-white border-yellow-500", 
+        class: "bg-yellow-500 text-yellow-900 border-yellow-500", 
         icon: Clock,
         label: `${daysUntil} dias`
       },
@@ -332,7 +332,7 @@ const ExpiringDocumentsDashboard = () => {
                             </Badge>
                           )}
                           {client.medium_count > 0 && (
-                            <Badge className="bg-yellow-500 text-white">
+                            <Badge className="bg-yellow-500 text-yellow-900">
                               {client.medium_count} médio{client.medium_count > 1 ? "s" : ""}
                             </Badge>
                           )}
