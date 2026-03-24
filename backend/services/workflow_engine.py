@@ -156,7 +156,6 @@ async def execute_action(rule: dict, context: dict) -> bool:
     
     try:
         if action == "send_notification":
-            target = config.get("target_user_id") or config.get("target_role")
             message = config.get("message", "Automação executada")
             # Substituir variáveis no message
             message = message.replace("{client_name}", context.get("client_name", "Cliente"))
