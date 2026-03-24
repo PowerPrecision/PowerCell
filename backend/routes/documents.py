@@ -25,6 +25,7 @@ from database import db
 from models.auth import UserRole
 from models.document import DocumentExpiryCreate, DocumentExpiryResponse
 from services.auth import get_current_user, require_roles
+from middleware.rate_limit import limiter
 
 # Importar o novo serviço S3
 from services.s3_storage import s3_service, sanitize_folder_name
@@ -277,8 +278,10 @@ async def list_client_files(
     return files
 
 @router.post("/client/{client_id}/upload", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@limiter.limit("30/minute")
 async def upload_file_s3(
     client_id: str,
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     category: str = Form(...), # Ex: "Financeiros", "Imovel"
@@ -567,9 +570,11 @@ async def proxy_s3_file(
 
 
 @router.delete("/client/{client_id}/file", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@limiter.limit("20/minute")
 async def delete_file_s3(
     client_id: str,
     file_path: str,
+    request: Request,
     user: dict = Depends(get_current_user)
 ):
     """Elimina um ficheiro do S3."""
@@ -1347,8 +1352,10 @@ async def get_expiring_documents_dashboard(
 # ====================================================================
 
 @router.post("/ai-analyze/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@limiter.limit("10/minute")
 async def ai_analyze_documents(
     process_id: str,
+    request: Request,
     files: List[UploadFile] = File(...),
     user: dict = Depends(get_current_user)
 ):

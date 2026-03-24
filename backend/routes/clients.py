@@ -100,6 +100,8 @@ async def list_registered_clients(
     sort_order: str = Query("asc", description="Ordem: asc ou desc"),
     limit: int = Query(50, le=200),
     skip: int = Query(0),
+    cursor: Optional[str] = Query(None, description="Cursor para paginação (valor do campo de ordenação do último item)"),
+    cursor_id: Optional[str] = Query(None, description="ID do último item (para desempate na paginação por cursor)"),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -151,11 +153,31 @@ async def list_registered_clients(
     if sort_field not in valid_sort_fields:
         sort_field = "created_at"
     
+    # O10 - Cursor pagination: se cursor fornecido, usa cursor em vez de skip
+    if cursor is not None and cursor_id:
+        cursor_op = "$gt" if sort_order_int == 1 else "$lt"
+        query["$or"] = query.get("$or", []) if "$or" not in query else query.pop("$or")
+        
+        # Construir condição de cursor com desempate pelo id
+        cursor_condition = {
+            "$or": [
+                {sort_field: {cursor_op: cursor}},
+                {sort_field: cursor, "id": {"$gt" if sort_order_int == 1 else "$lt": cursor_id}}
+            ]
+        }
+        
+        # Merge com query existente usando $and
+        if query.get("$or"):
+            existing_or = query.pop("$or")
+            query = {"$and": [{**query, "$or": existing_or}, cursor_condition]}
+        else:
+            query = {"$and": [{**query}, cursor_condition]}
+    
     # Buscar clientes
     clients = await db.clients.find(
         query,
         {"_id": 0}
-    ).sort(sort_field, sort_order_int).skip(skip).limit(limit).to_list(length=limit)
+    ).sort([(sort_field, sort_order_int), ("id", sort_order_int)]).skip(skip if cursor is None else 0).limit(limit).to_list(length=limit)
     
     # Contar total
     total = await db.clients.count_documents(query)
@@ -214,13 +236,24 @@ async def list_registered_clients(
     # Desencriptar dados sensíveis
     enriched_clients = decrypt_clients_list(enriched_clients)
     
+    # Cursor info para próxima página
+    next_cursor = None
+    next_cursor_id = None
+    if enriched_clients:
+        last = enriched_clients[-1]
+        next_cursor = last.get(sort_field, "")
+        next_cursor_id = last.get("id", "")
+    
     return {
         "clients": enriched_clients,
         "total": total,
         "has_process_filter": has_process,
         "assigned_to_me": assigned_to_me,
         "sort_field": sort_field,
-        "sort_order": sort_order
+        "sort_order": sort_order,
+        "next_cursor": next_cursor,
+        "next_cursor_id": next_cursor_id,
+        "has_more": len(enriched_clients) == limit
     }
 
 
@@ -445,13 +478,15 @@ async def list_clients(
             elif assignment_filter == "none":
                 # Não tem nenhum atribuido
                 assignment_query = {
-                    "$or": [
-                        {"assigned_consultor_id": None},
-                        {"assigned_consultor_id": {"$exists": False}}
-                    ],
-                    "$or": [
-                        {"assigned_mediador_id": None},
-                        {"assigned_mediador_id": {"$exists": False}}
+                    "$and": [
+                        {"$or": [
+                            {"assigned_consultor_id": None},
+                            {"assigned_consultor_id": {"$exists": False}}
+                        ]},
+                        {"$or": [
+                            {"assigned_mediador_id": None},
+                            {"assigned_mediador_id": {"$exists": False}}
+                        ]}
                     ]
                 }
             
