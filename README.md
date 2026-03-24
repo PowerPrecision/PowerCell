@@ -88,6 +88,11 @@ PowerCell/
 - Tabela mostra por defeito apenas clientes **sem processo atribuído**
 - Quando o processo é criado, o cliente desaparece da vista principal
 - Filtro disponível para ver "Todos", "Com Processo" ou "Sem Processo"
+- Link S3 automático ao criar processo: `s3://powerprecision-docs-storage/Documentação Clientes/Nome_Do_Cliente/`
+
+### Dashboard
+- **Alerta de processos sem atualização**: Exclui processos concluídos, desistências e arquivados
+- **Ver processos**: Lista detalhada expandível com link direto para cada processo
 
 ### Administração
 - **Gestão de Perfis e Permissões** (`/configuracoes-perfis`): Controlo granular de páginas e ações por utilizador
