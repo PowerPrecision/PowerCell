@@ -7,6 +7,9 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 ## [2026-03-24] - Pré-visualização para Consultores e Correções de Build
 
+### Nota
+- **Quadro Origem dos Dados**: Visível apenas para o role ADMIN (por design)
+
 ### Adicionado
 - **Pré-visualização do Formulário para Consultores**: Botão "Pré-visualizar Formulário" na página de Registos de Clientes. Abre o formulário completo (6 passos) em modo navegável sem obrigar a preencher campos. Rota: `/formulario-consultor`
 - Banner "Modo de Pré-visualização" com botão de voltar
