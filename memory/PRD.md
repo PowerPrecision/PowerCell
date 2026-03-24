@@ -1,44 +1,40 @@
 # PowerCell CRM - PRD (Product Requirements Document)
 
 ## Problema Original
-Aplicacao CRM para gestao de processos de credito imobiliario. O utilizador solicitou implementacao de todas as correcoes e melhorias listadas no ficheiro `ideias CreditoIMO.txt`, incluindo bugs (E#), melhorias (M#) e outras alteracoes (O#).
+Aplicacao CRM para gestao de processos de credito imobiliario com formulario publico, gestao de clientes, processos, documentos, workflow e automacao.
 
 ## Stack Tecnologica
 - **Backend**: FastAPI, MongoDB, Pydantic, JWT Auth, AWS S3, slowapi, sentry-sdk, upstash-redis
 - **Frontend**: React, TailwindCSS, Shadcn UI, Sonner, Lucide Icons, @sentry/react, @axe-core/react
 - **DB**: MongoDB (via MONGO_URL)
-- **Observabilidade**: Sentry (backend + frontend)
-- **Cache**: Upstash Redis (REST API, graceful degradation)
 
-## Estado de Implementacao - COMPLETO
+## Implementacao Completa
 
-### Todos os Bugs (E#), Melhorias (M#) e Outras (O#) - IMPLEMENTADOS
+### Bugs (E#), Melhorias (M#), Outras (O#) - TODOS IMPLEMENTADOS
 
-### Funcionalidades Extra Implementadas
-- Notificacoes automaticas de processos atrasados
-- Redis health check no endpoint /api/health
-- Motor de Automacao No-Code (O22)
+### Funcionalidades Extra
+- Notificacoes processos atrasados
+- Motor Automacao No-Code (O22)
 - WebSocket fallback polling (O11)
 - Testes acessibilidade axe-core (O19)
-- Encriptacao formulario publico (O5)
-
-### Sessao Anterior
-- Bug fix: Erro `.includes()` no PublicClientForm
-- Required Labels com * vermelho e texto "(obrigatorio)"
-- Campo "Trabalha no Estrangeiro" no formulario
+- Sentry (O2), Redis cache (O13)
+- Bug fix `.includes()` no formulario
+- Required Labels `*` vermelho + "(obrigatorio)"
+- Campo "Trabalha no Estrangeiro"
 - Opcao "Nenhuma" nos bancos (Step 5)
 - Configuracoes de Perfis (`/configuracoes-perfis`)
 - Gestao do Formulario (`/gestao-formulario`)
-- Client Details mostra todos os campos
+- Campos personalizados dinamicos (texto, dropdown, checkbox, numero, data, sim/nao)
+- **Templates de formulario** (3 sistema + personalizados)
 
-### Sessao Atual - Campos Personalizados
-- **Criacao de campos personalizados**: Admin pode criar campos com tipos texto, dropdown, checkbox, numero, data, sim/nao
-- **Editor de opcoes inline**: Para dropdowns e checkboxes, opcoes sao adicionadas via editor inline
-- **Atribuicao a qualquer passo**: Campos podem ser adicionados a qualquer passo (1-5) ou ao passo 6 "Informacoes Adicionais"
-- **Renderizacao dinamica**: Campos personalizados sao automaticamente mostrados no formulario publico
-- **Eliminacao de campos**: Campos personalizados podem ser eliminados (campos do sistema nao podem)
-- **Dados guardados**: Valores dos campos personalizados sao guardados com o registo do cliente
-- **API publica**: GET /api/public/form-config retorna campos personalizados sem autenticacao
+### Templates de Formulario (Sessao Atual)
+- **3 templates de sistema**: Credito Habitacao, Refinanciamento, Credito Pessoal
+- **Guardar como template**: Admin pode guardar config atual como template reutilizavel
+- **Ativar template**: Substitui config do formulario ativo com 1 clique
+- **Duplicar template**: Cria copia editavel de qualquer template
+- **Eliminar template**: Apenas templates personalizados podem ser eliminados
+- **Refinanciamento**: Step 3 substituido por campos especificos (valor transferencia, prazo, banco atual, spread)
+- **Credito Pessoal**: Sem step imovel, focado em situacao financeira
 
 ## Tarefas Pendentes
 
@@ -47,15 +43,16 @@ Aplicacao CRM para gestao de processos de credito imobiliario. O utilizador soli
 - Criar relatorio semanal automatico enviado por email aos gestores
 
 ### P2 - Backlog Futuro
-- Dashboard de performance por consultor (tempo de resposta, taxa de conversao, NPS)
+- Dashboard de performance por consultor
 
 ## Credenciais de Teste
 - Admin: admin@sistema.pt / admin
 - CEO: pedroborges@powerealestate.pt / power2026
 
-## Notas Tecnicas
-- Redis mostra 'error' no preview (DNS bloqueado)
-- axe-core reports na consola do browser em modo dev
-- Form config routes: /api/admin/form-config/* (admin), /api/public/form-config (publico)
-- Custom fields sao armazenados na colecao `form_config` com type="public_form"
-- Custom field_key gerado com prefixo `custom_` + uuid hex
+## Rotas Importantes
+- Form config admin: /api/admin/form-config/*
+- Form config publico: /api/public/form-config
+- Templates: /api/admin/form-config/templates/*
+- Automacao: /api/admin/automation/*
+- Perfis: /configuracoes-perfis
+- Gestao formulario: /gestao-formulario
