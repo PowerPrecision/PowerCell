@@ -606,7 +606,7 @@ async def get_kanban_board(
 @router.get("/my-clients")
 async def get_my_clients(user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
-    UserRole.ADMIN, UserRole.CEO
+    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO
 ]))):
     """
     Obter lista de clientes atribuídos ao utilizador atual.

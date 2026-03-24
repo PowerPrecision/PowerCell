@@ -89,12 +89,12 @@ class UserRole:
     @classmethod
     def can_act_as_consultor(cls, role: str) -> bool:
         """Check if role can perform consultor tasks"""
-        return role in [cls.CONSULTOR, cls.DIRETOR, cls.CEO, cls.ADMIN]
+        return role in [cls.CONSULTOR, cls.DIRETOR, cls.CEO, cls.ADMIN, cls.ADMINISTRATIVO]
     
     @classmethod
     def can_act_as_intermediario(cls, role: str) -> bool:
         """Check if role can perform intermediário de crédito tasks"""
-        return role in [cls.INTERMEDIARIO, cls.MEDIADOR, cls.DIRETOR, cls.CEO, cls.ADMIN]
+        return role in [cls.INTERMEDIARIO, cls.MEDIADOR, cls.DIRETOR, cls.CEO, cls.ADMIN, cls.ADMINISTRATIVO]
     
     @classmethod
     def can_act_as_mediador(cls, role: str) -> bool:
