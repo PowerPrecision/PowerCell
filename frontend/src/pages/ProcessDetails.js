@@ -67,6 +67,7 @@ import ProcessSummaryCard from "../components/ProcessSummaryCard";
 import EmailHistoryPanel from "../components/EmailHistoryPanel";
 import UnifiedDocumentsPanel from "../components/UnifiedDocumentsPanel";
 import ProcessTimeline from "../components/ProcessTimeline";
+import UnifiedAuditTrail from "../components/UnifiedAuditTrail";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
@@ -2615,28 +2616,12 @@ const ProcessDetails = () => {
 
                   {/* History Tab */}
                   <TabsContent value="history" className="p-4 pt-2">
-                    <h3 className="font-medium mb-4">Histórico de Alterações</h3>
-                    <ScrollArea className="h-[400px]">
-                      {history.length === 0 ? (
-                        <p className="text-center text-muted-foreground text-sm py-4">Sem histórico</p>
-                      ) : (
-                        <div className="space-y-3">
-                          {history.map((entry) => (
-                            <div key={entry.id} className="border-l-2 border-primary/30 pl-3 py-1">
-                              <p className="text-sm font-medium">{entry.action}</p>
-                              {entry.field && (
-                                <p className="text-xs text-muted-foreground">
-                                  {entry.field}: {entry.old_value || "vazio"} → {entry.new_value}
-                                </p>
-                              )}
-                              <p className="text-xs text-muted-foreground">
-                                {entry.user_name} • {format(parseISO(entry.created_at), "dd/MM HH:mm", { locale: pt })}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </ScrollArea>
+                    <h3 className="font-medium mb-3">Filme da Lead</h3>
+                    <UnifiedAuditTrail 
+                      history={history} 
+                      activities={activities}
+                      maxHeight="400px"
+                    />
                   </TabsContent>
                 </Tabs>
               </CardContent>
