@@ -2197,3 +2197,60 @@ async def get_audit_logs(
     total = await db.audit_logs.count_documents(query)
     
     return {"logs": logs, "total": total, "limit": limit, "skip": skip}
+
+
+# ============== STALE PROCESSES STATS ==============
+
+@router.get("/stale-processes")
+async def get_stale_processes(
+    days: int = Query(14, ge=1, le=90),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+):
+    """
+    Obter estatísticas de processos sem atualização.
+    Retorna processos agrupados por nível de urgência.
+    """
+    now = datetime.now(timezone.utc)
+    final_statuses = ["concluido", "cancelado", "recusado", "desistiu", "escritura_feita"]
+    
+    cutoff = (now - timedelta(days=days)).isoformat()
+    
+    stale = await db.processes.find({
+        "status": {"$nin": final_statuses},
+        "$or": [
+            {"updated_at": {"$lte": cutoff}},
+            {"updated_at": {"$exists": False}, "created_at": {"$lte": cutoff}}
+        ]
+    }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_name": 1, 
+        "mediador_name": 1, "updated_at": 1, "created_at": 1}).to_list(500)
+    
+    # Calcular dias desde última atualização
+    results = []
+    for p in stale:
+        last = p.get("updated_at") or p.get("created_at", "")
+        try:
+            last_date = datetime.fromisoformat(last.replace('Z', '+00:00'))
+            days_since = (now - last_date).days
+        except (ValueError, TypeError, AttributeError):
+            days_since = days
+        
+        results.append({
+            "id": p["id"],
+            "client_name": p.get("client_name", ""),
+            "status": p.get("status", ""),
+            "consultor_name": p.get("consultor_name", ""),
+            "mediador_name": p.get("mediador_name", ""),
+            "days_since_update": days_since,
+            "urgency": "critical" if days_since > 21 else "high" if days_since > 14 else "medium"
+        })
+    
+    results.sort(key=lambda x: x["days_since_update"], reverse=True)
+    
+    return {
+        "total": len(results),
+        "critical": len([r for r in results if r["urgency"] == "critical"]),
+        "high": len([r for r in results if r["urgency"] == "high"]),
+        "medium": len([r for r in results if r["urgency"] == "medium"]),
+        "processes": results[:100]
+    }
+

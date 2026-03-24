@@ -23,6 +23,9 @@ const notificationIcons = {
   property_docs_check: FileText,
   deed_reminder: Calendar,
   process_status_change: ArrowRight,
+  process_stale: AlertTriangle,
+  process_urgent: Clock,
+  clients_waiting: AlertTriangle,
   default: Bell
 };
 
@@ -35,6 +38,9 @@ const notificationColors = {
   property_docs_check: "text-purple-500 bg-purple-50",
   deed_reminder: "text-green-500 bg-green-50",
   process_status_change: "text-indigo-500 bg-indigo-50",
+  process_stale: "text-red-600 bg-red-50",
+  process_urgent: "text-orange-500 bg-orange-50",
+  clients_waiting: "text-amber-600 bg-amber-50",
   default: "text-gray-500 bg-gray-50"
 };
 
