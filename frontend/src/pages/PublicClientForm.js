@@ -2106,6 +2106,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               <Building2 className="h-8 w-8 text-amber-400" />
               <h1 className="text-xl font-bold text-white">PowerCell</h1>
             </div>
+            {!previewMode && (
             <a 
               href="/login" 
               className="flex items-center gap-2 text-sm text-amber-400 hover:text-amber-300 font-medium transition-colors"
@@ -2114,6 +2115,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               <span className="hidden sm:inline">Acesso Colaborador</span>
               <span className="sm:hidden">Login</span>
             </a>
+            )}
           </div>
         </div>
       </header>
