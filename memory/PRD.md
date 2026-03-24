@@ -45,6 +45,7 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 
 ## Correções Recentes
 - **2026-03-24**: Corrigido `backend/Dockerfile` — adicionado `--extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/` ao comando `pip install` para resolver falha de build em produção causada pela dependência privada `emergentintegrations`.
+- **2026-03-24**: Removido `litellm==1.80.0` do `requirements.txt` — versão pinada não disponível no PyPI público; é instalada automaticamente como dependência transitiva.
 
 ## Credenciais de Teste
 - Admin: admin@sistema.pt / admin
