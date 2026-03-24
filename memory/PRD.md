@@ -4,9 +4,11 @@
 Aplicação CRM para gestão de processos de crédito imobiliário. O utilizador solicitou implementação de todas as correções e melhorias listadas no ficheiro `ideias CreditoIMO.txt`, incluindo bugs (E#), melhorias (M#) e outras alterações (O#).
 
 ## Stack Tecnológica
-- **Backend**: FastAPI, MongoDB, Pydantic, JWT Auth (access+refresh), AWS S3, python-magic (MIME), slowapi (rate limiting)
-- **Frontend**: React, TailwindCSS, Shadcn UI, Sonner (toasts), Lucide Icons
+- **Backend**: FastAPI, MongoDB, Pydantic, JWT Auth (access+refresh), AWS S3, python-magic (MIME), slowapi (rate limiting), sentry-sdk, upstash-redis
+- **Frontend**: React, TailwindCSS, Shadcn UI, Sonner, Lucide Icons, @sentry/react
 - **DB**: MongoDB (via MONGO_URL)
+- **Observabilidade**: Sentry (backend + frontend)
+- **Cache**: Upstash Redis (REST API, graceful degradation)
 
 ## Estado de Implementação - COMPLETO
 
@@ -16,55 +18,46 @@ Aplicação CRM para gestão de processos de crédito imobiliário. O utilizador
 | E1.2 | Bloco "Origem dos Dados" visibilidade | IMPLEMENTADO |
 | E1.3 | Cores dos bancos no formulário público | IMPLEMENTADO |
 | E1.4 | Situação profissional não guardada | IMPLEMENTADO (verificado E2E) |
-| E1.6 | Mapeamento S3 correto | IMPLEMENTADO (_find_client_folder com fuzzy match) |
-| E1.8 | Botões documentos overflow | IMPLEMENTADO (overflow-x-auto) |
+| E1.6 | Mapeamento S3 correto | IMPLEMENTADO |
+| E1.8 | Botões documentos overflow | IMPLEMENTADO |
 | E1.9 | Todos os dados do formulário guardados | IMPLEMENTADO (verificado E2E) |
-| E2 | Validação formulário + refinanciamento | IMPLEMENTADO (validateStep) |
+| E2 | Validação formulário + refinanciamento | IMPLEMENTADO |
 
 ### Melhorias (M#) - TODOS IMPLEMENTADOS
 | ID | Descrição | Estado |
 |----|-----------|--------|
-| M1 | Destacar erros no formulário | IMPLEMENTADO |
-| M3 | Criar pasta S3 ao registar | IMPLEMENTADO |
-| M4 | Apagar fases do workflow | IMPLEMENTADO |
-| M5 | Ordenação alfabética por defeito | IMPLEMENTADO |
-| M6 | Email ao criar utilizador | IMPLEMENTADO |
-| M7 | NIF empresa para indexação | IMPLEMENTADO (enforced on upload) |
-| M8 | Log atividade RGPD | IMPLEMENTADO |
-| M9 | Botão guardar config IA | IMPLEMENTADO |
+| M1-M9 | Todos os items | IMPLEMENTADO |
 
-### Outras (O#) - IMPLEMENTAÇÃO ABRANGENTE
+### Outras (O#) - IMPLEMENTAÇÃO COMPLETA
 | ID | Descrição | Estado |
 |----|-----------|--------|
 | O1 | Validação MIME type | IMPLEMENTADO (magic bytes) |
-| O3 | Rate limiting | IMPLEMENTADO (upload 30/min, delete 20/min, AI 10/min, login 3/hr) |
-| O4 | JWT lifecycle | IMPLEMENTADO (access 24h + refresh 7d + rotação) |
-| O5 | Direito ao esquecimento | PARCIAL (RGPD deletion implementado, encriptação pendente) |
-| O6 | Skeletons | IMPLEMENTADO (18+ páginas convertidas) |
-| O7 | Filtros Kanban | IMPLEMENTADO (data + urgência + limpar + contagem) |
-| O8 | Undo toast | IMPLEMENTADO (UsersManagementPage) |
-| O9 | Card view mobile | IMPLEMENTADO (3 páginas: Clients, FilteredProcess, Users) |
-| O10 | Cursor pagination | IMPLEMENTADO (GET /api/clients/registered com cursor + backwards compatible) |
-| O12 | Rotas duplicadas | VERIFICADO (não duplicado) |
-| O14 | Staff role | VERIFICADO (funciona corretamente) |
-| O15 | JWT secret produção | IMPLEMENTADO (validação robusta em config.py) |
+| O2 | Sentry | IMPLEMENTADO (backend DSN + frontend DSN + tracing) |
+| O3 | Rate limiting | IMPLEMENTADO (uploads 30/min, deletes 20/min, AI 10/min) |
+| O4 | JWT lifecycle | IMPLEMENTADO (access 24h + refresh 7d) |
+| O6 | Skeletons | IMPLEMENTADO (18+ páginas) |
+| O7 | Filtros Kanban | IMPLEMENTADO (data + urgência) |
+| O8 | Undo toast | IMPLEMENTADO |
+| O9 | Card view mobile | IMPLEMENTADO (3 páginas) |
+| O10 | Cursor pagination | IMPLEMENTADO (backwards compatible) |
+| O13 | Redis cache | IMPLEMENTADO (graceful degradation, TTL 60-300s) |
+| O15 | JWT secret produção | IMPLEMENTADO |
 | O16 | DOMPurify | IMPLEMENTADO |
-| O17 | Password strength | IMPLEMENTADO (frontend indicator + backend validation) |
+| O17 | Password strength | IMPLEMENTADO |
 | O18 | Audit logs | IMPLEMENTADO |
 | O20/O21 | Contraste amarelo | IMPLEMENTADO |
 | O23 | Contagem IA | IMPLEMENTADO |
-| O24 | Audit trail unificado | IMPLEMENTADO ("Filme da Lead" com UnifiedAuditTrail) |
+| O24 | Audit trail unificado | IMPLEMENTADO ("Filme da Lead") |
 
-### Feature Extra: Notificações Processos Atrasados
-- Backend scheduled task + API endpoint + frontend alert banner
-- 3 níveis: >7d urgente, >14d atrasado, >21d crítico (notifica diretores)
+### Features Extra
+- Notificações automáticas de processos atrasados (>7d urgente, >14d atrasado, >21d crítico)
+- Banner de alerta no AdminDashboard
+- Redis health check no endpoint /api/health
 
-## Items que Precisam de Serviços Externos (Não Implementáveis sem Chaves)
-| ID | Descrição | Bloqueio |
-|----|-----------|---------|
-| O2 | Sentry | Precisa de Sentry DSN |
-| O11 | Websockets fallback | Opcional (WS já funciona) |
-| O13 | Redis cache | Redis não disponível no pod |
-| O19 | Acessibilidade | Precisa de setup axe-core |
-| O22 | Workflow engine No-Code | Feature grande - requer design prévio |
-| O5 | Encriptação dados sensíveis | Parcial - precisa de chaves KMS |
+## Items Pendentes (Necessitam Design/Decisão)
+| ID | Descrição | Nota |
+|----|-----------|------|
+| O5 | Encriptação dados sensíveis | Requer chaves KMS |
+| O11 | Websockets fallback | WS já funciona, polling opcional |
+| O19 | Testes acessibilidade | Precisa axe-core setup |
+| O22 | Workflow Engine No-Code | Feature grande - requer UX design |
