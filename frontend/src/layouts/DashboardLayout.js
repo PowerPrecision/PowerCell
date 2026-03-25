@@ -457,10 +457,10 @@ const DashboardLayout = ({ children, title }) => {
       
       const negocioItems = [];
       
-      // Adicionar "Os Meus Clientes" para consultores e intermediários (incluindo intermediário de crédito)
+      // Adicionar "Os Meus Processos" para consultores e intermediários (incluindo intermediário de crédito)
       if (["consultor", "intermediario", "mediador", "consultor_intermediario"].includes(user?.role)) {
         negocioItems.push({
-          label: "Os Meus Clientes",
+          label: "Os Meus Processos",
           icon: Users,
           href: "/meus-clientes",
         });
