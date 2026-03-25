@@ -1163,6 +1163,18 @@ const ProcessDetails = () => {
               </Button>
             )}
 
+            {/* Botão Documentos - Destaque para fácil acesso */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-amber-600 border-amber-200 hover:bg-amber-50 bg-amber-50/50"
+              onClick={() => setActiveTab("documents")}
+              title="Ver Documentos"
+            >
+              <FolderOpen className="h-4 w-4 mr-2" />
+              Documentos
+            </Button>
+
             {/* Calculadoras */}
             {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
               <>
@@ -1339,7 +1351,7 @@ const ProcessDetails = () => {
               </CardHeader>
               <CardContent>
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-5">
+                  <TabsList className="grid w-full grid-cols-5 lg:grid-cols-6">
                     <TabsTrigger value="personal" className="gap-2">
                       <User className="h-4 w-4" />
                       <span className="hidden sm:inline">Pessoais</span>
@@ -1355,6 +1367,10 @@ const ProcessDetails = () => {
                     <TabsTrigger value="credit" className="gap-2">
                       <CreditCard className="h-4 w-4" />
                       <span className="hidden sm:inline">Crédito</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="documents" className="gap-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
+                      <FolderOpen className="h-4 w-4" />
+                      <span className="hidden sm:inline">Documentos</span>
                     </TabsTrigger>
                   </TabsList>
 
@@ -2228,6 +2244,38 @@ const ProcessDetails = () => {
                         </div>
                       </div>
                     )}
+                  </TabsContent>
+
+                  {/* Documents Tab - Destaque para fácil acesso */}
+                  <TabsContent value="documents" className="mt-4">
+                    <div className="space-y-4">
+                      {/* Header com info */}
+                      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
+                            <FolderOpen className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-amber-800 dark:text-amber-200">Gestão de Documentos</h3>
+                            <p className="text-sm text-amber-600 dark:text-amber-400">
+                              Faça upload de ficheiros ou adicione links externos (Google Drive, OneDrive, etc.)
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Painel de Documentos Unificado */}
+                      <Card className="border-amber-200 dark:border-amber-800">
+                        <CardContent className="pt-6">
+                          <UnifiedDocumentsPanel 
+                            key={documentsRefreshKey}
+                            processId={id}
+                            clientName={process?.client_name}
+                            onAIDataExtracted={handleAIDataExtractedFromDocs}
+                          />
+                        </CardContent>
+                      </Card>
+                    </div>
                   </TabsContent>
                 </Tabs>
 
