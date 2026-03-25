@@ -1,8 +1,9 @@
 """
 ====================================================================
-MODELOS DE EMAILS - CREDITOIMO
+MODELOS DE EMAILS - POWERCELL
 ====================================================================
 Modelos Pydantic para o sistema de histórico de emails.
+Inclui suporte para marcações, anexos avançados e templates.
 ====================================================================
 """
 
@@ -24,12 +25,45 @@ class EmailStatus(str, Enum):
     DRAFT = "draft"
 
 
+class EmailMarkType(str, Enum):
+    """Tipos de marcação de email."""
+    IMPORTANT = "important"
+    READ = "read"
+    UNREAD = "unread"
+    STARRED = "starred"
+    ARCHIVED = "archived"
+    SPAM = "spam"
+
+
 class EmailAttachment(BaseModel):
     """Anexo de email."""
+    id: Optional[str] = None
     filename: str
     size: Optional[int] = None
     content_type: Optional[str] = None
     url: Optional[str] = None
+    content_id: Optional[str] = None  # Para imagens embutidas
+    is_inline: bool = False
+    preview_url: Optional[str] = None  # URL para preview (imagens, PDFs)
+    downloaded: bool = False
+
+
+class EmailMark(BaseModel):
+    """Marcação de email."""
+    type: EmailMarkType
+    marked_at: str
+    marked_by: str
+
+
+class EmailTemplate(BaseModel):
+    """Template de resposta rápida."""
+    id: str
+    name: str
+    subject: Optional[str] = None
+    body: str
+    category: Optional[str] = None  # "resposta", "follow-up", "agradecimento", etc.
+    created_by: Optional[str] = None
+    is_default: bool = False
 
 
 class EmailCreate(BaseModel):
@@ -55,6 +89,11 @@ class EmailUpdate(BaseModel):
     body: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[EmailStatus] = None
+    is_important: Optional[bool] = None
+    is_read: Optional[bool] = None
+    is_starred: Optional[bool] = None
+    is_archived: Optional[bool] = None
+    labels: Optional[List[str]] = None
 
 
 class EmailResponse(BaseModel):
@@ -77,3 +116,48 @@ class EmailResponse(BaseModel):
     created_by: Optional[str] = None
     created_by_name: Optional[str] = None
     notes: Optional[str] = None
+    # Novos campos de marcação
+    is_important: bool = False
+    is_read: bool = False
+    is_starred: bool = False
+    is_archived: bool = False
+    labels: Optional[List[str]] = []
+    account: Optional[str] = None
+
+
+class EmailFilter(BaseModel):
+    """Filtros avançados para pesquisa de emails."""
+    process_id: Optional[str] = None
+    direction: Optional[EmailDirection] = None
+    account: Optional[str] = None  # "precision" ou "power"
+    is_important: Optional[bool] = None
+    is_read: Optional[bool] = None
+    is_starred: Optional[bool] = None
+    is_archived: Optional[bool] = None
+    has_attachments: Optional[bool] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    search_term: Optional[str] = None
+    labels: Optional[List[str]] = []
+
+
+class EmailTemplateCreate(BaseModel):
+    """Criar template de email."""
+    name: str
+    subject: Optional[str] = None
+    body: str
+    category: Optional[str] = None
+    is_default: bool = False
+
+
+class EmailTemplateResponse(BaseModel):
+    """Resposta de template de email."""
+    id: str
+    name: str
+    subject: Optional[str] = None
+    body: str
+    category: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: str
+    is_default: bool = False
+    usage_count: int = 0

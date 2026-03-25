@@ -1,8 +1,15 @@
 /**
  * EmailHistoryPanel - Painel de Histórico de Emails
  * Componente para visualizar e registar emails na ficha do cliente
+ * 
+ * MELHORIAS:
+ * - Visualização de anexos (preview, download)
+ * - Filtros avançados (por data, por conta, por tipo)
+ * - Marcação de emails (importante, lido, etc.)
+ * - Templates de resposta rápida
+ * - Timeline de emails no processo
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -26,18 +33,52 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "./ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Checkbox } from "./ui/checkbox";
 import { 
   Mail, Send, Inbox, Plus, Loader2, Clock, User, 
   Paperclip, MoreVertical, Trash2, Eye, ChevronDown, ChevronUp, RefreshCw,
-  Settings, X, AtSign, Maximize2, ExternalLink, Link, Search
+  Settings, X, AtSign, Maximize2, ExternalLink, Link, Search,
+  Star, StarOff, Bookmark, BookmarkOff, Archive, ArchiveRestore,
+  Filter, Calendar, FileText, Download, Image, FileSpreadsheet,
+  AlertCircle, CheckCircle, Reply, Copy, Edit3, ChevronLeft, ChevronRight,
+  Sparkles, Tag, EyeOff
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, isAfter, isBefore, subDays, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getProcessEmails, getEmailStats, createEmail, deleteEmail, syncProcessEmails, getMonitoredEmails, addMonitoredEmail, removeMonitoredEmail } from "../services/api";
 import EmailViewerModal from "./EmailViewerModal";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+
+// Tamanhos de arquivo
+const formatFileSize = (bytes) => {
+  if (!bytes) return "";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+};
+
+// Ícone por tipo de anexo
+const getAttachmentIcon = (contentType) => {
+  if (!contentType) return FileText;
+  if (contentType.includes("image")) return Image;
+  if (contentType.includes("pdf")) return FileText;
+  if (contentType.includes("spreadsheet") || contentType.includes("excel")) return FileSpreadsheet;
+  return FileText;
+};
 
 const EmailHistoryPanel = ({ 
   processId, 
@@ -48,12 +89,13 @@ const EmailHistoryPanel = ({
   token
 }) => {
   const [emails, setEmails] = useState([]);
-  const [stats, setStats] = useState({ total: 0, sent: 0, received: 0 });
+  const [stats, setStats] = useState({ total: 0, sent: 0, received: 0, unread: 0, important: 0, starred: 0 });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [filter, setFilter] = useState("all"); // all, sent, received
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [expandedEmail, setExpandedEmail] = useState(null);
   
@@ -66,15 +108,38 @@ const EmailHistoryPanel = ({
   const [newMonitoredEmail, setNewMonitoredEmail] = useState("");
   const [addingEmail, setAddingEmail] = useState(false);
   
-  // TAREFA 1: Associação manual de emails
+  // Associação manual
   const [isAssociateDialogOpen, setIsAssociateDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [associating, setAssociating] = useState(null);
   
-  // Pesquisa local no histórico
+  // Pesquisa local
   const [localSearchTerm, setLocalSearchTerm] = useState("");
+  
+  // Filtros avançados
+  const [advancedFilters, setAdvancedFilters] = useState({
+    account: "all",
+    dateFrom: "",
+    dateTo: "",
+    hasAttachments: "all",
+    isImportant: false,
+    isUnread: false,
+    isStarred: false
+  });
+  
+  // Templates
+  const [templates, setTemplates] = useState([]);
+  const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  
+  // Anexos
+  const [attachmentPreview, setAttachmentPreview] = useState(null);
+  
+  // Timeline mode
+  const [timelineMode, setTimelineMode] = useState(false);
+  const [emailTimeline, setEmailTimeline] = useState([]);
   
   // URLs dos webmails
   const WEBMAIL_URLS = {
@@ -105,8 +170,9 @@ const EmailHistoryPanel = ({
     if (processId) {
       fetchData();
       fetchMonitoredEmails();
+      fetchTemplates();
     }
-  }, [processId, filter]);
+  }, [processId, filter, advancedFilters]);
 
   const fetchMonitoredEmails = async () => {
     try {
@@ -114,6 +180,239 @@ const EmailHistoryPanel = ({
       setMonitoredEmails(response.data.monitored_emails || []);
     } catch (error) {
       console.error("Erro ao carregar emails monitorizados:", error);
+    }
+  };
+
+  const fetchTemplates = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/emails/templates`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTemplates(data);
+      }
+    } catch (error) {
+      console.error("Erro ao carregar templates:", error);
+    }
+  };
+
+  // Filtros avançados aplicados
+  const filteredEmails = useMemo(() => {
+    let filtered = [...emails];
+    
+    // Pesquisa local
+    if (localSearchTerm.trim()) {
+      const term = localSearchTerm.toLowerCase();
+      filtered = filtered.filter(email => 
+        (email.subject && email.subject.toLowerCase().includes(term)) ||
+        (email.from_email && email.from_email.toLowerCase().includes(term)) ||
+        (email.to_emails && email.to_emails.some(e => e.toLowerCase().includes(term))) ||
+        (email.body && email.body.toLowerCase().includes(term))
+      );
+    }
+    
+    // Filtro por conta
+    if (advancedFilters.account !== "all") {
+      filtered = filtered.filter(e => e.account === advancedFilters.account);
+    }
+    
+    // Filtro por data
+    if (advancedFilters.dateFrom) {
+      const fromDate = startOfDay(parseISO(advancedFilters.dateFrom));
+      filtered = filtered.filter(e => {
+        if (!e.sent_at) return false;
+        return isAfter(parseISO(e.sent_at), fromDate);
+      });
+    }
+    if (advancedFilters.dateTo) {
+      const toDate = endOfDay(parseISO(advancedFilters.dateTo));
+      filtered = filtered.filter(e => {
+        if (!e.sent_at) return false;
+        return isBefore(parseISO(e.sent_at), toDate);
+      });
+    }
+    
+    // Filtro por anexos
+    if (advancedFilters.hasAttachments === "yes") {
+      filtered = filtered.filter(e => e.attachments && e.attachments.length > 0);
+    } else if (advancedFilters.hasAttachments === "no") {
+      filtered = filtered.filter(e => !e.attachments || e.attachments.length === 0);
+    }
+    
+    // Filtro por marcações
+    if (advancedFilters.isImportant) {
+      filtered = filtered.filter(e => e.is_important);
+    }
+    if (advancedFilters.isUnread) {
+      filtered = filtered.filter(e => !e.is_read);
+    }
+    if (advancedFilters.isStarred) {
+      filtered = filtered.filter(e => e.is_starred);
+    }
+    
+    return filtered;
+  }, [emails, localSearchTerm, advancedFilters]);
+
+  // Agrupar emails por data para timeline
+  useEffect(() => {
+    if (timelineMode && emails.length > 0) {
+      const grouped = {};
+      emails.forEach(email => {
+        if (email.sent_at) {
+          const dateKey = email.sent_at.substring(0, 10);
+          if (!grouped[dateKey]) {
+            grouped[dateKey] = {
+              date: dateKey,
+              emails: [],
+              stats: { sent: 0, received: 0 }
+            };
+          }
+          grouped[dateKey].emails.push(email);
+          if (email.direction === "sent") {
+            grouped[dateKey].stats.sent++;
+          } else {
+            grouped[dateKey].stats.received++;
+          }
+        }
+      });
+      setEmailTimeline(Object.values(grouped).sort((a, b) => b.date.localeCompare(a.date)));
+    }
+  }, [timelineMode, emails]);
+
+  // Marcação de emails
+  const markEmail = async (emailId, markType) => {
+    try {
+      const response = await fetch(`${API_URL}/api/emails/${emailId}/mark`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ mark_type: markType })
+      });
+      
+      if (!response.ok) throw new Error("Erro ao marcar email");
+      
+      // Atualizar local
+      setEmails(prev => prev.map(e => {
+        if (e.id === emailId) {
+          const updated = { ...e };
+          if (markType === "important") updated.is_important = true;
+          if (markType === "read") updated.is_read = true;
+          if (markType === "unread") updated.is_read = false;
+          if (markType === "starred") updated.is_starred = true;
+          if (markType === "archived") updated.is_archived = true;
+          return updated;
+        }
+        return e;
+      }));
+      
+      toast.success(`Email marcado como ${markType}`);
+    } catch (error) {
+      toast.error("Erro ao marcar email");
+    }
+  };
+
+  const unmarkEmail = async (emailId, markType) => {
+    try {
+      const response = await fetch(`${API_URL}/api/emails/${emailId}/mark/${markType}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (!response.ok) throw new Error("Erro ao desmarcar email");
+      
+      // Atualizar local
+      setEmails(prev => prev.map(e => {
+        if (e.id === emailId) {
+          const updated = { ...e };
+          if (markType === "important") updated.is_important = false;
+          if (markType === "starred") updated.is_starred = false;
+          if (markType === "archived") updated.is_archived = false;
+          return updated;
+        }
+        return e;
+      }));
+      
+      toast.success("Marcação removida");
+    } catch (error) {
+      toast.error("Erro ao remover marcação");
+    }
+  };
+
+  // Download de anexo
+  const downloadAttachment = async (emailId, attachment) => {
+    try {
+      if (attachment.url) {
+        window.open(attachment.url, '_blank');
+        return;
+      }
+      
+      const response = await fetch(
+        `${API_URL}/api/emails/${emailId}/attachments/${attachment.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = attachment.filename;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      toast.error("Erro ao descarregar anexo");
+    }
+  };
+
+  // Preview de anexo
+  const previewAttachment = async (emailId, attachment) => {
+    try {
+      const response = await fetch(
+        `${API_URL}/api/emails/${emailId}/attachments/${attachment.id}/preview`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAttachmentPreview({
+          ...attachment,
+          previewUrl: data.preview_url
+        });
+      }
+    } catch (error) {
+      toast.error("Preview não disponível");
+    }
+  };
+
+  // Usar template
+  const useTemplate = async (templateId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/emails/templates/${templateId}/use`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ process_id: processId })
+      });
+      
+      if (!response.ok) throw new Error("Erro ao usar template");
+      
+      const data = await response.json();
+      setNewEmail(prev => ({
+        ...prev,
+        subject: data.subject,
+        body: data.body
+      }));
+      setIsTemplateDialogOpen(false);
+      setIsCreateDialogOpen(true);
+      toast.success("Template aplicado");
+    } catch (error) {
+      toast.error("Erro ao aplicar template");
     }
   };
 
@@ -145,19 +444,17 @@ const EmailHistoryPanel = ({
     }
   };
 
-  // TAREFA 1: Pesquisar emails para associação
+  // Pesquisa para associação
   const handleSearchEmails = async () => {
     if (!searchQuery.trim() || searchQuery.length < 3) {
-      toast.error("Introduza pelo menos 3 caracteres para pesquisar");
+      toast.error("Introduza pelo menos 3 caracteres");
       return;
     }
     try {
       setSearching(true);
       const response = await fetch(
         `${API_URL}/api/emails/search?q=${encodeURIComponent(searchQuery)}&limit=20`,
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) throw new Error("Erro na pesquisa");
       const data = await response.json();
@@ -169,7 +466,7 @@ const EmailHistoryPanel = ({
     }
   };
 
-  // TAREFA 1: Associar email ao cliente
+  // Associar email
   const handleAssociateEmail = async (emailId) => {
     try {
       setAssociating(emailId);
@@ -206,10 +503,12 @@ const EmailHistoryPanel = ({
       setLoading(true);
       const [emailsRes, statsRes] = await Promise.all([
         getProcessEmails(processId, filter === "all" ? null : filter),
-        getEmailStats(processId)
+        fetch(`${API_URL}/api/emails/stats/${processId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).then(r => r.json())
       ]);
       setEmails(emailsRes.data);
-      setStats(statsRes.data);
+      setStats(statsRes);
     } catch (error) {
       console.error("Erro ao carregar emails:", error);
     } finally {
@@ -219,70 +518,50 @@ const EmailHistoryPanel = ({
 
   const handleSyncEmails = async () => {
     if (!clientEmail && monitoredEmails.length === 0) {
-      toast.error("Adicione pelo menos um email para monitorizar antes de sincronizar");
+      toast.error("Adicione pelo menos um email para monitorizar");
       return;
     }
 
     try {
       setSyncing(true);
-      toast.info("A iniciar sincronização de emails em background...");
+      toast.info("A iniciar sincronização...");
       
       const response = await syncProcessEmails(processId, 60);
       
-      // Verificar se a sincronização foi iniciada em background
       if (response.data.status === "started") {
-        toast.success("Sincronização iniciada! Os emails serão importados em alguns minutos.");
-        // Polling para verificar o status
+        toast.success("Sincronização iniciada em background");
         const checkStatus = async () => {
           try {
             const statusResponse = await fetch(
-              `${process.env.REACT_APP_BACKEND_URL}/api/emails/sync-status/${processId}`,
+              `${API_URL}/api/emails/sync-status/${processId}`,
               { headers: { Authorization: `Bearer ${token}` } }
             );
             const status = await statusResponse.json();
             
             if (status.status === "completed") {
-              toast.success(`Sincronização concluída: ${status.result?.new_imported || 0} novos emails importados`);
+              toast.success(`Sincronização concluída: ${status.result?.new_imported || 0} novos emails`);
               fetchData();
               setSyncing(false);
             } else if (status.status === "error") {
-              toast.error(`Erro na sincronização: ${status.error}`);
+              toast.error(`Erro: ${status.error}`);
               setSyncing(false);
             } else if (status.status === "running") {
-              // Continuar polling
               setTimeout(checkStatus, 5000);
             } else {
               setSyncing(false);
             }
           } catch (e) {
-            console.error("Erro ao verificar status:", e);
             setSyncing(false);
           }
         };
-        // Iniciar polling após 3 segundos
         setTimeout(checkStatus, 3000);
-      } else if (response.data.success) {
-        // Resposta síncrona (modo blocking)
-        toast.success(`Sincronização concluída: ${response.data.new_imported} novos emails importados`);
-        fetchData();
-        setSyncing(false);
       } else {
-        const errorMsg = response.data.error || "";
-        if (errorMsg.includes("não configurada") || errorMsg.includes("not configured")) {
-          toast.error("Conta de email não configurada. Contacte o administrador.");
-        } else {
-          toast.error(errorMsg || "Erro na sincronização");
-        }
+        toast.success(`Sincronização concluída: ${response.data.new_imported} novos emails`);
+        fetchData();
         setSyncing(false);
       }
     } catch (error) {
-      console.error("Erro ao sincronizar:", error);
-      const detail = error.response?.data?.detail || "";
-      if (detail.includes("não configurada") || detail.includes("not configured") || detail.includes("IMAP")) {
-        toast.error("Conta de email não configurada pelo administrador. A sincronização não está disponível.");
-      } else {
-        toast.error(detail || "Erro ao sincronizar emails");
-      }
+      toast.error("Erro ao sincronizar emails");
       setSyncing(false);
     }
   };
@@ -299,8 +578,6 @@ const EmailHistoryPanel = ({
 
     try {
       setCreating(true);
-      
-      // Preparar dados
       const toEmails = newEmail.to_emails.split(",").map(e => e.trim()).filter(e => e);
       
       await createEmail({
@@ -326,14 +603,14 @@ const EmailHistoryPanel = ({
       });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao registar email");
+      toast.error("Erro ao registar email");
     } finally {
       setCreating(false);
     }
   };
 
   const handleDeleteEmail = async (emailId) => {
-    if (!window.confirm("Tem a certeza que deseja eliminar este registo de email?")) return;
+    if (!window.confirm("Tem a certeza que deseja eliminar este email?")) return;
     try {
       await deleteEmail(emailId);
       toast.success("Email eliminado");
@@ -355,8 +632,28 @@ const EmailHistoryPanel = ({
     setIsCreateDialogOpen(true);
   };
 
-  const toggleExpandEmail = (emailId) => {
-    setExpandedEmail(expandedEmail === emailId ? null : emailId);
+  const clearFilters = () => {
+    setAdvancedFilters({
+      account: "all",
+      dateFrom: "",
+      dateTo: "",
+      hasAttachments: "all",
+      isImportant: false,
+      isUnread: false,
+      isStarred: false
+    });
+    setLocalSearchTerm("");
+  };
+
+  const hasActiveFilters = () => {
+    return advancedFilters.account !== "all" ||
+           advancedFilters.dateFrom ||
+           advancedFilters.dateTo ||
+           advancedFilters.hasAttachments !== "all" ||
+           advancedFilters.isImportant ||
+           advancedFilters.isUnread ||
+           advancedFilters.isStarred ||
+           localSearchTerm;
   };
 
   if (loading && emails.length === 0) {
@@ -382,17 +679,29 @@ const EmailHistoryPanel = ({
                 {stats.total > 0 && (
                   <Badge variant="secondary" className="ml-2">{stats.total}</Badge>
                 )}
+                {stats.unread > 0 && (
+                  <Badge variant="destructive" className="ml-1">{stats.unread} não lidos</Badge>
+                )}
               </CardTitle>
+              
+              {/* Toggle Timeline */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setTimelineMode(!timelineMode)}
+                className={timelineMode ? "bg-amber-100 text-amber-700" : ""}
+              >
+                <Clock className="h-4 w-4" />
+              </Button>
             </div>
             
-            {/* Botões de acção - numa linha separada */}
+            {/* Botões de acção */}
             <div className="flex flex-wrap items-center gap-2">
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => openWebmail('precision')}
                 title="Abrir Webmail Precision"
-                data-testid="email-webmail-precision-btn"
               >
                 <Mail className="h-4 w-4 mr-1" />
                 <span className="text-xs">Precision</span>
@@ -403,41 +712,48 @@ const EmailHistoryPanel = ({
                 variant="outline"
                 onClick={() => openWebmail('power')}
                 title="Abrir Webmail Power"
-                data-testid="email-webmail-power-btn"
               >
                 <Mail className="h-4 w-4 mr-1" />
                 <span className="text-xs">Power</span>
                 <ExternalLink className="h-3 w-3 ml-1" />
               </Button>
+              
+              {/* Templates */}
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => setIsTemplateDialogOpen(true)}
+                className="bg-purple-50 hover:bg-purple-100 border-purple-200"
+              >
+                <Sparkles className="h-4 w-4 mr-1 text-purple-500" />
+                <span className="text-xs">Templates</span>
+              </Button>
+              
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => setIsAssociateDialogOpen(true)}
-                title="Associar email manualmente"
-                data-testid="email-associate-btn"
-                className="bg-blue-50 hover:bg-blue-100 border-blue-200 dark:bg-blue-950 dark:border-blue-800"
+                className="bg-blue-50 hover:bg-blue-100 border-blue-200"
               >
                 <Link className="h-4 w-4 mr-1" />
                 <span className="text-xs">Associar</span>
               </Button>
+              
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => setIsSettingsOpen(true)}
-                title="Configurar emails monitorizados"
-                data-testid="email-settings-btn"
                 className="bg-amber-50 hover:bg-amber-100 border-amber-200"
               >
                 <Settings className="h-4 w-4 mr-1" />
                 <span className="text-xs">Emails</span>
               </Button>
+              
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={handleSyncEmails}
                 disabled={syncing || (!clientEmail && monitoredEmails.length === 0)}
-                title="Sincronizar emails do servidor"
-                data-testid="email-sync-btn"
               >
                 {syncing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -451,35 +767,155 @@ const EmailHistoryPanel = ({
             {!compact && (
               <CardDescription className="text-xs">
                 {stats.sent} enviado(s) • {stats.received} recebido(s)
-                {monitoredEmails.length > 0 && ` • ${monitoredEmails.length + 1} email(s) monitorizados`}
+                {stats.important > 0 && ` • ${stats.important} importante(s)`}
+                {stats.starred > 0 && ` • ${stats.starred} estrela(s)`}
               </CardDescription>
             )}
           </div>
         </CardHeader>
         <CardContent>
-          {/* Campo de Pesquisa */}
-          <div className="relative mb-3">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Pesquisar emails por assunto, remetente..."
-              value={localSearchTerm}
-              onChange={(e) => setLocalSearchTerm(e.target.value)}
-              className="pl-9 h-9 text-sm"
-              data-testid="email-search-input"
-            />
-            {localSearchTerm && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
-                onClick={() => setLocalSearchTerm("")}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            )}
+          {/* Campo de Pesquisa e Filtros */}
+          <div className="flex gap-2 mb-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Pesquisar emails..."
+                value={localSearchTerm}
+                onChange={(e) => setLocalSearchTerm(e.target.value)}
+                className="pl-9 h-9 text-sm"
+              />
+              {localSearchTerm && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+                  onClick={() => setLocalSearchTerm("")}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+            
+            {/* Filtros Avançados */}
+            <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+              <PopoverTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className={hasActiveFilters() ? "bg-amber-100 border-amber-300" : ""}
+                >
+                  <Filter className="h-4 w-4" />
+                  {hasActiveFilters() && (
+                    <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 text-xs">
+                      !
+                    </Badge>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80" align="end">
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm">Filtros Avançados</h4>
+                  
+                  {/* Conta */}
+                  <div className="space-y-2">
+                    <Label className="text-xs">Conta</Label>
+                    <Select 
+                      value={advancedFilters.account}
+                      onValueChange={(v) => setAdvancedFilters(prev => ({ ...prev, account: v }))}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas</SelectItem>
+                        <SelectItem value="precision">Precision</SelectItem>
+                        <SelectItem value="power">Power</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {/* Data */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">De</Label>
+                      <Input
+                        type="date"
+                        value={advancedFilters.dateFrom}
+                        onChange={(e) => setAdvancedFilters(prev => ({ ...prev, dateFrom: e.target.value }))}
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Até</Label>
+                      <Input
+                        type="date"
+                        value={advancedFilters.dateTo}
+                        onChange={(e) => setAdvancedFilters(prev => ({ ...prev, dateTo: e.target.value }))}
+                        className="h-8"
+                      />
+                    </div>
+                  </div>
+                  
+                  {/* Anexos */}
+                  <div className="space-y-2">
+                    <Label className="text-xs">Anexos</Label>
+                    <Select 
+                      value={advancedFilters.hasAttachments}
+                      onValueChange={(v) => setAdvancedFilters(prev => ({ ...prev, hasAttachments: v }))}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        <SelectItem value="yes">Com anexos</SelectItem>
+                        <SelectItem value="no">Sem anexos</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {/* Marcações */}
+                  <div className="space-y-2">
+                    <Label className="text-xs">Marcações</Label>
+                    <div className="flex flex-wrap gap-2">
+                      <label className="flex items-center gap-1 text-xs">
+                        <Checkbox
+                          checked={advancedFilters.isImportant}
+                          onCheckedChange={(v) => setAdvancedFilters(prev => ({ ...prev, isImportant: v }))}
+                        />
+                        Importante
+                      </label>
+                      <label className="flex items-center gap-1 text-xs">
+                        <Checkbox
+                          checked={advancedFilters.isUnread}
+                          onCheckedChange={(v) => setAdvancedFilters(prev => ({ ...prev, isUnread: v }))}
+                        />
+                        Não lido
+                      </label>
+                      <label className="flex items-center gap-1 text-xs">
+                        <Checkbox
+                          checked={advancedFilters.isStarred}
+                          onCheckedChange={(v) => setAdvancedFilters(prev => ({ ...prev, isStarred: v }))}
+                        />
+                        Estrela
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-between pt-2">
+                    <Button variant="ghost" size="sm" onClick={clearFilters}>
+                      Limpar filtros
+                    </Button>
+                    <Button size="sm" onClick={() => setIsFilterOpen(false)}>
+                      Aplicar
+                    </Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
 
-          {/* Filtros */}
+          {/* Tabs de Filtros */}
           <Tabs value={filter} onValueChange={setFilter} className="mb-4">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="all" className="text-xs">
@@ -496,141 +932,436 @@ const EmailHistoryPanel = ({
             </TabsList>
           </Tabs>
 
-          {/* Lista de emails - Layout compacto com scroll horizontal no assunto */}
-          {(() => {
-            // Filtrar emails pela pesquisa local
-            const filteredEmails = localSearchTerm.trim() 
-              ? emails.filter(email => 
-                  (email.subject && email.subject.toLowerCase().includes(localSearchTerm.toLowerCase())) ||
-                  (email.from_email && email.from_email.toLowerCase().includes(localSearchTerm.toLowerCase())) ||
-                  (email.to_email && email.to_email.toLowerCase().includes(localSearchTerm.toLowerCase())) ||
-                  (email.body_preview && email.body_preview.toLowerCase().includes(localSearchTerm.toLowerCase()))
-                )
-              : emails;
-            
-            if (emails.length === 0) {
-              return (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Mail className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                  <p>Nenhum email registado</p>
-                  <Button 
-                    variant="outline" 
-                    className="mt-4"
-                    onClick={() => openCreateDialog("sent")}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Registar Email
-                  </Button>
-                </div>
-              );
-            }
-            
-            if (filteredEmails.length === 0 && localSearchTerm) {
-              return (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Search className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                  <p>Nenhum email encontrado para "{localSearchTerm}"</p>
-                  <Button 
-                    variant="outline" 
-                    className="mt-4"
-                    onClick={() => setLocalSearchTerm("")}
-                  >
-                    <X className="h-4 w-4 mr-2" />
-                    Limpar pesquisa
-                  </Button>
-                </div>
-              );
-            }
-            
-            return (
-              <ScrollArea className="pr-1" style={{ height: maxHeight }}>
-                <div className="space-y-1">
-                  {filteredEmails.map((email) => (
-                  <div
-                    key={email.id}
-                    className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
-                      email.direction === "sent" 
-                        ? "bg-blue-50/30 dark:bg-blue-950/10 border-blue-200/50 dark:border-blue-800/50" 
-                        : "bg-emerald-50/30 dark:bg-emerald-950/10 border-emerald-200/50 dark:border-emerald-800/50"
-                    }`}
-                    onClick={() => openEmailViewer(email.id)}
-                  >
-                    {/* Ícone de direção */}
-                    <div className={`p-1.5 rounded shrink-0 ${
-                      email.direction === "sent" 
-                        ? "bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-300" 
-                        : "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-300"
-                    }`}>
-                      {email.direction === "sent" ? (
-                        <Send className="h-3 w-3" />
-                      ) : (
-                        <Inbox className="h-3 w-3" />
-                      )}
-                    </div>
-
-                    {/* Conteúdo com scroll horizontal */}
-                    <div className="flex-1 min-w-0 overflow-hidden">
-                      <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-muted">
-                        <p className="font-medium text-sm whitespace-nowrap pr-2" title={email.subject}>
-                          {email.subject}
-                        </p>
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {email.direction === "sent" ? "Para: " : "De: "}
-                        {email.direction === "sent" 
-                          ? email.to_emails?.join(", ")
-                          : email.from_email
-                        }
-                      </p>
-                      {/* Mostrar CC se existir - destacado */}
-                      {email.cc_emails?.length > 0 && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
-                          <span className="text-[10px] bg-amber-100 dark:bg-amber-900/50 px-1 rounded">CC</span>
-                          <span className="truncate">{email.cc_emails.join(", ")}</span>
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Data e botão */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                        {email.sent_at 
-                          ? format(parseISO(email.sent_at), "dd/MM/yy", { locale: pt })
-                          : "-"
-                        }
+          {/* Timeline Mode */}
+          {timelineMode ? (
+            <ScrollArea style={{ height: maxHeight }}>
+              <div className="space-y-4">
+                {emailTimeline.map((day) => (
+                  <div key={day.date}>
+                    <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-1">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium text-sm">
+                        {format(parseISO(day.date), "EEEE, dd 'de' MMMM", { locale: pt })}
                       </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEmailViewer(email.id);
-                        }}
-                        title="Ver email completo"
-                      >
-                        <Maximize2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <Badge variant="outline" className="text-xs">
+                        {day.stats.sent} env • {day.stats.received} rec
+                      </Badge>
+                    </div>
+                    <div className="space-y-1 pl-6 border-l-2 border-muted">
+                      {day.emails.map((email) => (
+                        <div
+                          key={email.id}
+                          className={`flex items-center gap-2 p-2 rounded border cursor-pointer hover:bg-muted/50 ${
+                            email.direction === "sent" 
+                              ? "bg-blue-50/30 border-blue-200/50" 
+                              : "bg-emerald-50/30 border-emerald-200/50"
+                          }`}
+                          onClick={() => openEmailViewer(email.id)}
+                        >
+                          <div className={`p-1 rounded ${
+                            email.direction === "sent" 
+                              ? "bg-blue-100 text-blue-600" 
+                              : "bg-emerald-100 text-emerald-600"
+                          }`}>
+                            {email.direction === "sent" ? <Send className="h-3 w-3" /> : <Inbox className="h-3 w-3" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{email.subject}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {email.direction === "sent" ? "Para: " : "De: "}
+                              {email.direction === "sent" ? email.to_emails?.[0] : email.from_email}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {email.is_important && <AlertCircle className="h-3 w-3 text-amber-500" />}
+                            {email.is_starred && <Star className="h-3 w-3 text-amber-500 fill-amber-500" />}
+                            {!email.is_read && <div className="h-2 w-2 rounded-full bg-amber-500" />}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}
               </div>
             </ScrollArea>
-            );
-          })()}
+          ) : (
+            /* Lista Normal */
+            <ScrollArea style={{ height: maxHeight }}>
+              {filteredEmails.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Mail className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                  <p>Nenhum email encontrado</p>
+                  {hasActiveFilters() && (
+                    <Button variant="outline" className="mt-2" size="sm" onClick={clearFilters}>
+                      Limpar filtros
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {filteredEmails.map((email) => (
+                    <div
+                      key={email.id}
+                      className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
+                        email.direction === "sent" 
+                          ? "bg-blue-50/30 dark:bg-blue-950/10 border-blue-200/50 dark:border-blue-800/50" 
+                          : "bg-emerald-50/30 dark:bg-emerald-950/10 border-emerald-200/50 dark:border-emerald-800/50"
+                      } ${!email.is_read ? "border-l-4 border-l-amber-500" : ""}`}
+                      onClick={() => openEmailViewer(email.id)}
+                    >
+                      {/* Ícone de direção */}
+                      <div className={`p-1.5 rounded shrink-0 ${
+                        email.direction === "sent" 
+                          ? "bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-300" 
+                          : "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-300"
+                      }`}>
+                        {email.direction === "sent" ? <Send className="h-3 w-3" /> : <Inbox className="h-3 w-3" />}
+                      </div>
+
+                      {/* Conteúdo */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className={`font-medium text-sm truncate ${!email.is_read ? "font-semibold" : ""}`}>
+                            {email.subject}
+                          </p>
+                          {/* Marcações */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {email.is_important && <AlertCircle className="h-3 w-3 text-amber-500" />}
+                            {email.is_starred && <Star className="h-3 w-3 text-amber-500 fill-amber-500" />}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs text-muted-foreground truncate">
+                            {email.direction === "sent" ? "Para: " : "De: "}
+                            {email.direction === "sent" ? email.to_emails?.[0] : email.from_email}
+                          </p>
+                          {email.attachments?.length > 0 && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Paperclip className="h-3 w-3" />
+                              {email.attachments.length}
+                            </div>
+                          )}
+                        </div>
+                        {/* CC */}
+                        {email.cc_emails?.length > 0 && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                            <span className="text-[10px] bg-amber-100 dark:bg-amber-900/50 px-1 rounded">CC</span>
+                            <span className="truncate">{email.cc_emails.join(", ")}</span>
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Data e ações */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                          {email.sent_at ? format(parseISO(email.sent_at), "dd/MM/yy") : "-"}
+                        </span>
+                        
+                        {/* Dropdown de ações */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openEmailViewer(email.id); }}>
+                              <Eye className="h-4 w-4 mr-2" /> Ver completo
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {!email.is_read ? (
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); markEmail(email.id, "read"); }}>
+                                <CheckCircle className="h-4 w-4 mr-2" /> Marcar lido
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); markEmail(email.id, "unread"); }}>
+                                <EyeOff className="h-4 w-4 mr-2" /> Marcar não lido
+                              </DropdownMenuItem>
+                            )}
+                            {!email.is_important ? (
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); markEmail(email.id, "important"); }}>
+                                <AlertCircle className="h-4 w-4 mr-2 text-amber-500" /> Importante
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); unmarkEmail(email.id, "important"); }}>
+                                <AlertCircle className="h-4 w-4 mr-2" /> Não importante
+                              </DropdownMenuItem>
+                            )}
+                            {!email.is_starred ? (
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); markEmail(email.id, "starred"); }}>
+                                <Star className="h-4 w-4 mr-2 text-amber-500" /> Estrela
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); unmarkEmail(email.id, "starred"); }}>
+                                <StarOff className="h-4 w-4 mr-2" /> Tirar estrela
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteEmail(email.id); }} className="text-red-600">
+                              <Trash2 className="h-4 w-4 mr-2" /> Eliminar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          )}
         </CardContent>
       </Card>
 
-      {/* Modal para visualização de email */}
+      {/* Modal de visualização */}
       <EmailViewerModal
         isOpen={isViewerOpen}
         onClose={() => setIsViewerOpen(false)}
-        emails={emails}
+        emails={filteredEmails}
         selectedEmailId={selectedEmailId}
         onSelectEmail={setSelectedEmailId}
+        onMarkEmail={markEmail}
+        onUnmarkEmail={unmarkEmail}
+        token={token}
       />
 
-      {/* Dialog para registar email */}
+      {/* Modal de Templates */}
+      <Dialog open={isTemplateDialogOpen} onOpenChange={setIsTemplateDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-500" />
+              Templates de Resposta Rápida
+            </DialogTitle>
+            <DialogDescription>
+              Escolha um template para resposta rápida
+            </DialogDescription>
+          </DialogHeader>
+          
+          <ScrollArea className="h-[400px] pr-4">
+            {templates.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <FileText className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                <p>Nenhum template disponível</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {templates.map((template) => (
+                  <div
+                    key={template.id}
+                    className="p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => useTemplate(template.id)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm">{template.name}</p>
+                          {template.is_default && (
+                            <Badge variant="outline" className="text-xs">Default</Badge>
+                          )}
+                        </div>
+                        {template.subject && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Assunto: {template.subject}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                          {template.body.substring(0, 100)}...
+                        </p>
+                        {template.category && (
+                          <Badge variant="secondary" className="mt-2 text-xs">{template.category}</Badge>
+                        )}
+                      </div>
+                      <Button variant="ghost" size="sm">
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTemplateDialogOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Configurações */}
+      <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AtSign className="h-5 w-5" />
+              Emails Monitorizados
+            </DialogTitle>
+            <DialogDescription>
+              Configure os emails que serão sincronizados para este processo.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-sm font-medium">Email Principal do Cliente</Label>
+              <div className="flex items-center gap-2 mt-1 p-2 bg-muted rounded-md">
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">{clientEmail || "Não definido"}</span>
+                <Badge variant="outline" className="ml-auto text-xs">Principal</Badge>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-sm font-medium">Emails Adicionais</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Adicione outros emails relacionados (bancos, intermediários, etc.)
+              </p>
+              
+              {monitoredEmails.length > 0 ? (
+                <div className="space-y-2 mb-3">
+                  {monitoredEmails.map((email) => (
+                    <div key={email} className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
+                      <AtSign className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm flex-1">{email}</span>
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive" onClick={() => handleRemoveMonitoredEmail(email)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground italic mb-3">
+                  Nenhum email adicional configurado
+                </p>
+              )}
+
+              <div className="flex gap-2">
+                <Input
+                  placeholder="email@exemplo.pt"
+                  value={newMonitoredEmail}
+                  onChange={(e) => setNewMonitoredEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddMonitoredEmail()}
+                />
+                <Button onClick={handleAddMonitoredEmail} disabled={addingEmail} size="sm">
+                  {addingEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t">
+              <Label className="text-sm font-medium">Contas da Empresa</Label>
+              <div className="space-y-1 mt-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <Badge variant="outline" className="text-xs">Precision</Badge>
+                  geral@precisioncredito.pt
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <Badge variant="outline" className="text-xs">Power</Badge>
+                  geral@powerealestate.pt
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsSettingsOpen(false)}>
+              Fechar
+            </Button>
+            <Button onClick={() => { setIsSettingsOpen(false); handleSyncEmails(); }} className="bg-teal-600 hover:bg-teal-700">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Sincronizar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Associação */}
+      <Dialog open={isAssociateDialogOpen} onOpenChange={setIsAssociateDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link className="h-5 w-5" />
+              Associar Email ao Cliente
+            </DialogTitle>
+            <DialogDescription>
+              Pesquise um email existente para associar a este cliente.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Pesquisar por assunto ou remetente..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearchEmails()}
+              />
+              <Button onClick={handleSearchEmails} disabled={searching}>
+                {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              </Button>
+            </div>
+
+            <ScrollArea className="h-[300px] border rounded-md p-2">
+              {searchResults.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Search className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">
+                    {searchQuery.length > 0 ? "Nenhum resultado" : "Pesquise para ver resultados"}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {searchResults.map((email) => (
+                    <div key={email.id} className="p-3 border rounded-lg hover:bg-muted/50">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{email.subject}</p>
+                          <p className="text-xs text-muted-foreground truncate">De: {email.from_email}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-muted-foreground">
+                              {email.sent_at && format(parseISO(email.sent_at), "dd/MM/yyyy")}
+                            </span>
+                            {email.client_name && (
+                              <Badge variant="outline" className="text-xs">
+                                Já: {email.client_name}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => handleAssociateEmail(email.id)}
+                          disabled={associating === email.id || email.process_id === processId}
+                        >
+                          {associating === email.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : email.process_id === processId ? (
+                            "Já associado"
+                          ) : (
+                            <>
+                              <Link className="h-4 w-4 mr-1" />
+                              Associar
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsAssociateDialogOpen(false); setSearchQuery(""); setSearchResults([]); }}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Criar Email */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
@@ -638,15 +1369,11 @@ const EmailHistoryPanel = ({
               {newEmail.direction === "sent" ? "Registar Email Enviado" : "Registar Email Recebido"}
             </DialogTitle>
             <DialogDescription>
-              {newEmail.direction === "sent" 
-                ? "Registe um email que foi enviado ao cliente"
-                : "Registe um email que foi recebido do cliente"
-              }
+              {newEmail.direction === "sent" ? "Registe um email enviado ao cliente" : "Registe um email recebido do cliente"}
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
-            {/* Direção */}
             <div className="space-y-2">
               <Label>Tipo</Label>
               <Select 
@@ -664,14 +1391,12 @@ const EmailHistoryPanel = ({
                 <SelectContent>
                   <SelectItem value="sent">
                     <div className="flex items-center gap-2">
-                      <Send className="h-4 w-4" />
-                      Email Enviado
+                      <Send className="h-4 w-4" /> Email Enviado
                     </div>
                   </SelectItem>
                   <SelectItem value="received">
                     <div className="flex items-center gap-2">
-                      <Inbox className="h-4 w-4" />
-                      Email Recebido
+                      <Inbox className="h-4 w-4" /> Email Recebido
                     </div>
                   </SelectItem>
                 </SelectContent>
@@ -690,7 +1415,7 @@ const EmailHistoryPanel = ({
               <div className="space-y-2">
                 <Label>Para *</Label>
                 <Input
-                  placeholder="email@exemplo.pt (separar com vírgula)"
+                  placeholder="email@exemplo.pt"
                   value={newEmail.to_emails}
                   onChange={(e) => setNewEmail(prev => ({ ...prev, to_emails: e.target.value }))}
                 />
@@ -719,7 +1444,7 @@ const EmailHistoryPanel = ({
             <div className="space-y-2">
               <Label>Notas (opcional)</Label>
               <Input
-                placeholder="Notas internas sobre este email"
+                placeholder="Notas internas"
                 value={newEmail.notes}
                 onChange={(e) => setNewEmail(prev => ({ ...prev, notes: e.target.value }))}
               />
@@ -730,11 +1455,7 @@ const EmailHistoryPanel = ({
             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button 
-              onClick={handleCreateEmail} 
-              disabled={creating}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
+            <Button onClick={handleCreateEmail} disabled={creating} className="bg-teal-600 hover:bg-teal-700">
               {creating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
               Registar Email
             </Button>
@@ -742,221 +1463,37 @@ const EmailHistoryPanel = ({
         </DialogContent>
       </Dialog>
 
-      {/* Dialog de Configurações de Emails Monitorizados */}
-      <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AtSign className="h-5 w-5" />
-              Emails Monitorizados
-            </DialogTitle>
-            <DialogDescription>
-              Configure os emails que serão sincronizados para este processo.
-              Os emails de geral@powerealestate.pt e geral@precisioncredito.pt são verificados automaticamente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            {/* Email principal do cliente */}
-            <div>
-              <Label className="text-sm font-medium">Email Principal do Cliente</Label>
-              <div className="flex items-center gap-2 mt-1 p-2 bg-muted rounded-md">
-                <Mail className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm">{clientEmail || "Não definido"}</span>
-                <Badge variant="outline" className="ml-auto text-xs">Principal</Badge>
-              </div>
-            </div>
-
-            {/* Emails adicionais */}
-            <div>
-              <Label className="text-sm font-medium">Emails Adicionais</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Adicione outros emails relacionados com este processo (bancos, intermediários, etc.)
-              </p>
-              
-              {/* Lista de emails monitorizados */}
-              {monitoredEmails.length > 0 ? (
-                <div className="space-y-2 mb-3">
-                  {monitoredEmails.map((email) => (
-                    <div key={email} className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
-                      <AtSign className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm flex-1">{email}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                        onClick={() => handleRemoveMonitoredEmail(email)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground italic mb-3">
-                  Nenhum email adicional configurado
-                </p>
-              )}
-
-              {/* Adicionar novo email */}
-              <div className="flex gap-2">
-                <Input
-                  placeholder="email@exemplo.pt"
-                  value={newMonitoredEmail}
-                  onChange={(e) => setNewMonitoredEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddMonitoredEmail()}
+      {/* Preview de Anexo */}
+      {attachmentPreview && (
+        <Dialog open={!!attachmentPreview} onOpenChange={() => setAttachmentPreview(null)}>
+          <DialogContent className="sm:max-w-[800px]">
+            <DialogHeader>
+              <DialogTitle>{attachmentPreview.filename}</DialogTitle>
+            </DialogHeader>
+            <div className="flex items-center justify-center min-h-[400px] bg-muted/50 rounded-lg">
+              {attachmentPreview.previewUrl ? (
+                <img 
+                  src={attachmentPreview.previewUrl} 
+                  alt={attachmentPreview.filename}
+                  className="max-w-full max-h-[500px] object-contain"
                 />
-                <Button 
-                  onClick={handleAddMonitoredEmail}
-                  disabled={addingEmail}
-                  size="sm"
-                >
-                  {addingEmail ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-            </div>
-
-            {/* Contas de email da empresa */}
-            <div className="pt-2 border-t">
-              <Label className="text-sm font-medium">Contas da Empresa</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Emails da empresa onde os emails são sincronizados
-              </p>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-sm">
-                  <Badge variant="outline" className="text-xs">Precision</Badge>
-                  geral@precisioncredito.pt
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Badge variant="outline" className="text-xs">Power</Badge>
-                  geral@powerealestate.pt
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsSettingsOpen(false)}>
-              Fechar
-            </Button>
-            <Button 
-              onClick={() => {
-                setIsSettingsOpen(false);
-                handleSyncEmails();
-              }}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Sincronizar Agora
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* TAREFA 1: Dialog para Associar Email Manualmente */}
-      <Dialog open={isAssociateDialogOpen} onOpenChange={setIsAssociateDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Link className="h-5 w-5" />
-              Associar Email ao Cliente
-            </DialogTitle>
-            <DialogDescription>
-              Pesquise um email existente pelo assunto ou remetente para associar a este cliente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            {/* Pesquisa */}
-            <div className="flex gap-2">
-              <Input
-                placeholder="Pesquisar por assunto ou remetente..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearchEmails()}
-              />
-              <Button onClick={handleSearchEmails} disabled={searching}>
-                {searching ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Search className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-
-            {/* Resultados */}
-            <ScrollArea className="h-[300px] border rounded-md p-2">
-              {searchResults.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Search className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">
-                    {searchQuery.length > 0 ? "Nenhum resultado encontrado" : "Pesquise para ver resultados"}
-                  </p>
-                </div>
               ) : (
-                <div className="space-y-2">
-                  {searchResults.map((email) => (
-                    <div 
-                      key={email.id}
-                      className="p-3 border rounded-lg hover:bg-muted/50 cursor-pointer"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{email.subject}</p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            De: {email.from_email}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-muted-foreground">
-                              {email.sent_at && format(parseISO(email.sent_at), "dd/MM/yyyy", { locale: pt })}
-                            </span>
-                            {email.client_name && (
-                              <Badge variant="outline" className="text-xs">
-                                Já associado: {email.client_name}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() => handleAssociateEmail(email.id)}
-                          disabled={associating === email.id || email.process_id === processId}
-                          className="shrink-0"
-                        >
-                          {associating === email.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : email.process_id === processId ? (
-                            "Já associado"
-                          ) : (
-                            <>
-                              <Link className="h-4 w-4 mr-1" />
-                              Associar
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="text-center">
+                  <FileText className="h-16 w-16 mx-auto mb-2 text-muted-foreground" />
+                  <p>Preview não disponível</p>
+                  <Button 
+                    className="mt-4"
+                    onClick={() => downloadAttachment(selectedEmailId, attachmentPreview)}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download
+                  </Button>
                 </div>
               )}
-            </ScrollArea>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setIsAssociateDialogOpen(false);
-              setSearchQuery("");
-              setSearchResults([]);
-            }}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 };
