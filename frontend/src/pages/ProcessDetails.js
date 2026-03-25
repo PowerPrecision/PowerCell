@@ -1351,7 +1351,7 @@ const ProcessDetails = () => {
               </CardHeader>
               <CardContent>
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-5 lg:grid-cols-6">
+                  <TabsList className="grid w-full grid-cols-6">
                     <TabsTrigger value="personal" className="gap-2">
                       <User className="h-4 w-4" />
                       <span className="hidden sm:inline">Pessoais</span>
@@ -1371,6 +1371,10 @@ const ProcessDetails = () => {
                     <TabsTrigger value="documents" className="gap-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
                       <FolderOpen className="h-4 w-4" />
                       <span className="hidden sm:inline">Documentos</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="emails" className="gap-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
+                      <Send className="h-4 w-4" />
+                      <span className="hidden sm:inline">Emails</span>
                     </TabsTrigger>
                   </TabsList>
 
@@ -2277,6 +2281,40 @@ const ProcessDetails = () => {
                       </Card>
                     </div>
                   </TabsContent>
+
+                  {/* Emails Tab - Histórico de Emails do Processo */}
+                  <TabsContent value="emails" className="mt-4">
+                    <div className="space-y-4">
+                      {/* Header com info */}
+                      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg">
+                            <Send className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-blue-800 dark:text-blue-200">Histórico de Emails</h3>
+                            <p className="text-sm text-blue-600 dark:text-blue-400">
+                              Emails associados a este processo
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Painel de Emails */}
+                      <Card className="border-blue-200 dark:border-blue-800">
+                        <CardContent className="pt-6">
+                          <EmailHistoryPanel 
+                            processId={id}
+                            clientEmail={process?.client_email}
+                            clientName={process?.client_name}
+                            compact={false}
+                            maxHeight="500px"
+                            token={token}
+                          />
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </TabsContent>
                 </Tabs>
 
                 {/* Notas extraídas por IA */}
@@ -2497,43 +2535,6 @@ const ProcessDetails = () => {
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Emails */}
-              <AccordionItem value="emails" className="border rounded-lg">
-                <AccordionTrigger className="px-3 py-2 text-sm hover:no-underline">
-                  <span className="flex items-center gap-2">
-                    <Send className="h-4 w-4" />
-                    Histórico de Emails
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent className="px-3 pb-3">
-                  <EmailHistoryPanel 
-                    processId={id}
-                    clientEmail={process?.client_email}
-                    clientName={process?.client_name}
-                    compact={true}
-                    maxHeight="200px"
-                    token={token}
-                  />
-                </AccordionContent>
-              </AccordionItem>
-
-              {/* Documentos Unificados - Ficheiros + Links Drive */}
-              <AccordionItem value="docs" className="border rounded-lg">
-                <AccordionTrigger className="px-3 py-2 text-sm hover:no-underline">
-                  <span className="flex items-center gap-2">
-                    <FolderOpen className="h-4 w-4" />
-                    Documentos
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent className="px-3 pb-3 overflow-x-auto">
-                  <UnifiedDocumentsPanel 
-                    key={documentsRefreshKey}
-                    processId={id}
-                    clientName={process?.client_name}
-                    onAIDataExtracted={handleAIDataExtractedFromDocs}
-                  />
-                </AccordionContent>
-              </AccordionItem>
             </Accordion>
             )}
 
