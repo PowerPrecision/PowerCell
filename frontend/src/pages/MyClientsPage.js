@@ -136,7 +136,7 @@ const MyClientsPage = () => {
         {/* Header */}
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Os Meus Clientes</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Os Meus Processos</h1>
             <p className="text-gray-500 text-sm mt-1">
               Visão geral dos processos atribuídos a si
             </p>
@@ -153,7 +153,7 @@ const MyClientsPage = () => {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">{stats.total}</p>
-                  <p className="text-sm text-gray-500">Total de Clientes</p>
+                  <p className="text-sm text-gray-500">Total de Processos</p>
                 </div>
               </div>
             </CardContent>
@@ -223,14 +223,14 @@ const MyClientsPage = () => {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">
-              Lista de Clientes ({filteredClients.length})
+              Lista de Processos ({filteredClients.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
             {filteredClients.length === 0 ? (
               <div className="text-center py-12 text-gray-500" data-testid="empty-state">
                 <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>Nenhum cliente encontrado</p>
+                <p>Nenhum processo encontrado</p>
                 {searchTerm && (
                   <p className="text-sm mt-2">
                     Tente ajustar os filtros de pesquisa

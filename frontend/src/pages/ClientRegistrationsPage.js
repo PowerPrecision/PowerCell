@@ -242,48 +242,76 @@ const ClientRegistrationsPage = () => {
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Stats - Melhorado com progress bars */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
+          <Card className="border-l-4 border-l-blue-500">
             <CardContent className="pt-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                  <Users className="h-5 w-5 text-blue-600" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{total}</p>
-                  <p className="text-xs text-muted-foreground">Total Registados</p>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
+                    <Users className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{total}</p>
+                    <p className="text-xs text-muted-foreground">Total Registados</p>
+                  </div>
                 </div>
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-l-4 border-l-green-500">
             <CardContent className="pt-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                  <CheckCircle className="h-5 w-5 text-green-600" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-green-100 dark:bg-green-900/30 rounded-xl">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">
+                      {clients.filter(c => c.has_process).length}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Com Processo</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-2xl font-bold">
-                    {clients.filter(c => c.has_process).length}
+                <div className="text-right">
+                  <p className="text-sm font-medium text-green-600">
+                    {total > 0 ? Math.round((clients.filter(c => c.has_process).length / total) * 100) : 0}%
                   </p>
-                  <p className="text-xs text-muted-foreground">Com Processo</p>
                 </div>
+              </div>
+              <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-green-500 rounded-full transition-all duration-500"
+                  style={{ width: `${total > 0 ? (clients.filter(c => c.has_process).length / total) * 100 : 0}%` }}
+                />
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-l-4 border-l-orange-500">
             <CardContent className="pt-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
-                  <XCircle className="h-5 w-5 text-orange-600" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-orange-100 dark:bg-orange-900/30 rounded-xl">
+                    <XCircle className="h-5 w-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">
+                      {clients.filter(c => !c.has_process).length}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Sem Processo</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-2xl font-bold">
-                    {clients.filter(c => !c.has_process).length}
+                <div className="text-right">
+                  <p className="text-sm font-medium text-orange-600">
+                    {total > 0 ? Math.round((clients.filter(c => !c.has_process).length / total) * 100) : 0}%
                   </p>
-                  <p className="text-xs text-muted-foreground">Sem Processo</p>
                 </div>
+              </div>
+              <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-orange-500 rounded-full transition-all duration-500"
+                  style={{ width: `${total > 0 ? (clients.filter(c => !c.has_process).length / total) * 100 : 0}%` }}
+                />
               </div>
             </CardContent>
           </Card>
@@ -357,25 +385,33 @@ const ClientRegistrationsPage = () => {
           </CardContent>
         </Card>
 
-        {/* Clients List */}
+        {/* Clients List - Design melhorado */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Clientes Registados ({total})</CardTitle>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Clientes Registados ({total})
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (
               <TableSkeleton rows={6} columns={5} />
             ) : clients.length === 0 ? (
-              <div className="text-center py-12">
-                <Users className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground">
+              <div className="text-center py-16">
+                <div className="mx-auto w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-muted-foreground/50" />
+                </div>
+                <p className="text-muted-foreground font-medium">
                   Nenhum cliente encontrado
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Os clientes que se registarem aparecerão aqui
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {/* Table Header */}
-                <div className="grid grid-cols-12 gap-2 px-3 py-2 text-sm font-medium text-muted-foreground border-b bg-muted/50">
+                <div className="hidden md:grid grid-cols-12 gap-3 px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 rounded-lg border">
                   <div className="col-span-3">Cliente</div>
                   <div className="col-span-2">Contacto</div>
                   <div className="col-span-2">NIF</div>
@@ -384,28 +420,34 @@ const ClientRegistrationsPage = () => {
                   <div className="col-span-1 text-right">Acções</div>
                 </div>
 
-                {/* Rows */}
+                {/* Rows - Design melhorado */}
                 {clients.map((client) => (
                   <div
                     key={client.id}
-                    className="grid grid-cols-12 gap-2 px-3 py-3 items-center hover:bg-muted/50 rounded-lg border-b"
+                    className={`grid grid-cols-1 md:grid-cols-12 gap-3 px-4 py-4 items-center hover:bg-primary/5 rounded-xl border transition-all duration-200 ${
+                      client.has_process 
+                        ? 'border-l-4 border-l-green-500 bg-green-50/30 dark:bg-green-900/10' 
+                        : 'border-l-4 border-l-orange-500 bg-orange-50/30 dark:bg-orange-900/10'
+                    }`}
                   >
                     <div className="col-span-3">
                       <div className="flex items-center gap-3">
-                        <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
-                          <span className="text-sm font-medium text-primary">
-                            {client.nome?.charAt(0)?.toUpperCase() || "?"}
-                          </span>
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center font-semibold ${
+                          client.has_process 
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' 
+                            : 'bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300'
+                        }`}>
+                          {client.nome?.charAt(0)?.toUpperCase() || "?"}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <button
                             onClick={() => handleViewClientDetails(client.id)}
-                            className="font-medium text-left hover:text-primary transition-colors cursor-pointer"
+                            className="font-semibold text-left hover:text-primary transition-colors cursor-pointer truncate block"
                           >
                             {client.nome}
                           </button>
                           {client.fonte && (
-                            <Badge variant="outline" className="text-xs mt-1">
+                            <Badge variant="outline" className="text-[10px] mt-1 px-1.5 py-0">
                               {client.fonte}
                             </Badge>
                           )}
@@ -413,61 +455,62 @@ const ClientRegistrationsPage = () => {
                       </div>
                     </div>
                     
-                    <div className="col-span-2 space-y-1">
+                    <div className="col-span-2 space-y-1.5">
                       {client.contacto?.email && (
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Mail className="h-3 w-3" />
-                          <span className="truncate">{client.contacto.email}</span>
+                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+                          <span className="truncate" title={client.contacto.email}>{client.contacto.email}</span>
                         </div>
                       )}
                       {client.contacto?.telefone && (
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Phone className="h-3 w-3" />
-                          {client.contacto.telefone}
+                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <Phone className="h-3.5 w-3.5 flex-shrink-0" />
+                          <span>{client.contacto.telefone}</span>
                         </div>
                       )}
                     </div>
                     
                     <div className="col-span-2">
                       {client.nif ? (
-                        <div className="flex items-center gap-1">
-                          <Hash className="h-3 w-3 text-muted-foreground" />
-                          <span className="font-mono text-sm">{client.nif}</span>
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-muted/50 rounded-md w-fit">
+                          <Hash className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="font-mono text-sm font-medium">{client.nif}</span>
                         </div>
                       ) : (
-                        <span className="text-muted-foreground text-sm">-</span>
+                        <span className="text-muted-foreground text-sm italic">Não preenchido</span>
                       )}
                     </div>
                     
                     <div className="col-span-2">
                       {client.has_process ? (
                         <div className="flex flex-col gap-1">
-                          <Badge className="bg-green-600 text-white text-xs">
+                          <Badge className="bg-green-600 text-white text-xs px-2 py-1">
                             <CheckCircle className="h-3 w-3 mr-1" />
                             Tem Processo
                           </Badge>
                           {client.processes?.length > 0 && (
-                            <span className="text-xs text-muted-foreground">
+                            <span className="text-xs text-muted-foreground font-mono">
                               #{client.processes[0].process_number}
                             </span>
                           )}
                         </div>
                       ) : (
-                        <Badge variant="outline" className="text-orange-600 border-orange-300 text-xs">
+                        <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50 dark:bg-orange-900/20 text-xs px-2 py-1">
                           <XCircle className="h-3 w-3 mr-1" />
                           Sem Processo
                         </Badge>
                       )}
                     </div>
                     
-                    <div className="col-span-2 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        {formatDate(client.created_at)}
+                    <div className="col-span-2 text-sm">
+                      <div className="flex items-center gap-1.5 text-muted-foreground">
+                        <Calendar className="h-3.5 w-3.5" />
+                        <span>{formatDate(client.created_at)}</span>
                       </div>
                       {client.assigned_to_name && (
-                        <div className="text-xs mt-1">
-                          Atribuído a: {client.assigned_to_name}
+                        <div className="text-xs mt-1.5 flex items-center gap-1 text-primary">
+                          <User className="h-3 w-3" />
+                          {client.assigned_to_name}
                         </div>
                       )}
                     </div>
@@ -475,23 +518,26 @@ const ClientRegistrationsPage = () => {
                     <div className="col-span-1 flex justify-end gap-1">
                       {client.has_process && client.processes?.length > 0 && (
                         <Button
-                          variant="ghost"
+                          variant="default"
                           size="sm"
                           onClick={() => navigate(`/process/${client.processes[0].id}`)}
                           title="Ver processo"
+                          className="h-8"
                         >
-                          <Eye className="h-4 w-4" />
+                          <Eye className="h-4 w-4 mr-1" />
+                          Ver
                         </Button>
                       )}
                       {!client.has_process && canAssign && (
                         <Button
-                          variant="ghost"
+                          variant="default"
                           size="sm"
                           onClick={() => setAssignDialog({ open: true, client })}
                           title="Atribuir e criar processo"
-                          className="text-primary hover:text-primary"
+                          className="h-8"
                         >
-                          <UserPlus className="h-4 w-4" />
+                          <UserPlus className="h-4 w-4 mr-1" />
+                          Atribuir
                         </Button>
                       )}
                     </div>
