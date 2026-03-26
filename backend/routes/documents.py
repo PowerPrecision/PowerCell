@@ -300,119 +300,138 @@ async def upload_file_s3(
     - O campo empresa_nif é OBRIGATÓRIO
     - Deve conter o NIF da empresa onde o cliente trabalha
     """
-    # Verificar se utilizador "indexacao" forneceu o NIF da empresa
-    if user.get("role") == "indexacao":
-        if not empresa_nif:
-            raise HTTPException(
-                status_code=400, 
-                detail="O NIF da empresa é obrigatório para utilizadores de indexação. Por favor, insira o NIF da entidade empregadora do cliente."
-            )
-        # Validar formato do NIF (9 dígitos)
-        import re
-        if not re.match(r'^\d{9}$', empresa_nif):
-            raise HTTPException(
-                status_code=400,
-                detail="NIF da empresa inválido. Deve conter exatamente 9 dígitos."
-            )
-    
-    process = await db.processes.find_one({"id": client_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
-    
-    # Se empresa_nif foi fornecido, guardar no processo
-    if empresa_nif:
-        personal_data = process.get("personal_data", {})
-        personal_data["employer_nif"] = empresa_nif
-        await db.processes.update_one(
-            {"id": client_id},
-            {"$set": {"personal_data": personal_data}}
-        )
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    # Obter segundo titular se existir (com verificação de None)
-    titular2_upload = process.get("titular2_data") or {}
-    second_client_name = process.get("second_client_name") or titular2_upload.get("nome") or titular2_upload.get("name")
-    
-    # Obter mapeamento S3 configurado (prioridade máxima)
-    s3_folder = process.get("s3_folder")
-    
-    # Ler o conteúdo do ficheiro
-    file_content = await file.read()
-    original_filename = file.filename
-    content_type = file.content_type
-    
-    # ====================================================================
-    # SEGURANÇA: Validar MIME type usando magic bytes (não apenas extensão)
-    # Isto previne uploads de executáveis disfarçados como documentos
-    # ====================================================================
     try:
-        validate_file_content(file_content, original_filename)
-    except HTTPException as e:
-        logger.warning(f"[SECURITY] Ficheiro rejeitado: {original_filename} - {e.detail}")
-        raise
-    
-    # Verificar se é uma imagem e converter para PDF
-    converted_to_pdf = False
-    if is_image_file(original_filename, content_type) and IMG2PDF_AVAILABLE:
+        # Verificar se S3 está configurado
+        if not s3_service.is_configured():
+            raise HTTPException(
+                status_code=503, 
+                detail="Serviço de armazenamento S3 não configurado. Contacte o administrador para configurar as credenciais AWS."
+            )
+        
+        # Verificar se utilizador "indexacao" forneceu o NIF da empresa
+        if user.get("role") == "indexacao":
+            if not empresa_nif:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="O NIF da empresa é obrigatório para utilizadores de indexação. Por favor, insira o NIF da entidade empregadora do cliente."
+                )
+            # Validar formato do NIF (9 dígitos)
+            import re
+            if not re.match(r'^\d{9}$', empresa_nif):
+                raise HTTPException(
+                    status_code=400,
+                    detail="NIF da empresa inválido. Deve conter exatamente 9 dígitos."
+                )
+        
+        process = await db.processes.find_one({"id": client_id})
+        if not process:
+            raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
+        
+        # Se empresa_nif foi fornecido, guardar no processo
+        if empresa_nif:
+            personal_data = process.get("personal_data", {})
+            personal_data["employer_nif"] = empresa_nif
+            await db.processes.update_one(
+                {"id": client_id},
+                {"$set": {"personal_data": personal_data}}
+            )
+        
+        client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+        # Obter segundo titular se existir (com verificação de None)
+        titular2_upload = process.get("titular2_data") or {}
+        second_client_name = process.get("second_client_name") or titular2_upload.get("nome") or titular2_upload.get("name")
+        
+        # Obter mapeamento S3 configurado (prioridade máxima)
+        s3_folder = process.get("s3_folder")
+        
+        # Ler o conteúdo do ficheiro
+        file_content = await file.read()
+        original_filename = file.filename
+        content_type = file.content_type
+        
+        # ====================================================================
+        # SEGURANÇA: Validar MIME type usando magic bytes (não apenas extensão)
+        # Isto previne uploads de executáveis disfarçados como documentos
+        # ====================================================================
         try:
-            logger.info(f"A converter imagem para PDF")
-            pdf_bytes, new_filename = await convert_image_to_pdf(file_content, original_filename)
-            
-            if new_filename != original_filename:
-                file_content = pdf_bytes
-                original_filename = new_filename
-                content_type = MIME_TYPE_PDF
-                converted_to_pdf = True
-                logger.info(f"Conversão concluída")
-        except (IOError, OSError, ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Não foi possível converter imagem para PDF: {e}")
-            # Continua com o ficheiro original
+            validate_file_content(file_content, original_filename)
+        except HTTPException as e:
+            logger.warning(f"[SECURITY] Ficheiro rejeitado: {original_filename} - {e.detail}")
+            raise
+        
+        # Verificar se é uma imagem e converter para PDF
+        converted_to_pdf = False
+        if is_image_file(original_filename, content_type) and IMG2PDF_AVAILABLE:
+            try:
+                logger.info(f"A converter imagem para PDF")
+                pdf_bytes, new_filename = await convert_image_to_pdf(file_content, original_filename)
+                
+                if new_filename != original_filename:
+                    file_content = pdf_bytes
+                    original_filename = new_filename
+                    content_type = MIME_TYPE_PDF
+                    converted_to_pdf = True
+                    logger.info(f"Conversão concluída")
+            except (IOError, OSError, ValueError, KeyError, TypeError) as e:
+                logger.warning(f"Não foi possível converter imagem para PDF: {e}")
+                # Continua com o ficheiro original
+        
+        # Normalizar nome do ficheiro
+        normalized_filename = normalize_filename(original_filename, category)
+        logger.info(f"Nome normalizado")
+        
+        # Criar BytesIO para o upload
+        file_buffer = BytesIO(file_content)
+        
+        # Upload para o S3
+        s3_path = s3_service.upload_file(
+            file_buffer,
+            client_id,
+            client_name,
+            category,
+            normalized_filename,
+            content_type,
+            second_client_name=second_client_name,
+            s3_folder=s3_folder
+        )
+        
+        if not s3_path:
+            raise HTTPException(status_code=500, detail=ERROR_S3_UPLOAD_FAILED)
+        
+        # Gerar link temporário para acesso imediato
+        temporary_url = s3_service.get_presigned_url(s3_path) or ""
+        
+        # Agendar categorização automática em background (não bloqueia o response)
+        background_tasks.add_task(
+            auto_categorize_document_background,
+            process_id=client_id,
+            client_name=client_name,
+            s3_path=s3_path,
+            filename=normalized_filename,
+            file_content=file_content
+        )
+        
+        return {
+            "success": True, 
+            "path": s3_path, 
+            "message": "Ficheiro guardado com sucesso",
+            "original_filename": file.filename,
+            "normalized_filename": normalized_filename,
+            "converted_to_pdf": converted_to_pdf,
+            "auto_categorization": "iniciada",  # Indica que categorização foi agendada
+            "temporary_url": temporary_url  # URL para acesso imediato (válido 1 hora)
+        }
     
-    # Normalizar nome do ficheiro
-    normalized_filename = normalize_filename(original_filename, category)
-    logger.info(f"Nome normalizado")
-    
-    # Criar BytesIO para o upload
-    file_buffer = BytesIO(file_content)
-    
-    # Upload para o S3
-    s3_path = s3_service.upload_file(
-        file_buffer,
-        client_id,
-        client_name,
-        category,
-        normalized_filename,
-        content_type,
-        second_client_name=second_client_name,
-        s3_folder=s3_folder
-    )
-    
-    if not s3_path:
-        raise HTTPException(status_code=500, detail=ERROR_S3_UPLOAD_FAILED)
-    
-    # Gerar link temporário para acesso imediato
-    temporary_url = s3_service.get_presigned_url(s3_path) or ""
-    
-    # Agendar categorização automática em background (não bloqueia o response)
-    background_tasks.add_task(
-        auto_categorize_document_background,
-        process_id=client_id,
-        client_name=client_name,
-        s3_path=s3_path,
-        filename=normalized_filename,
-        file_content=file_content
-    )
-    
-    return {
-        "success": True, 
-        "path": s3_path, 
-        "message": "Ficheiro guardado com sucesso",
-        "original_filename": file.filename,
-        "normalized_filename": normalized_filename,
-        "converted_to_pdf": converted_to_pdf,
-        "auto_categorization": "iniciada",  # Indica que categorização foi agendada
-        "temporary_url": temporary_url  # URL para acesso imediato (válido 1 hora)
-    }
+    except HTTPException:
+        # Re-raise HTTPExceptions para manter o status code correto
+        raise
+    except Exception as e:
+        # Log do erro completo para debugging
+        logger.error(f"Erro inesperado no upload: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Erro ao processar upload: {str(e)}"
+        )
 
 @router.post("/client/{client_id}/init-folders", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def initialize_folders(client_id: str, user: dict = Depends(get_current_user)):
