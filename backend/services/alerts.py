@@ -401,7 +401,7 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
     Os outros recebem notificação via sistema interno.
     
     Args:
-        process: Dados do processo
+        process: Dados do processo (pode ter 'client_name' ou 'nome')
         has_property: Se o cliente já tem imóvel (atribuir só intermediários)
     """
     # Buscar administradores e CEO
@@ -409,6 +409,11 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
         "role": {"$in": ["admin", "ceo"]},
         "is_active": True
     }, {"_id": 0}).to_list(100)
+    
+    # Obter nome do cliente (compatível com ambos os formatos)
+    client_name = process.get("client_name") or process.get("nome") or "Cliente"
+    client_email = process.get("client_email") or process.get("contacto", {}).get("email") or ""
+    client_phone = process.get("client_phone") or process.get("contacto", {}).get("telefone") or ""
     
     assignment_note = ""
     if has_property:
@@ -421,12 +426,12 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
         admin = admins[0]
         await send_notification_with_preference_check(
             admin["email"],
-            f"Novo Registo de Cliente: {process.get('client_name', 'Cliente')}",
+            f"Novo Registo de Cliente: {client_name}",
             f"Um novo cliente registou-se no sistema:\n\n"
-            f"Nome: {process.get('client_name')}\n"
-            f"Email: {process.get('client_email')}\n"
-            f"Telefone: {process.get('client_phone')}\n"
-            f"Tipo: {process.get('process_type')}\n"
+            f"Nome: {client_name}\n"
+            f"Email: {client_email}\n"
+            f"Telefone: {client_phone}\n"
+            f"Tipo: {process.get('process_type', 'Não especificado')}\n"
             f"{assignment_note}\n\n"
             f"Por favor, aceda ao sistema para atribuir os responsáveis.",
             notification_type="new_process",
@@ -437,10 +442,10 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
     notification = {
         "id": str(uuid.uuid4()),
         "type": ALERT_TYPES["NEW_CLIENT_REGISTRATION"],
-        "process_id": process["id"],
-        "client_name": process.get("client_name"),
+        "process_id": process.get("id"),
+        "client_name": client_name,
         "has_property": has_property,
-        "message": f"Novo registo: {process.get('client_name')}" + (" (Já tem imóvel)" if has_property else ""),
+        "message": f"Novo registo: {client_name}" + (" (Já tem imóvel)" if has_property else ""),
         "read": False,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
