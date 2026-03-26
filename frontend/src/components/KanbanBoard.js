@@ -714,9 +714,14 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
                     <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30">
                       {column.count}
                     </Badge>
-                    <span className="text-white text-xs font-medium writing-mode-vertical transform -rotate-180 whitespace-nowrap flex-1 flex items-center">
-                      {column.label}
-                    </span>
+                    <div className="flex-1 flex items-center justify-center px-1">
+                      <span
+                        className="text-white text-xs font-medium text-center overflow-hidden"
+                        style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+                      >
+                        {column.label}
+                      </span>
+                    </div>
                     <ChevronRight className="h-4 w-4 text-white/70" />
                   </div>
                 ) : (
