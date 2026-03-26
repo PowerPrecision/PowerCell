@@ -369,11 +369,6 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/validades",
               },
               {
-                label: "Mapeamentos NIF",
-                icon: Database,
-                href: "/admin/mapeamentos-nif",
-              },
-              {
                 label: "Processos Background",
                 icon: LayoutGrid,
                 href: "/admin/processos-background",
