@@ -17,7 +17,7 @@ router = APIRouter(prefix="/search", tags=["Search"])
 
 @router.get("/global")
 async def global_search(
-    q: str = Query(..., min_length=2, description="Termo de pesquisa"),
+    q: str = Query(..., min_length=1, description="Termo de pesquisa"),
     limit: int = Query(5, ge=1, le=20, description="Limite de resultados por tipo"),
     user: dict = Depends(get_current_user)
 ) -> Dict[str, Any]:
@@ -34,6 +34,14 @@ async def global_search(
         }
     """
     search_term = q.strip()
+    
+    # Se o termo for muito curto, retornar resultados vazios (não erro)
+    if len(search_term) < 2:
+        return {
+            "processes": [],
+            "clients": [],
+            "tasks": []
+        }
     
     # Criar regex para pesquisa case-insensitive
     regex_pattern = {"$regex": search_term, "$options": "i"}

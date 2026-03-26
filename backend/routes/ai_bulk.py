@@ -1811,3 +1811,10 @@ async def add_nif_mapping_manual(
         "success": True,
         "message": f"Mapeamento adicionado: '{folder_name}' -> NIF {nif} -> '{process.get('client_name')}'"
     }
+
+
+# ====================================================================
+# INCLUIR ROUTER DE BACKGROUND JOBS
+# ====================================================================
+from routes.ai_bulk.background_jobs import router as background_jobs_router
+router.include_router(background_jobs_router)
