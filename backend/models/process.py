@@ -228,8 +228,8 @@ class RealEstateData(BaseModel):
     ja_tem_imovel: Optional[bool] = None  # Indica se cliente já tem imóvel identificado
     has_property: Optional[bool] = None   # Alias para ja_tem_imovel
     # Novos campos - área, valor e finalidade
-    area_pretendida: Optional[str] = None           # Área pretendida em m²
-    valor_maximo_imovel: Optional[str] = None       # Valor máximo do imóvel em euros
+    area_pretendida: Optional[float] = None           # Área pretendida em m²
+    valor_maximo_imovel: Optional[float] = None       # Valor máximo do imóvel em euros
     finalidade: Optional[str] = None                # compra_imovel, refinanciamento
     ja_tem_casa_escolhida: Optional[bool] = None    # Se já tem casa escolhida
     proprietario_nome: Optional[str] = None         # Nome do proprietário (se já tem casa)
