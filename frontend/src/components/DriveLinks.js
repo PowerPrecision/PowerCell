@@ -108,6 +108,20 @@ const DriveLinks = ({ processId, clientName }) => {
 
   // Abrir pasta do cliente no Drive
   const handleOpenFolder = () => {
+    // Verificar se o URL é válido para o browser (não pode ser s3://)
+    const urlToOpen = savedFolderUrl || mainFolderUrl || storageInfo?.base_url;
+    
+    if (!urlToOpen) {
+      toast.error("Armazenamento não configurado. Contacte o administrador.");
+      return;
+    }
+    
+    // URLs s3:// não podem ser abertas no browser
+    if (urlToOpen.startsWith("s3://")) {
+      toast.error("Os ficheiros S3 são acedidos através da área de Documentos. O browser não consegue abrir URLs s3:// diretamente.");
+      return;
+    }
+    
     if (savedFolderUrl) {
       window.open(savedFolderUrl, "_blank");
     } else if (mainFolderUrl) {
@@ -116,8 +130,6 @@ const DriveLinks = ({ processId, clientName }) => {
     } else if (storageInfo?.base_url) {
       window.open(storageInfo.base_url, "_blank");
       toast.info(`Procure pela pasta "${clientName}" no ${storageInfo.provider_label}`, { duration: 5000 });
-    } else {
-      toast.error("Armazenamento não configurado. Contacte o administrador.");
     }
   };
 
