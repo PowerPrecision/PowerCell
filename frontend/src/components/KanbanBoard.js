@@ -715,7 +715,10 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
                       {column.count}
                     </Badge>
                     <div className="flex-1 flex items-center justify-center px-1">
-                      <span className="text-white text-xs font-medium text-center whitespace-nowrap overflow-hidden text-ellipsis max-h-[50vh]">
+                      <span
+                        className="text-white text-xs font-medium text-center overflow-hidden"
+                        style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+                      >
                         {column.label}
                       </span>
                     </div>
