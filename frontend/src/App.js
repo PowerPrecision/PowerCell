@@ -33,7 +33,6 @@ const SystemConfigPage = React.lazy(() => import("./pages/SystemConfigPage"));
 const AIConfigPage = React.lazy(() => import("./pages/AIConfigPage"));
 const AITrainingPage = React.lazy(() => import("./pages/AITrainingPage"));
 const BackgroundJobsPage = React.lazy(() => import("./pages/BackgroundJobsPage"));
-const NIFMappingsPage = React.lazy(() => import("./pages/NIFMappingsPage"));
 const NotificationSettingsPage = React.lazy(() => import("./pages/NotificationSettingsPage"));
 const UnifiedLogsPage = React.lazy(() => import("./pages/UnifiedLogsPage"));
 const PropertiesPage = React.lazy(() => import("./pages/PropertiesPage"));
@@ -367,16 +366,6 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
                 <AITrainingPage />
-              </ProtectedRoute>
-            }
-          />
-          
-          {/* NIF Mappings - Admin only */}
-          <Route
-            path="/admin/mapeamentos-nif"
-            element={
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <NIFMappingsPage />
               </ProtectedRoute>
             }
           />
