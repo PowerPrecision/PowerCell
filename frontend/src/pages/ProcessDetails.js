@@ -1166,18 +1166,6 @@ const ProcessDetails = () => {
               </Button>
             )}
 
-            {/* Botão Documentos - Destaque para fácil acesso */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-amber-600 border-amber-200 hover:bg-amber-50 bg-amber-50/50"
-              onClick={() => setActiveTab("documents")}
-              title="Ver Documentos"
-            >
-              <FolderOpen className="h-4 w-4 mr-2" />
-              Documentos
-            </Button>
-
             {/* Calculadoras */}
             {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
               <>
