@@ -13,6 +13,7 @@ SEGURANÇA:
 import re
 import uuid
 import logging
+import copy
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Tuple
 
@@ -396,16 +397,32 @@ def decrypt_sensitive_data(data: dict) -> dict:
     Returns:
         Dicionário com campos sensíveis desencriptados
     """
-    if not encryption_service.is_available() or not data:
+    if not data:
         return data
     
-    result = data.copy()
+    # Usar cópia profunda para evitar modificar o original
+    result = copy.deepcopy(data)
+    
+    # Função auxiliar para desencriptar campo
+    def decrypt_field(value):
+        if not value or not isinstance(value, str):
+            return value
+        if not value.startswith("ENC:"):
+            return value
+        # Tentar desencriptar mesmo se o serviço não estiver "disponível"
+        try:
+            decrypted = encryption_service.decrypt(value)
+            if decrypted and not decrypted.startswith("ENC:"):
+                return decrypted
+        except Exception as e:
+            logger.warning(f"Erro ao desencriptar valor: {e}")
+        return value
     
     # Desencriptar campos no nível raiz
     root_fields = ["client_phone", "client_nif"]
     for field in root_fields:
         if field in result and result[field]:
-            result[field] = encryption_service.decrypt(str(result[field]))
+            result[field] = decrypt_field(result[field])
     
     # Desencriptar sub-dicionários
     sections = {
@@ -420,7 +437,7 @@ def decrypt_sensitive_data(data: dict) -> dict:
         if section in result and isinstance(result[section], dict):
             for field in fields:
                 if field in result[section] and result[section][field]:
-                    result[section][field] = encryption_service.decrypt(str(result[section][field]))
+                    result[section][field] = decrypt_field(result[section][field])
     
     # Desencriptar listas de co-compradores/co-proponentes
     for list_field in ["co_buyers", "co_applicants"]:
@@ -430,7 +447,7 @@ def decrypt_sensitive_data(data: dict) -> dict:
                 if isinstance(item, dict):
                     for field in list_fields:
                         if field in item and item[field]:
-                            result[list_field][i][field] = encryption_service.decrypt(str(item[field]))
+                            result[list_field][i][field] = decrypt_field(item[field])
     
     return result
 

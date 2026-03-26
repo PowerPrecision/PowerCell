@@ -15,6 +15,7 @@ SEGURANÇA:
 
 import uuid
 import logging
+import copy
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -60,24 +61,44 @@ def encrypt_client_data(data: dict) -> dict:
 
 def decrypt_client_data(data: dict) -> dict:
     """Desencripta campos sensíveis de um cliente."""
-    if not encryption_service.is_available() or not data:
+    if not data:
         return data
     
-    result = data.copy()
+    # Usar cópia profunda para evitar modificar o original
+    result = copy.deepcopy(data)
+    
+    # Função auxiliar para desencriptar campo
+    def decrypt_field(value):
+        if not value or not isinstance(value, str):
+            return value
+        if not value.startswith("ENC:"):
+            return value
+        # Tentar desencriptar mesmo se o serviço não estiver "disponível"
+        try:
+            decrypted = encryption_service.decrypt(value)
+            if decrypted and not decrypted.startswith("ENC:"):
+                return decrypted
+        except Exception as e:
+            logger.warning(f"Erro ao desencriptar valor: {e}")
+        return value
     
     # Desencriptar dados_pessoais
     if "dados_pessoais" in result and isinstance(result["dados_pessoais"], dict):
         fields = ["nif", "documento_id", "morada_fiscal", "phone", "telefone"]
         for field in fields:
             if field in result["dados_pessoais"] and result["dados_pessoais"][field]:
-                result["dados_pessoais"][field] = encryption_service.decrypt(str(result["dados_pessoais"][field]))
+                result["dados_pessoais"][field] = decrypt_field(result["dados_pessoais"][field])
     
     # Desencriptar contacto
     if "contacto" in result and isinstance(result["contacto"], dict):
         fields = ["telefone", "telefone_secundario", "phone"]
         for field in fields:
             if field in result["contacto"] and result["contacto"][field]:
-                result["contacto"][field] = encryption_service.decrypt(str(result["contacto"][field]))
+                result["contacto"][field] = decrypt_field(result["contacto"][field])
+    
+    # Desencriptar campo nif no nível raiz (se existir)
+    if "nif" in result and result["nif"]:
+        result["nif"] = decrypt_field(result["nif"])
     
     return result
 
