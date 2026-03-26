@@ -695,27 +695,29 @@ const EmailHistoryPanel = ({
               </Button>
             </div>
             
-            {/* Botões de acção */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Botões de acção - responsivo */}
+            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => openWebmail('precision')}
                 title="Abrir Webmail Precision"
+                className="px-2 sm:px-3"
               >
-                <Mail className="h-4 w-4 mr-1" />
-                <span className="text-xs">Precision</span>
-                <ExternalLink className="h-3 w-3 ml-1" />
+                <Mail className="h-4 w-4 sm:mr-1" />
+                <span className="text-xs hidden sm:inline">Precision</span>
+                <ExternalLink className="h-3 w-3 ml-1 hidden sm:inline" />
               </Button>
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => openWebmail('power')}
                 title="Abrir Webmail Power"
+                className="px-2 sm:px-3"
               >
-                <Mail className="h-4 w-4 mr-1" />
-                <span className="text-xs">Power</span>
-                <ExternalLink className="h-3 w-3 ml-1" />
+                <Mail className="h-4 w-4 sm:mr-1" />
+                <span className="text-xs hidden sm:inline">Power</span>
+                <ExternalLink className="h-3 w-3 ml-1 hidden sm:inline" />
               </Button>
               
               {/* Templates */}
@@ -723,30 +725,33 @@ const EmailHistoryPanel = ({
                 size="sm" 
                 variant="outline"
                 onClick={() => setIsTemplateDialogOpen(true)}
-                className="bg-purple-50 hover:bg-purple-100 border-purple-200"
+                title="Templates"
+                className="bg-purple-50 hover:bg-purple-100 border-purple-200 px-2 sm:px-3"
               >
-                <Sparkles className="h-4 w-4 mr-1 text-purple-500" />
-                <span className="text-xs">Templates</span>
+                <Sparkles className="h-4 w-4 sm:mr-1 text-purple-500" />
+                <span className="text-xs hidden sm:inline">Templates</span>
               </Button>
               
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => setIsAssociateDialogOpen(true)}
-                className="bg-blue-50 hover:bg-blue-100 border-blue-200"
+                title="Associar email"
+                className="bg-blue-50 hover:bg-blue-100 border-blue-200 px-2 sm:px-3"
               >
-                <Link className="h-4 w-4 mr-1" />
-                <span className="text-xs">Associar</span>
+                <Link className="h-4 w-4 sm:mr-1" />
+                <span className="text-xs hidden sm:inline">Associar</span>
               </Button>
               
               <Button 
                 size="sm" 
                 variant="outline"
                 onClick={() => setIsSettingsOpen(true)}
-                className="bg-amber-50 hover:bg-amber-100 border-amber-200"
+                title="Configurações de emails"
+                className="bg-amber-50 hover:bg-amber-100 border-amber-200 px-2 sm:px-3"
               >
-                <Settings className="h-4 w-4 mr-1" />
-                <span className="text-xs">Emails</span>
+                <Settings className="h-4 w-4 sm:mr-1" />
+                <span className="text-xs hidden sm:inline">Emails</span>
               </Button>
               
               <Button 
@@ -754,13 +759,26 @@ const EmailHistoryPanel = ({
                 variant="outline"
                 onClick={handleSyncEmails}
                 disabled={syncing || (!clientEmail && monitoredEmails.length === 0)}
+                title="Sincronizar emails"
+                className="px-2 sm:px-3"
               >
                 {syncing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <RefreshCw className="h-4 w-4" />
                 )}
-                <span className="text-xs ml-1">Sync</span>
+                <span className="text-xs ml-1 hidden sm:inline">Sync</span>
+              </Button>
+              
+              {/* Botão Novo - sempre visível */}
+              <Button 
+                size="sm"
+                onClick={() => openCreateDialog('sent')}
+                title="Novo email"
+                className="bg-teal-600 hover:bg-teal-700 px-2 sm:px-3"
+              >
+                <Plus className="h-4 w-4 sm:mr-1" />
+                <span className="text-xs hidden sm:inline">Novo</span>
               </Button>
             </div>
             
