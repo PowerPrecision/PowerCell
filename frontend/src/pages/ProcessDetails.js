@@ -683,7 +683,10 @@ const ProcessDetails = () => {
       'data_sinal', 'reforco_sinal', 'comissao_mediacao',
       // Credenciais de portais oficiais
       'portal_financas_utilizador', 'portal_financas_senha',
-      'seg_social_utilizador', 'seg_social_senha'
+      'seg_social_utilizador', 'seg_social_senha',
+      // Situação profissional e rendimentos
+      'monthly_income', 'employment_type', 'employment_duration', 'employer_name',
+      'employer_nif', 'trabalha_estrangeiro', 'bancos_simulacoes', 'tempo_restante_credito'
     ];
     
     const cleaned = {};
