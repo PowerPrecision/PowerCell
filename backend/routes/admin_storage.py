@@ -260,6 +260,7 @@ async def get_process_s3_mappings(
     status: str = Query(None, description="Filtrar por status"),
     has_mapping: bool = Query(None, description="Filtrar por ter/não ter mapeamento"),
     include_closed: bool = Query(False, description="Incluir processos concluídos e desistências"),
+    include_deleted: bool = Query(False, description="Incluir processos eliminados"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     user: dict = Depends(require_roles([UserRole.ADMIN]))
@@ -270,6 +271,15 @@ async def get_process_s3_mappings(
     # Por defeito, excluir processos concluídos e desistências
     if not include_closed:
         query["status"] = {"$nin": ["concluidos", "desistencias"]}
+    
+    # Por defeito, excluir processos eliminados (soft delete)
+    if not include_deleted:
+        query["is_active"] = {"$ne": False}
+        # Também excluir por status "eliminado" para compatibilidade
+        if "status" in query:
+            query["status"]["$nin"] = list(set(query["status"].get("$nin", []) + ["eliminado"]))
+        else:
+            query["status"] = {"$ne": "eliminado"}
     
     if search:
         query["$or"] = [

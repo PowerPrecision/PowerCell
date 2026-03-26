@@ -1595,6 +1595,83 @@ const ProcessDetails = () => {
                         </CardContent>
                       </Card>
                       
+                      {/* 2º Titular */}
+                      {process?.titular2_data && (
+                        <Card className="border-l-4 border-l-cyan-500">
+                          <CardContent className="pt-4">
+                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                              <Users className="h-4 w-4 text-cyan-500" />
+                              2º Titular
+                              <Badge variant="secondary" className="ml-2">
+                                Cônjuge/Co-Titular
+                              </Badge>
+                            </h4>
+                            <div className="grid grid-cols-2 gap-4">
+                              {process.titular2_data.name && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Nome</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.name}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.nif && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">NIF</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.nif}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.email && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Email</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.email}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.phone && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Telefone</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.phone}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.birth_date && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.birth_date}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.estado_civil && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Estado Civil</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.estado_civil}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.naturalidade && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Naturalidade</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.naturalidade}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.nacionalidade && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Nacionalidade</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.nacionalidade}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.documento_id && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Nº Documento</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.documento_id}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.morada_fiscal && (
+                                <div className="space-y-1 col-span-2">
+                                  <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.morada_fiscal}</p>
+                                </div>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                      
                       {/* Co-Compradores / Co-Proponentes */}
                       {(process?.co_buyers?.length > 0 || process?.co_applicants?.length > 0) && (
                         <Card className="border-l-4 border-l-indigo-500">
