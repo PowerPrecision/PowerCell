@@ -10,9 +10,11 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { ScrollArea } from "./ui/scroll-area";
-import { Bell, BellRing, UserPlus, Clock, FileText, Calendar, AlertTriangle, CheckCircle, Volume2, VolumeX, ArrowRight } from "lucide-react";
+import { Bell, BellRing, UserPlus, Clock, FileText, Calendar, AlertTriangle, CheckCircle, Volume2, VolumeX, ArrowRight, Mail, Inbox, Send } from "lucide-react";
 import { getNotifications, markNotificationRead } from "../services/api";
 import { toast } from "sonner";
+
+const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const notificationIcons = {
   new_registration: UserPlus,
@@ -26,6 +28,9 @@ const notificationIcons = {
   process_stale: AlertTriangle,
   process_urgent: Clock,
   clients_waiting: AlertTriangle,
+  new_email: Mail,
+  email_received: Inbox,
+  email_sent: Send,
   default: Bell
 };
 
@@ -41,6 +46,9 @@ const notificationColors = {
   process_stale: "text-red-600 bg-red-50",
   process_urgent: "text-orange-500 bg-orange-50",
   clients_waiting: "text-amber-600 bg-amber-50",
+  new_email: "text-amber-500 bg-amber-50",
+  email_received: "text-emerald-500 bg-emerald-50",
+  email_sent: "text-blue-500 bg-blue-50",
   default: "text-gray-500 bg-gray-50"
 };
 

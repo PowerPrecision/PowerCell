@@ -34,19 +34,18 @@ async def get_stats(user: dict = Depends(get_current_user)):
         process_query = {"assigned_mediador_id": user_id}
     # Admin, CEO, Administrativo e Diretor see all (no filter)
     
-    # Get process count
-    stats["total_processes"] = await db.processes.count_documents(process_query)
-    
     # Process status breakdown
     # Active = not concluded and not dropped out
     concluded_statuses = ["concluidos"]
     dropped_statuses = ["desistencias"]
-    
+
     concluded_query = {**process_query, "status": {"$in": concluded_statuses}} if process_query else {"status": {"$in": concluded_statuses}}
     dropped_query = {**process_query, "status": {"$in": dropped_statuses}} if process_query else {"status": {"$in": dropped_statuses}}
     active_query = {**process_query, "status": {"$nin": concluded_statuses + dropped_statuses}} if process_query else {"status": {"$nin": concluded_statuses + dropped_statuses}}
-    
-    stats["active_processes"] = await db.processes.count_documents(active_query)
+
+    # total_processes = apenas processos ativos (sem concluídos e desistências)
+    stats["total_processes"] = await db.processes.count_documents(active_query)
+    stats["active_processes"] = stats["total_processes"]
     stats["concluded_processes"] = await db.processes.count_documents(concluded_query)
     stats["dropped_processes"] = await db.processes.count_documents(dropped_query)
     

@@ -242,6 +242,18 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
     return () => clearInterval(pollInterval);
   }, [fetchKanbanData]);
 
+  // Colapsar colunas vazias por defeito quando os dados são carregados
+  useEffect(() => {
+    if (kanbanData.columns.length > 0 && collapsedColumns.size === 0) {
+      const emptyColumnIds = kanbanData.columns
+        .filter(col => col.count === 0)
+        .map(col => col.id);
+      if (emptyColumnIds.length > 0) {
+        setCollapsedColumns(new Set(emptyColumnIds));
+      }
+    }
+  }, [kanbanData.columns]);
+
   const handleDragStart = (e, process, columnName) => {
     setDraggingCard({ process, sourceColumn: columnName });
     e.dataTransfer.effectAllowed = "move";
@@ -683,7 +695,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
               return (
               <div
                 key={column.id}
-                className={`flex-shrink-0 ${isCollapsed ? 'w-[60px]' : 'w-[320px]'} rounded-lg border-2 transition-all ${
+                className={`flex-shrink-0 ${isCollapsed ? 'w-[50px]' : 'w-[320px]'} rounded-lg border-2 transition-all ${
                   dragOverColumn === column.name
                     ? "border-primary border-dashed bg-primary/5"
                     : "border-transparent"
@@ -692,24 +704,31 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
                 onDragLeave={handleDragLeave}
                 onDrop={(e) => handleDrop(e, column.name)}
               >
-                {/* Column Header */}
-                <div 
-                  className={`${statusHeaderColors[column.color] || "bg-gray-500"} rounded-t-lg px-4 py-3 cursor-pointer`}
-                  onClick={isEmpty ? toggleCollapse : undefined}
-                  title={isEmpty ? (isCollapsed ? "Expandir" : "Minimizar") : ""}
-                >
-                  <div className="flex items-center justify-between">
-                    {isCollapsed ? (
-                      <div className="flex flex-col items-center w-full">
-                        <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30 mb-1">
-                          {column.count}
-                        </Badge>
-                        <span className="text-white text-xs writing-mode-vertical transform -rotate-90 whitespace-nowrap mt-4">
-                          {column.label}
-                        </span>
-                      </div>
-                    ) : (
-                      <>
+                {isCollapsed ? (
+                  /* Coluna Colapsada - Cor preenchendo toda a vertical */
+                  <div 
+                    className={`${statusHeaderColors[column.color] || "bg-gray-500"} min-h-[70vh] rounded-lg flex flex-col items-center justify-between py-4 cursor-pointer`}
+                    onClick={toggleCollapse}
+                    title="Clique para expandir"
+                  >
+                    <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30">
+                      {column.count}
+                    </Badge>
+                    <span className="text-white text-xs font-medium writing-mode-vertical transform -rotate-180 whitespace-nowrap flex-1 flex items-center">
+                      {column.label}
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-white/70" />
+                  </div>
+                ) : (
+                  /* Coluna Expandida */
+                  <>
+                    {/* Column Header */}
+                    <div 
+                      className={`${statusHeaderColors[column.color] || "bg-gray-500"} rounded-t-lg px-4 py-3 cursor-pointer`}
+                      onClick={isEmpty ? toggleCollapse : undefined}
+                      title={isEmpty ? "Clique para minimizar" : ""}
+                    >
+                      <div className="flex items-center justify-between">
                         <h3 className="font-semibold text-white text-sm truncate">
                           {column.label}
                         </h3>
@@ -728,92 +747,90 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
                             </Button>
                           )}
                         </div>
-                      </>
-                    )}
-                  </div>
-                </div>
+                      </div>
+                    </div>
 
-                {/* Column Content - Hidden when collapsed */}
-                {!isCollapsed && (
-                <div className={`${statusColors[column.color] || "bg-gray-100"} min-h-[60vh] rounded-b-lg p-2`}>
-                  <ScrollArea className="h-[60vh]">
-                    <div className="space-y-2 pr-2">
-                      {column.processes.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground text-sm">
-                          <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p>Nenhum processo</p>
-                        </div>
-                      ) : (
-                        column.processes.map((process) => (
-                          <Card
-                            key={process.id}
-                            className={`cursor-pointer hover:shadow-md transition-shadow ${
-                              draggingCard?.process.id === process.id ? "opacity-50" : ""
-                            }`}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, process, column.name)}
-                            onClick={(e) => {
-                              // Não navegar se estiver arrastando
-                              if (!draggingCard) {
-                                setSelectedProcess(process);
-                                setShowProcessDialog(true);
-                              }
-                            }}
-                            data-testid={`process-card-${process.id}`}
-                          >
-                            <CardContent className="p-2">
-                              {/* Layout com nome visível */}
-                              <div className="space-y-1.5">
-                                {/* Linha 1: Número do processo */}
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-1.5">
-                                    <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0 cursor-grab" />
-                                    <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                                      #{process.process_number || '—'}
-                                    </span>
-                                    {process.prioridade && (
-                                      <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4">!</Badge>
+                    {/* Column Content */}
+                    <div className={`${statusColors[column.color] || "bg-gray-100"} min-h-[60vh] rounded-b-lg p-2`}>
+                      <ScrollArea className="h-[60vh]">
+                        <div className="space-y-2 pr-2">
+                          {column.processes.length === 0 ? (
+                            <div className="text-center py-8 text-muted-foreground text-sm">
+                              <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                              <p>Nenhum processo</p>
+                            </div>
+                          ) : (
+                            column.processes.map((process) => (
+                              <Card
+                                key={process.id}
+                                className={`cursor-pointer hover:shadow-md transition-shadow ${
+                                  draggingCard?.process.id === process.id ? "opacity-50" : ""
+                                }`}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, process, column.name)}
+                                onClick={(e) => {
+                                  // Não navegar se estiver arrastando
+                                  if (!draggingCard) {
+                                    setSelectedProcess(process);
+                                    setShowProcessDialog(true);
+                                  }
+                                }}
+                                data-testid={`process-card-${process.id}`}
+                              >
+                                <CardContent className="p-2">
+                                  {/* Layout com nome visível */}
+                                  <div className="space-y-1.5">
+                                    {/* Linha 1: Número do processo */}
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-1.5">
+                                        <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0 cursor-grab" />
+                                        <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                                          #{process.process_number || '—'}
+                                        </span>
+                                        {process.prioridade && (
+                                          <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4">!</Badge>
+                                        )}
+                                      </div>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-5 w-5 flex-shrink-0"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          navigate(`/process/${process.id}`);
+                                        }}
+                                        title="Ver processo"
+                                        data-testid={`view-process-${process.id}`}
+                                      >
+                                        <Eye className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                    {/* Linha 2: Nome do cliente - SEMPRE VISÍVEL */}
+                                    <p 
+                                      className="font-semibold text-sm leading-snug break-words whitespace-normal min-w-0" 
+                                      style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+                                      title={process.client_name}
+                                    >
+                                      {process.client_name}
+                                    </p>
+                                    {/* Linha 3: Consultor (se existir) */}
+                                    {process.consultor_name && (
+                                      <div className="flex items-center gap-1">
+                                        <User className="h-3 w-3 text-muted-foreground" />
+                                        <span className="text-[10px] text-muted-foreground truncate">
+                                          {process.consultor_name}
+                                        </span>
+                                      </div>
                                     )}
                                   </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-5 w-5 flex-shrink-0"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      navigate(`/process/${process.id}`);
-                                    }}
-                                    title="Ver processo"
-                                    data-testid={`view-process-${process.id}`}
-                                  >
-                                    <Eye className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                                {/* Linha 2: Nome do cliente - SEMPRE VISÍVEL */}
-                                <p 
-                                  className="font-semibold text-sm leading-snug break-words whitespace-normal min-w-0" 
-                                  style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
-                                  title={process.client_name}
-                                >
-                                  {process.client_name}
-                                </p>
-                                {/* Linha 3: Consultor (se existir) */}
-                                {process.consultor_name && (
-                                  <div className="flex items-center gap-1">
-                                    <User className="h-3 w-3 text-muted-foreground" />
-                                    <span className="text-[10px] text-muted-foreground truncate">
-                                      {process.consultor_name}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))
-                      )}
+                                </CardContent>
+                              </Card>
+                            ))
+                          )}
+                        </div>
+                      </ScrollArea>
                     </div>
-                  </ScrollArea>
-                </div>
+                  </>
                 )}
               </div>
             );

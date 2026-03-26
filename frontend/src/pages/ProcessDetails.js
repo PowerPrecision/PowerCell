@@ -1163,6 +1163,18 @@ const ProcessDetails = () => {
               </Button>
             )}
 
+            {/* Botão Documentos - Destaque para fácil acesso */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-amber-600 border-amber-200 hover:bg-amber-50 bg-amber-50/50"
+              onClick={() => setActiveTab("documents")}
+              title="Ver Documentos"
+            >
+              <FolderOpen className="h-4 w-4 mr-2" />
+              Documentos
+            </Button>
+
             {/* Calculadoras */}
             {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
               <>
@@ -1339,22 +1351,30 @@ const ProcessDetails = () => {
               </CardHeader>
               <CardContent>
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-5">
-                    <TabsTrigger value="personal" className="gap-2">
+                  <TabsList className="grid w-full grid-cols-3 lg:grid-cols-6">
+                    <TabsTrigger value="personal" className="gap-1 lg:gap-2">
                       <User className="h-4 w-4" />
-                      <span className="hidden sm:inline">Pessoais</span>
+                      <span className="hidden lg:inline">Pessoais</span>
                     </TabsTrigger>
-                    <TabsTrigger value="financial" className="gap-2">
+                    <TabsTrigger value="financial" className="gap-1 lg:gap-2">
                       <Briefcase className="h-4 w-4" />
-                      <span className="hidden sm:inline">Financeiros</span>
+                      <span className="hidden lg:inline">Financeiros</span>
                     </TabsTrigger>
-                    <TabsTrigger value="realestate" className="gap-2">
+                    <TabsTrigger value="realestate" className="gap-1 lg:gap-2">
                       <Building2 className="h-4 w-4" />
-                      <span className="hidden sm:inline">Imobiliário</span>
+                      <span className="hidden lg:inline">Imobiliário</span>
                     </TabsTrigger>
-                    <TabsTrigger value="credit" className="gap-2">
+                    <TabsTrigger value="credit" className="gap-1 lg:gap-2">
                       <CreditCard className="h-4 w-4" />
-                      <span className="hidden sm:inline">Crédito</span>
+                      <span className="hidden lg:inline">Crédito</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="documents" className="gap-1 lg:gap-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
+                      <FolderOpen className="h-4 w-4" />
+                      <span className="hidden lg:inline">Documentos</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="emails" className="gap-1 lg:gap-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
+                      <Send className="h-4 w-4" />
+                      <span className="hidden lg:inline">Emails</span>
                     </TabsTrigger>
                   </TabsList>
 
@@ -1575,6 +1595,83 @@ const ProcessDetails = () => {
                         </CardContent>
                       </Card>
                       
+                      {/* 2º Titular */}
+                      {process?.titular2_data && (
+                        <Card className="border-l-4 border-l-cyan-500">
+                          <CardContent className="pt-4">
+                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                              <Users className="h-4 w-4 text-cyan-500" />
+                              2º Titular
+                              <Badge variant="secondary" className="ml-2">
+                                Cônjuge/Co-Titular
+                              </Badge>
+                            </h4>
+                            <div className="grid grid-cols-2 gap-4">
+                              {process.titular2_data.name && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Nome</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.name}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.nif && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">NIF</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.nif}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.email && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Email</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.email}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.phone && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Telefone</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.phone}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.birth_date && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.birth_date}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.estado_civil && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Estado Civil</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.estado_civil}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.naturalidade && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Naturalidade</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.naturalidade}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.nacionalidade && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Nacionalidade</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.nacionalidade}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.documento_id && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Nº Documento</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.documento_id}</p>
+                                </div>
+                              )}
+                              {process.titular2_data.morada_fiscal && (
+                                <div className="space-y-1 col-span-2">
+                                  <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
+                                  <p className="text-sm font-medium">{process.titular2_data.morada_fiscal}</p>
+                                </div>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                      
                       {/* Co-Compradores / Co-Proponentes */}
                       {(process?.co_buyers?.length > 0 || process?.co_applicants?.length > 0) && (
                         <Card className="border-l-4 border-l-indigo-500">
@@ -1754,20 +1851,6 @@ const ProcessDetails = () => {
                               <Select
                                 value={financialData.efetivo || ""}
                                 onValueChange={(value) => setFinancialData({ ...financialData, efetivo: value })}
-                                disabled={!canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="sim">Sim</SelectItem>
-                                  <SelectItem value="nao">Não</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Trabalha no Estrangeiro?</Label>
-                              <Select
-                                value={financialData.trabalha_estrangeiro || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, trabalha_estrangeiro: value })}
                                 disabled={!canEditFinancial}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
@@ -1980,6 +2063,20 @@ const ProcessDetails = () => {
                               </Select>
                             </div>
                             <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Trabalha no Estrangeiro?</Label>
+                              <Select
+                                value={financialData.trabalha_estrangeiro || ""}
+                                onValueChange={(value) => setFinancialData({ ...financialData, trabalha_estrangeiro: value })}
+                                disabled={!canEditFinancial}
+                              >
+                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="sim">Sim</SelectItem>
+                                  <SelectItem value="nao">Não</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Tempo de Emprego</Label>
                               <Input
                                 value={financialData.employment_duration || ""}
@@ -1988,7 +2085,7 @@ const ProcessDetails = () => {
                                 className="h-9"
                               />
                             </div>
-                            <div className="space-y-1 col-span-2">
+                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Entidade Empregadora</Label>
                               <Input
                                 value={financialData.employer_name || ""}
@@ -2229,6 +2326,72 @@ const ProcessDetails = () => {
                       </div>
                     )}
                   </TabsContent>
+
+                  {/* Documents Tab - Destaque para fácil acesso */}
+                  <TabsContent value="documents" className="mt-4">
+                    <div className="space-y-4">
+                      {/* Header com info */}
+                      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
+                            <FolderOpen className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-amber-800 dark:text-amber-200">Gestão de Documentos</h3>
+                            <p className="text-sm text-amber-600 dark:text-amber-400">
+                              Faça upload de ficheiros ou adicione links externos (Google Drive, OneDrive, etc.)
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Painel de Documentos Unificado */}
+                      <Card className="border-amber-200 dark:border-amber-800">
+                        <CardContent className="pt-6">
+                          <UnifiedDocumentsPanel 
+                            key={documentsRefreshKey}
+                            processId={id}
+                            clientName={process?.client_name}
+                            onAIDataExtracted={handleAIDataExtractedFromDocs}
+                          />
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </TabsContent>
+
+                  {/* Emails Tab - Histórico de Emails do Processo */}
+                  <TabsContent value="emails" className="mt-4">
+                    <div className="space-y-4">
+                      {/* Header com info */}
+                      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg">
+                            <Send className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-blue-800 dark:text-blue-200">Histórico de Emails</h3>
+                            <p className="text-sm text-blue-600 dark:text-blue-400">
+                              Emails associados a este processo
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Painel de Emails */}
+                      <Card className="border-blue-200 dark:border-blue-800">
+                        <CardContent className="pt-6">
+                          <EmailHistoryPanel 
+                            processId={id}
+                            clientEmail={process?.client_email}
+                            clientName={process?.client_name}
+                            compact={false}
+                            maxHeight="500px"
+                            token={token}
+                          />
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </TabsContent>
                 </Tabs>
 
                 {/* Notas extraídas por IA */}
@@ -2248,8 +2411,8 @@ const ProcessDetails = () => {
                   </Card>
                 )}
 
-                {/* Conexões de Dados - Visível para todos exceto clientes e indexacao */}
-                {user?.role !== "cliente" && user?.role !== "indexacao" && (
+                {/* Conexões de Dados - Visível apenas para admin */}
+                {user?.role === "admin" && (
                   <Card className="mt-6 border-blue-200 bg-blue-50/50">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm flex items-center gap-2 text-blue-700">
@@ -2449,43 +2612,6 @@ const ProcessDetails = () => {
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Emails */}
-              <AccordionItem value="emails" className="border rounded-lg">
-                <AccordionTrigger className="px-3 py-2 text-sm hover:no-underline">
-                  <span className="flex items-center gap-2">
-                    <Send className="h-4 w-4" />
-                    Histórico de Emails
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent className="px-3 pb-3">
-                  <EmailHistoryPanel 
-                    processId={id}
-                    clientEmail={process?.client_email}
-                    clientName={process?.client_name}
-                    compact={true}
-                    maxHeight="200px"
-                    token={token}
-                  />
-                </AccordionContent>
-              </AccordionItem>
-
-              {/* Documentos Unificados - Ficheiros + Links Drive */}
-              <AccordionItem value="docs" className="border rounded-lg">
-                <AccordionTrigger className="px-3 py-2 text-sm hover:no-underline">
-                  <span className="flex items-center gap-2">
-                    <FolderOpen className="h-4 w-4" />
-                    Documentos
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent className="px-3 pb-3 overflow-x-auto">
-                  <UnifiedDocumentsPanel 
-                    key={documentsRefreshKey}
-                    processId={id}
-                    clientName={process?.client_name}
-                    onAIDataExtracted={handleAIDataExtractedFromDocs}
-                  />
-                </AccordionContent>
-              </AccordionItem>
             </Accordion>
             )}
 
