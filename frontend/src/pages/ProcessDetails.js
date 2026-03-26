@@ -1351,30 +1351,30 @@ const ProcessDetails = () => {
               </CardHeader>
               <CardContent>
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-6">
-                    <TabsTrigger value="personal" className="gap-2">
+                  <TabsList className="grid w-full grid-cols-3 lg:grid-cols-6">
+                    <TabsTrigger value="personal" className="gap-1 lg:gap-2">
                       <User className="h-4 w-4" />
-                      <span className="hidden sm:inline">Pessoais</span>
+                      <span className="hidden lg:inline">Pessoais</span>
                     </TabsTrigger>
-                    <TabsTrigger value="financial" className="gap-2">
+                    <TabsTrigger value="financial" className="gap-1 lg:gap-2">
                       <Briefcase className="h-4 w-4" />
-                      <span className="hidden sm:inline">Financeiros</span>
+                      <span className="hidden lg:inline">Financeiros</span>
                     </TabsTrigger>
-                    <TabsTrigger value="realestate" className="gap-2">
+                    <TabsTrigger value="realestate" className="gap-1 lg:gap-2">
                       <Building2 className="h-4 w-4" />
-                      <span className="hidden sm:inline">Imobiliário</span>
+                      <span className="hidden lg:inline">Imobiliário</span>
                     </TabsTrigger>
-                    <TabsTrigger value="credit" className="gap-2">
+                    <TabsTrigger value="credit" className="gap-1 lg:gap-2">
                       <CreditCard className="h-4 w-4" />
-                      <span className="hidden sm:inline">Crédito</span>
+                      <span className="hidden lg:inline">Crédito</span>
                     </TabsTrigger>
-                    <TabsTrigger value="documents" className="gap-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
+                    <TabsTrigger value="documents" className="gap-1 lg:gap-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
                       <FolderOpen className="h-4 w-4" />
-                      <span className="hidden sm:inline">Documentos</span>
+                      <span className="hidden lg:inline">Documentos</span>
                     </TabsTrigger>
-                    <TabsTrigger value="emails" className="gap-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
+                    <TabsTrigger value="emails" className="gap-1 lg:gap-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
                       <Send className="h-4 w-4" />
-                      <span className="hidden sm:inline">Emails</span>
+                      <span className="hidden lg:inline">Emails</span>
                     </TabsTrigger>
                   </TabsList>
 
@@ -1784,20 +1784,6 @@ const ProcessDetails = () => {
                               </Select>
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Trabalha no Estrangeiro?</Label>
-                              <Select
-                                value={financialData.trabalha_estrangeiro || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, trabalha_estrangeiro: value })}
-                                disabled={!canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="sim">Sim</SelectItem>
-                                  <SelectItem value="nao">Não</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Precisa Vender Casa?</Label>
                               <Select
                                 value={financialData.precisa_vender_casa || ""}
@@ -2000,6 +1986,20 @@ const ProcessDetails = () => {
                               </Select>
                             </div>
                             <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Trabalha no Estrangeiro?</Label>
+                              <Select
+                                value={financialData.trabalha_estrangeiro || ""}
+                                onValueChange={(value) => setFinancialData({ ...financialData, trabalha_estrangeiro: value })}
+                                disabled={!canEditFinancial}
+                              >
+                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="sim">Sim</SelectItem>
+                                  <SelectItem value="nao">Não</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Tempo de Emprego</Label>
                               <Input
                                 value={financialData.employment_duration || ""}
@@ -2008,7 +2008,7 @@ const ProcessDetails = () => {
                                 className="h-9"
                               />
                             </div>
-                            <div className="space-y-1 col-span-2">
+                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Entidade Empregadora</Label>
                               <Input
                                 value={financialData.employer_name || ""}
@@ -2334,8 +2334,8 @@ const ProcessDetails = () => {
                   </Card>
                 )}
 
-                {/* Conexões de Dados - Visível para todos exceto clientes e indexacao */}
-                {user?.role !== "cliente" && user?.role !== "indexacao" && (
+                {/* Conexões de Dados - Visível apenas para admin */}
+                {user?.role === "admin" && (
                   <Card className="mt-6 border-blue-200 bg-blue-50/50">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm flex items-center gap-2 text-blue-700">
