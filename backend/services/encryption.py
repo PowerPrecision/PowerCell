@@ -67,11 +67,20 @@ class EncryptionService:
     def _initialize_key(self):
         """Inicializa a chave de encriptação."""
         if not CRYPTO_AVAILABLE:
+            logger.warning("Cryptography não disponível - encriptação desativada")
             return
         
         # Obter chave de variável de ambiente
         secret = os.environ.get("ENCRYPTION_KEY") or os.environ.get("JWT_SECRET", "default-secret-key")
         salt = os.environ.get("ENCRYPTION_SALT", "creditoimo-encryption-salt").encode()
+        
+        # Log para debug (sem mostrar o segredo completo)
+        if os.environ.get("ENCRYPTION_KEY"):
+            logger.info(f"ENCRYPTION_KEY definida (len={len(os.environ.get('ENCRYPTION_KEY'))})")
+        elif os.environ.get("JWT_SECRET"):
+            logger.info(f"A usar JWT_SECRET como chave de encriptação (len={len(os.environ.get('JWT_SECRET'))})")
+        else:
+            logger.warning("ENCRYPTION_KEY e JWT_SECRET não definidas - a usar chave por defeito!")
         
         # Derivar chave usando PBKDF2
         try:
@@ -126,16 +135,23 @@ class EncryptionService:
         Returns:
             Valor original desencriptado
         """
-        if not self.is_available() or not value:
+        if not value:
             return value
         
         # Verificar se está encriptado
         if not isinstance(value, str) or not value.startswith(self.ENCRYPTION_PREFIX):
             return value
         
+        # Se o serviço não está disponível, tentar mesmo assim
+        if not self._fernet:
+            logger.error("Tentativa de desencriptação mas Fernet não está inicializado!")
+            return value
+        
         try:
             encrypted_part = value[len(self.ENCRYPTION_PREFIX):]
-            return self._fernet.decrypt(encrypted_part.encode()).decode()
+            decrypted = self._fernet.decrypt(encrypted_part.encode()).decode()
+            logger.debug("Desencriptação bem sucedida")
+            return decrypted
         except Exception as e:
             logger.error(f"Erro ao desencriptar: {e}")
             return value
