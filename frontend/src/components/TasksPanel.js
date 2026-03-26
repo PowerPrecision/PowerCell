@@ -268,7 +268,7 @@ const TasksPanel = ({
 
   // Helper para mostrar badge de prazo
   const getDueDateBadge = (task) => {
-    if (!task.due_date || task.completed) return null;
+    if (!task || !task.due_date || task.completed) return null;
     
     const daysUntil = task.days_until_due;
     const isOverdue = task.is_overdue;
