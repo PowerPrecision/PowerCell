@@ -636,9 +636,14 @@ async def get_kanban_board(
             "count": len(enriched_processes)
         })
     
+    # Excluir processos concluídos e desistências da contagem total
+    active_processes = [p for p in processes if p.get("status") not in ["concluidos", "desistencias"]]
+    inactive_processes = [p for p in processes if p.get("status") in ["concluidos", "desistencias"]]
+
     return {
         "columns": kanban,
-        "total_processes": len(processes),
+        "total_processes": len(active_processes),
+        "total_inactive": len(inactive_processes),
         "user_role": role,
         "current_user_id": user_id
     }

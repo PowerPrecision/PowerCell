@@ -242,6 +242,18 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
     return () => clearInterval(pollInterval);
   }, [fetchKanbanData]);
 
+  // Colapsar colunas vazias por defeito quando os dados são carregados
+  useEffect(() => {
+    if (kanbanData.columns.length > 0 && collapsedColumns.size === 0) {
+      const emptyColumnIds = kanbanData.columns
+        .filter(col => col.count === 0)
+        .map(col => col.id);
+      if (emptyColumnIds.length > 0) {
+        setCollapsedColumns(new Set(emptyColumnIds));
+      }
+    }
+  }, [kanbanData.columns]);
+
   const handleDragStart = (e, process, columnName) => {
     setDraggingCard({ process, sourceColumn: columnName });
     e.dataTransfer.effectAllowed = "move";
