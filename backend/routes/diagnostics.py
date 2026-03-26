@@ -493,3 +493,96 @@ async def quick_system_check(
         "stats": stats,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+
+@router.get("/encryption")
+async def check_encryption_status(
+    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Verifica o estado do serviço de encriptação.
+    
+    Testa se a encriptação/desencriptação está a funcionar corretamente.
+    """
+    import os
+    from services.encryption import encryption_service
+    
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "crypto_available": False,
+        "fernet_initialized": False,
+        "encryption_key_source": None,
+        "test_encryption": None,
+        "test_decryption": None,
+        "can_decrypt_existing": None,
+        "errors": []
+    }
+    
+    # Verificar se cryptography está disponível
+    try:
+        from cryptography.fernet import Fernet
+        result["crypto_available"] = True
+    except ImportError:
+        result["errors"].append("Biblioteca cryptography não instalada")
+        return result
+    
+    # Verificar se Fernet está inicializado
+    result["fernet_initialized"] = encryption_service._fernet is not None
+    
+    # Verificar origem da chave
+    if os.environ.get("ENCRYPTION_KEY"):
+        result["encryption_key_source"] = "ENCRYPTION_KEY"
+        result["encryption_key_length"] = len(os.environ.get("ENCRYPTION_KEY"))
+    elif os.environ.get("JWT_SECRET"):
+        result["encryption_key_source"] = "JWT_SECRET"
+        result["encryption_key_length"] = len(os.environ.get("JWT_SECRET"))
+    else:
+        result["encryption_key_source"] = "default"
+        result["encryption_key_length"] = 0
+        result["errors"].append("ENCRYPTION_KEY e JWT_SECRET não definidas - usando chave por defeito!")
+    
+    # Testar encriptação/desencriptação
+    if encryption_service._fernet:
+        try:
+            test_value = "123456789"
+            encrypted = encryption_service.encrypt(test_value)
+            result["test_encryption"] = {
+                "success": encrypted.startswith("ENC:"),
+                "encrypted_length": len(encrypted)
+            }
+            
+            # Testar desencriptação
+            decrypted = encryption_service.decrypt(encrypted)
+            result["test_decryption"] = {
+                "success": decrypted == test_value,
+                "decrypted_value": decrypted[:3] + "..." if decrypted else None
+            }
+        except Exception as e:
+            result["errors"].append(f"Erro no teste de encriptação: {str(e)}")
+    
+    # Tentar desencriptar um valor existente da base de dados
+    try:
+        # Buscar um cliente com NIF encriptado
+        client = await db.clients.find_one(
+            {"dados_pessoais.nif": {"$regex": "^ENC:"}},
+            {"_id": 0, "id": 1, "nome": 1, "dados_pessoais.nif": 1}
+        )
+        
+        if client:
+            encrypted_nif = client.get("dados_pessoais", {}).get("nif", "")
+            if encrypted_nif and encrypted_nif.startswith("ENC:"):
+                decrypted_nif = encryption_service.decrypt(encrypted_nif)
+                result["can_decrypt_existing"] = {
+                    "found": True,
+                    "client_id": client.get("id"),
+                    "client_name": client.get("nome"),
+                    "encrypted_prefix": encrypted_nif[:20] + "...",
+                    "decrypted_length": len(decrypted_nif) if decrypted_nif else 0,
+                    "decryption_success": not decrypted_nif.startswith("ENC:") if decrypted_nif else False
+                }
+        else:
+            result["can_decrypt_existing"] = {"found": False, "message": "Nenhum cliente com NIF encriptado encontrado"}
+    except Exception as e:
+        result["errors"].append(f"Erro ao testar desencriptação de dados existentes: {str(e)}")
+    
+    return result
