@@ -761,8 +761,9 @@ async def get_storage_info(user: dict = Depends(get_current_user)):
         from services.s3_storage import s3_service
         result["configured"] = s3_service.is_configured()
         result["can_browse"] = True  # S3 permite listar ficheiros
-        if s3_service.is_configured():
-            result["base_url"] = f"s3://{s3_service.bucket_name}"
+        # Não retornar URL s3:// - browsers não suportam este esquema
+        # O acesso a ficheiros S3 é feito via URLs pré-assinadas geradas pela API
+        result["base_url"] = None
     
     elif provider_value == "onedrive":
         result["configured"] = bool(storage.onedrive_shared_url)
