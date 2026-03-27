@@ -84,79 +84,87 @@ async def request_rgpd(
     
     Permissões: Todos os staff podem solicitar.
     """
-    # Verificar se o processo existe
-    process = await db.processes.find_one({"id": data.process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    # Criar pedido de RGPD
-    result = await create_rgpd_request(
-        process_id=data.process_id,
-        client_name=data.client_name,
-        client_email=data.client_email,
-        user=user
-    )
-    
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail="Erro ao criar pedido de RGPD")
-    
-    # Se já existe e está assinado, retornar informação
-    if result.get("existing"):
-        if result.get("status") == "signed":
-            return RGPDResponse(
-                id=result["request_id"],
-                process_id=data.process_id,
-                client_name=data.client_name,
-                client_email=data.client_email,
-                status=RGPDStatusEnum.SIGNED,
-                signed_at=result.get("signed_at"),
-                created_at="",
-                created_by_name=user.get("name", "")
-            )
-        elif result.get("status") == "pending":
-            return RGPDResponse(
-                id=result["request_id"],
-                process_id=data.process_id,
-                client_name=data.client_name,
-                client_email=data.client_email,
-                status=RGPDStatusEnum.PENDING,
-                token_expires_at=result.get("expires_at"),
-                created_at="",
-                created_by_name=user.get("name", "")
-            )
-    
-    # Enviar email com o link
-    email_sent = await send_rgpd_email(
-        client_email=data.client_email,
-        client_name=data.client_name,
-        token=result["token"],
-        request_id=result["request_id"],
-        user_email=user["email"]
-    )
-    
-    if not email_sent:
-        logger.warning("RGPD created but email failed to send")
-    
-    # M8 - Registar atividade no processo
-    email_status = "enviado" if email_sent else "falhou"
-    await _add_process_activity(
-        process_id=data.process_id,
-        user_id=user.get("id", "system"),
-        user_name=user.get("name", "Sistema"),
-        action=f"RGPD solicitado — email {email_status} para {data.client_email}",
-        details=f"Link de assinatura enviado para o cliente. Expira em {TOKEN_EXPIRY_HOURS}h."
-    )
-    
-    return RGPDResponse(
-        id=result["request_id"],
-        process_id=data.process_id,
-        client_name=data.client_name,
-        client_email=data.client_email,
-        status=RGPDStatusEnum.PENDING,
-        token_expires_at=result["expires_at"],
-        created_at="",
-        created_by_name=user.get("name", "")
-    )
+    try:
+        # Verificar se o processo existe
+        process = await db.processes.find_one({"id": data.process_id})
+        if not process:
+            raise HTTPException(status_code=404, detail="Processo não encontrado")
+        
+        # Criar pedido de RGPD
+        result = await create_rgpd_request(
+            process_id=data.process_id,
+            client_name=data.client_name,
+            client_email=data.client_email,
+            user=user
+        )
+        
+        if not result.get("success"):
+            logger.error(f"Erro ao criar pedido RGPD: {result}")
+            raise HTTPException(status_code=500, detail="Erro ao criar pedido de RGPD")
+        
+        # Se já existe e está assinado, retornar informação
+        if result.get("existing"):
+            if result.get("status") == "signed":
+                return RGPDResponse(
+                    id=result["request_id"],
+                    process_id=data.process_id,
+                    client_name=data.client_name,
+                    client_email=data.client_email,
+                    status=RGPDStatusEnum.SIGNED,
+                    signed_at=result.get("signed_at"),
+                    created_at="",
+                    created_by_name=user.get("name", "")
+                )
+            elif result.get("status") == "pending":
+                return RGPDResponse(
+                    id=result["request_id"],
+                    process_id=data.process_id,
+                    client_name=data.client_name,
+                    client_email=data.client_email,
+                    status=RGPDStatusEnum.PENDING,
+                    token_expires_at=result.get("expires_at"),
+                    created_at="",
+                    created_by_name=user.get("name", "")
+                )
+        
+        # Enviar email com o link
+        email_sent = await send_rgpd_email(
+            client_email=data.client_email,
+            client_name=data.client_name,
+            token=result["token"],
+            request_id=result["request_id"],
+            user_email=user["email"]
+        )
+        
+        if not email_sent:
+            logger.warning("RGPD created but email failed to send")
+        
+        # M8 - Registar atividade no processo
+        email_status = "enviado" if email_sent else "falhou"
+        await _add_process_activity(
+            process_id=data.process_id,
+            user_id=user.get("id", "system"),
+            user_name=user.get("name", "Sistema"),
+            action=f"RGPD solicitado — email {email_status} para {data.client_email}",
+            details=f"Link de assinatura enviado para o cliente. Expira em {TOKEN_EXPIRY_HOURS}h."
+        )
+        
+        return RGPDResponse(
+            id=result["request_id"],
+            process_id=data.process_id,
+            client_name=data.client_name,
+            client_email=data.client_email,
+            status=RGPDStatusEnum.PENDING,
+            token_expires_at=result["expires_at"],
+            created_at="",
+            created_by_name=user.get("name", "")
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro inesperado em request_rgpd: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
 @router.get("/validate/{token}", response_model=RGPDPublicView)
