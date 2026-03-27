@@ -107,11 +107,53 @@ const BackupsPage = () => {
 
       if (response.ok) {
         toast.success("Backup iniciado em background");
-        // Actualizar dados após 5 segundos
-        setTimeout(() => {
-          fetchData();
-          setBackupInProgress(false);
-        }, 5000);
+        
+        // Fazer polling a cada 3 segundos para atualizar o histórico
+        let pollCount = 0;
+        const maxPolls = 20; // Máximo de 60 segundos de polling
+        
+        const pollInterval = setInterval(async () => {
+          pollCount++;
+          
+          try {
+            const historyRes = await fetch(`${API_URL}/api/backup/history?limit=5`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            
+            if (historyRes.ok) {
+              const historyData = await historyRes.json();
+              const latestBackup = historyData.history?.[0];
+              
+              // Atualizar histórico
+              setHistory(historyData.history || []);
+              
+              // Se o backup terminou (completed ou failed), parar polling
+              if (latestBackup && latestBackup.status !== "running") {
+                clearInterval(pollInterval);
+                setBackupInProgress(false);
+                
+                if (latestBackup.status === "completed") {
+                  toast.success("Backup concluído com sucesso!");
+                } else {
+                  toast.error("Backup falhou. Verifique os logs.");
+                }
+                
+                // Atualizar estatísticas
+                fetchData();
+              }
+            }
+            
+            // Parar após maxPolls tentativas
+            if (pollCount >= maxPolls) {
+              clearInterval(pollInterval);
+              setBackupInProgress(false);
+              toast.info("Verifique o histórico para o estado do backup");
+            }
+          } catch (err) {
+            console.error("Erro no polling:", err);
+          }
+        }, 3000);
+        
       } else {
         throw new Error("Erro ao iniciar backup");
       }
