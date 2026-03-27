@@ -318,7 +318,15 @@ const NotificationsDropdown = () => {
           <>
             <DropdownMenuSeparator />
             <div className="px-3 py-2 text-center">
-              <Button variant="ghost" size="sm" className="text-xs text-blue-600">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-xs text-blue-600"
+                onClick={() => {
+                  setIsOpen(false);
+                  navigate("/configuracoes/notificacoes");
+                }}
+              >
                 Ver todas ({notifications.length})
               </Button>
             </div>
