@@ -1422,11 +1422,22 @@ async def ai_analyze_documents(
     Returns:
         Resultado da análise com comparações e sugestões
     """
-    from services.ai_document_analyzer import analyze_multiple_documents
-    from routes.ai_import_logs import create_ai_import_log, finalize_ai_import_log
     import time
     
     start_time = time.time()
+    
+    try:
+        from services.ai_document_analyzer import analyze_multiple_documents
+    except ImportError as e:
+        logger.error(f"Erro ao importar ai_document_analyzer: {e}")
+        raise HTTPException(status_code=500, detail=f"Serviço de análise não disponível: {str(e)}")
+    
+    try:
+        from routes.ai_import_logs import create_ai_import_log, finalize_ai_import_log
+    except ImportError as e:
+        logger.warning(f"ai_import_logs não disponível: {e}")
+        create_ai_import_log = None
+        finalize_ai_import_log = None
     
     # Buscar dados do processo
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
@@ -1435,30 +1446,43 @@ async def ai_analyze_documents(
     
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     
-    # Criar log de importação
-    log_id = await create_ai_import_log(
-        process_id=process_id,
-        client_name=client_name,
-        created_by=user.get("id"),
-        created_by_name=user.get("name")
-    )
+    # Criar log de importação (se disponível)
+    log_id = None
+    if create_ai_import_log:
+        try:
+            log_id = await create_ai_import_log(
+                process_id=process_id,
+                client_name=client_name,
+                created_by=user.get("id"),
+                created_by_name=user.get("name")
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao criar log de importação: {e}")
     
     # Preparar documentos para análise
     documents = []
     for file in files:
-        content = await file.read()
-        if len(content) == 0:
+        try:
+            content = await file.read()
+            if len(content) == 0:
+                continue
+                
+            documents.append({
+                "content": content,
+                "name": file.filename,
+                "mime_type": file.content_type or "application/octet-stream"
+            })
+        except Exception as e:
+            logger.warning(f"Erro ao ler ficheiro {file.filename}: {e}")
             continue
-            
-        documents.append({
-            "content": content,
-            "name": file.filename,
-            "mime_type": file.content_type or "application/octet-stream"
-        })
     
     if not documents:
         # Actualizar log com erro
-        await finalize_ai_import_log(log_id, duration_ms=0)
+        if log_id and finalize_ai_import_log:
+            try:
+                await finalize_ai_import_log(log_id, duration_ms=0)
+            except Exception:
+                pass
         raise HTTPException(status_code=400, detail=ERROR_NO_VALID_FILES)
     
     # Extrair dados existentes do cliente para comparação
@@ -1476,8 +1500,21 @@ async def ai_analyze_documents(
         "email": process.get("email") or process.get("client_email"),
     }
     
-    # Analisar documentos (passando o log_id para actualização em tempo real)
-    results = await analyze_multiple_documents(documents, existing_data, log_id=log_id)
+    # Analisar documentos
+    try:
+        results = await analyze_multiple_documents(documents, existing_data, log_id=log_id)
+    except Exception as e:
+        logger.error(f"Erro na análise de documentos: {e}", exc_info=True)
+        
+        # Finalizar log com erro
+        total_duration = int((time.time() - start_time) * 1000)
+        if log_id and finalize_ai_import_log:
+            try:
+                await finalize_ai_import_log(log_id, duration_ms=total_duration)
+            except Exception:
+                pass
+        
+        raise HTTPException(status_code=500, detail=f"Erro na análise: {str(e)}")
     
     # Extrair dados e identificar conflitos
     extracted_data = {}
@@ -1516,7 +1553,11 @@ async def ai_analyze_documents(
     
     # Finalizar log
     total_duration = int((time.time() - start_time) * 1000)
-    await finalize_ai_import_log(log_id, duration_ms=total_duration)
+    if log_id and finalize_ai_import_log:
+        try:
+            await finalize_ai_import_log(log_id, duration_ms=total_duration)
+        except Exception as e:
+            logger.warning(f"Erro ao finalizar log: {e}")
     
     return {
         "success": True,
