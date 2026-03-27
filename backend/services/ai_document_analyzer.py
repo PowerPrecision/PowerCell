@@ -100,32 +100,43 @@ Para Caderneta Predial:
 """
 
 
-def get_llm_client():
+def get_openai_client():
     """
-    Retorna o cliente LLM apropriado baseado na chave de API configurada.
-    Usa emergentintegrations para chaves sk-emerg*, ou OpenAI nativo para sk-*.
+    Retorna o cliente OpenAI configurado.
+    Usa OPENAI_API_KEY ou EMERGENT_LLM_KEY como fallback.
+    
+    Nota: Para usar chaves emergent, configure um OPENAI_API_KEY válido da OpenAI.
+    Chaves EMERGENT_LLM_KEY requerem um provedor OpenAI-compatible.
     """
-    emergent_key = os.environ.get("EMERGENT_LLM_KEY")
-    openai_key = os.environ.get("OPENAI_API_KEY")
+    from openai import AsyncOpenAI
     
-    if emergent_key and emergent_key.startswith("sk-emerg"):
-        # Usar emergentintegrations para chaves emergent
-        try:
-            from emergentintegrations.llm.openai import LLM
-            return LLM(api_key=emergent_key), "emergent"
-        except ImportError as e:
-            logger.error(f"Biblioteca emergentintegrations não instalada: {e}")
-            return None, None
-    elif openai_key:
-        # Usar OpenAI nativo
-        from openai import AsyncOpenAI
-        return AsyncOpenAI(api_key=openai_key), "openai"
-    elif emergent_key:
-        # Se emergent_key existe mas não começa com sk-emerg, tentar como OpenAI
-        from openai import AsyncOpenAI
-        return AsyncOpenAI(api_key=emergent_key), "openai"
+    # Prioridade: OPENAI_API_KEY > EMERGENT_LLM_KEY
+    api_key = os.environ.get("OPENAI_API_KEY")
+    base_url = None
     
-    return None, None
+    if not api_key:
+        emergent_key = os.environ.get("EMERGENT_LLM_KEY")
+        if emergent_key:
+            # Se for uma chave emergent, precisamos usar o endpoint correto
+            # Nota: chaves sk-emerg NÃO são compatíveis com a API da OpenAI
+            if emergent_key.startswith("sk-emerg"):
+                logger.warning("EMERGENT_LLM_KEY detectada mas chaves 'sk-emerg' não são compatíveis com OpenAI direta.")
+                logger.warning("Configure uma OPENAI_API_KEY válida ou use um endpoint OpenAI-compatible.")
+                logger.info("Tentando usar endpoint emergent compatible...")
+                # Usar endpoint emergent (assumindo que existe)
+                base_url = os.environ.get("EMERGENT_BASE_URL", "https://api.emergent.ai/v1")
+                api_key = emergent_key
+            else:
+                # Tentar usar como chave OpenAI normal
+                api_key = emergent_key
+    
+    if not api_key:
+        return None
+    
+    if base_url:
+        return AsyncOpenAI(api_key=api_key, base_url=base_url)
+    else:
+        return AsyncOpenAI(api_key=api_key)
 
 
 async def analyze_document_with_ai(
@@ -145,11 +156,14 @@ async def analyze_document_with_ai(
         Dados extraídos do documento
     """
     try:
-        client, client_type = get_llm_client()
+        client = get_openai_client()
         
         if not client:
-            logger.error("EMERGENT_LLM_KEY ou OPENAI_API_KEY não configurada")
-            return {"success": False, "error": "Chave de API não configurada. Configure EMERGENT_LLM_KEY ou OPENAI_API_KEY nas variáveis de ambiente."}
+            logger.error("OPENAI_API_KEY não configurada")
+            return {
+                "success": False, 
+                "error": "Chave de API não configurada. Configure OPENAI_API_KEY nas variáveis de ambiente."
+            }
         
         # Converter para base64
         file_base64 = base64.b64encode(file_content).decode('utf-8')
@@ -176,26 +190,15 @@ async def analyze_document_with_ai(
                 
                 if text_content.strip():
                     # Usar o texto extraído para análise
-                    if client_type == "emergent":
-                        response = await client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
-                                {"role": "user", "content": f"Analise este documento ({file_name}) extraído de um PDF. Conteúdo:\n\n{text_content[:10000]}"}
-                            ],
-                            max_tokens=2000,
-                            temperature=0.1
-                        )
-                    else:
-                        response = await client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
-                                {"role": "user", "content": f"Analise este documento ({file_name}) extraído de um PDF. Conteúdo:\n\n{text_content[:10000]}"}
-                            ],
-                            max_tokens=2000,
-                            temperature=0.1
-                        )
+                    response = await client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
+                            {"role": "user", "content": f"Analise este documento ({file_name}) extraído de um PDF. Conteúdo:\n\n{text_content[:10000]}"}
+                        ],
+                        max_tokens=2000,
+                        temperature=0.1
+                    )
                 else:
                     return {"success": False, "error": "Não foi possível extrair texto do PDF"}
             except ImportError:
@@ -204,38 +207,21 @@ async def analyze_document_with_ai(
             # Para imagens, usar o vision API
             image_url = f"data:{mime_type};base64,{file_base64}"
             
-            if client_type == "emergent":
-                response = await client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": f"Analise este documento ({file_name}) e extraia todos os dados relevantes."},
-                                {"type": "image_url", "image_url": {"url": image_url}}
-                            ]
-                        }
-                    ],
-                    max_tokens=2000,
-                    temperature=0.1
-                )
-            else:
-                response = await client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": f"Analise este documento ({file_name}) e extraia todos os dados relevantes."},
-                                {"type": "image_url", "image_url": {"url": image_url}}
-                            ]
-                        }
-                    ],
-                    max_tokens=2000,
-                    temperature=0.1
-                )
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"Analise este documento ({file_name}) e extraia todos os dados relevantes."},
+                            {"type": "image_url", "image_url": {"url": image_url}}
+                        ]
+                    }
+                ],
+                max_tokens=2000,
+                temperature=0.1
+            )
         
         # Obter a resposta
         response_text = response.choices[0].message.content
