@@ -139,6 +139,27 @@ _invalid_origins = []
 # Verificar se devemos permitir previews do Vercel
 _allow_vercel_previews = os.environ.get('ALLOW_VERCEL_PREVIEWS', 'true').lower() == 'true'
 
+def _add_origin_with_variants(origin: str) -> list:
+    """
+    Adiciona uma origem e suas variantes (www e não-www).
+    Isto resolve problemas de CORS quando o utilizador acede via www ou não.
+    
+    Exemplo: https://powercell.pt adiciona também https://www.powercell.pt
+    """
+    origins = [origin]
+    
+    if origin.startswith('https://'):
+        domain = origin[8:]  # Remove 'https://'
+        
+        # Se não tem www, adicionar versão com www
+        if not domain.startswith('www.'):
+            origins.append(f"https://www.{domain}")
+        # Se tem www, adicionar versão sem www
+        elif domain.startswith('www.'):
+            origins.append(f"https://{domain[4:]}")
+    
+    return origins
+
 for origin in _cors_env.split(','):
     origin = origin.strip()
     if not origin:
@@ -146,7 +167,10 @@ for origin in _cors_env.split(','):
     
     # Validar formato da origem (deve ser URL válido com protocolo)
     if origin.startswith('https://'):
-        CORS_ORIGINS.append(origin)
+        # Adicionar origem e suas variantes (www/non-www)
+        for variant in _add_origin_with_variants(origin):
+            if variant not in CORS_ORIGINS:
+                CORS_ORIGINS.append(variant)
     elif origin.startswith('http://localhost') or origin.startswith('http://127.0.0.1'):
         # Permitir localhost apenas para desenvolvimento
         print(f"⚠️  AVISO: Origem HTTP localhost permitida (apenas dev): {origin}", file=sys.stderr)
