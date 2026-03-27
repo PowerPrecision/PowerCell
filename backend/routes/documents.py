@@ -538,9 +538,14 @@ async def proxy_s3_file(
         StreamingResponse com o conteúdo do ficheiro
     """
     from fastapi.responses import StreamingResponse
+    from botocore.exceptions import ClientError, NoCredentialsError, BotoCoreError
     import asyncio
     
+    # Log do pedido para debugging
+    logger.info(f"[PROXY] Acesso a ficheiro: {file_path}")
+    
     if not s3_service.is_configured():
+        logger.error("[PROXY] S3 não configurado")
         raise HTTPException(status_code=500, detail=ERROR_S3_NOT_CONFIGURED)
     
     try:
@@ -561,15 +566,19 @@ async def proxy_s3_file(
         # Extrair nome do ficheiro
         filename = file_path.split('/')[-1] if '/' in file_path else file_path
         
+        logger.info(f"[PROXY] Streaming ficheiro: {filename} ({content_length} bytes)")
+        
         # Criar generator para streaming
         def iterfile():
             body = response['Body']
-            while True:
-                chunk = body.read(8192)  # 8KB chunks
-                if not chunk:
-                    break
-                yield chunk
-            body.close()
+            try:
+                while True:
+                    chunk = body.read(8192)  # 8KB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                body.close()
         
         headers = {
             'Content-Disposition': f'inline; filename="{filename}"',
@@ -583,9 +592,26 @@ async def proxy_s3_file(
             headers=headers
         )
         
-    except (IOError, OSError, ValueError, KeyError, TypeError) as e:
-        logger.error(f"Erro ao fazer proxy do ficheiro S3: {e}")
+    except NoCredentialsError:
+        logger.error("[PROXY] Credenciais S3 não configuradas")
+        raise HTTPException(status_code=500, detail="Credenciais S3 não configuradas")
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        if error_code == 'NoSuchKey':
+            logger.warning(f"[PROXY] Ficheiro não encontrado: {file_path}")
+            raise HTTPException(status_code=404, detail=ERROR_S3_FILE_NOT_FOUND)
+        elif error_code == 'AccessDenied':
+            logger.error(f"[PROXY] Acesso negado ao ficheiro: {file_path}")
+            raise HTTPException(status_code=403, detail="Acesso negado ao ficheiro")
+        else:
+            logger.error(f"[PROXY] Erro S3 ({error_code}): {e}")
+            raise HTTPException(status_code=500, detail=f"Erro ao aceder ao S3: {error_code}")
+    except (BotoCoreError, IOError, OSError) as e:
+        logger.error(f"[PROXY] Erro ao fazer proxy do ficheiro S3: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao obter ficheiro: {str(e)}")
+    except Exception as e:
+        logger.error(f"[PROXY] Erro inesperado: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
 @router.delete("/client/{client_id}/file", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
