@@ -1814,6 +1814,49 @@ async def add_nif_mapping_manual(
 
 
 # ====================================================================
+# ENDPOINT DE REVISÕES PENDENTES
+# ====================================================================
+
+@router.get("/pending-reviews")
+async def get_pending_reviews(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Obter lista de processos com dados pendentes de revisão.
+    
+    Retorna processos que têm ai_pending_review com dados extraídos
+    que precisam de revisão manual (ex: processos concluídos/desistidos).
+    """
+    try:
+        # Buscar processos com ai_pending_review não vazio
+        processes = await db.processes.find(
+            {"ai_pending_review": {"$exists": True, "$ne": []}},
+            {"_id": 0, "id": 1, "client_name": 1, "status": 1, "ai_pending_review": 1}
+        ).to_list(100)
+        
+        result = []
+        for process in processes:
+            pending_reviews = process.get("ai_pending_review", [])
+            if pending_reviews:
+                result.append({
+                    "process_id": process.get("id"),
+                    "client_name": process.get("client_name"),
+                    "status": process.get("status"),
+                    "pending_count": len(pending_reviews),
+                    "pending_reviews": pending_reviews
+                })
+        
+        return {
+            "total": len(result),
+            "processes": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao obter revisões pendentes: {e}")
+        return {"total": 0, "processes": []}
+
+
+# ====================================================================
 # INCLUIR ROUTER DE BACKGROUND JOBS
 # ====================================================================
 from routes.ai_bulk.background_jobs import router as background_jobs_router
