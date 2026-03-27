@@ -39,20 +39,33 @@ const AlertDialogContent = React.forwardRef(({
   // Generate unique IDs for accessibility
   const descriptionId = React.useId()
   
-  // Check if children already contain an AlertDialogTitle
-  const hasTitle = React.Children.toArray(children).some(
-    child => React.isValidElement(child) && 
-    (child.type === AlertDialogTitle || 
-     child.type?.displayName === AlertDialogTitle.displayName ||
-     child.type === AlertDialogHeader)
-  )
+  /**
+   * Recursively check if children contain a specific component type.
+   * This is needed because AlertDialogDescription might be nested inside AlertDialogHeader.
+   */
+  const hasComponentType = (children, targetType, targetDisplayName) => {
+    return React.Children.toArray(children).some(child => {
+      if (!React.isValidElement(child)) return false
+      
+      // Check direct match
+      if (child.type === targetType || child.type?.displayName === targetDisplayName) {
+        return true
+      }
+      
+      // Check nested children (e.g., AlertDialogDescription inside AlertDialogHeader)
+      if (child.props?.children) {
+        return hasComponentType(child.props.children, targetType, targetDisplayName)
+      }
+      
+      return false
+    })
+  }
 
-  // Check if children contain an AlertDialogDescription
-  const hasDescription = React.Children.toArray(children).some(
-    child => React.isValidElement(child) && 
-    (child.type === AlertDialogDescription || 
-     child.type?.displayName === AlertDialogDescription.displayName)
-  )
+  // Check if children already contain an AlertDialogTitle (recursively)
+  const hasTitle = hasComponentType(children, AlertDialogTitle, AlertDialogTitle.displayName)
+
+  // Check if children contain an AlertDialogDescription (recursively)
+  const hasDescription = hasComponentType(children, AlertDialogDescription, AlertDialogDescription.displayName)
 
   // Determine if we need aria-describedby
   const needsAriaDescribedBy = hasDescription || description
