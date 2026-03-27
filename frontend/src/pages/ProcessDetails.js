@@ -1100,18 +1100,18 @@ const ProcessDetails = () => {
           </div>
           
           {/* Linha 2: Botões de Ação */}
-          <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-12">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pl-0 sm:pl-12">
             {/* Botão para Gerir Atribuições - escondido para gestor_documentos */}
             {user?.role !== "gestor_documentos" && (
               <Button
                 variant="outline"
                 size="sm"
-                className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                className="text-purple-600 border-purple-200 hover:bg-purple-50 h-8 px-2 sm:px-3"
                 onClick={openAssignDialog}
                 data-testid="assign-users-btn"
               >
-                <Users className="h-4 w-4 mr-1" />
-                Atribuições
+                <Users className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">Atribuições</span>
               </Button>
             )}
             
@@ -1120,7 +1120,7 @@ const ProcessDetails = () => {
               <Button
                 variant="outline"
                 size="sm"
-                className={`${
+                className={`h-8 px-2 sm:px-3 ${
                   rgpdStatus?.status === 'signed' 
                     ? 'text-green-600 border-green-200 hover:bg-green-50' 
                     : rgpdStatus?.status === 'pending'
@@ -1138,17 +1138,19 @@ const ProcessDetails = () => {
                 }
               >
                 {rgpdSending || rgpdLoading ? (
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
                 ) : rgpdStatus?.status === 'signed' ? (
-                  <CheckCircle className="h-4 w-4 mr-1" />
+                  <CheckCircle className="h-3.5 w-3.5 sm:mr-1" />
                 ) : (
-                  <FileSignature className="h-4 w-4 mr-1" />
+                  <FileSignature className="h-3.5 w-3.5 sm:mr-1" />
                 )}
-                {rgpdStatus?.status === 'signed' 
-                  ? 'RGPD Assinado' 
-                  : rgpdStatus?.status === 'pending'
-                  ? 'RGPD Pendente'
-                  : 'Solicitar RGPD'}
+                <span className="hidden sm:inline">
+                  {rgpdStatus?.status === 'signed' 
+                    ? 'RGPD Assinado' 
+                    : rgpdStatus?.status === 'pending'
+                    ? 'RGPD Pendente'
+                    : 'RGPD'}
+                </span>
               </Button>
             )}
             
@@ -1157,12 +1159,12 @@ const ProcessDetails = () => {
               <Button
                 variant="outline"
                 size="sm"
-                className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                className="text-indigo-600 border-indigo-200 hover:bg-indigo-50 h-8 px-2 sm:px-3"
                 onClick={() => setShowCPCVModal(true)}
                 title="Gerar Contrato Promessa Compra e Venda"
               >
-                <FileSignature className="h-4 w-4 mr-2" />
-                CPCV
+                <FileSignature className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">CPCV</span>
               </Button>
             )}
 
@@ -1179,11 +1181,11 @@ const ProcessDetails = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50 h-8 px-2 sm:px-3"
                       title="Calculadora DSTI - Taxa de Esforço"
                     >
-                      <Calculator className="h-4 w-4 mr-2" />
-                      DSTI
+                      <Calculator className="h-3.5 w-3.5 sm:mr-1" />
+                      <span className="hidden sm:inline">DSTI</span>
                     </Button>
                   }
                   clientData={{
@@ -1199,11 +1201,11 @@ const ProcessDetails = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                      className="text-purple-600 border-purple-200 hover:bg-purple-50 h-8 px-2 sm:px-3"
                       title="Calculadora de Risco de Crédito"
                     >
-                      <TrendingUp className="h-4 w-4 mr-2" />
-                      Risco
+                      <TrendingUp className="h-3.5 w-3.5 sm:mr-1" />
+                      <span className="hidden sm:inline">Risco</span>
                     </Button>
                   }
                   clientData={{
@@ -1220,7 +1222,7 @@ const ProcessDetails = () => {
             
             {canChangeStatus && (
               <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger className="w-44" data-testid="status-select">
+                <SelectTrigger className="w-36 sm:w-44 h-8 text-xs sm:text-sm" data-testid="status-select">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1236,12 +1238,12 @@ const ProcessDetails = () => {
               <Button
                 variant="outline"
                 size="sm"
-                className="text-red-600 border-red-200 hover:bg-red-50"
+                className="text-red-600 border-red-200 hover:bg-red-50 h-8 px-2 sm:px-3"
                 onClick={handleDeleteClient}
                 data-testid="delete-client-btn"
               >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Eliminar
+                <Trash2 className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">Eliminar</span>
               </Button>
             )}
           </div>
@@ -1342,30 +1344,30 @@ const ProcessDetails = () => {
               </CardHeader>
               <CardContent>
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-3 lg:grid-cols-6">
-                    <TabsTrigger value="personal" className="gap-1 lg:gap-2">
-                      <User className="h-4 w-4" />
-                      <span className="hidden lg:inline">Pessoais</span>
+                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 gap-1 h-auto p-1">
+                    <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
+                      <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Pessoais</span>
                     </TabsTrigger>
-                    <TabsTrigger value="financial" className="gap-1 lg:gap-2">
-                      <Briefcase className="h-4 w-4" />
-                      <span className="hidden lg:inline">Financeiros</span>
+                    <TabsTrigger value="financial" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
+                      <Briefcase className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Financeiros</span>
                     </TabsTrigger>
-                    <TabsTrigger value="realestate" className="gap-1 lg:gap-2">
-                      <Building2 className="h-4 w-4" />
-                      <span className="hidden lg:inline">Imobiliário</span>
+                    <TabsTrigger value="realestate" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
+                      <Building2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Imóvel</span>
                     </TabsTrigger>
-                    <TabsTrigger value="credit" className="gap-1 lg:gap-2">
-                      <CreditCard className="h-4 w-4" />
-                      <span className="hidden lg:inline">Crédito</span>
+                    <TabsTrigger value="credit" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
+                      <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Crédito</span>
                     </TabsTrigger>
-                    <TabsTrigger value="documents" className="gap-1 lg:gap-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
-                      <FolderOpen className="h-4 w-4" />
-                      <span className="hidden lg:inline">Documentos</span>
+                    <TabsTrigger value="documents" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
+                      <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Docs</span>
                     </TabsTrigger>
-                    <TabsTrigger value="emails" className="gap-1 lg:gap-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
-                      <Send className="h-4 w-4" />
-                      <span className="hidden lg:inline">Emails</span>
+                    <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
+                      <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Emails</span>
                     </TabsTrigger>
                   </TabsList>
 
