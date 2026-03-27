@@ -34,6 +34,7 @@ const AIConfigPage = React.lazy(() => import("./pages/AIConfigPage"));
 const AITrainingPage = React.lazy(() => import("./pages/AITrainingPage"));
 const BackgroundJobsPage = React.lazy(() => import("./pages/BackgroundJobsPage"));
 const NotificationSettingsPage = React.lazy(() => import("./pages/NotificationSettingsPage"));
+const NotificationsPage = React.lazy(() => import("./pages/NotificationsPage"));
 const UnifiedLogsPage = React.lazy(() => import("./pages/UnifiedLogsPage"));
 const PropertiesPage = React.lazy(() => import("./pages/PropertiesPage"));
 const ClientsPage = React.lazy(() => import("./pages/ClientsPage"));
@@ -386,6 +387,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
                 <NotificationSettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Notifications Page - All staff */}
+          <Route
+            path="/notificacoes"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <NotificationsPage />
               </ProtectedRoute>
             }
           />
