@@ -267,6 +267,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     """
     Handler global para HTTPExceptions.
     Regista erros 4xx e 5xx no sistema de logs para análise.
+    Inclui headers CORS para garantir que erros não bloqueiam o frontend.
     """
     # Só logar erros significativos (não 401/403 de autenticação normal)
     if exc.status_code >= 500 or exc.status_code in [400, 404]:
@@ -303,9 +304,31 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         except (IOError, OSError) as log_error:
             logger.warning(f"Erro ao registar log: {log_error}")
     
+    # Obter origin do request para CORS
+    origin = request.headers.get("origin", "*")
+    
+    # Verificar se a origin é permitida
+    allowed_origin = None
+    if origin in CORS_ORIGINS:
+        allowed_origin = origin
+    elif CORS_ORIGIN_REGEX:
+        import re
+        for pattern in CORS_ORIGIN_REGEX:
+            if re.match(pattern, origin):
+                allowed_origin = origin
+                break
+    
+    headers = {}
+    if allowed_origin:
+        headers = {
+            "Access-Control-Allow-Origin": allowed_origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
+    
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail}
+        content={"detail": exc.detail},
+        headers=headers
     )
 
 @app.exception_handler(Exception)
@@ -313,6 +336,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     """
     Handler para excepções não tratadas.
     Regista o erro e retorna 500.
+    Inclui headers CORS para garantir que erros não bloqueiam o frontend.
     """
     try:
         from services.system_error_logger import system_error_logger
@@ -333,9 +357,32 @@ async def general_exception_handler(request: Request, exc: Exception):
         logger.error(f"Erro ao registar excepção: {log_error}")
     
     logger.exception(f"Unhandled exception: {exc}")
+    
+    # Obter origin do request para CORS
+    origin = request.headers.get("origin", "*")
+    
+    # Verificar se a origin é permitida
+    allowed_origin = None
+    if origin in CORS_ORIGINS:
+        allowed_origin = origin
+    elif CORS_ORIGIN_REGEX:
+        import re
+        for pattern in CORS_ORIGIN_REGEX:
+            if re.match(pattern, origin):
+                allowed_origin = origin
+                break
+    
+    headers = {}
+    if allowed_origin:
+        headers = {
+            "Access-Control-Allow-Origin": allowed_origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
+    
     return JSONResponse(
         status_code=500,
-        content={"detail": "Erro interno do servidor"}
+        content={"detail": "Erro interno do servidor"},
+        headers=headers
     )
 
 # Rotas
