@@ -432,17 +432,18 @@ const ClientRegistrationsPage = () => {
                   >
                     <div className="col-span-3">
                       <div className="flex items-center gap-3">
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center font-semibold ${
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center font-semibold shrink-0 ${
                           client.has_process 
                             ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' 
                             : 'bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300'
                         }`}>
                           {client.nome?.charAt(0)?.toUpperCase() || "?"}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1 overflow-hidden">
                           <button
                             onClick={() => handleViewClientDetails(client.id)}
-                            className="font-semibold text-left hover:text-primary transition-colors cursor-pointer truncate block"
+                            className="font-semibold text-left hover:text-primary transition-colors cursor-pointer block truncate w-full"
+                            title={client.nome}
                           >
                             {client.nome}
                           </button>
@@ -455,9 +456,9 @@ const ClientRegistrationsPage = () => {
                       </div>
                     </div>
                     
-                    <div className="col-span-2 space-y-1.5">
+                    <div className="col-span-2 space-y-1.5 min-w-0">
                       {client.contacto?.email && (
-                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground min-w-0">
                           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
                           <span className="truncate" title={client.contacto.email}>{client.contacto.email}</span>
                         </div>
@@ -465,7 +466,7 @@ const ClientRegistrationsPage = () => {
                       {client.contacto?.telefone && (
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                           <Phone className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span>{client.contacto.telefone}</span>
+                          <span className="whitespace-nowrap">{client.contacto.telefone}</span>
                         </div>
                       )}
                     </div>
