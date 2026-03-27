@@ -29,7 +29,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copiar requirements e instalar dependências
 COPY requirements.txt .
 RUN pip install --user --no-warn-script-location -r requirements.txt
-RUN pip install --user --no-warn-script-location --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ emergentintegrations==0.1.1
 
 
 # -----------------------------
