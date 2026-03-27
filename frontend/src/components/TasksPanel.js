@@ -325,17 +325,17 @@ const TasksPanel = ({
     <>
       <Card className="border-border">
         <CardHeader className={compact ? "pb-2" : ""}>
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
               <CardTitle className={`flex items-center gap-2 ${compact ? "text-base" : "text-lg"}`}>
-                <ClipboardList className="h-5 w-5" />
-                Tarefas
+                <ClipboardList className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
+                <span className="truncate">Tarefas</span>
                 {tasks.length > 0 && (
-                  <Badge variant="secondary" className="ml-2">{tasks.length}</Badge>
+                  <Badge variant="secondary" className="ml-1 sm:ml-2 text-xs">{tasks.length}</Badge>
                 )}
               </CardTitle>
               {!compact && (
-                <CardDescription>
+                <CardDescription className="text-xs sm:text-sm">
                   {processId ? "Tarefas deste processo" : "Todas as tarefas"}
                 </CardDescription>
               )}
@@ -344,25 +344,26 @@ const TasksPanel = ({
               <Button 
                 size="sm" 
                 onClick={openCreateDialog}
-                className="bg-teal-600 hover:bg-teal-700"
+                className="bg-teal-600 hover:bg-teal-700 h-8 px-2 sm:px-3 shrink-0"
               >
-                <Plus className="h-4 w-4 mr-1" />
-                Nova
+                <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">Nova</span>
               </Button>
             )}
           </div>
         </CardHeader>
         <CardContent>
           {/* Filtros */}
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex flex-col xs:flex-row items-start xs:items-center gap-3 xs:gap-4 mb-4">
             <div className="flex items-center gap-2">
               <Checkbox
                 id="showCompleted"
                 checked={showCompleted}
                 onCheckedChange={setShowCompleted}
+                className="h-4 w-4"
               />
-              <Label htmlFor="showCompleted" className="text-sm text-muted-foreground cursor-pointer">
-                Mostrar concluídas
+              <Label htmlFor="showCompleted" className="text-xs sm:text-sm text-muted-foreground cursor-pointer">
+                Concluídas
               </Label>
             </div>
             {!processId && (
@@ -371,8 +372,9 @@ const TasksPanel = ({
                   id="showCreatedByMe"
                   checked={showCreatedByMe}
                   onCheckedChange={setShowCreatedByMe}
+                  className="h-4 w-4"
                 />
-                <Label htmlFor="showCreatedByMe" className="text-sm text-muted-foreground cursor-pointer">
+                <Label htmlFor="showCreatedByMe" className="text-xs sm:text-sm text-muted-foreground cursor-pointer">
                   Criadas por mim
                 </Label>
               </div>
@@ -383,7 +385,7 @@ const TasksPanel = ({
           {tasks.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <ClipboardList className="h-12 w-12 mx-auto mb-2 opacity-20" />
-              <p>Nenhuma tarefa {showCompleted ? "" : "pendente"}</p>
+              <p className="text-sm">Nenhuma tarefa {showCompleted ? "" : "pendente"}</p>
             </div>
           ) : (
             <ScrollArea style={{ maxHeight }}>
@@ -391,7 +393,7 @@ const TasksPanel = ({
                 {tasks.map((task) => (
                   <div
                     key={task.id}
-                    className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+                    className={`flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg border transition-colors cursor-pointer ${
                       task.completed 
                         ? "bg-muted/30 border-muted" 
                         : "bg-background border-border hover:bg-muted/50 hover:border-primary/30"
@@ -411,38 +413,38 @@ const TasksPanel = ({
                       className="mt-0.5 flex-shrink-0"
                     >
                       {task.completed ? (
-                        <CheckCircle2 className="h-5 w-5 text-green-600" />
+                        <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
                       ) : (
-                        <Circle className="h-5 w-5 text-muted-foreground hover:text-blue-600" />
+                        <Circle className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground hover:text-blue-600" />
                       )}
                     </button>
 
                     {/* Conteúdo */}
                     <div className="flex-1 min-w-0">
-                      <p className={`font-medium ${task.completed ? "line-through text-muted-foreground" : ""}`}>
+                      <p className={`font-medium text-sm sm:text-base ${task.completed ? "line-through text-muted-foreground" : ""}`}>
                         {task.title}
                       </p>
                       {task.description && (
-                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                        <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">
                           {task.description}
                         </p>
                       )}
-                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2">
                         {/* Badge de prazo */}
                         {getDueDateBadge(task)}
                         {/* Atribuídos */}
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs text-muted-foreground">
                           <User className="h-3 w-3" />
-                          {task.assigned_to_names?.join(", ") || "Sem atribuição"}
+                          <span className="truncate max-w-[80px] sm:max-w-none">{task.assigned_to_names?.join(", ") || "Sem atribuição"}</span>
                         </div>
                         {/* Processo */}
                         {task.process_name && !processId && (
-                          <Badge variant="outline" className="text-xs">
+                          <Badge variant="outline" className="text-[10px] sm:text-xs h-4 sm:h-5">
                             {task.process_name}
                           </Badge>
                         )}
-                        {/* Data de criação */}
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        {/* Data de criação - hidden on very small screens */}
+                        <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground">
                           <Clock className="h-3 w-3" />
                           {format(parseISO(task.created_at), "dd/MM/yyyy", { locale: pt })}
                         </div>
@@ -452,8 +454,8 @@ const TasksPanel = ({
                     {/* Menu */}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
-                          <MoreVertical className="h-4 w-4" />
+                        <Button variant="ghost" size="sm" className="h-7 w-7 sm:h-8 sm:w-8 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">

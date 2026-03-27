@@ -950,13 +950,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 onClick={fetchFiles}
                 disabled={loading}
                 data-testid="refresh-files-btn"
+                className="h-8 w-8 p-0"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               </Button>
             </div>
             
             {/* Linha 2: Botões de acção */}
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -966,9 +967,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   setTemplateDialog({ open: true });
                 }}
                 data-testid="generate-template-btn"
-                className="bg-emerald-50 hover:bg-emerald-100 border-emerald-200 dark:bg-emerald-950/50 dark:border-emerald-800 dark:hover:bg-emerald-900/50 whitespace-nowrap"
+                className="bg-emerald-50 hover:bg-emerald-100 border-emerald-200 dark:bg-emerald-950/50 dark:border-emerald-800 dark:hover:bg-emerald-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
               >
-                <FileDown className="h-4 w-4 mr-1.5 text-emerald-600" />
+                <FileDown className="h-3.5 w-3.5 text-emerald-600 sm:mr-1" />
                 <span className="hidden sm:inline">Gerar</span> Minuta
               </Button>
               <Button
@@ -976,14 +977,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
                 data-testid="upload-file-btn"
-                className="whitespace-nowrap"
+                className="whitespace-nowrap h-8 px-2 sm:px-3"
               >
                 {uploading ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin sm:mr-1" />
                 ) : (
-                  <Upload className="h-4 w-4 mr-1.5" />
+                  <Upload className="h-3.5 w-3.5 sm:mr-1" />
                 )}
-                Upload
+                <span className="hidden xs:inline">Upload</span>
               </Button>
               <Button
                 size="sm"
@@ -991,12 +992,12 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 onClick={handleAIAnalysis}
                 disabled={aiAnalyzing || getAllFiles().length === 0}
                 data-testid="ai-analyze-btn"
-                className="bg-purple-50 hover:bg-purple-100 border-purple-200 dark:bg-purple-950/50 dark:border-purple-800 dark:hover:bg-purple-900/50 whitespace-nowrap"
+                className="bg-purple-50 hover:bg-purple-100 border-purple-200 dark:bg-purple-950/50 dark:border-purple-800 dark:hover:bg-purple-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
               >
                 {aiAnalyzing ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1.5 text-purple-600" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600 sm:mr-1" />
                 ) : (
-                  <Brain className="h-4 w-4 mr-1.5 text-purple-600" />
+                  <Brain className="h-3.5 w-3.5 text-purple-600 sm:mr-1" />
                 )}
                 <span className="hidden sm:inline">Analisar</span> IA
               </Button>
@@ -1007,14 +1008,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 disabled={renaming || getAllFiles().length === 0}
                 data-testid="smart-rename-btn"
                 title="Renomear documentos com nomes inteligentes baseados na análise IA"
-                className="bg-amber-50 hover:bg-amber-100 border-amber-200 dark:bg-amber-950/50 dark:border-amber-800 dark:hover:bg-amber-900/50 whitespace-nowrap"
+                className="bg-amber-50 hover:bg-amber-100 border-amber-200 dark:bg-amber-950/50 dark:border-amber-800 dark:hover:bg-amber-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
               >
                 {renaming ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1.5 text-amber-600" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 sm:mr-1" />
                 ) : (
-                  <Sparkles className="h-4 w-4 mr-1.5 text-amber-600" />
+                  <Sparkles className="h-3.5 w-3.5 text-amber-600 sm:mr-1" />
                 )}
-                <span className="hidden lg:inline">Renomear</span> IA
+                <span className="hidden md:inline">Renomear</span> IA
               </Button>
               <input
                 ref={fileInputRef}
@@ -1038,7 +1039,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           )}
 
           {/* Pesquisa de ficheiros e ordenação */}
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -1046,7 +1047,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 placeholder="Pesquisar documentos..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9"
+                className="pl-9 h-9 text-sm"
                 data-testid="search-documents-input"
               />
               {searchQuery && (
@@ -1061,25 +1062,25 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
               )}
             </div>
             {/* Botões de ordenação */}
-            <div className="flex gap-1">
+            <div className="flex gap-1 justify-end">
               <Button
                 variant={sortBy === "date" ? "secondary" : "ghost"}
                 size="sm"
                 onClick={() => toggleSort("date")}
-                className="h-9 px-2"
+                className="h-9 px-2 text-xs"
                 title="Ordenar por data"
               >
-                {sortBy === "date" && sortOrder === "desc" ? <ChevronDown className="h-3 w-3" /> : sortBy === "date" ? <ChevronUp className="h-3 w-3" /> : null}
+                {sortBy === "date" && sortOrder === "desc" ? <ChevronDown className="h-3 w-3 mr-0.5" /> : sortBy === "date" ? <ChevronUp className="h-3 w-3 mr-0.5" /> : null}
                 Data
               </Button>
               <Button
                 variant={sortBy === "name" ? "secondary" : "ghost"}
                 size="sm"
                 onClick={() => toggleSort("name")}
-                className="h-9 px-2"
+                className="h-9 px-2 text-xs"
                 title="Ordenar por nome"
               >
-                {sortBy === "name" && sortOrder === "desc" ? <ChevronDown className="h-3 w-3" /> : sortBy === "name" ? <ChevronUp className="h-3 w-3" /> : null}
+                {sortBy === "name" && sortOrder === "desc" ? <ChevronDown className="h-3 w-3 mr-0.5" /> : sortBy === "name" ? <ChevronUp className="h-3 w-3 mr-0.5" /> : null}
                 Nome
               </Button>
             </div>
@@ -1088,17 +1089,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
         <CardContent className="pt-0">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full flex flex-wrap h-auto gap-1 p-1">
+            <TabsList className="w-full flex flex-wrap h-auto gap-0.5 sm:gap-1 p-1">
               {/* Tab "Todos" primeiro */}
               <TabsTrigger
                 value="all"
-                className="flex-1 min-w-[60px] gap-1 text-xs py-1.5 px-2"
+                className="min-w-[40px] sm:min-w-[60px] sm:flex-1 gap-1 text-[10px] sm:text-xs py-1.5 px-1.5 sm:px-2"
                 data-testid="tab-all"
               >
                 <FolderOpen className="h-3 w-3" />
                 <span className="hidden sm:inline">Todos</span>
                 {stats?.total_files > 0 && (
-                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                  <Badge variant="secondary" className="ml-0.5 sm:ml-1 h-4 px-1 text-[10px]">
                     {stats.total_files}
                   </Badge>
                 )}
@@ -1110,13 +1111,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   <TabsTrigger
                     key={cat.id}
                     value={cat.id}
-                    className="flex-1 min-w-[60px] gap-1 text-xs py-1.5 px-2"
+                    className="min-w-[40px] sm:min-w-[60px] sm:flex-1 gap-1 text-[10px] sm:text-xs py-1.5 px-1.5 sm:px-2"
                     data-testid={`tab-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
                   >
                     <Icon className="h-3 w-3" />
                     <span className="hidden sm:inline">{cat.label}</span>
                     {count > 0 && (
-                      <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                      <Badge variant="secondary" className="ml-0.5 sm:ml-1 h-4 px-1 text-[10px]">
                         {count}
                       </Badge>
                     )}
@@ -1133,38 +1134,38 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                     {filteredFiles.map((file, idx) => (
                       <div
                         key={`${file.path}-${idx}`}
-                        className="flex items-center justify-between p-2 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                        className="flex items-center justify-between p-2 rounded-lg border bg-card hover:bg-accent/50 transition-colors gap-2"
                       >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                           <FileIcon filename={file.name} />
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium truncate">{file.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              <Badge variant="outline" className="mr-2 text-[10px] py-0">
+                            <p className="text-xs sm:text-sm font-medium truncate">{file.name}</p>
+                            <p className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
+                              <Badge variant="outline" className="text-[10px] py-0 h-4">
                                 {file.category}
                               </Badge>
-                              {file.size_formatted} • {formatDate(file.last_modified)}
+                              <span className="hidden xs:inline">{file.size_formatted} • {formatDate(file.last_modified)}</span>
                             </p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
+                        <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            className="h-7 w-7 sm:h-8 sm:w-8"
                             onClick={() => handleDownload(file)}
                             title="Download"
                           >
-                            <Download className="h-4 w-4" />
+                            <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-red-500 hover:text-red-600"
+                            className="h-7 w-7 sm:h-8 sm:w-8 text-red-500 hover:text-red-600"
                             onClick={() => setDeleteDialog({ open: true, file })}
                             title="Eliminar"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                           </Button>
                         </div>
                       </div>
@@ -1192,40 +1193,40 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       {getFilteredCategoryFiles(cat.id).map((file, idx) => (
                         <div
                           key={`${file.path}-${idx}`}
-                          className="flex items-center justify-between p-2 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                          className="flex items-center justify-between p-2 rounded-lg border bg-card hover:bg-accent/50 transition-colors gap-2"
                           data-testid={`file-item-${idx}`}
                         >
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
                             <FileIcon filename={file.name} />
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate" title={file.name}>
+                              <p className="text-xs sm:text-sm font-medium truncate" title={file.name}>
                                 {file.name}
                               </p>
-                              <p className="text-xs text-muted-foreground">
+                              <p className="text-[10px] sm:text-xs text-muted-foreground">
                                 {file.size_formatted} • {formatDate(file.last_modified)}
                               </p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8"
+                              className="h-7 w-7 sm:h-8 sm:w-8"
                               onClick={() => handleDownload(file)}
                               title="Download"
                               data-testid={`download-btn-${idx}`}
                             >
-                              <Download className="h-4 w-4" />
+                              <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                             </Button>
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-red-500 hover:text-red-600"
+                              className="h-7 w-7 sm:h-8 sm:w-8 text-red-500 hover:text-red-600"
                               onClick={() => setDeleteDialog({ open: true, file })}
                               title="Eliminar"
                               data-testid={`delete-btn-${idx}`}
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                             </Button>
                           </div>
                         </div>
