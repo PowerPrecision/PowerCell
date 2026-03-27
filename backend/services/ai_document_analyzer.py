@@ -117,12 +117,12 @@ async def analyze_document_with_ai(
         Dados extraídos do documento
     """
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+        from openai import AsyncOpenAI
         
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        api_key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            logger.error("EMERGENT_LLM_KEY não configurada")
-            return {"success": False, "error": "Chave de API não configurada"}
+            logger.error("EMERGENT_LLM_KEY ou OPENAI_API_KEY não configurada")
+            return {"success": False, "error": "Chave de API não configurada. Configure EMERGENT_LLM_KEY ou OPENAI_API_KEY nas variáveis de ambiente."}
         
         # Converter para base64
         file_base64 = base64.b64encode(file_content).decode('utf-8')
@@ -136,30 +136,65 @@ async def analyze_document_with_ai(
             else:
                 return {"success": False, "error": f"Tipo de ficheiro não suportado: {mime_type}"}
         
-        # Criar instância do chat
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"doc-analysis-{uuid.uuid4()}",
-            system_message=DOCUMENT_ANALYSIS_PROMPT
-        ).with_model("openai", "gpt-4o-mini")
+        # Criar cliente OpenAI assíncrono
+        client = AsyncOpenAI(api_key=api_key)
         
-        # Criar mensagem com imagem
-        image_content = ImageContent(image_base64=file_base64)
+        # Preparar o conteúdo da mensagem
+        # Para PDFs, precisamos de os processar diferente (não suportado diretamente pelo vision API)
+        if mime_type == "application/pdf":
+            # Tentar extrair texto do PDF usando PyMuPDF
+            try:
+                import fitz  # PyMuPDF
+                pdf_document = fitz.open(stream=file_content, filetype="pdf")
+                text_content = ""
+                for page in pdf_document:
+                    text_content += page.get_text()
+                pdf_document.close()
+                
+                if text_content.strip():
+                    # Usar o texto extraído para análise
+                    response = await client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
+                            {"role": "user", "content": f"Analise este documento ({file_name}) extraído de um PDF. Conteúdo:\n\n{text_content[:10000]}"}
+                        ],
+                        max_tokens=2000,
+                        temperature=0.1
+                    )
+                else:
+                    return {"success": False, "error": "Não foi possível extrair texto do PDF"}
+            except ImportError:
+                return {"success": False, "error": "PyMuPDF não instalado para processamento de PDF"}
+        else:
+            # Para imagens, usar o vision API
+            image_url = f"data:{mime_type};base64,{file_base64}"
+            
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"Analise este documento ({file_name}) e extraia todos os dados relevantes."},
+                            {"type": "image_url", "image_url": {"url": image_url}}
+                        ]
+                    }
+                ],
+                max_tokens=2000,
+                temperature=0.1
+            )
         
-        user_message = UserMessage(
-            text=f"Analise este documento ({file_name}) e extraia todos os dados relevantes.",
-            file_contents=[image_content]
-        )
-        
-        # Enviar para análise
-        logger.info(f"Analisando documento: {file_name}")
-        response = await chat.send_message(user_message)
+        # Obter a resposta
+        response_text = response.choices[0].message.content
+        logger.info(f"Resposta recebida para {file_name}")
         
         # Parse da resposta JSON
         import json
         
         # Tentar extrair JSON da resposta
-        json_match = re.search(r'\{[\s\S]*\}', response)
+        json_match = re.search(r'\{[\s\S]*\}', response_text)
         if json_match:
             try:
                 result = json.loads(json_match.group())
@@ -173,7 +208,7 @@ async def analyze_document_with_ai(
                     "tipo_documento": "outro",
                     "confianca": 0.5,
                     "dados_extraidos": {},
-                    "observacoes": response,
+                    "observacoes": response_text,
                     "file_name": file_name
                 }
         else:
@@ -182,12 +217,12 @@ async def analyze_document_with_ai(
                 "tipo_documento": "outro",
                 "confianca": 0.3,
                 "dados_extraidos": {},
-                "observacoes": response,
+                "observacoes": response_text,
                 "file_name": file_name
             }
             
     except Exception as e:
-        logger.error(f"Erro na análise de documento: {e}")
+        logger.error(f"Erro na análise de documento: {e}", exc_info=True)
         return {"success": False, "error": str(e), "file_name": file_name}
 
 
