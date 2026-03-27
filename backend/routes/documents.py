@@ -19,7 +19,7 @@ from typing import List, Optional, Dict
 from io import BytesIO
 
 # Adicionados UploadFile, File, Form para o S3
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response
 
 from database import db
 from models.auth import UserRole
@@ -1397,10 +1397,9 @@ async def get_expiring_documents_dashboard(
 # ====================================================================
 
 @router.post("/ai-analyze/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
-@limiter.limit("10/minute")
 async def ai_analyze_documents(
-    process_id: str,
     request: Request,
+    process_id: str,
     files: List[UploadFile] = File(...),
     user: dict = Depends(get_current_user)
 ):
