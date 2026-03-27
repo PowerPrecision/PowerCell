@@ -314,24 +314,21 @@ const NotificationsDropdown = () => {
           )}
         </ScrollArea>
         
-        {notifications.length > 20 && (
-          <>
-            <DropdownMenuSeparator />
-            <div className="px-3 py-2 text-center">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-xs text-blue-600"
-                onClick={() => {
-                  setIsOpen(false);
-                  navigate("/configuracoes/notificacoes");
-                }}
-              >
-                Ver todas ({notifications.length})
-              </Button>
-            </div>
-          </>
-        )}
+        <DropdownMenuSeparator />
+        <div className="px-3 py-2 text-center">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="text-xs text-blue-600 w-full"
+            onClick={() => {
+              setIsOpen(false);
+              navigate("/notificacoes");
+            }}
+          >
+            <Bell className="h-3.5 w-3.5 mr-2" />
+            Ver todas as notificações
+          </Button>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -54,6 +54,10 @@ class DatabaseProxy:
     """
     def __getattr__(self, name):
         return getattr(get_database(), name)
+    
+    def __getitem__(self, name):
+        """Permite acesso via db[collection_name]."""
+        return get_database()[name]
 
 
 class ClientProxy:

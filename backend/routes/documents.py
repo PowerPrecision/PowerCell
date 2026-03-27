@@ -1777,7 +1777,7 @@ async def organize_documents_after_analysis(
                         Bucket=s3_service.bucket_name,
                         Key=folder_key
                     )
-                except (ClientError, KeyError, AttributeError):
+                except (KeyError, AttributeError):
                     # Criar pasta
                     s3_service.s3_client.put_object(
                         Bucket=s3_service.bucket_name,
@@ -1785,6 +1785,18 @@ async def organize_documents_after_analysis(
                         Body=b''
                     )
                     results["folders_created"].append(folder)
+                except Exception as e:
+                    # Verificar se é um erro do S3 (NotFound)
+                    if "NotFound" in str(type(e).__name__) or "404" in str(e):
+                        # Criar pasta
+                        s3_service.s3_client.put_object(
+                            Bucket=s3_service.bucket_name,
+                            Key=folder_key,
+                            Body=b''
+                        )
+                        results["folders_created"].append(folder)
+                    else:
+                        raise
             except (IOError, OSError, ValueError, KeyError, TypeError) as e:
                 logger.warning(f"Erro ao criar pasta {folder}: {e}")
     

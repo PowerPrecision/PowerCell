@@ -8,11 +8,98 @@ from database import db
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from services.auth import hash_password, require_roles
+from services.permissions import (
+    get_default_permissions_for_role, 
+    get_all_available_permissions,
+    get_role_display_info,
+    validate_permissions,
+    DEFAULT_PERMISSIONS_BY_ROLE
+)
 
 logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+# ============== PERMISSIONS ROUTES ==============
+
+@router.get("/permissions/available")
+async def get_available_permissions(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """
+    Retorna todas as permissões disponíveis no sistema.
+    Usado pelo frontend para exibir opções de permissões.
+    """
+    return {
+        "success": True,
+        "data": get_all_available_permissions()
+    }
+
+
+@router.get("/permissions/defaults")
+async def get_default_permissions(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """
+    Retorna as permissões padrão para cada role.
+    Usado pelo frontend para mostrar permissões quando muda o role.
+    """
+    return {
+        "success": True,
+        "roles": get_role_display_info(),
+        "defaults": DEFAULT_PERMISSIONS_BY_ROLE
+    }
+
+
+@router.get("/permissions/defaults/{role}")
+async def get_default_permissions_for_role_endpoint(
+    role: str, 
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Retorna as permissões padrão para um role específico.
+    """
+    if role not in DEFAULT_PERMISSIONS_BY_ROLE:
+        raise HTTPException(status_code=400, detail="Role inválido")
+    
+    return {
+        "success": True,
+        "role": role,
+        "permissions": get_default_permissions_for_role(role)
+    }
+
+
+@router.post("/users/{user_id}/reset-permissions")
+async def reset_user_permissions(
+    user_id: str, 
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Redefine as permissões de um utilizador para o padrão do seu role.
+    """
+    target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    
+    role = target_user.get("role")
+    default_perms = get_default_permissions_for_role(role)
+    
+    await db.users.update_one(
+        {"id": user_id}, 
+        {"$set": {"permissions": default_perms}}
+    )
+    
+    await _audit_log(
+        "permissions_reset", 
+        "user", 
+        user_id, 
+        user, 
+        {"role": role, "permissions": default_perms}
+    )
+    
+    return {
+        "success": True,
+        "message": f"Permissões redefinidas para o padrão do role '{role}'",
+        "permissions": default_perms
+    }
 
 
 # ============== WORKFLOW STATUS ROUTES ==============
@@ -551,11 +638,20 @@ async def _audit_log(action: str, entity: str, entity_id: str, performed_by: dic
 
 @router.put("/users/{user_id}", response_model=UserResponse)
 async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    from services.permissions import (
+        get_default_permissions_for_role, 
+        should_sync_permissions,
+        validate_permissions
+    )
+    
     target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not target_user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
     
     update_data = {}
+    role_changed = False
+    old_role = target_user.get("role")
+    
     if data.name is not None:
         update_data["name"] = data.name
     if data.phone is not None:
@@ -563,11 +659,12 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
     if data.role is not None:
         if data.role not in [UserRole.CLIENTE, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS, UserRole.CEO, UserRole.ADMIN]:
             raise HTTPException(status_code=400, detail="Role inválido")
+        if data.role != old_role:
+            role_changed = True
         update_data["role"] = data.role
     if data.is_active is not None:
         # Proteger admin de ser desactivado
-        target_user = await db.users.find_one({"id": user_id})
-        if target_user and target_user.get("role") == "admin" and data.is_active == False:
+        if target_user.get("role") == "admin" and data.is_active == False:
             raise HTTPException(status_code=400, detail="Não é possível desactivar o utilizador administrador")
         update_data["is_active"] = data.is_active
     if data.onedrive_folder is not None:
@@ -575,9 +672,21 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
     # Processar alteração de password (apenas admin pode alterar password de outros)
     if data.password is not None and data.password.strip():
         update_data["password"] = hash_password(data.password)
-    # Processar permissões
+    
+    # Processar permissões - sincronizar automaticamente quando o role muda
+    current_permissions = target_user.get("permissions")
+    new_role = data.role or old_role
+    
     if data.permissions is not None:
-        update_data["permissions"] = data.permissions
+        # Se o admin está a definir permissões explicitamente, usar essas
+        update_data["permissions"] = validate_permissions(data.permissions)
+    elif role_changed:
+        # Se o role mudou, sincronizar permissões com o novo role
+        # Apenas sincronizar se o utilizador não tinha permissões personalizadas
+        if should_sync_permissions(old_role, new_role, current_permissions):
+            update_data["permissions"] = get_default_permissions_for_role(new_role)
+            logger.info(f"Permissões sincronizadas para utilizador {user_id}: {old_role} -> {new_role}")
+        # Se tinha permissões personalizadas, manter (admin pode redefinir manualmente)
     
     if update_data:
         await db.users.update_one({"id": user_id}, {"$set": update_data})
