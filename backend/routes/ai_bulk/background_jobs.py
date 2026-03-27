@@ -307,16 +307,21 @@ async def get_job_notifications(
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Obtém notificações de jobs (ex: jobs stuck)."""
-    query = {"type": "stuck_job"}
-    if unread_only:
-        query["is_read"] = False
-    
-    notifications = await db.job_notifications.find(
-        query,
-        {"_id": 0}
-    ).sort("created_at", -1).limit(50).to_list(50)
-    
-    return {"notifications": notifications}
+    try:
+        query = {"type": "stuck_job"}
+        if unread_only:
+            query["is_read"] = False
+        
+        notifications = await db.job_notifications.find(
+            query,
+            {"_id": 0}
+        ).sort("created_at", -1).limit(50).to_list(50)
+        
+        return {"notifications": notifications}
+    except Exception as e:
+        logger.warning(f"Erro ao obter notificações de jobs: {e}")
+        # Retornar lista vazia se a coleção não existir
+        return {"notifications": []}
 
 
 @router.put("/background-jobs/notifications/{notification_id}/read")
