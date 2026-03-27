@@ -75,15 +75,21 @@ async def trigger_backup(
     Use GET /backup/statistics para verificar o resultado.
     """
     from services.backup import full_backup_workflow
+    import uuid
     
     logger.info(f"[BACKUP] Backup manual triggered por {current_user.get('email')}")
     
-    # Registar início
+    # Criar ID único para este backup
+    backup_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc)
+    
+    # Registar início com ID único
     await db.backup_history.insert_one({
+        "id": backup_id,
         "triggered_by": current_user.get("id"),
         "triggered_by_email": current_user.get("email"),
         "trigger_type": "manual",
-        "started_at": datetime.now(timezone.utc),
+        "started_at": started_at,
         "status": "running"
     })
     
@@ -95,24 +101,20 @@ async def trigger_backup(
                 cleanup_after=request.cleanup_after
             )
             
-            # Actualizar registo
+            # Actualizar registo usando o ID único
             await db.backup_history.update_one(
-                {
-                    "triggered_by": current_user.get("id"),
-                    "status": "running"
-                },
+                {"id": backup_id},
                 {"$set": {
                     "status": "completed" if result["success"] else "failed",
                     "result": result,
                     "completed_at": datetime.now(timezone.utc)
                 }}
             )
+            logger.info(f"[BACKUP] Backup {backup_id} concluído com status: {'completed' if result['success'] else 'failed'}")
         except Exception as e:
+            logger.error(f"[BACKUP] Erro no backup {backup_id}: {e}")
             await db.backup_history.update_one(
-                {
-                    "triggered_by": current_user.get("id"),
-                    "status": "running"
-                },
+                {"id": backup_id},
                 {"$set": {
                     "status": "failed",
                     "error": str(e),
@@ -125,7 +127,8 @@ async def trigger_backup(
     return {
         "success": True,
         "message": "Backup iniciado em background",
-        "check_status_at": "/api/backup/statistics"
+        "backup_id": backup_id,
+        "check_status_at": f"/api/backup/status/{backup_id}"
     }
 
 
@@ -140,7 +143,7 @@ async def get_history(
     history = await db.backup_history.find(
         {},
         {"_id": 0}
-    ).sort("created_at", -1).limit(limit).to_list(limit)
+    ).sort("started_at", -1).limit(limit).to_list(limit)
     
     return {
         "success": True,

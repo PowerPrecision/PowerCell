@@ -217,24 +217,31 @@ async def get_backup_statistics() -> dict:
         "last_backup": None
     }
     
-    # Contar backups no histórico
-    history = await db.backup_history.find({}).sort("started_at", -1).limit(100).to_list(100)
-    
-    stats["total_backups"] = len(history)
-    stats["successful_backups"] = len([h for h in history if h.get("status") == "completed"])
-    
-    if stats["total_backups"] > 0:
-        stats["success_rate"] = (stats["successful_backups"] / stats["total_backups"]) * 100
-        stats["last_backup"] = {
-            "started_at": history[0].get("started_at"),
-            "status": history[0].get("status"),
-            "success": history[0].get("status") == "completed"
-        }
+    try:
+        # Contar backups no histórico - ordenar por started_at descendente
+        history = await db.backup_history.find({}).sort("started_at", -1).limit(100).to_list(100)
+        
+        stats["total_backups"] = len(history)
+        stats["successful_backups"] = len([h for h in history if h.get("status") == "completed"])
+        
+        if stats["total_backups"] > 0:
+            stats["success_rate"] = (stats["successful_backups"] / stats["total_backups"]) * 100
+            last = history[0]
+            stats["last_backup"] = {
+                "started_at": last.get("started_at").isoformat() if isinstance(last.get("started_at"), datetime) else last.get("started_at"),
+                "status": last.get("status"),
+                "success": last.get("status") == "completed"
+            }
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas de backup: {e}")
     
     # Calcular tamanho dos ficheiros locais
-    if config.BACKUP_DIR.exists():
-        for backup_file in config.BACKUP_DIR.glob("backup_*.zip"):
-            stats["total_size_bytes"] += backup_file.stat().st_size
+    try:
+        if config.BACKUP_DIR.exists():
+            for backup_file in config.BACKUP_DIR.glob("backup_*.zip"):
+                stats["total_size_bytes"] += backup_file.stat().st_size
+    except Exception as e:
+        logger.error(f"Erro ao calcular tamanho dos backups: {e}")
     
     return stats
 
@@ -326,15 +333,21 @@ async def scheduled_backup_job():
     
     try:
         from database import db
+        import uuid
         
         logger.info("[SCHEDULED BACKUP] Iniciando backup automático...")
         
-        # Registar início
+        # Criar ID único
+        backup_id = str(uuid.uuid4())
+        started_at = datetime.now(timezone.utc)
+        
+        # Registar início com ID único
         await db.backup_history.insert_one({
+            "id": backup_id,
             "triggered_by": "system",
             "triggered_by_email": "scheduled",
             "trigger_type": "scheduled",
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started_at,
             "status": "running"
         })
         
@@ -344,13 +357,13 @@ async def scheduled_backup_job():
             cleanup_after=True
         )
         
-        # Actualizar registo
+        # Actualizar registo com ID único
         await db.backup_history.update_one(
-            {"triggered_by": "system", "status": "running"},
+            {"id": backup_id},
             {"$set": {
                 "status": "completed" if result["success"] else "failed",
                 "result": result,
-                "completed_at": datetime.now(timezone.utc).isoformat()
+                "completed_at": datetime.now(timezone.utc)
             }}
         )
         
