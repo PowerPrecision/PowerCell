@@ -8,6 +8,7 @@
  * - Alterar role do utilizador
  * - Gerir permissões de acesso por utilizador
  * - Ativar/desativar utilizador
+ * - Sincronização automática de permissões com role
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
@@ -26,7 +27,7 @@ import {
 } from "../components/ui/select";
 import { toast } from "sonner";
 import {
-  Settings, Users, Shield, Search, Loader2, Save, ChevronRight, UserCog, Lock, Eye, EyeOff
+  Settings, Users, Shield, Search, Loader2, Save, ChevronRight, UserCog, Lock, Eye, EyeOff, RefreshCw, AlertCircle
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -84,6 +85,23 @@ const ProfileSettingsPage = () => {
   const [editDialog, setEditDialog] = useState({ open: false, user: null });
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
+  const [defaultPermissions, setDefaultPermissions] = useState({});
+  const [permissionsModified, setPermissionsModified] = useState(false);
+
+  // Carregar permissões padrão do backend
+  const fetchDefaultPermissions = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/permissions/defaults`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDefaultPermissions(data.defaults || {});
+      }
+    } catch (err) {
+      console.error("Erro ao carregar permissões padrão:", err);
+    }
+  }, [token]);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -102,17 +120,58 @@ const ProfileSettingsPage = () => {
     }
   }, [token]);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useEffect(() => { 
+    fetchUsers(); 
+    fetchDefaultPermissions();
+  }, [fetchUsers, fetchDefaultPermissions]);
 
   const openEditDialog = (user) => {
     const perms = user.permissions || {};
     setEditForm({
       role: user.role,
+      originalRole: user.role, // Guardar o role original para detectar mudanças
       is_active: user.is_active !== false,
       pages: perms.pages || AVAILABLE_PAGES.map(p => p.key),
       actions: perms.actions || AVAILABLE_ACTIONS.map(a => a.key),
+      originalPages: perms.pages || AVAILABLE_PAGES.map(p => p.key),
+      originalActions: perms.actions || AVAILABLE_ACTIONS.map(a => a.key),
     });
+    setPermissionsModified(false);
     setEditDialog({ open: true, user });
+  };
+
+  // Aplicar permissões padrão do role selecionado
+  const applyDefaultPermissions = (role) => {
+    if (defaultPermissions[role]) {
+      setEditForm(prev => ({
+        ...prev,
+        pages: defaultPermissions[role].pages || [],
+        actions: defaultPermissions[role].actions || [],
+      }));
+      setPermissionsModified(true);
+      toast.info(`Permissões aplicadas para o perfil ${ROLES.find(r => r.value === role)?.label || role}`);
+    }
+  };
+
+  // Handle role change - sincronizar permissões automaticamente
+  const handleRoleChange = (newRole) => {
+    const roleChanged = newRole !== editForm.originalRole;
+    
+    setEditForm(prev => ({
+      ...prev,
+      role: newRole,
+    }));
+
+    // Se o role mudou, perguntar se quer aplicar as permissões padrão
+    if (roleChanged && defaultPermissions[newRole]) {
+      // Aplicar automaticamente as permissões padrão do novo role
+      applyDefaultPermissions(newRole);
+    }
+  };
+
+  // Redefinir permissões para o padrão do role atual
+  const resetToDefault = () => {
+    applyDefaultPermissions(editForm.role);
   };
 
   const handleSave = async () => {
@@ -153,6 +212,7 @@ const ProfileSettingsPage = () => {
         ? prev.pages.filter(p => p !== key)
         : [...prev.pages, key]
     }));
+    setPermissionsModified(true);
   };
 
   const toggleAction = (key) => {
@@ -162,9 +222,24 @@ const ProfileSettingsPage = () => {
         ? prev.actions.filter(a => a !== key)
         : [...prev.actions, key]
     }));
+    setPermissionsModified(true);
   };
 
   const getRoleInfo = (role) => ROLES.find(r => r.value === role) || { label: role, color: "bg-gray-100 text-gray-800" };
+
+  // Verificar se as permissões são personalizadas (diferentes do padrão do role)
+  const hasCustomPermissions = (user) => {
+    if (!user.permissions) return false;
+    const roleDefaults = defaultPermissions[user.role];
+    if (!roleDefaults) return !!user.permissions;
+    
+    const userPages = (user.permissions.pages || []).sort().join(',');
+    const userActions = (user.permissions.actions || []).sort().join(',');
+    const defaultPages = (roleDefaults.pages || []).sort().join(',');
+    const defaultActions = (roleDefaults.actions || []).sort().join(',');
+    
+    return userPages !== defaultPages || userActions !== defaultActions;
+  };
 
   const filtered = users.filter(u =>
     u.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -204,7 +279,7 @@ const ProfileSettingsPage = () => {
           <div className="grid gap-3">
             {filtered.map((u) => {
               const roleInfo = getRoleInfo(u.role);
-              const hasCustomPerms = !!u.permissions;
+              const customPerms = hasCustomPermissions(u);
               return (
                 <Card
                   key={u.id}
@@ -226,7 +301,7 @@ const ProfileSettingsPage = () => {
                     </div>
                     <div className="flex items-center gap-3">
                       <Badge className={`${roleInfo.color} text-xs`}>{roleInfo.label}</Badge>
-                      {hasCustomPerms && (
+                      {customPerms && (
                         <Badge variant="outline" className="text-xs">
                           <Lock className="h-3 w-3 mr-1" />
                           Personalizado
@@ -261,11 +336,21 @@ const ProfileSettingsPage = () => {
             </DialogHeader>
 
             <div className="space-y-6 py-4">
+              {/* Info sobre sincronização */}
+              {editForm.role !== editForm.originalRole && (
+                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div>
+                    <strong>Role alterado!</strong> As permissões foram atualizadas automaticamente para o padrão do novo perfil.
+                  </div>
+                </div>
+              )}
+
               {/* Role & Status */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Role</Label>
-                  <Select value={editForm.role} onValueChange={(v) => setEditForm(prev => ({ ...prev, role: v }))}>
+                  <Select value={editForm.role} onValueChange={handleRoleChange}>
                     <SelectTrigger data-testid="edit-role">
                       <SelectValue />
                     </SelectTrigger>
@@ -314,24 +399,30 @@ const ProfileSettingsPage = () => {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {AVAILABLE_PAGES.map(page => (
-                    <label
-                      key={page.key}
-                      className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all text-sm ${
-                        (editForm.pages || []).includes(page.key)
-                          ? "bg-primary/5 border-primary/30"
-                          : "bg-muted/30 border-transparent opacity-60"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={(editForm.pages || []).includes(page.key)}
-                        onChange={() => togglePage(page.key)}
-                        className="rounded border-gray-300"
-                      />
-                      <span>{page.label}</span>
-                    </label>
-                  ))}
+                  {AVAILABLE_PAGES.map(page => {
+                    const isDefaultForRole = (defaultPermissions[editForm.role]?.pages || []).includes(page.key);
+                    return (
+                      <label
+                        key={page.key}
+                        className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all text-sm ${
+                          (editForm.pages || []).includes(page.key)
+                            ? "bg-primary/5 border-primary/30"
+                            : "bg-muted/30 border-transparent opacity-60"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={(editForm.pages || []).includes(page.key)}
+                          onChange={() => togglePage(page.key)}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="flex-1">{page.label}</span>
+                        {isDefaultForRole && (
+                          <span className="text-[10px] text-primary font-medium">PADRÃO</span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -360,25 +451,49 @@ const ProfileSettingsPage = () => {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {AVAILABLE_ACTIONS.map(action => (
-                    <label
-                      key={action.key}
-                      className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all text-sm ${
-                        (editForm.actions || []).includes(action.key)
-                          ? "bg-primary/5 border-primary/30"
-                          : "bg-muted/30 border-transparent opacity-60"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={(editForm.actions || []).includes(action.key)}
-                        onChange={() => toggleAction(action.key)}
-                        className="rounded border-gray-300"
-                      />
-                      <span>{action.label}</span>
-                    </label>
-                  ))}
+                  {AVAILABLE_ACTIONS.map(action => {
+                    const isDefaultForRole = (defaultPermissions[editForm.role]?.actions || []).includes(action.key);
+                    return (
+                      <label
+                        key={action.key}
+                        className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all text-sm ${
+                          (editForm.actions || []).includes(action.key)
+                            ? "bg-primary/5 border-primary/30"
+                            : "bg-muted/30 border-transparent opacity-60"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={(editForm.actions || []).includes(action.key)}
+                          onChange={() => toggleAction(action.key)}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="flex-1">{action.label}</span>
+                        {isDefaultForRole && (
+                          <span className="text-[10px] text-primary font-medium">PADRÃO</span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
+              </div>
+
+              {/* Botão para redefinir permissões */}
+              <div className="flex items-center justify-between pt-2 border-t">
+                <p className="text-sm text-muted-foreground">
+                  {permissionsModified ? 
+                    "Permissões personalizadas manualmente" : 
+                    "Permissões sincronizadas com o perfil"}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={resetToDefault}
+                  className="flex items-center gap-2"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Redefinir para Padrão
+                </Button>
               </div>
             </div>
 
