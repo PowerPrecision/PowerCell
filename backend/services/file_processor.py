@@ -110,6 +110,11 @@ def process_pdf_sync(
     }
     
     try:
+        # CONSTANTES DE SEGURANÇA (igual ao ai_document.py)
+        MAX_PDF_TEXT_LENGTH = 50000  # ~50KB de texto
+        MAX_PDF_PAGE_TEXT_LENGTH = 10000  # ~10KB por página
+        MAX_PDF_PAGES = 50
+        
         # Tentar com PyPDF2 primeiro
         try:
             from PyPDF2 import PdfReader
@@ -118,11 +123,31 @@ def process_pdf_sync(
             
             if extract_text:
                 text_parts = []
-                for page in reader.pages:
-                    text = page.extract_text()
-                    if text:
-                        text_parts.append(text)
-                result["text"] = "\n".join(text_parts)
+                total_chars = 0
+                pages_to_process = min(len(reader.pages), MAX_PDF_PAGES)
+                
+                for i, page in enumerate(reader.pages[:pages_to_process]):
+                    page_text = page.extract_text()
+                    if page_text:
+                        # Limitar tamanho por página
+                        if len(page_text) > MAX_PDF_PAGE_TEXT_LENGTH:
+                            page_text = page_text[:MAX_PDF_PAGE_TEXT_LENGTH]
+                        text_parts.append(page_text)
+                        total_chars += len(page_text)
+                        
+                        # Parar se exceder limite total
+                        if total_chars >= MAX_PDF_TEXT_LENGTH:
+                            break
+                
+                raw_text = "\n".join(text_parts)
+                
+                # SANITIZAÇÃO: Importar e aplicar função de sanitização
+                try:
+                    from services.ai_document import sanitize_pdf_text
+                    result["text"] = sanitize_pdf_text(raw_text, MAX_PDF_TEXT_LENGTH)
+                except ImportError:
+                    # Fallback: sanitização básica local
+                    result["text"] = raw_text[:MAX_PDF_TEXT_LENGTH]
             
             result["success"] = True
             
@@ -135,11 +160,31 @@ def process_pdf_sync(
                 
                 if extract_text:
                     text_parts = []
-                    for page in reader.pages:
-                        text = page.extract_text()
-                        if text:
-                            text_parts.append(text)
-                    result["text"] = "\n".join(text_parts)
+                    total_chars = 0
+                    pages_to_process = min(len(reader.pages), MAX_PDF_PAGES)
+                    
+                    for i, page in enumerate(reader.pages[:pages_to_process]):
+                        page_text = page.extract_text()
+                        if page_text:
+                            # Limitar tamanho por página
+                            if len(page_text) > MAX_PDF_PAGE_TEXT_LENGTH:
+                                page_text = page_text[:MAX_PDF_PAGE_TEXT_LENGTH]
+                            text_parts.append(page_text)
+                            total_chars += len(page_text)
+                            
+                            # Parar se exceder limite total
+                            if total_chars >= MAX_PDF_TEXT_LENGTH:
+                                break
+                    
+                    raw_text = "\n".join(text_parts)
+                    
+                    # SANITIZAÇÃO: Importar e aplicar função de sanitização
+                    try:
+                        from services.ai_document import sanitize_pdf_text
+                        result["text"] = sanitize_pdf_text(raw_text, MAX_PDF_TEXT_LENGTH)
+                    except ImportError:
+                        # Fallback: sanitização básica local
+                        result["text"] = raw_text[:MAX_PDF_TEXT_LENGTH]
                 
                 result["success"] = True
                 
