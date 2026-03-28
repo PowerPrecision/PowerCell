@@ -1129,49 +1129,61 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             {/* Tab "Todos" - mostra todos os ficheiros */}
             <TabsContent value="all" className="mt-3">
               {filteredFiles.length > 0 ? (
-                <ScrollArea className="h-[250px]">
-                  <div className="space-y-2">
+                <div className="overflow-x-auto pb-2 -mx-2 px-2">
+                  <div className="flex gap-3 min-w-max">
                     {filteredFiles.map((file, idx) => (
                       <div
                         key={`${file.path}-${idx}`}
-                        className="flex items-center justify-between p-2 rounded-lg border bg-card hover:bg-accent/50 transition-colors gap-2"
+                        className="flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
                       >
-                        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                        {/* Icon and actions row */}
+                        <div className="flex items-center justify-between mb-2">
                           <FileIcon filename={file.name} />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs sm:text-sm font-medium truncate">{file.name}</p>
-                            <p className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
-                              <Badge variant="outline" className="text-[10px] py-0 h-4">
-                                {file.category}
-                              </Badge>
-                              <span className="hidden xs:inline">{file.size_formatted} • {formatDate(file.last_modified)}</span>
-                            </p>
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => handleDownload(file)}
+                              title="Download"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-red-500 hover:text-red-600"
+                              onClick={() => setDeleteDialog({ open: true, file })}
+                              title="Eliminar"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 sm:h-8 sm:w-8"
-                            onClick={() => handleDownload(file)}
-                            title="Download"
-                          >
-                            <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 sm:h-8 sm:w-8 text-red-500 hover:text-red-600"
-                            onClick={() => setDeleteDialog({ open: true, file })}
-                            title="Eliminar"
-                          >
-                            <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                          </Button>
+                        {/* Clickable file name */}
+                        <button
+                          onClick={() => handleDownload(file)}
+                          className="text-left text-xs sm:text-sm font-medium truncate hover:text-blue-600 hover:underline cursor-pointer mb-1"
+                          title={`Clique para descarregar: ${file.name}`}
+                        >
+                          {file.name}
+                        </button>
+                        {/* Meta info */}
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge variant="outline" className="text-[10px] py-0 h-4">
+                            {file.category}
+                          </Badge>
+                          <span className="text-[10px] text-muted-foreground">
+                            {file.size_formatted}
+                          </span>
                         </div>
+                        <span className="text-[10px] text-muted-foreground mt-1">
+                          {formatDate(file.last_modified)}
+                        </span>
                       </div>
                     ))}
                   </div>
-                </ScrollArea>
+                </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   <FolderOpen className="h-10 w-10 mx-auto mb-3 opacity-50" />
@@ -1188,51 +1200,61 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             {CATEGORIES.map((cat) => (
               <TabsContent key={cat.id} value={cat.id} className="mt-3">
                 {getFilteredCategoryFiles(cat.id).length > 0 ? (
-                  <ScrollArea className="h-[250px]">
-                    <div className="space-y-2">
+                  <div className="overflow-x-auto pb-2 -mx-2 px-2">
+                    <div className="flex gap-3 min-w-max">
                       {getFilteredCategoryFiles(cat.id).map((file, idx) => (
                         <div
                           key={`${file.path}-${idx}`}
-                          className="flex items-center justify-between p-2 rounded-lg border bg-card hover:bg-accent/50 transition-colors gap-2"
+                          className="flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
                           data-testid={`file-item-${idx}`}
                         >
-                          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                          {/* Icon and actions row */}
+                          <div className="flex items-center justify-between mb-2">
                             <FileIcon filename={file.name} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs sm:text-sm font-medium truncate" title={file.name}>
-                                {file.name}
-                              </p>
-                              <p className="text-[10px] sm:text-xs text-muted-foreground">
-                                {file.size_formatted} • {formatDate(file.last_modified)}
-                              </p>
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => handleDownload(file)}
+                                title="Download"
+                                data-testid={`download-btn-${idx}`}
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-red-500 hover:text-red-600"
+                                onClick={() => setDeleteDialog({ open: true, file })}
+                                title="Eliminar"
+                                data-testid={`delete-btn-${idx}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 sm:h-8 sm:w-8"
-                              onClick={() => handleDownload(file)}
-                              title="Download"
-                              data-testid={`download-btn-${idx}`}
-                            >
-                              <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 sm:h-8 sm:w-8 text-red-500 hover:text-red-600"
-                              onClick={() => setDeleteDialog({ open: true, file })}
-                              title="Eliminar"
-                              data-testid={`delete-btn-${idx}`}
-                            >
-                              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                            </Button>
+                          {/* Clickable file name */}
+                          <button
+                            onClick={() => handleDownload(file)}
+                            className="text-left text-xs sm:text-sm font-medium truncate hover:text-blue-600 hover:underline cursor-pointer mb-1"
+                            title={`Clique para descarregar: ${file.name}`}
+                          >
+                            {file.name}
+                          </button>
+                          {/* Meta info */}
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-[10px] text-muted-foreground">
+                              {file.size_formatted}
+                            </span>
                           </div>
+                          <span className="text-[10px] text-muted-foreground mt-1">
+                            {formatDate(file.last_modified)}
+                          </span>
                         </div>
                       ))}
                     </div>
-                  </ScrollArea>
+                  </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
                     <FolderOpen className="h-10 w-10 mx-auto mb-3 opacity-50" />
