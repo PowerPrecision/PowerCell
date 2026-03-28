@@ -91,6 +91,21 @@ MAX_IMAGE_SIZE = 1024
 # Tamanho máximo de ficheiro (20MB)
 MAX_FILE_SIZE = 20 * 1024 * 1024
 
+# ====================================================================
+# LIMITES DE SEGURANÇA PARA EXTRAÇÃO DE TEXTO DE PDF
+# Mitigação de Prompt Injection
+# ====================================================================
+
+# Tamanho máximo de texto extraído de PDF (em caracteres)
+# Limita a quantidade de dados que podem ser enviados para a IA
+MAX_PDF_TEXT_LENGTH = 50000  # ~50KB de texto
+
+# Tamanho máximo por página de PDF
+MAX_PDF_PAGE_TEXT_LENGTH = 10000  # ~10KB por página
+
+# Número máximo de páginas a processar
+MAX_PDF_PAGES = 50
+
 # Número máximo de ficheiros a processar em paralelo
 MAX_CONCURRENT_ANALYSIS = 5
 
@@ -160,15 +175,122 @@ class RateLimitError(Exception):
     pass
 
 
-def extract_text_from_pdf(pdf_content: bytes) -> str:
+def sanitize_pdf_text(text: str, max_length: int = MAX_PDF_TEXT_LENGTH) -> str:
     """
-    Extrair texto de um PDF usando pypdf.
+    Sanitiza texto extraído de PDF para prevenir Prompt Injection.
+    
+    MITIGAÇÕES IMPLEMENTADAS:
+    1. Remove caracteres de controlo perigosos (NULL, SOH, STX, etc.)
+    2. Remove sequências de escape ANSI
+    3. Remove caracteres Unicode de controlo (C0, C1)
+    4. Limita o tamanho total do texto
+    5. Remove padrões suspeitos de prompt injection
+    6. Normaliza espaços em branco excessivos
+    
+    Args:
+        text: Texto extraído do PDF
+        max_length: Tamanho máximo permitido
+    
+    Returns:
+        Texto sanitizado e truncado
+    """
+    if not text:
+        return ""
+    
+    # 1. Remover caracteres de controlo ASCII perigosos (0x00-0x1F exceto 0x09, 0x0A, 0x0D)
+    # Mantém: tab (0x09), newline (0x0A), carriage return (0x0D)
+    sanitized = ""
+    for char in text:
+        code = ord(char)
+        # Permitir caracteres imprimíveis, tab, newline, carriage return
+        if code >= 0x20 or code in (0x09, 0x0A, 0x0D):
+            sanitized += char
+        # Substituir caracteres de controlo por espaço
+        elif code < 0x20:
+            sanitized += " "
+    
+    # 2. Remover sequências de escape ANSI (comum em PDFs maliciosos)
+    # Padrão: ESC [ ... letras/dígitos
+    ansi_escape = re.compile(r'\x1B\[[0-9;]*[A-Za-z]')
+    sanitized = ansi_escape.sub('', sanitized)
+    
+    # 3. Remover caracteres Unicode de controlo C1 (0x80-0x9F)
+    sanitized = re.sub(r'[\x80-\x9F]', '', sanitized)
+    
+    # 4. Remover caracteres NULL bytes que possam ter passado
+    sanitized = sanitized.replace('\x00', '')
+    
+    # 5. Padrões suspeitos de prompt injection
+    # Detecta tentativas comuns de injeção de prompts
+    suspicious_patterns = [
+        # Ignorar instruções anteriores
+        r'(?i)ignore\s+(previous|above|all|prior)\s+(instructions?|prompts?|context)',
+        r'(?i)forget\s+(everything|all|prior|previous)',
+        r'(?i)disregard\s+(all|any|previous|above)',
+        # Novo system prompt
+        r'(?i)(new|fake|alternative)\s+system\s+prompt',
+        r'(?i)you\s+are\s+now\s+',
+        r'(?i)act\s+as\s+(if|a|an)\s+',
+        # Injeção de contexto
+        r'(?i)<<[^>]+>>',  # <<CONTEXT>> patterns
+        r'(?i)\[\[.+\]\]',  # [[INSTRUCTION]] patterns
+        # Delimitadores de secção suspeitos
+        r'(?i)---+\s*(system|instruction|context|prompt)\s*---+',
+        # Tentativas de override
+        r'(?i)override\s+(previous|default|system)',
+        # JSON injection
+        r'(?i)"role"\s*:\s*"system"',
+    ]
+    
+    for pattern in suspicious_patterns:
+        sanitized = re.sub(pattern, '[REDACTED]', sanitized)
+    
+    # 6. Normalizar espaços em branco excessivos
+    # Múltiplos espaços -> um espaço
+    sanitized = re.sub(r' {3,}', '  ', sanitized)
+    # Múltiplas newlines -> máximo 2
+    sanitized = re.sub(r'\n{3,}', '\n\n', sanitized)
+    # Múltiplos tabs -> um tab
+    sanitized = re.sub(r'\t{2,}', '\t', sanitized)
+    
+    # 7. Remover caracteres não imprimíveis restantes
+    # Manter apenas caracteres Unicode válidos e imprimíveis
+    sanitized = ''.join(c for c in sanitized if c.isprintable() or c in '\n\r\t')
+    
+    # 8. Truncar se exceder o tamanho máximo
+    if len(sanitized) > max_length:
+        # Truncar em um limite de palavra se possível
+        truncate_at = sanitized.rfind(' ', 0, max_length)
+        if truncate_at > max_length * 0.8:  # Se encontrou espaço nos últimos 20%
+            sanitized = sanitized[:truncate_at]
+        else:
+            sanitized = sanitized[:max_length]
+        logger.warning(f"Texto de PDF truncado de {len(text)} para {len(sanitized)} caracteres")
+    
+    # Log de sanitização se houve alterações
+    if len(sanitized) != len(text):
+        logger.info(f"PDF text sanitized: {len(text)} -> {len(sanitized)} chars")
+    
+    return sanitized.strip()
+
+
+def extract_text_from_pdf(pdf_content: bytes, max_pages: int = MAX_PDF_PAGES) -> str:
+    """
+    Extrair texto de um PDF usando pypdf com limites de segurança.
+    
+    MITIGAÇÕES DE SEGURANÇA:
+    - Limite de páginas processadas (MAX_PDF_PAGES)
+    - Limite de tamanho por página (MAX_PDF_PAGE_TEXT_LENGTH)
+    - Limite total de texto (MAX_PDF_TEXT_LENGTH)
+    - Sanitização de caracteres de controlo
+    - Prevenção de Prompt Injection
     
     Args:
         pdf_content: Conteúdo do PDF em bytes
+        max_pages: Número máximo de páginas a processar
     
     Returns:
-        Texto extraído do PDF
+        Texto extraído e sanitizado do PDF
     """
     try:
         from pypdf import PdfReader
@@ -176,15 +298,39 @@ def extract_text_from_pdf(pdf_content: bytes) -> str:
         pdf_file = io.BytesIO(pdf_content)
         reader = PdfReader(pdf_file)
         
-        text_parts = []
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text_parts.append(page_text)
+        total_pages = len(reader.pages)
+        pages_to_process = min(total_pages, max_pages)
         
-        full_text = "\n".join(text_parts).strip()
-        logger.info(f"PDF text extraction: {len(full_text)} caracteres extraídos")
-        return full_text
+        if total_pages > max_pages:
+            logger.warning(f"PDF tem {total_pages} páginas, processando apenas {max_pages}")
+        
+        text_parts = []
+        total_chars = 0
+        
+        for i, page in enumerate(reader.pages[:pages_to_process]):
+            page_text = page.extract_text()
+            
+            if page_text:
+                # Limitar tamanho por página
+                if len(page_text) > MAX_PDF_PAGE_TEXT_LENGTH:
+                    logger.warning(f"Página {i+1} truncada: {len(page_text)} -> {MAX_PDF_PAGE_TEXT_LENGTH} chars")
+                    page_text = page_text[:MAX_PDF_PAGE_TEXT_LENGTH]
+                
+                text_parts.append(page_text)
+                total_chars += len(page_text)
+                
+                # Parar se já excedemos o limite total
+                if total_chars >= MAX_PDF_TEXT_LENGTH:
+                    logger.warning(f"Limite de texto total atingido na página {i+1}")
+                    break
+        
+        full_text = "\n".join(text_parts)
+        
+        # SANITIZAÇÃO: Aplicar antes de retornar
+        sanitized_text = sanitize_pdf_text(full_text, MAX_PDF_TEXT_LENGTH)
+        
+        logger.info(f"PDF text extraction: {len(sanitized_text)} caracteres extraídos de {pages_to_process} páginas")
+        return sanitized_text
         
     except Exception as e:
         logger.warning(f"Falha na extracção de texto do PDF: {e}")

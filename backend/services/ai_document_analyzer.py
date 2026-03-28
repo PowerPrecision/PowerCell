@@ -179,22 +179,55 @@ async def analyze_document_with_ai(
         
         # Preparar o conteúdo da mensagem
         if mime_type == "application/pdf":
-            # Tentar extrair texto do PDF usando PyMuPDF
+            # Tentar extrair texto do PDF usando PyMuPDF com limites de segurança
             try:
                 import fitz  # PyMuPDF
+                
+                # CONSTANTES DE SEGURANÇA (igual ao ai_document.py)
+                MAX_PDF_TEXT_LENGTH = 50000  # ~50KB de texto
+                MAX_PDF_PAGE_TEXT_LENGTH = 10000  # ~10KB por página
+                MAX_PDF_PAGES = 50
+                
                 pdf_document = fitz.open(stream=file_content, filetype="pdf")
                 text_content = ""
+                pages_processed = 0
+                total_chars = 0
+                
                 for page in pdf_document:
-                    text_content += page.get_text()
+                    if pages_processed >= MAX_PDF_PAGES:
+                        logger.warning(f"PDF excedeu limite de {MAX_PDF_PAGES} páginas")
+                        break
+                    
+                    page_text = page.get_text()
+                    
+                    # Limitar tamanho por página
+                    if len(page_text) > MAX_PDF_PAGE_TEXT_LENGTH:
+                        logger.warning(f"Página {pages_processed + 1} truncada: {len(page_text)} -> {MAX_PDF_PAGE_TEXT_LENGTH} chars")
+                        page_text = page_text[:MAX_PDF_PAGE_TEXT_LENGTH]
+                    
+                    text_content += page_text + "\n"
+                    total_chars += len(page_text)
+                    pages_processed += 1
+                    
+                    # Parar se já excedemos o limite total
+                    if total_chars >= MAX_PDF_TEXT_LENGTH:
+                        logger.warning(f"Limite de texto total atingido na página {pages_processed}")
+                        break
+                
                 pdf_document.close()
                 
+                # SANITIZAÇÃO: Remover caracteres de controlo e padrões maliciosos
+                # Importar função de sanitização do módulo principal
+                from services.ai_document import sanitize_pdf_text
+                text_content = sanitize_pdf_text(text_content, MAX_PDF_TEXT_LENGTH)
+                
                 if text_content.strip():
-                    # Usar o texto extraído para análise
+                    # Usar o texto extraído para análise (já sanitizado)
                     response = await client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[
                             {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
-                            {"role": "user", "content": f"Analise este documento ({file_name}) extraído de um PDF. Conteúdo:\n\n{text_content[:10000]}"}
+                            {"role": "user", "content": f"Analise este documento ({file_name}) extraído de um PDF. Conteúdo:\n\n{text_content}"}
                         ],
                         max_tokens=2000,
                         temperature=0.1
