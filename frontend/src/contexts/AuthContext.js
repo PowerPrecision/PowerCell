@@ -128,46 +128,27 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async (email, password) => {
-    // Tentar login com refresh tokens (login-v2)
-    try {
-      const response = await api.post("/auth/login-v2", {
-        email,
-        password,
-      });
-      const { access_token, refresh_token, user: userData } = response.data;
-      
-      // Guardar ambos os tokens
-      localStorage.setItem("token", access_token);
-      localStorage.setItem("refreshToken", refresh_token);
-      setAuthToken(access_token);
-      setToken(access_token);
-      setRefreshToken(refresh_token);
-      setUser(userData);
-      setIsImpersonating(false);
-      setOriginalAdminName(null);
-      
-      // Agendar refresh
-      scheduleTokenRefresh(access_token);
-      
-      return userData;
-    } catch (error) {
-      // Fallback para login antigo se v2 não estiver disponível
-      if (error.response?.status === 404) {
-        const response = await api.post("/auth/login", {
-          email,
-          password,
-        });
-        const { access_token, user: userData } = response.data;
-        localStorage.setItem("token", access_token);
-        setAuthToken(access_token);
-        setToken(access_token);
-        setUser(userData);
-        setIsImpersonating(false);
-        setOriginalAdminName(null);
-        return userData;
-      }
-      throw error;
-    }
+    // Login com refresh tokens (login-v2) - rota segura obrigatória
+    const response = await api.post("/auth/login-v2", {
+      email,
+      password,
+    });
+    const { access_token, refresh_token, user: userData } = response.data;
+    
+    // Guardar ambos os tokens
+    localStorage.setItem("token", access_token);
+    localStorage.setItem("refreshToken", refresh_token);
+    setAuthToken(access_token);
+    setToken(access_token);
+    setRefreshToken(refresh_token);
+    setUser(userData);
+    setIsImpersonating(false);
+    setOriginalAdminName(null);
+    
+    // Agendar refresh
+    scheduleTokenRefresh(access_token);
+    
+    return userData;
   };
 
   const register = async (name, email, password, phone) => {

@@ -1160,10 +1160,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             </Button>
                           </div>
                         </div>
-                        {/* Clickable file name */}
+                        {/* Clickable file name - duas linhas com letra pequena */}
                         <button
                           onClick={() => handleDownload(file)}
-                          className="text-left text-xs sm:text-sm font-medium truncate hover:text-blue-600 hover:underline cursor-pointer mb-1"
+                          className="text-left text-[10px] sm:text-xs font-medium line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer mb-1 min-h-[2rem] leading-tight"
                           title={`Clique para descarregar: ${file.name}`}
                         >
                           {file.name}
@@ -1234,10 +1234,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               </Button>
                             </div>
                           </div>
-                          {/* Clickable file name */}
+                          {/* Clickable file name - duas linhas com letra pequena */}
                           <button
                             onClick={() => handleDownload(file)}
-                            className="text-left text-xs sm:text-sm font-medium truncate hover:text-blue-600 hover:underline cursor-pointer mb-1"
+                            className="text-left text-[10px] sm:text-xs font-medium line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer mb-1 min-h-[2rem] leading-tight"
                             title={`Clique para descarregar: ${file.name}`}
                           >
                             {file.name}
