@@ -72,36 +72,19 @@ async def register(request: Request, response: Response, data: UserRegister):
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", deprecated=True)
 @limiter.limit("10/minute")
 async def login(request: Request, data: UserLogin, response: Response):
+    """
+    DEPRECATED: Esta rota foi descontinuada.
+    Utilize /auth/login-v2 para autenticação segura com refresh tokens.
+    
+    Esta rota será removida em futuras versões.
+    """
     from fastapi import HTTPException
-    
-    user = await db.users.find_one({"email": data.email}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
-    # Check password - support both "password" and "hashed_password" field names
-    password_field = user.get("password") or user.get("hashed_password", "")
-    if not verify_password(data.password, password_field):
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
-    if not user.get("is_active", True):
-        raise HTTPException(status_code=401, detail="Conta desativada")
-    
-    token = create_token(user["id"], user["email"], user["role"])
-    
-    return TokenResponse(
-        access_token=token,
-        user=UserResponse(
-            id=user["id"],
-            email=user["email"],
-            name=user["name"],
-            phone=user.get("phone"),
-            role=user["role"],
-            created_at=user["created_at"],
-            onedrive_folder=user.get("onedrive_folder")
-        )
+    raise HTTPException(
+        status_code=410, 
+        detail="Esta rota de login foi descontinuada. Utilize /auth/login-v2 para autenticação segura com refresh tokens."
     )
 
 
