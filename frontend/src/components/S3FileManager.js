@@ -713,22 +713,19 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setPreviewLoading(true);
     
     try {
-      // Usar o temporary_url se disponível, ou buscar via API
-      if (file.temporary_url) {
-        setPreviewUrl(file.temporary_url);
+      // Buscar novo URL (evita URLs expirados ou paths desatualizados)
+      const response = await fetch(
+        `${API_URL}/api/documents/download-url/${encodeURIComponent(file.path)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPreviewUrl(data.url);
       } else {
-        const response = await fetch(
-          `${API_URL}/api/documents/client/${processId}/download?file_path=${encodeURIComponent(file.path)}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          setPreviewUrl(data.url);
-        } else {
-          toast.error("Erro ao carregar preview");
-          setPreviewFile(null);
-        }
+        const error = await response.json();
+        toast.error(error.detail || "Erro ao carregar preview");
+        setPreviewFile(null);
       }
     } catch (error) {
       console.error("Erro ao carregar preview:", error);
@@ -767,21 +764,36 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       // Criar FormData com os ficheiros
       const formData = new FormData();
       
-      // Obter o conteúdo dos ficheiros via proxy endpoint (evita CORS)
+      // Obter o conteúdo dos ficheiros - preferir temporary_url (presigned URL) se disponível
       for (const file of filesToAnalyze) {
         try {
-          // Usar endpoint proxy que faz streaming do ficheiro através do backend
-          const proxyResponse = await fetch(
-            `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
+          let blob;
           
-          if (proxyResponse.ok) {
-            const blob = await proxyResponse.blob();
-            formData.append('files', blob, file.name);
+          // Se temos temporary_url (presigned URL), usar diretamente
+          if (file.temporary_url) {
+            const fileResponse = await fetch(file.temporary_url);
+            if (fileResponse.ok) {
+              blob = await fileResponse.blob();
+            } else {
+              console.warn(`Erro ao obter ficheiro ${file.name} via presigned URL: ${fileResponse.status}`);
+              continue;
+            }
           } else {
-            console.warn(`Erro ao obter ficheiro ${file.name}: ${proxyResponse.status}`);
+            // Fallback: usar proxy endpoint
+            const proxyResponse = await fetch(
+              `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            
+            if (proxyResponse.ok) {
+              blob = await proxyResponse.blob();
+            } else {
+              console.warn(`Erro ao obter ficheiro ${file.name} via proxy: ${proxyResponse.status}`);
+              continue;
+            }
           }
+          
+          formData.append('files', blob, file.name);
         } catch (e) {
           console.error(`Erro ao obter ficheiro ${file.name}:`, e);
         }

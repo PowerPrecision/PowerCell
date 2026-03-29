@@ -617,6 +617,7 @@ async def get_download_url_by_path(
 ):
     """
     Gera URL temporário para download/preview de ficheiro por path S3.
+    Tenta variações de path (underscore <-> espaço) se o original falhar.
     
     Args:
         file_path: Path completo do ficheiro no S3 (URL encoded)
@@ -624,11 +625,37 @@ async def get_download_url_by_path(
     Returns:
         URL presigned para acesso temporário
     """
-    url = s3_service.get_presigned_url(file_path)
-    if not url:
-        raise HTTPException(status_code=500, detail=ERROR_PRESIGNED_URL)
+    import asyncio
     
-    return {"url": url, "path": file_path}
+    # Tentar path original e variações
+    variations = [file_path]
+    
+    # Variação com underscores -> espaços
+    if '_' in file_path:
+        variations.append(file_path.replace('_', ' '))
+    
+    # Variação com espaços -> underscores
+    if ' ' in file_path:
+        variations.append(file_path.replace(' ', '_'))
+    
+    # Variação com a pasta "Documentação Clientes"
+    if 'Documentação Clientes/' in file_path:
+        variations.append(file_path.replace('Documentação Clientes/', 'Documentação_Clientes/'))
+    if 'Documentação_Clientes/' in file_path:
+        variations.append(file_path.replace('Documentação_Clientes/', 'Documentação Clientes/'))
+    
+    # Verificar qual variação existe no S3
+    loop = asyncio.get_event_loop()
+    for path in variations:
+        exists = await loop.run_in_executor(None, lambda p=path: s3_service.file_exists(p))
+        if exists:
+            url = s3_service.get_presigned_url(path)
+            if url:
+                logger.info(f"[DOWNLOAD-URL] URL gerado para: {path}")
+                return {"url": url, "path": path}
+    
+    logger.warning(f"[DOWNLOAD-URL] Ficheiro não encontrado (tentadas {len(variations)} variações): {file_path}")
+    raise HTTPException(status_code=404, detail=ERROR_S3_FILE_NOT_FOUND)
 
 
 @router.get("/proxy/{file_path:path}", responses={500: HTTP_500_RESPONSE})
@@ -657,23 +684,68 @@ async def proxy_s3_file(
         logger.error("[PROXY] S3 não configurado")
         raise HTTPException(status_code=500, detail=ERROR_S3_NOT_CONFIGURED)
     
+    # Função auxiliar para obter ficheiro do S3
+    def get_s3_object(key):
+        return s3_service.s3_client.get_object(
+            Bucket=s3_service.bucket_name,
+            Key=key
+        )
+    
+    # Função para gerar variações do path (underscore <-> espaço)
+    def get_path_variations(original_path):
+        variations = [original_path]
+        
+        # Variação com underscores -> espaços
+        if '_' in original_path:
+            variations.append(original_path.replace('_', ' '))
+        
+        # Variação com espaços -> underscores
+        if ' ' in original_path:
+            variations.append(original_path.replace(' ', '_'))
+        
+        # Variação com a pasta "Documentação Clientes" <-> "Documentação_Clientes"
+        if 'Documentação Clientes/' in original_path:
+            variations.append(original_path.replace('Documentação Clientes/', 'Documentação_Clientes/'))
+        if 'Documentação_Clientes/' in original_path:
+            variations.append(original_path.replace('Documentação_Clientes/', 'Documentação Clientes/'))
+        
+        return variations
+    
+    # Tentar path original e variações
+    path_variations = get_path_variations(file_path)
+    response = None
+    used_path = None
+    
+    for try_path in path_variations:
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, lambda p=try_path: get_s3_object(p))
+            used_path = try_path
+            logger.info(f"[PROXY] Ficheiro encontrado com path: {try_path}")
+            break
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == 'NoSuchKey':
+                logger.debug(f"[PROXY] Path não encontrado: {try_path}")
+                continue
+            else:
+                # Outros erros S3, relançar
+                raise
+        except NoCredentialsError:
+            logger.error("[PROXY] Credenciais S3 não configuradas")
+            raise HTTPException(status_code=500, detail="Credenciais S3 não configuradas")
+    
+    if response is None:
+        logger.warning(f"[PROXY] Ficheiro não encontrado em nenhuma variação: {file_path}")
+        raise HTTPException(status_code=404, detail=ERROR_S3_FILE_NOT_FOUND)
+    
     try:
-        # Obter o ficheiro do S3 numa thread separada (operação bloqueante)
-        def get_s3_object():
-            return s3_service.s3_client.get_object(
-                Bucket=s3_service.bucket_name,
-                Key=file_path
-            )
-        
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, get_s3_object)
-        
         # Determinar content-type
         content_type = response.get('ContentType', 'application/octet-stream')
         content_length = response.get('ContentLength', 0)
         
         # Extrair nome do ficheiro
-        filename = file_path.split('/')[-1] if '/' in file_path else file_path
+        filename = used_path.split('/')[-1] if '/' in used_path else used_path
         
         logger.info(f"[PROXY] Streaming ficheiro: {filename} ({content_length} bytes)")
         
@@ -701,20 +773,6 @@ async def proxy_s3_file(
             headers=headers
         )
         
-    except NoCredentialsError:
-        logger.error("[PROXY] Credenciais S3 não configuradas")
-        raise HTTPException(status_code=500, detail="Credenciais S3 não configuradas")
-    except ClientError as e:
-        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
-        if error_code == 'NoSuchKey':
-            logger.warning(f"[PROXY] Ficheiro não encontrado: {file_path}")
-            raise HTTPException(status_code=404, detail=ERROR_S3_FILE_NOT_FOUND)
-        elif error_code == 'AccessDenied':
-            logger.error(f"[PROXY] Acesso negado ao ficheiro: {file_path}")
-            raise HTTPException(status_code=403, detail="Acesso negado ao ficheiro")
-        else:
-            logger.error(f"[PROXY] Erro S3 ({error_code}): {e}")
-            raise HTTPException(status_code=500, detail=f"Erro ao aceder ao S3: {error_code}")
     except (BotoCoreError, IOError, OSError) as e:
         logger.error(f"[PROXY] Erro ao fazer proxy do ficheiro S3: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao obter ficheiro: {str(e)}")

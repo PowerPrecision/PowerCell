@@ -465,6 +465,32 @@ class S3Service:
         else:
             return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
+    def file_exists(self, object_name: str) -> bool:
+        """
+        Verifica se um ficheiro existe no S3.
+        
+        Args:
+            object_name: Caminho S3 do ficheiro
+            
+        Returns:
+            True se existe, False caso contrário
+        """
+        if not self.is_configured():
+            return False
+            
+        try:
+            self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=object_name
+            )
+            return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == '404':
+                return False
+            logger.error(f"Erro ao verificar ficheiro S3: {e}")
+            return False
+
     def get_presigned_url(self, object_name: str, expiration: int = 3600) -> Optional[str]:
         """
         Gera um link temporário (1 hora por defeito) para download/visualização.
@@ -555,6 +581,7 @@ class S3Service:
     def get_file_content(self, object_name: str) -> Optional[bytes]:
         """
         Obtém o conteúdo de um ficheiro do S3.
+        Tenta variações do path (underscore <-> espaço) se o original falhar.
         
         Args:
             object_name: Caminho S3 do ficheiro
@@ -565,16 +592,43 @@ class S3Service:
         if not self.is_configured():
             logger.error("S3 não configurado")
             return None
-            
-        try:
-            response = self.s3_client.get_object(
-                Bucket=self.bucket_name, 
-                Key=object_name
-            )
-            return response['Body'].read()
-        except ClientError as e:
-            logger.error(f"Erro ao obter ficheiro S3: {e}")
-            return None
+        
+        # Gerar variações do path
+        variations = [object_name]
+        
+        # Variação com underscores -> espaços
+        if '_' in object_name:
+            variations.append(object_name.replace('_', ' '))
+        
+        # Variação com espaços -> underscores
+        if ' ' in object_name:
+            variations.append(object_name.replace(' ', '_'))
+        
+        # Variação com a pasta base
+        if 'Documentação Clientes/' in object_name:
+            variations.append(object_name.replace('Documentação Clientes/', 'Documentação_Clientes/'))
+        if 'Documentação_Clientes/' in object_name:
+            variations.append(object_name.replace('Documentação_Clientes/', 'Documentação Clientes/'))
+        
+        for path in variations:
+            try:
+                response = self.s3_client.get_object(
+                    Bucket=self.bucket_name, 
+                    Key=path
+                )
+                logger.debug(f"Ficheiro S3 obtido com sucesso: {path}")
+                return response['Body'].read()
+            except ClientError as e:
+                error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                if error_code == 'NoSuchKey':
+                    logger.debug(f"Path não encontrado no S3: {path}")
+                    continue
+                else:
+                    logger.error(f"Erro S3 ({error_code}) ao obter ficheiro {path}: {e}")
+                    return None
+        
+        logger.warning(f"Ficheiro não encontrado no S3 (tentadas {len(variations)} variações): {object_name}")
+        return None
 
     def move_file(
         self,
