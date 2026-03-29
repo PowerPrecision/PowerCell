@@ -35,6 +35,7 @@ from services.document_processor import convert_image_to_pdf, IMG2PDF_AVAILABLE
 
 # Importar serviço de validação de ficheiros (MIME type validation)
 from services.file_validation import validate_file_content
+from services.history import log_history
 
 router = APIRouter(prefix="/documents", tags=["Document Management"])
 logger = logging.getLogger(__name__)
@@ -418,6 +419,15 @@ async def upload_file_s3(
             file_content=file_content
         )
         
+        # Registar no histórico
+        await log_history(
+            process_id=client_id,
+            user=user,
+            action="Carregou documento",
+            field="documento",
+            new_value=f"{normalized_filename} ({category})"
+        )
+        
         return {
             "success": True, 
             "path": s3_path, 
@@ -647,9 +657,21 @@ async def delete_file_s3(
     if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
         raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
     
+    # Guardar nome do ficheiro antes de eliminar
+    filename = file_path.split('/')[-1] if '/' in file_path else file_path
+    
     success = s3_service.delete_file(file_path)
     if not success:
         raise HTTPException(status_code=500, detail=ERROR_DELETE_FILE)
+    
+    # Registar no histórico
+    await log_history(
+        process_id=client_id,
+        user=user,
+        action="Eliminou documento",
+        field="documento",
+        old_value=filename
+    )
     
     return {"success": True, "message": "Ficheiro eliminado"}
 
