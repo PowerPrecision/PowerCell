@@ -412,3 +412,169 @@ def validate_and_extract_file(
 # TIFF: 49 49 2A 00 (little endian) ou 4D 4D 00 2A (big endian)
 # Java Serialization: AC ED 00 05
 # ====================================================================
+
+
+# ====================================================================
+# VALIDAÇÃO COM CONVERSÃO AUTOMÁTICA
+# ====================================================================
+def validate_and_convert_file(
+    file_content: bytes,
+    declared_filename: Optional[str] = None,
+    max_size_mb: Optional[int] = None,
+    auto_convert: bool = True
+) -> Tuple[bytes, str, str, dict]:
+    """
+    Valida ficheiro com conversão automática se necessário.
+    
+    Esta função:
+    1. Tenta validar o ficheiro diretamente
+    2. Se falhar, tenta extrair de wrappers
+    3. Se ainda falhar, tenta converter automaticamente
+    4. Usa IA para analisar ficheiros desconhecidos
+    
+    Args:
+        file_content: Conteúdo binário do ficheiro
+        declared_filename: Nome do ficheiro (para logging)
+        max_size_mb: Tamanho máximo em MB (opcional)
+        auto_convert: Se deve tentar conversão automática (default: True)
+    
+    Returns:
+        Tuple (content, mime_type, description, conversion_info)
+        - content: Conteúdo validado/convertido
+        - mime_type: Tipo MIME final
+        - description: Descrição do tipo
+        - conversion_info: Informações sobre conversão
+    
+    Raises:
+        HTTPException: Se o ficheiro não puder ser validado, extraído ou convertido
+    """
+    from services.file_converter import (
+        convert_file,
+        can_convert_file,
+        is_dangerous,
+        detect_file_type,
+    )
+    
+    filename = declared_filename or "unknown"
+    conversion_info = {
+        "original_size": len(file_content),
+        "was_converted": False,
+        "was_extracted": False,
+        "conversion_method": None,
+        "original_mime_type": None,
+        "final_mime_type": None,
+        "ai_analysis": None,
+    }
+    
+    # 1. Tentar validação com extração primeiro (usa função existente)
+    try:
+        content, mime_type, description, was_extracted, extraction_info = validate_and_extract_file(
+            file_content, declared_filename, max_size_mb
+        )
+        
+        conversion_info["was_extracted"] = was_extracted
+        conversion_info["original_mime_type"] = extraction_info.get("detected_mime_type")
+        conversion_info["final_mime_type"] = mime_type
+        
+        return content, mime_type, description, conversion_info
+        
+    except HTTPException as validation_error:
+        original_error = validation_error.detail
+        
+        # Se auto_convert está desativado, re-levantar o erro
+        if not auto_convert:
+            raise
+        
+        logger.info(f"[VALIDATE] Validation failed, attempting conversion for: {sanitize_for_log(filename)}")
+        
+        # 2. Verificar tipo detectado
+        detected_mime, detected_ext, confidence = detect_file_type(file_content)
+        conversion_info["original_mime_type"] = detected_mime
+        
+        # 3. Verificar se é perigoso
+        if is_dangerous(detected_mime):
+            logger.critical(f"[SECURITY] Ficheiro perigoso bloqueado: {detected_mime}")
+            raise HTTPException(
+                status_code=400,
+                detail="Formato de ficheiro não permitido por razões de segurança. "
+                       "Ficheiros executáveis e scripts não são aceites."
+            )
+        
+        # 4. Verificar se pode ser convertido
+        conversion_check = can_convert_file(file_content, filename)
+        
+        if conversion_check["can_convert"] == False:
+            # Não pode ser convertido
+            raise HTTPException(
+                status_code=400,
+                detail=f"Não foi possível processar o ficheiro. {conversion_check.get('reason', original_error)} "
+                       f"Tipos permitidos: PDF, JPEG, PNG, TIFF, DOCX, XLSX. "
+                       f"Se o ficheiro é uma imagem ou documento, tente exportar novamente no formato correto."
+            )
+        
+        # 5. Tentar conversão
+        try:
+            converted_content, new_filename, convert_metadata = convert_file(
+                file_content, filename, target_format='pdf'
+            )
+            
+            if convert_metadata.get("converted"):
+                # Conversão bem-sucedida
+                logger.info(
+                    f"[VALIDATE] File converted successfully: {sanitize_for_log(filename)} "
+                    f"using {convert_metadata.get('method')}"
+                )
+                
+                conversion_info["was_converted"] = True
+                conversion_info["conversion_method"] = convert_metadata.get("method")
+                conversion_info["final_mime_type"] = "application/pdf"
+                conversion_info["new_filename"] = new_filename
+                conversion_info["ai_analysis"] = convert_metadata.get("ai_analysis")
+                
+                # Validar o conteúdo convertido
+                try:
+                    valid, mime_type, description = validate_file_content(
+                        converted_content, new_filename, max_size_mb
+                    )
+                    return converted_content, mime_type, description, conversion_info
+                except HTTPException:
+                    # Conteúdo convertido também falhou - retornar mesmo assim
+                    return converted_content, "application/pdf", "PDF Document (converted)", conversion_info
+                    
+            elif convert_metadata.get("error"):
+                # Conversão falhou
+                error_msg = convert_metadata["error"]
+                conversion_info["ai_analysis"] = convert_metadata.get("ai_analysis")
+                
+                # Se temos análise IA, dar feedback útil
+                if conversion_info.get("ai_analysis"):
+                    ai_rec = conversion_info["ai_analysis"].get("recommendation", "")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Não foi possível converter o ficheiro. {ai_rec} "
+                               f"(detectado: {detected_mime})"
+                    )
+                
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Não foi possível converter o ficheiro: {error_msg}. "
+                           f"Tipo detectado: {detected_mime}. "
+                           f"Tente exportar o ficheiro diretamente como PDF ou imagem."
+                )
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[VALIDATE] Conversion error: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Erro durante a conversão do ficheiro: {str(e)}. "
+                       f"Tente exportar o ficheiro diretamente como PDF ou imagem."
+            )
+    
+    # Fallback - não deveria chegar aqui
+    raise HTTPException(
+        status_code=400,
+        detail="Não foi possível processar o ficheiro. "
+               "Tente exportar o ficheiro diretamente como PDF ou imagem."
+    )
