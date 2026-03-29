@@ -1389,7 +1389,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       return (
                         <div
                           key={`${file.path}-${idx}`}
-                          className={`grid grid-cols-[28px_1fr_90px_100px_70px] gap-2 px-2 py-1.5 text-xs items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""} ${isPreviewing ? "bg-accent" : ""}`}
+                          className={`grid grid-cols-[28px_1fr_80px_90px_auto] gap-2 px-2 py-1.5 text-xs items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""} ${isPreviewing ? "bg-accent" : ""}`}
                           onClick={() => { toggleFileSelection(file); handlePreview(file); }}
                           data-testid={`file-row-${idx}`}
                         >
@@ -1424,12 +1424,12 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                           </span>
 
                           {/* Ações */}
-                          <div className="flex items-center justify-center gap-0.5">
+                          <div className="flex items-center justify-end gap-0.5 min-w-[80px]">
                             {isPreviewable(file.name) && (
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
-                                className="h-5 w-5" 
+                                className="h-5 w-5 flex-shrink-0" 
                                 onClick={(e) => { e.stopPropagation(); handlePreview(file); }}
                                 title="Preview"
                               >
@@ -1439,7 +1439,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              className="h-5 w-5" 
+                              className="h-5 w-5 flex-shrink-0" 
                               onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
                               title="Download"
                             >
@@ -1448,7 +1448,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              className="h-5 w-5 text-blue-500 hover:text-blue-600" 
+                              className="h-5 w-5 flex-shrink-0 text-blue-500 hover:text-blue-600" 
                               onClick={(e) => { e.stopPropagation(); openManualRename(file); }}
                               title="Renomear"
                             >
@@ -1457,7 +1457,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              className="h-5 w-5 text-red-500 hover:text-red-600" 
+                              className="h-5 w-5 flex-shrink-0 text-red-500 hover:text-red-600" 
                               onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
                               title="Eliminar"
                             >
@@ -1582,6 +1582,24 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                         title="Abrir em nova aba"
                       >
                         <ExternalLink className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
+                        onClick={() => openManualRename(previewFile)}
+                        title="Renomear"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 w-6 p-0 text-red-500 hover:text-red-600"
+                        onClick={() => setDeleteDialog({ open: true, file: previewFile })}
+                        title="Eliminar"
+                      >
+                        <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>
