@@ -354,21 +354,34 @@ async def upload_file_s3(
         # SEGURANÇA: Validar MIME type usando magic bytes (não apenas extensão)
         # Isto previne uploads de executáveis disfarçados como documentos
         # TAMBÉM: Tenta extrair conteúdo de wrappers (Java serialization, base64)
+        # E: Converte automaticamente ficheiros para PDF quando possível
         # ====================================================================
+        from services.file_validation import validate_and_convert_file
+        
+        # Inicializar variáveis de conversão
+        was_extracted = False
+        was_converted = False
+        
         try:
-            # Usar validate_and_extract_file para tentar extrair de wrappers
-            validated_content, detected_mime, mime_description, was_extracted, extraction_info = validate_and_extract_file(
-                file_content, original_filename
+            # Usar validate_and_convert_file para validação, extração e conversão
+            validated_content, detected_mime, mime_description, conversion_info = validate_and_convert_file(
+                file_content, original_filename, auto_convert=True
             )
             
-            # Se o conteúdo foi extraído, usar o conteúdo extraído
-            if was_extracted:
-                logger.info(f"[UPLOAD] Conteúdo extraído de wrapper: {sanitize_for_log(original_filename)} -> {detected_mime}")
+            # Processar informações de conversão
+            was_extracted = conversion_info.get("was_extracted", False)
+            was_converted = conversion_info.get("was_converted", False)
+            
+            if was_extracted or was_converted:
+                logger.info(
+                    f"[UPLOAD] Ficheiro processado: {sanitize_for_log(original_filename)} "
+                    f"(extraído: {was_extracted}, convertido: {was_converted}, "
+                    f"método: {conversion_info.get('conversion_method') or conversion_info.get('extraction_method')})"
+                )
                 file_content = validated_content
-                # Atualizar content_type baseado no MIME detectado
                 content_type = detected_mime
                 
-                # Se era PDF extraído, atualizar o nome do ficheiro
+                # Atualizar nome do ficheiro se foi convertido para PDF
                 if detected_mime == MIME_TYPE_PDF and not original_filename.lower().endswith('.pdf'):
                     original_filename = original_filename.rsplit('.', 1)[0] + '.pdf' if '.' in original_filename else original_filename + '.pdf'
                     
@@ -376,9 +389,10 @@ async def upload_file_s3(
             logger.warning(f"[UPLOAD] Ficheiro rejeitado: {sanitize_for_log(original_filename)} - {e.detail}")
             raise
         
-        # Verificar se é uma imagem e converter para PDF
-        converted_to_pdf = False
-        if is_image_file(original_filename, content_type) and IMG2PDF_AVAILABLE:
+        # Verificar se é uma imagem e converter para PDF (fallback para imagens puras)
+        # Nota: was_converted já pode ter sido definido acima se a conversão automática funcionou
+        converted_to_pdf = was_converted  # Inicializar com valor de conversão automática
+        if not was_converted and is_image_file(original_filename, content_type) and IMG2PDF_AVAILABLE:
             try:
                 logger.info(f"[UPLOAD] A converter imagem para PDF: {sanitize_for_log(original_filename)}")
                 pdf_bytes, new_filename = await convert_image_to_pdf(file_content, original_filename)
@@ -451,6 +465,9 @@ async def upload_file_s3(
             "original_filename": file.filename,
             "normalized_filename": normalized_filename,
             "converted_to_pdf": converted_to_pdf,
+            "was_extracted": was_extracted,
+            "was_converted": was_converted,
+            "conversion_method": conversion_info.get("conversion_method") if 'conversion_info' in dir() else None,
             "auto_categorization": "iniciada",  # Indica que categorização foi agendada
             "temporary_url": temporary_url  # URL para acesso imediato (válido 1 hora)
         }
@@ -465,6 +482,65 @@ async def upload_file_s3(
             status_code=500, 
             detail=f"Erro interno ao processar upload. Por favor tente novamente ou contacte o suporte se o problema persistir."
         )
+
+
+@router.post("/check-file", responses={400: HTTP_400_RESPONSE, 500: HTTP_500_RESPONSE})
+async def check_file_upload(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Verifica se um ficheiro pode ser enviado e/ou convertido.
+    
+    Este endpoint permite verificar o ficheiro antes de tentar o upload,
+    dando feedback ao utilizador sobre:
+    - Se o formato é suportado
+    - Se pode ser convertido automaticamente
+    - Que tipo de conversão será aplicada
+    
+    Útil para dar feedback proativo ao utilizador.
+    """
+    from services.file_converter import can_convert_file, detect_file_type
+    
+    try:
+        # Ler o conteúdo do ficheiro
+        file_content = await file.read()
+        filename = file.filename
+        
+        if not file_content or len(file_content) == 0:
+            return {
+                "can_upload": False,
+                "reason": "Ficheiro vazio",
+                "filename": filename
+            }
+        
+        # Detectar tipo real
+        detected_mime, detected_ext, confidence = detect_file_type(file_content)
+        
+        # Verificar se pode ser convertido
+        conversion_check = can_convert_file(file_content, filename)
+        
+        # Verificar tamanho
+        file_size_mb = len(file_content) / (1024 * 1024)
+        
+        return {
+            "can_upload": conversion_check["can_convert"] != False,
+            "filename": filename,
+            "file_size_mb": round(file_size_mb, 2),
+            "detected_type": detected_mime,
+            "detected_extension": detected_ext,
+            "confidence": confidence,
+            "conversion_info": conversion_check,
+            "recommendation": conversion_check.get("suggested_action", "Pode fazer upload diretamente")
+        }
+        
+    except Exception as e:
+        logger.error(f"[CHECK-FILE] Erro: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao verificar ficheiro: {str(e)}"
+        )
+
 
 @router.post("/client/{client_id}/init-folders", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def initialize_folders(client_id: str, user: dict = Depends(get_current_user)):
