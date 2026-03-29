@@ -514,31 +514,33 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     await executeUpload(selectedFiles);
   };
 
-  // Download de ficheiro - usa temporary_url se disponível
+  // Download de ficheiro - usa proxy para evitar CORS
   const handleDownload = async (file) => {
-    // Se já temos o temporary_url, usar directamente
-    if (file.temporary_url) {
-      window.open(file.temporary_url, "_blank");
-      return;
-    }
-    
-    // Fallback para o endpoint de download (para ficheiros antigos sem temporary_url)
     try {
+      // Usar proxy endpoint para evitar CORS do S3
       const response = await fetch(
-        `${API_URL}/api/documents/client/${processId}/download?file_path=${encodeURIComponent(file.path)}`,
+        `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
 
       if (response.ok) {
-        const data = await response.json();
-        // Abrir URL num novo separador
-        window.open(data.url, "_blank");
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name || 'download';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       } else {
-        toast.error("Erro ao gerar link de download");
+        const error = await response.json();
+        toast.error(error.detail || "Erro ao fazer download");
       }
     } catch (error) {
+      console.error("Erro ao fazer download:", error);
       toast.error("Erro ao fazer download");
     }
   };
@@ -713,15 +715,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setPreviewLoading(true);
     
     try {
-      // Buscar novo URL (evita URLs expirados ou paths desatualizados)
+      // Usar proxy endpoint para evitar CORS do S3
       const response = await fetch(
-        `${API_URL}/api/documents/download-url/${encodeURIComponent(file.path)}`,
+        `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
       if (response.ok) {
-        const data = await response.json();
-        setPreviewUrl(data.url);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        setPreviewUrl(url);
       } else {
         const error = await response.json();
         toast.error(error.detail || "Erro ao carregar preview");
@@ -764,36 +767,22 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       // Criar FormData com os ficheiros
       const formData = new FormData();
       
-      // Obter o conteúdo dos ficheiros - preferir temporary_url (presigned URL) se disponível
+      // Obter o conteúdo dos ficheiros via proxy endpoint (evita CORS do S3)
       for (const file of filesToAnalyze) {
         try {
-          let blob;
+          // Usar proxy endpoint que faz streaming através do backend (evita CORS)
+          const proxyResponse = await fetch(
+            `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
           
-          // Se temos temporary_url (presigned URL), usar diretamente
-          if (file.temporary_url) {
-            const fileResponse = await fetch(file.temporary_url);
-            if (fileResponse.ok) {
-              blob = await fileResponse.blob();
-            } else {
-              console.warn(`Erro ao obter ficheiro ${file.name} via presigned URL: ${fileResponse.status}`);
-              continue;
-            }
+          if (proxyResponse.ok) {
+            const blob = await proxyResponse.blob();
+            formData.append('files', blob, file.name);
           } else {
-            // Fallback: usar proxy endpoint
-            const proxyResponse = await fetch(
-              `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-            
-            if (proxyResponse.ok) {
-              blob = await proxyResponse.blob();
-            } else {
-              console.warn(`Erro ao obter ficheiro ${file.name} via proxy: ${proxyResponse.status}`);
-              continue;
-            }
+            console.warn(`Erro ao obter ficheiro ${file.name} via proxy: ${proxyResponse.status}`);
+            continue;
           }
-          
-          formData.append('files', blob, file.name);
         } catch (e) {
           console.error(`Erro ao obter ficheiro ${file.name}:`, e);
         }
