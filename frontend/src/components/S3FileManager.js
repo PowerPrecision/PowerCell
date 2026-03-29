@@ -67,7 +67,11 @@ import {
   Settings2,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Save,
+  LayoutGrid,
+  List,
+  HardDrive,
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { format } from "date-fns";
@@ -155,8 +159,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [renameDialog, setRenameDialog] = useState({ open: false, results: null });
   
   // Estado para ordenação de ficheiros
-  const [sortBy, setSortBy] = useState("date"); // "date", "name", "size"
+  const [sortBy, setSortBy] = useState("date"); // "date", "name", "size", "category"
   const [sortOrder, setSortOrder] = useState("desc"); // "asc", "desc"
+  
+  // Estado para modo de visualização (lista ou grelha)
+  const [viewMode, setViewMode] = useState("list"); // "list" | "grid"
+  
+  // Estado para categoria seleccionada na sidebar
+  const [selectedCategory, setSelectedCategory] = useState(null); // null = todos
   
   // Estado para NIF da empresa (obrigatório para indexacao)
   const [empresaNifDialog, setEmpresaNifDialog] = useState({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
@@ -181,6 +191,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         comparison = (a.name || "").localeCompare(b.name || "");
       } else if (sortBy === "size") {
         comparison = (a.size || 0) - (b.size || 0);
+      } else if (sortBy === "category") {
+        comparison = (a.category || "").localeCompare(b.category || "");
       }
       
       return sortOrder === "desc" ? -comparison : comparison;
@@ -661,6 +673,25 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       }
     });
   };
+  
+  // Selecionar/deselecionar todos os ficheiros visíveis
+  const toggleSelectAll = (filesList) => {
+    if (selectedFilesForAI.length === filesList.length && filesList.length > 0) {
+      // Desselecionar todos
+      setSelectedFilesForAI([]);
+    } else {
+      // Selecionar todos
+      setSelectedFilesForAI([...filesList]);
+    }
+  };
+  
+  // Obter ficheiros filtrados para a vista atual
+  const getDisplayFiles = () => {
+    if (selectedCategory) {
+      return getFilteredCategoryFiles(selectedCategory);
+    }
+    return filteredFiles;
+  };
 
   // Análise IA dos documentos
   const handleAIAnalysis = async () => {
@@ -1060,7 +1091,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             </div>
           )}
 
-          {/* Pesquisa de ficheiros e ordenação */}
+          {/* Pesquisa de ficheiros, toggle de vista e ordenação */}
           <div className="mt-3 flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1083,152 +1114,333 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 </Button>
               )}
             </div>
-            {/* Botões de ordenação */}
-            <div className="flex gap-1 justify-end">
-              <Button
-                variant={sortBy === "date" ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => toggleSort("date")}
-                className="h-9 px-2 text-xs"
-                title="Ordenar por data"
-              >
-                {sortBy === "date" && sortOrder === "desc" ? <ChevronDown className="h-3 w-3 mr-0.5" /> : sortBy === "date" ? <ChevronUp className="h-3 w-3 mr-0.5" /> : null}
-                Data
-              </Button>
-              <Button
-                variant={sortBy === "name" ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => toggleSort("name")}
-                className="h-9 px-2 text-xs"
-                title="Ordenar por nome"
-              >
-                {sortBy === "name" && sortOrder === "desc" ? <ChevronDown className="h-3 w-3 mr-0.5" /> : sortBy === "name" ? <ChevronUp className="h-3 w-3 mr-0.5" /> : null}
-                Nome
-              </Button>
+            {/* Toggle de vista e ordenação */}
+            <div className="flex gap-1 justify-end items-center">
+              {/* Toggle Lista/Grelha */}
+              <div className="flex border rounded-md p-0.5 mr-1">
+                <Button
+                  variant={viewMode === "list" ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => setViewMode("list")}
+                  className="h-7 w-7 p-0"
+                  title="Vista de lista"
+                  data-testid="view-list-btn"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={viewMode === "grid" ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => setViewMode("grid")}
+                  className="h-7 w-7 p-0"
+                  title="Vista de grelha"
+                  data-testid="view-grid-btn"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </Button>
+              </div>
+              {/* Botões de ordenação - apenas na vista de lista */}
+              {viewMode === "list" && (
+                <>
+                  <Button
+                    variant={sortBy === "date" ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() => toggleSort("date")}
+                    className="h-7 px-2 text-xs"
+                    title="Ordenar por data"
+                  >
+                    {sortBy === "date" && sortOrder === "desc" ? <ChevronDown className="h-3 w-3 mr-0.5" /> : sortBy === "date" ? <ChevronUp className="h-3 w-3 mr-0.5" /> : null}
+                    Data
+                  </Button>
+                  <Button
+                    variant={sortBy === "name" ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() => toggleSort("name")}
+                    className="h-7 px-2 text-xs"
+                    title="Ordenar por nome"
+                  >
+                    {sortBy === "name" && sortOrder === "desc" ? <ChevronDown className="h-3 w-3 mr-0.5" /> : sortBy === "name" ? <ChevronUp className="h-3 w-3 mr-0.5" /> : null}
+                    Nome
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
 
         <CardContent className="pt-0">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full flex flex-wrap h-auto gap-0.5 sm:gap-1 p-1">
-              {/* Tab "Todos" primeiro */}
-              <TabsTrigger
-                value="all"
-                className="min-w-[40px] sm:min-w-[60px] sm:flex-1 gap-1 text-[10px] sm:text-xs py-1.5 px-1.5 sm:px-2"
-                data-testid="tab-all"
-              >
-                <FolderOpen className="h-3 w-3" />
-                <span className="hidden sm:inline">Todos</span>
-                {stats?.total_files > 0 && (
-                  <Badge variant="secondary" className="ml-0.5 sm:ml-1 h-4 px-1 text-[10px]">
-                    {stats.total_files}
-                  </Badge>
-                )}
-              </TabsTrigger>
-              {CATEGORIES.map((cat) => {
-                const Icon = cat.icon;
-                const count = getCategoryCount(cat.id);
-                return (
-                  <TabsTrigger
-                    key={cat.id}
-                    value={cat.id}
-                    className="min-w-[40px] sm:min-w-[60px] sm:flex-1 gap-1 text-[10px] sm:text-xs py-1.5 px-1.5 sm:px-2"
-                    data-testid={`tab-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
+          {/* ========================================= */}
+          {/* VISTA DE LISTA - Explorador de Ficheiros */}
+          {/* ========================================= */}
+          {viewMode === "list" && (
+            <div className="flex gap-3 mt-3 h-[450px]">
+              {/* Sidebar - Árvore de Categorias/Pastas */}
+              <div className="w-44 flex-shrink-0 border rounded-lg overflow-hidden flex flex-col">
+                <div className="bg-muted/50 px-3 py-2 text-xs font-medium border-b flex items-center gap-2">
+                  <HardDrive className="h-4 w-4" />
+                  Categorias
+                </div>
+                <ScrollArea className="flex-1">
+                  {/* Pasta "Todos" */}
+                  <button
+                    onClick={() => setSelectedCategory(null)}
+                    className={`w-full px-3 py-2 text-sm text-left flex items-center gap-2 hover:bg-accent/50 transition-colors ${!selectedCategory ? "bg-accent font-medium" : ""}`}
+                    data-testid="folder-all"
                   >
-                    <Icon className="h-3 w-3" />
-                    <span className="hidden sm:inline">{cat.label}</span>
-                    {count > 0 && (
-                      <Badge variant="secondary" className="ml-0.5 sm:ml-1 h-4 px-1 text-[10px]">
-                        {count}
-                      </Badge>
-                    )}
-                  </TabsTrigger>
-                );
-              })}
-            </TabsList>
-
-            {/* Tab "Todos" - mostra todos os ficheiros */}
-            <TabsContent value="all" className="mt-3">
-              {filteredFiles.length > 0 ? (
-                <div className="overflow-x-auto pb-2 -mx-2 px-2">
-                  <div className="flex gap-3 min-w-max">
-                    {filteredFiles.map((file, idx) => (
-                      <div
-                        key={`${file.path}-${idx}`}
-                        className="flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
+                    <FolderOpen className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                    <span className="truncate">Todos</span>
+                    <Badge variant="secondary" className="ml-auto text-[10px] h-4 px-1">
+                      {stats?.total_files || 0}
+                    </Badge>
+                  </button>
+                  
+                  {/* Pastas por Categoria */}
+                  {CATEGORIES.map((cat) => {
+                    const Icon = cat.icon;
+                    const count = getCategoryCount(cat.id);
+                    const colorMap = {
+                      blue: "text-blue-500",
+                      green: "text-green-500",
+                      purple: "text-purple-500",
+                      orange: "text-orange-500",
+                      gray: "text-gray-500",
+                    };
+                    return (
+                      <button
+                        key={cat.id}
+                        onClick={() => setSelectedCategory(cat.id)}
+                        className={`w-full px-3 py-2 text-sm text-left flex items-center gap-2 hover:bg-accent/50 transition-colors ${selectedCategory === cat.id ? "bg-accent font-medium" : ""}`}
+                        data-testid={`folder-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
                       >
-                        {/* Icon and actions row */}
-                        <div className="flex items-center justify-between mb-2">
-                          <FileIcon filename={file.name} />
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() => handleDownload(file)}
+                        <Icon className={`h-4 w-4 flex-shrink-0 ${colorMap[cat.color] || "text-gray-500"}`} />
+                        <span className="truncate">{cat.label}</span>
+                        {count > 0 && (
+                          <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1">
+                            {count}
+                          </Badge>
+                        )}
+                      </button>
+                    );
+                  })}
+                </ScrollArea>
+              </div>
+
+              {/* Área Principal - Tabela de Ficheiros */}
+              <div className="flex-1 border rounded-lg overflow-hidden flex flex-col">
+                {/* Header da tabela - clicável para ordenar */}
+                <div className="grid grid-cols-[32px_1fr_100px_80px_130px_70px] gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground border-b items-center">
+                  <div className="w-8 flex justify-center">
+                    <button
+                      onClick={() => toggleSelectAll(getDisplayFiles())}
+                      className="hover:bg-accent rounded p-0.5"
+                      title={selectedFilesForAI.length === getDisplayFiles().length && getDisplayFiles().length > 0 ? "Desselecionar todos" : "Selecionar todos"}
+                    >
+                      {selectedFilesForAI.length === getDisplayFiles().length && getDisplayFiles().length > 0 ? (
+                        <CheckSquare className="h-4 w-4 text-blue-600" />
+                      ) : (
+                        <Square className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  <button 
+                    onClick={() => toggleSort("name")} 
+                    className="flex items-center gap-1 hover:text-foreground text-left"
+                  >
+                    Nome 
+                    {sortBy === "name" && (
+                      sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => toggleSort("category")} 
+                    className="text-left"
+                  >
+                    Categoria
+                    {sortBy === "category" && (
+                      sortOrder === "asc" ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => toggleSort("size")} 
+                    className="text-right"
+                  >
+                    Tam.
+                    {sortBy === "size" && (
+                      sortOrder === "asc" ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => toggleSort("date")} 
+                    className="text-left"
+                  >
+                    Data
+                    {sortBy === "date" && (
+                      sortOrder === "asc" ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />
+                    )}
+                  </button>
+                  <div className="text-center">Ações</div>
+                </div>
+
+                {/* Linhas dos ficheiros */}
+                <ScrollArea className="flex-1">
+                  {getDisplayFiles().length > 0 ? (
+                    getDisplayFiles().map((file, idx) => {
+                      const isSelected = selectedFilesForAI.some(f => f.path === file.path);
+                      return (
+                        <div
+                          key={`${file.path}-${idx}`}
+                          className={`grid grid-cols-[32px_1fr_100px_80px_130px_70px] gap-2 px-3 py-2 text-sm items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""}`}
+                          onClick={() => toggleFileSelection(file)}
+                          data-testid={`file-row-${idx}`}
+                        >
+                          {/* Checkbox */}
+                          <div className="w-8 flex justify-center">
+                            {isSelected ? (
+                              <CheckSquare className="h-4 w-4 text-blue-600" />
+                            ) : (
+                              <Square className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+
+                          {/* Nome + Ícone */}
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileIcon filename={file.name} />
+                            <span 
+                              className="truncate font-medium hover:text-blue-600 hover:underline"
+                              onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
+                              title={file.name}
+                            >
+                              {file.name}
+                            </span>
+                          </div>
+
+                          {/* Categoria */}
+                          <Badge variant="outline" className="text-[10px] justify-center py-0 h-5 truncate">
+                            {file.category || "Outros"}
+                          </Badge>
+
+                          {/* Tamanho */}
+                          <span className="text-xs text-muted-foreground text-right">
+                            {file.size_formatted}
+                          </span>
+
+                          {/* Data */}
+                          <span className="text-xs text-muted-foreground truncate">
+                            {formatDate(file.last_modified)}
+                          </span>
+
+                          {/* Ações */}
+                          <div className="flex items-center justify-center gap-0.5">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-6 w-6" 
+                              onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
                               title="Download"
                             >
                               <Download className="h-3.5 w-3.5" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-red-500 hover:text-red-600"
-                              onClick={() => setDeleteDialog({ open: true, file })}
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-6 w-6 text-red-500 hover:text-red-600" 
+                              onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
                               title="Eliminar"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         </div>
-                        {/* Clickable file name - duas linhas com letra pequena */}
-                        <button
-                          onClick={() => handleDownload(file)}
-                          className="text-left text-[10px] sm:text-xs font-medium line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer mb-1 min-h-[2rem] leading-tight"
-                          title={`Clique para descarregar: ${file.name}`}
-                        >
-                          {file.name}
-                        </button>
-                        {/* Meta info */}
-                        <div className="flex flex-wrap items-center gap-1">
-                          <Badge variant="outline" className="text-[10px] py-0 h-4">
-                            {file.category}
-                          </Badge>
-                          <span className="text-[10px] text-muted-foreground">
-                            {file.size_formatted}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-muted-foreground mt-1">
-                          {formatDate(file.last_modified)}
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-40" />
+                      <p className="text-sm font-medium">
+                        {searchQuery ? "Nenhum ficheiro encontrado" : "Nenhum ficheiro"}
+                      </p>
+                      <p className="text-xs mt-1">
+                        {searchQuery ? `Pesquisa: "${searchQuery}"` : selectedCategory ? `Categoria vazia` : "Faça upload de documentos"}
+                      </p>
+                    </div>
+                  )}
+                </ScrollArea>
+                
+                {/* Footer com contador de seleção */}
+                {selectedFilesForAI.length > 0 && (
+                  <div className="bg-blue-50 dark:bg-blue-950/50 px-3 py-2 text-xs text-blue-700 dark:text-blue-300 flex items-center justify-between border-t">
+                    <span>{selectedFilesForAI.length} ficheiro(s) selecionado(s)</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-xs bg-purple-50 hover:bg-purple-100 border-purple-200"
+                      onClick={handleAIAnalysis}
+                      disabled={aiAnalyzing}
+                    >
+                      {aiAnalyzing ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : (
+                        <Brain className="h-3 w-3 mr-1" />
+                      )}
+                      Analisar Seleção
+                    </Button>
                   </div>
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <FolderOpen className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">
-                    {searchQuery ? "Nenhum ficheiro encontrado" : "Nenhum ficheiro"}
-                  </p>
-                  <p className="text-xs mt-1">
-                    {searchQuery ? `Pesquisa: "${searchQuery}"` : "Faça upload de documentos"}
-                  </p>
-                </div>
-              )}
-            </TabsContent>
+                )}
+              </div>
+            </div>
+          )}
 
-            {CATEGORIES.map((cat) => (
-              <TabsContent key={cat.id} value={cat.id} className="mt-3">
-                {getFilteredCategoryFiles(cat.id).length > 0 ? (
+          {/* ========================================= */}
+          {/* VISTA DE GRELHA - Cards Horizontais      */}
+          {/* ========================================= */}
+          {viewMode === "grid" && (
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="w-full flex flex-wrap h-auto gap-0.5 sm:gap-1 p-1">
+                {/* Tab "Todos" primeiro */}
+                <TabsTrigger
+                  value="all"
+                  className="min-w-[40px] sm:min-w-[60px] sm:flex-1 gap-1 text-[10px] sm:text-xs py-1.5 px-1.5 sm:px-2"
+                  data-testid="tab-all"
+                >
+                  <FolderOpen className="h-3 w-3" />
+                  <span className="hidden sm:inline">Todos</span>
+                  {stats?.total_files > 0 && (
+                    <Badge variant="secondary" className="ml-0.5 sm:ml-1 h-4 px-1 text-[10px]">
+                      {stats.total_files}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+                {CATEGORIES.map((cat) => {
+                  const Icon = cat.icon;
+                  const count = getCategoryCount(cat.id);
+                  return (
+                    <TabsTrigger
+                      key={cat.id}
+                      value={cat.id}
+                      className="min-w-[40px] sm:min-w-[60px] sm:flex-1 gap-1 text-[10px] sm:text-xs py-1.5 px-1.5 sm:px-2"
+                      data-testid={`tab-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
+                    >
+                      <Icon className="h-3 w-3" />
+                      <span className="hidden sm:inline">{cat.label}</span>
+                      {count > 0 && (
+                        <Badge variant="secondary" className="ml-0.5 sm:ml-1 h-4 px-1 text-[10px]">
+                          {count}
+                        </Badge>
+                      )}
+                    </TabsTrigger>
+                  );
+                })}
+              </TabsList>
+
+              {/* Tab "Todos" - mostra todos os ficheiros */}
+              <TabsContent value="all" className="mt-3">
+                {filteredFiles.length > 0 ? (
                   <div className="overflow-x-auto pb-2 -mx-2 px-2">
                     <div className="flex gap-3 min-w-max">
-                      {getFilteredCategoryFiles(cat.id).map((file, idx) => (
+                      {filteredFiles.map((file, idx) => (
                         <div
                           key={`${file.path}-${idx}`}
                           className="flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
-                          data-testid={`file-item-${idx}`}
                         >
                           {/* Icon and actions row */}
                           <div className="flex items-center justify-between mb-2">
@@ -1240,7 +1452,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                 className="h-6 w-6"
                                 onClick={() => handleDownload(file)}
                                 title="Download"
-                                data-testid={`download-btn-${idx}`}
                               >
                                 <Download className="h-3.5 w-3.5" />
                               </Button>
@@ -1250,7 +1461,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                 className="h-6 w-6 text-red-500 hover:text-red-600"
                                 onClick={() => setDeleteDialog({ open: true, file })}
                                 title="Eliminar"
-                                data-testid={`delete-btn-${idx}`}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
@@ -1266,6 +1476,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                           </button>
                           {/* Meta info */}
                           <div className="flex flex-wrap items-center gap-1">
+                            <Badge variant="outline" className="text-[10px] py-0 h-4">
+                              {file.category}
+                            </Badge>
                             <span className="text-[10px] text-muted-foreground">
                               {file.size_formatted}
                             </span>
@@ -1280,15 +1493,87 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
                     <FolderOpen className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                    <p className="text-sm">Nenhum ficheiro em {cat.label}</p>
+                    <p className="text-sm">
+                      {searchQuery ? "Nenhum ficheiro encontrado" : "Nenhum ficheiro"}
+                    </p>
                     <p className="text-xs mt-1">
-                      Clique em "Upload" para adicionar documentos
+                      {searchQuery ? `Pesquisa: "${searchQuery}"` : "Faça upload de documentos"}
                     </p>
                   </div>
                 )}
               </TabsContent>
-            ))}
-          </Tabs>
+
+              {CATEGORIES.map((cat) => (
+                <TabsContent key={cat.id} value={cat.id} className="mt-3">
+                  {getFilteredCategoryFiles(cat.id).length > 0 ? (
+                    <div className="overflow-x-auto pb-2 -mx-2 px-2">
+                      <div className="flex gap-3 min-w-max">
+                        {getFilteredCategoryFiles(cat.id).map((file, idx) => (
+                          <div
+                            key={`${file.path}-${idx}`}
+                            className="flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
+                            data-testid={`file-item-${idx}`}
+                          >
+                            {/* Icon and actions row */}
+                            <div className="flex items-center justify-between mb-2">
+                              <FileIcon filename={file.name} />
+                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => handleDownload(file)}
+                                  title="Download"
+                                  data-testid={`download-btn-${idx}`}
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-red-500 hover:text-red-600"
+                                  onClick={() => setDeleteDialog({ open: true, file })}
+                                  title="Eliminar"
+                                  data-testid={`delete-btn-${idx}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                            {/* Clickable file name - duas linhas com letra pequena */}
+                            <button
+                              onClick={() => handleDownload(file)}
+                              className="text-left text-[10px] sm:text-xs font-medium line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer mb-1 min-h-[2rem] leading-tight"
+                              title={`Clique para descarregar: ${file.name}`}
+                            >
+                              {file.name}
+                            </button>
+                            {/* Meta info */}
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="text-[10px] text-muted-foreground">
+                                {file.size_formatted}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground mt-1">
+                              {formatDate(file.last_modified)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <FolderOpen className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                      <p className="text-sm">Nenhum ficheiro em {cat.label}</p>
+                      <p className="text-xs mt-1">
+                        Clique em "Upload" para adicionar documentos
+                      </p>
+                    </div>
+                  )}
+                </TabsContent>
+              ))}
+            </Tabs>
+          )}
         </CardContent>
       </Card>
 
