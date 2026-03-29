@@ -389,6 +389,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setUploadProgress(0);
 
     let successCount = 0;
+    let errorCount = 0;
     const totalFiles = files.length;
 
     for (let i = 0; i < files.length; i++) {
@@ -415,15 +416,32 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
         if (response.ok) {
           successCount++;
+        } else if (response.status === 429) {
+          // Rate limiting - esperar e tentar novamente
+          const retryAfter = response.headers.get("Retry-After") || 60;
+          toast.warning(`Aguardar ${retryAfter} segundos antes de continuar...`);
+          // Esperar e tentar novamente o mesmo ficheiro
+          await new Promise(resolve => setTimeout(resolve, parseInt(retryAfter) * 1000));
+          i--; // Tentar novamente o mesmo ficheiro
+          continue;
         } else {
           const error = await response.json();
-          toast.error(`Erro no upload de ${file.name}: ${error.detail}`);
+          // Mensagem de erro mais amigável
+          const errorMsg = error.detail || `Erro ${response.status}`;
+          toast.error(`${file.name}: ${errorMsg}`);
+          errorCount++;
         }
       } catch (error) {
-        toast.error(`Erro no upload de ${file.name}`);
+        toast.error(`Erro de conexão ao enviar ${file.name}`);
+        errorCount++;
       }
 
       setUploadProgress(((i + 1) / totalFiles) * 100);
+      
+      // Pequeno delay entre uploads para evitar rate limiting
+      if (i < files.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
     }
 
     if (successCount > 0) {
@@ -433,6 +451,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           : `${successCount}/${totalFiles} ficheiros enviados`
       );
       fetchFiles();
+    }
+    
+    if (errorCount > 0 && successCount === 0) {
+      toast.error(`Falha no upload de ${errorCount} ficheiro(s). Verifique o formato dos ficheiros (PDF, JPEG, PNG, HEIC).`);
     }
 
     setUploading(false);
