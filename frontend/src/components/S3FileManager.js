@@ -76,6 +76,7 @@ import {
   ExternalLink,
   ZoomIn,
   ZoomOut,
+  Pencil,
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { format } from "date-fns";
@@ -158,9 +159,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [savingS3Mapping, setSavingS3Mapping] = useState(false);
   const [loadingS3Folders, setLoadingS3Folders] = useState(false);
   
-  // Estado para renomeação inteligente
+  // Estado para renomeação inteligente (IA)
   const [renaming, setRenaming] = useState(false);
   const [renameDialog, setRenameDialog] = useState({ open: false, results: null });
+  
+  // Estado para renomeação manual (por ficheiro individual)
+  const [manualRenameDialog, setManualRenameDialog] = useState({ open: false, file: null, newName: "" });
+  const [manualRenaming, setManualRenaming] = useState(false);
   
   // Estado para ordenação de ficheiros
   const [sortBy, setSortBy] = useState("date"); // "date", "name", "size", "category"
@@ -938,6 +943,65 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
+  // Abrir diálogo de renomeação manual
+  const openManualRename = (file) => {
+    // Extrair nome sem extensão para facilitar edição
+    const filename = file.name || file.path?.split('/').pop() || "";
+    const lastDot = filename.lastIndexOf('.');
+    const nameWithoutExt = lastDot > 0 ? filename.substring(0, lastDot) : filename;
+    
+    setManualRenameDialog({
+      open: true,
+      file: file,
+      newName: nameWithoutExt
+    });
+  };
+
+  // Renomear ficheiro individual manualmente
+  const handleManualRename = async () => {
+    const { file, newName } = manualRenameDialog;
+    
+    if (!file || !newName.trim()) {
+      toast.error("Nome inválido");
+      return;
+    }
+
+    setManualRenaming(true);
+    
+    try {
+      const response = await fetch(
+        `${API_URL}/api/documents/rename-smart/${processId}`,
+        {
+          method: 'POST',
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            s3_path: file.path,
+            apply_ai_name: false,
+            novo_nome: newName.trim()
+          })
+        }
+      );
+
+      if (response.ok) {
+        const result = await response.json();
+        toast.success(`Ficheiro renomeado para "${result.new_name}"`);
+        setManualRenameDialog({ open: false, file: null, newName: "" });
+        fetchFiles(); // Recarregar lista
+      } else {
+        const error = await response.json();
+        toast.error(error.detail || "Erro ao renomear ficheiro");
+      }
+    } catch (error) {
+      console.error("Erro ao renomear ficheiro:", error);
+      toast.error("Erro ao renomear ficheiro");
+    } finally {
+      setManualRenaming(false);
+    }
+  };
+
   if (loading) {
     return (
       <Card data-testid="s3-file-manager">
@@ -1384,11 +1448,11 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              className="h-5 w-5 text-amber-500 hover:text-amber-600" 
-                              onClick={(e) => { e.stopPropagation(); handleSmartRename(); }}
+                              className="h-5 w-5 text-blue-500 hover:text-blue-600" 
+                              onClick={(e) => { e.stopPropagation(); openManualRename(file); }}
                               title="Renomear"
                             >
-                              <Sparkles className="h-3 w-3" />
+                              <Pencil className="h-3 w-3" />
                             </Button>
                             <Button 
                               variant="ghost" 
@@ -2202,6 +2266,71 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             >
               <Upload className="h-4 w-4 mr-2" />
               Confirmar Upload
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de renomeação manual */}
+      <Dialog open={manualRenameDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setManualRenameDialog({ open: false, file: null, newName: "" });
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-blue-600" />
+              Renomear Ficheiro
+            </DialogTitle>
+            <DialogDescription>
+              Introduza o novo nome para "{manualRenameDialog.file?.name}".
+              <br />
+              <span className="text-xs text-muted-foreground">
+                A extensão será mantida automaticamente.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Novo nome</label>
+              <Input
+                placeholder="Introduza o novo nome..."
+                value={manualRenameDialog.newName}
+                onChange={(e) => setManualRenameDialog(prev => ({
+                  ...prev,
+                  newName: e.target.value
+                }))}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && manualRenameDialog.newName.trim()) {
+                    handleManualRename();
+                  }
+                }}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setManualRenameDialog({ open: false, file: null, newName: "" })}
+              disabled={manualRenaming}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleManualRename}
+              disabled={!manualRenameDialog.newName.trim() || manualRenaming}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {manualRenaming ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Pencil className="h-4 w-4 mr-2" />
+              )}
+              Renomear
             </Button>
           </DialogFooter>
         </DialogContent>
