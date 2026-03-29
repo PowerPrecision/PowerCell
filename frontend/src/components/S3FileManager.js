@@ -174,8 +174,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   
   // Estado para drag and drop
   const [draggedFile, setDraggedFile] = useState(null);
+  const [draggedFiles, setDraggedFiles] = useState([]); // Múltiplos ficheiros selecionados
   const [dropTarget, setDropTarget] = useState(null);
   const [moving, setMoving] = useState(false);
+  const [dragCounter, setDragCounter] = useState(0); // Contador para drag enter/leave correto
   
   // Estado para ordenação de ficheiros
   const [sortBy, setSortBy] = useState("date"); // "date", "name", "size", "category"
@@ -1106,14 +1108,30 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
   // Drag and Drop handlers
   const handleDragStart = (e, file) => {
-    setDraggedFile(file);
+    // Se o ficheiro arrastado está entre os selecionados, arrastar todos os selecionados
+    // Caso contrário, arrastar apenas este ficheiro
+    const isSelected = selectedFilesForAI.some(f => f.path === file.path);
+    
+    if (isSelected && selectedFilesForAI.length > 1) {
+      // Arrastar múltiplos ficheiros selecionados
+      setDraggedFiles(selectedFilesForAI);
+      setDraggedFile(null);
+      e.dataTransfer.setData("text/plain", `${selectedFilesForAI.length} ficheiros`);
+    } else {
+      // Arrastar apenas este ficheiro
+      setDraggedFile(file);
+      setDraggedFiles([]);
+      e.dataTransfer.setData("text/plain", file.path);
+    }
+    
     e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", file.path);
   };
 
   const handleDragEnd = () => {
     setDraggedFile(null);
+    setDraggedFiles([]);
     setDropTarget(null);
+    setDragCounter(0);
   };
 
   const handleDragOver = (e, category) => {
@@ -1122,57 +1140,102 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setDropTarget(category);
   };
 
-  const handleDragLeave = () => {
-    setDropTarget(null);
+  const handleDragEnter = (e, category) => {
+    e.preventDefault();
+    setDragCounter(prev => prev + 1);
+    setDropTarget(category);
+  };
+
+  const handleDragLeave = (e, category) => {
+    e.preventDefault();
+    setDragCounter(prev => prev - 1);
+    // Só limpar o dropTarget quando sairmos completamente
+    if (dragCounter <= 1) {
+      setDropTarget(null);
+    }
   };
 
   const handleDrop = async (e, targetCategory) => {
     e.preventDefault();
+    const previousDropTarget = dropTarget;
     setDropTarget(null);
+    setDragCounter(0);
     
-    if (!draggedFile) return;
+    // Determinar quais ficheiros mover
+    const filesToMove = draggedFiles.length > 0 ? draggedFiles : (draggedFile ? [draggedFile] : []);
     
-    // Verificar se a categoria é diferente
-    const currentCategory = draggedFile.category || "Outros";
-    if (currentCategory === targetCategory) {
-      toast.info("Ficheiro já está nesta categoria");
+    if (filesToMove.length === 0) return;
+    
+    // Filtrar ficheiros que já estão na categoria destino
+    const filesToActuallyMove = filesToMove.filter(file => {
+      const currentCategory = file.category || "Outros";
+      return currentCategory !== targetCategory;
+    });
+    
+    if (filesToActuallyMove.length === 0) {
+      toast.info(filesToMove.length === 1 
+        ? "Ficheiro já está nesta categoria" 
+        : "Todos os ficheiros já estão nesta categoria");
       setDraggedFile(null);
+      setDraggedFiles([]);
       return;
     }
 
     setMoving(true);
-    toast.info(`A mover "${draggedFile.name}" para ${targetCategory}...`);
+    const fileCount = filesToActuallyMove.length;
+    toast.info(`A mover ${fileCount} ficheiro${fileCount > 1 ? 's' : ''} para ${targetCategory}...`);
+
+    let successCount = 0;
+    let errorCount = 0;
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/move-file/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            source_path: draggedFile.path,
-            target_category: targetCategory
-          })
-        }
-      );
+      // Mover cada ficheiro
+      for (const file of filesToActuallyMove) {
+        try {
+          const response = await fetch(
+            `${API_URL}/api/documents/move-file/${processId}`,
+            {
+              method: 'POST',
+              headers: { 
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                source_path: file.path,
+                target_category: targetCategory
+              })
+            }
+          );
 
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`Ficheiro movido para ${targetCategory}`);
+          if (response.ok) {
+            successCount++;
+          } else {
+            errorCount++;
+            console.error(`Erro ao mover ${file.name}`);
+          }
+        } catch (err) {
+          errorCount++;
+          console.error(`Erro ao mover ${file.name}:`, err);
+        }
+      }
+
+      // Mostrar resultado
+      if (successCount > 0) {
+        toast.success(`${successCount} ficheiro${successCount > 1 ? 's' : ''} movido${successCount > 1 ? 's' : ''} para ${targetCategory}`);
         fetchFiles(); // Recarregar lista
-      } else {
-        const error = await response.json();
-        toast.error(error.detail || "Erro ao mover ficheiro");
+        setSelectedFilesForAI([]); // Limpar seleção
+      }
+      
+      if (errorCount > 0) {
+        toast.error(`${errorCount} ficheiro${errorCount > 1 ? 's' : ''} não foram movidos`);
       }
     } catch (error) {
-      console.error("Erro ao mover ficheiro:", error);
-      toast.error("Erro ao mover ficheiro");
+      console.error("Erro ao mover ficheiros:", error);
+      toast.error("Erro ao mover ficheiros");
     } finally {
       setMoving(false);
       setDraggedFile(null);
+      setDraggedFiles([]);
     }
   };
 
@@ -1509,11 +1572,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       gray: "text-gray-500",
                     };
                     const isDropTarget = dropTarget === cat.id;
+                    const isDraggingMultiple = draggedFiles.length > 1;
                     return (
                       <div
                         key={cat.id}
                         onDragOver={(e) => handleDragOver(e, cat.id)}
-                        onDragLeave={handleDragLeave}
+                        onDragEnter={(e) => handleDragEnter(e, cat.id)}
+                        onDragLeave={(e) => handleDragLeave(e, cat.id)}
                         onDrop={(e) => handleDrop(e, cat.id)}
                         className={`relative ${isDropTarget ? "ring-2 ring-teal-500 ring-inset bg-teal-50 dark:bg-teal-950/30 rounded" : ""}`}
                       >
@@ -1526,8 +1591,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                           <Icon className={`h-4 w-4 ${isDropTarget ? "text-teal-600" : selectedCategory === cat.id ? "text-primary font-bold" : colorMap[cat.color] || "text-gray-500"}`} />
                         </button>
                         {isDropTarget && (
-                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <span className="text-[8px] text-teal-600 font-medium">Mover</span>
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-teal-100/80 dark:bg-teal-900/80 rounded">
+                            <div className="flex flex-col items-center">
+                              {isDraggingMultiple ? (
+                                <>
+                                  <span className="text-[10px] text-teal-700 dark:text-teal-300 font-bold">{draggedFiles.length}</span>
+                                  <span className="text-[8px] text-teal-600 dark:text-teal-400">soltar</span>
+                                </>
+                              ) : (
+                                <span className="text-[8px] text-teal-600 dark:text-teal-400 font-medium">soltar</span>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1589,20 +1663,28 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                     getDisplayFiles().map((file, idx) => {
                       const isSelected = selectedFilesForAI.some(f => f.path === file.path);
                       const isPreviewing = previewFile?.path === file.path;
-                      const isDragging = draggedFile?.path === file.path;
+                      const isDragging = draggedFile?.path === file.path || draggedFiles.some(f => f.path === file.path);
+                      const isMultiDrag = draggedFiles.length > 1 && isSelected;
                       return (
                         <div
                           key={`${file.path}-${idx}`}
                           draggable
                           onDragStart={(e) => handleDragStart(e, file)}
                           onDragEnd={handleDragEnd}
-                          className={`grid grid-cols-[28px_1fr_80px_90px_auto] gap-2 px-2 py-1.5 text-xs items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors select-none ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""} ${isPreviewing ? "bg-accent" : ""} ${isDragging ? "opacity-50 bg-accent/50" : ""}`}
+                          className={`grid grid-cols-[28px_1fr_80px_90px_auto] gap-2 px-2 py-1.5 text-xs items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors select-none ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""} ${isPreviewing ? "bg-accent" : ""} ${isDragging ? "opacity-40 bg-teal-50 dark:bg-teal-950/50 ring-1 ring-teal-400 ring-inset" : ""}`}
                           onClick={() => { toggleFileSelection(file); handlePreview(file); }}
                           data-testid={`file-row-${idx}`}
                         >
                           {/* Checkbox / Drag handle */}
-                          <div className="w-7 flex justify-center cursor-grab active:cursor-grabbing">
-                            {isSelected ? (
+                          <div className="w-7 flex justify-center cursor-grab active:cursor-grabbing relative">
+                            {isMultiDrag ? (
+                              <div className="relative">
+                                <CheckSquare className="h-3.5 w-3.5 text-teal-600" />
+                                <span className="absolute -top-1 -right-1 bg-teal-500 text-white text-[8px] rounded-full w-3 h-3 flex items-center justify-center font-bold">
+                                  {draggedFiles.length}
+                                </span>
+                              </div>
+                            ) : isSelected ? (
                               <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
                             ) : (
                               <Square className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1838,21 +1920,45 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 {CATEGORIES.map((cat) => {
                   const Icon = cat.icon;
                   const count = getCategoryCount(cat.id);
+                  const isDropTarget = dropTarget === cat.id;
+                  const isDraggingMultiple = draggedFiles.length > 1;
                   return (
-                    <TabsTrigger
+                    <div
                       key={cat.id}
-                      value={cat.id}
-                      className="min-w-[40px] sm:min-w-[60px] sm:flex-1 gap-1 text-[10px] sm:text-xs py-1.5 px-1.5 sm:px-2"
-                      data-testid={`tab-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
+                      className="relative"
+                      onDragOver={(e) => handleDragOver(e, cat.id)}
+                      onDragEnter={(e) => handleDragEnter(e, cat.id)}
+                      onDragLeave={(e) => handleDragLeave(e, cat.id)}
+                      onDrop={(e) => handleDrop(e, cat.id)}
                     >
-                      <Icon className="h-3 w-3" />
-                      <span className="hidden sm:inline">{cat.label}</span>
-                      {count > 0 && (
-                        <Badge variant="secondary" className="ml-0.5 sm:ml-1 h-4 px-1 text-[10px]">
-                          {count}
-                        </Badge>
+                      <TabsTrigger
+                        value={cat.id}
+                        className={`min-w-[40px] sm:min-w-[60px] sm:flex-1 gap-1 text-[10px] sm:text-xs py-1.5 px-1.5 sm:px-2 ${isDropTarget ? "ring-2 ring-teal-500 bg-teal-50 dark:bg-teal-950/50" : ""}`}
+                        data-testid={`tab-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
+                      >
+                        <Icon className="h-3 w-3" />
+                        <span className="hidden sm:inline">{cat.label}</span>
+                        {count > 0 && (
+                          <Badge variant="secondary" className="ml-0.5 sm:ml-1 h-4 px-1 text-[10px]">
+                            {count}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
+                      {isDropTarget && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-teal-100/90 dark:bg-teal-900/90 rounded-md">
+                          <div className="flex flex-col items-center">
+                            {isDraggingMultiple ? (
+                              <>
+                                <span className="text-xs text-teal-700 dark:text-teal-300 font-bold">{draggedFiles.length}</span>
+                                <span className="text-[10px] text-teal-600 dark:text-teal-400">soltar aqui</span>
+                              </>
+                            ) : (
+                              <span className="text-[10px] text-teal-600 dark:text-teal-400 font-medium">soltar aqui</span>
+                            )}
+                          </div>
+                        </div>
                       )}
-                    </TabsTrigger>
+                    </div>
                   );
                 })}
               </TabsList>
@@ -1862,57 +1968,63 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 {filteredFiles.length > 0 ? (
                   <div className="overflow-x-auto pb-2 -mx-2 px-2">
                     <div className="flex gap-3 min-w-max">
-                      {filteredFiles.map((file, idx) => (
-                        <div
-                          key={`${file.path}-${idx}`}
-                          className="flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
-                        >
-                          {/* Icon and actions row */}
-                          <div className="flex items-center justify-between mb-2">
-                            <FileIcon filename={file.name} />
-                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6"
-                                onClick={() => handleDownload(file)}
-                                title="Download"
-                              >
-                                <Download className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 text-red-500 hover:text-red-600"
-                                onClick={() => setDeleteDialog({ open: true, file })}
-                                title="Eliminar"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </div>
-                          {/* Clickable file name - duas linhas com letra pequena */}
-                          <button
-                            onClick={() => handleDownload(file)}
-                            className="text-left text-[10px] sm:text-xs font-medium line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer mb-1 min-h-[2rem] leading-tight"
-                            title={`Clique para descarregar: ${file.name}`}
+                      {filteredFiles.map((file, idx) => {
+                        const isDragging = draggedFile?.path === file.path || draggedFiles.some(f => f.path === file.path);
+                        return (
+                          <div
+                            key={`${file.path}-${idx}`}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, file)}
+                            onDragEnd={handleDragEnd}
+                            className={`flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group cursor-grab active:cursor-grabbing ${isDragging ? "opacity-40 ring-2 ring-teal-400" : ""}`}
                           >
-                            {file.name}
-                          </button>
-                          {/* Meta info */}
-                          <div className="flex flex-wrap items-center gap-1">
-                            <Badge variant="outline" className="text-[10px] py-0 h-4">
-                              {file.category}
-                            </Badge>
-                            <span className="text-[10px] text-muted-foreground">
-                              {file.size_formatted}
+                            {/* Icon and actions row */}
+                            <div className="flex items-center justify-between mb-2">
+                              <FileIcon filename={file.name} />
+                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
+                                  title="Download"
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-red-500 hover:text-red-600"
+                                  onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
+                                  title="Eliminar"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                            {/* Clickable file name - duas linhas com letra pequena */}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
+                              className="text-left text-[10px] sm:text-xs font-medium line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer mb-1 min-h-[2rem] leading-tight"
+                              title={`Clique para descarregar: ${file.name}`}
+                            >
+                              {file.name}
+                            </button>
+                            {/* Meta info */}
+                            <div className="flex flex-wrap items-center gap-1">
+                              <Badge variant="outline" className="text-[10px] py-0 h-4">
+                                {file.category}
+                              </Badge>
+                              <span className="text-[10px] text-muted-foreground">
+                                {file.size_formatted}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground mt-1">
+                              {formatDate(file.last_modified)}
                             </span>
                           </div>
-                          <span className="text-[10px] text-muted-foreground mt-1">
-                            {formatDate(file.last_modified)}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ) : (
@@ -1933,57 +2045,63 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   {getFilteredCategoryFiles(cat.id).length > 0 ? (
                     <div className="overflow-x-auto pb-2 -mx-2 px-2">
                       <div className="flex gap-3 min-w-max">
-                        {getFilteredCategoryFiles(cat.id).map((file, idx) => (
-                          <div
-                            key={`${file.path}-${idx}`}
-                            className="flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
-                            data-testid={`file-item-${idx}`}
-                          >
-                            {/* Icon and actions row */}
-                            <div className="flex items-center justify-between mb-2">
-                              <FileIcon filename={file.name} />
-                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6"
-                                  onClick={() => handleDownload(file)}
-                                  title="Download"
-                                  data-testid={`download-btn-${idx}`}
-                                >
-                                  <Download className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 text-red-500 hover:text-red-600"
-                                  onClick={() => setDeleteDialog({ open: true, file })}
-                                  title="Eliminar"
-                                  data-testid={`delete-btn-${idx}`}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            </div>
-                            {/* Clickable file name - duas linhas com letra pequena */}
-                            <button
-                              onClick={() => handleDownload(file)}
-                              className="text-left text-[10px] sm:text-xs font-medium line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer mb-1 min-h-[2rem] leading-tight"
-                              title={`Clique para descarregar: ${file.name}`}
+                        {getFilteredCategoryFiles(cat.id).map((file, idx) => {
+                          const isDragging = draggedFile?.path === file.path || draggedFiles.some(f => f.path === file.path);
+                          return (
+                            <div
+                              key={`${file.path}-${idx}`}
+                              draggable
+                              onDragStart={(e) => handleDragStart(e, file)}
+                              onDragEnd={handleDragEnd}
+                              className={`flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group cursor-grab active:cursor-grabbing ${isDragging ? "opacity-40 ring-2 ring-teal-400" : ""}`}
+                              data-testid={`file-item-${idx}`}
                             >
-                              {file.name}
-                            </button>
-                            {/* Meta info */}
-                            <div className="flex flex-wrap items-center gap-1">
-                              <span className="text-[10px] text-muted-foreground">
-                                {file.size_formatted}
+                              {/* Icon and actions row */}
+                              <div className="flex items-center justify-between mb-2">
+                                <FileIcon filename={file.name} />
+                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
+                                    title="Download"
+                                    data-testid={`download-btn-${idx}`}
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-red-500 hover:text-red-600"
+                                    onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
+                                    title="Eliminar"
+                                    data-testid={`delete-btn-${idx}`}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                              {/* Clickable file name - duas linhas com letra pequena */}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
+                                className="text-left text-[10px] sm:text-xs font-medium line-clamp-2 hover:text-blue-600 hover:underline cursor-pointer mb-1 min-h-[2rem] leading-tight"
+                                title={`Clique para descarregar: ${file.name}`}
+                              >
+                                {file.name}
+                              </button>
+                              {/* Meta info */}
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="text-[10px] text-muted-foreground">
+                                  {file.size_formatted}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground mt-1">
+                                {formatDate(file.last_modified)}
                               </span>
                             </div>
-                            <span className="text-[10px] text-muted-foreground mt-1">
-                              {formatDate(file.last_modified)}
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (
