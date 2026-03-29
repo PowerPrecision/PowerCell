@@ -586,3 +586,95 @@ async def check_encryption_status(
         result["errors"].append(f"Erro ao testar desencriptação de dados existentes: {str(e)}")
     
     return result
+
+
+@router.get("/pii-compliance")
+async def check_pii_compliance(
+    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Verifica a conformidade PII (Personally Identifiable Information) com a OpenAI.
+    
+    IMPORTANTE: Este endpoint verifica se os dados sensíveis dos clientes
+    (NIFs, rendimentos, dados pessoais) estão protegidos de serem usados
+    para treino de modelos públicos.
+    
+    Para garantir conformidade:
+    1. Configure OPENAI_DATA_TRAINING_OPT_OUT=true nas variáveis de ambiente
+    2. Verifique em https://platform.openai.com/account/organization que 
+       "Improve our models with your data" está DESATIVADO
+    3. Configure OPENAI_ORGANIZATION_ID com o ID da sua organização corporativa
+    
+    Retorna:
+    - Estado de conformidade
+    - Verificações realizadas
+    - Avisos e recomendações
+    """
+    from services.openai_privacy import verify_openai_privacy_compliance
+    
+    try:
+        compliance_result = await verify_openai_privacy_compliance()
+        
+        # Adicionar documentação
+        compliance_result["documentation"] = {
+            "how_to_configure_opt_out": [
+                "1. Aceda a https://platform.openai.com/account/organization",
+                "2. Navegue para 'Data Controls' > 'Training Data'",
+                "3. Desative 'Improve our models with your data'",
+                "4. Configure OPENAI_DATA_TRAINING_OPT_OUT=true nas variáveis de ambiente",
+                "5. Configure OPENAI_ORGANIZATION_ID com o ID da sua organização"
+            ],
+            "enterprise_accounts": (
+                "Contas Enterprise da OpenAI têm o treino de dados desativado por defeito. "
+                "Se tem uma conta Enterprise, confirme que o opt-out está ativo nas settings."
+            ),
+            "data_types_protected": [
+                "NIF (Número de Identificação Fiscal)",
+                "Rendimentos (salários, IRS)",
+                "Dados pessoais (nome, morada, telefone)",
+                "Dados bancários (IBAN, saldos)",
+                "Número de documento (CC, passaporte)"
+            ],
+            "reference_links": [
+                "https://platform.openai.com/docs/models/how-we-use-your-data",
+                "https://openai.com/enterprise-privacy",
+                "https://platform.openai.com/account/organization"
+            ]
+        }
+        
+        return compliance_result
+        
+    except Exception as e:
+        logger.error(f"Erro ao verificar conformidade PII: {e}")
+        return {
+            "compliant": False,
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+
+@router.post("/pii-compliance/test-api")
+async def test_openai_api_privacy(
+    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Testa a conectividade com a API OpenAI verificando configurações de privacidade.
+    
+    Este endpoint faz uma chamada de teste à API para verificar:
+    - Se a conectividade está funcional
+    - Se o Organization ID está a ser usado
+    - Se há avisos de privacidade
+    """
+    from services.openai_privacy import test_openai_api_with_privacy_headers
+    
+    try:
+        result = await test_openai_api_with_privacy_headers()
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return result
+    except Exception as e:
+        logger.error(f"Erro ao testar API OpenAI: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
