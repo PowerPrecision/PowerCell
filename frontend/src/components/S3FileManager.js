@@ -628,10 +628,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
-  // Formatar data
+  // Formatar data - dd/mm/AA hh:mm
   const formatDate = (dateStr) => {
     try {
-      return format(new Date(dateStr), "d MMM yyyy, HH:mm", { locale: pt });
+      return format(new Date(dateStr), "dd/MM/yy HH:mm", { locale: pt });
     } catch {
       return dateStr;
     }
@@ -1227,25 +1227,23 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           {/* ========================================= */}
           {viewMode === "list" && (
             <div className="flex gap-2 mt-3 h-[450px]">
-              {/* Sidebar - Categorias (compacta) */}
-              <div className="w-24 flex-shrink-0 border rounded-lg overflow-hidden flex flex-col">
-                <div className="bg-muted/50 px-2 py-1.5 text-[10px] font-medium border-b flex items-center gap-1">
-                  <HardDrive className="h-3 w-3" />
-                  <span className="truncate">Pastas</span>
+              {/* Sidebar - Categorias (apenas ícones) */}
+              <div className="w-10 flex-shrink-0 border rounded-lg overflow-hidden flex flex-col">
+                <div className="bg-muted/50 px-1 py-1.5 text-[10px] font-medium border-b flex items-center justify-center">
+                  <HardDrive className="h-3.5 w-3.5" />
                 </div>
                 <ScrollArea className="flex-1">
                   {/* Pasta "Todos" */}
                   <button
                     onClick={() => setSelectedCategory(null)}
-                    className={`w-full px-2 py-1.5 text-xs text-left flex items-center gap-1.5 hover:bg-accent/50 transition-colors ${!selectedCategory ? "bg-accent font-medium" : ""}`}
+                    className={`w-full px-1 py-2 text-xs flex items-center justify-center hover:bg-accent/50 transition-colors ${!selectedCategory ? "bg-accent" : ""}`}
                     data-testid="folder-all"
+                    title={`Todos (${stats?.total_files || 0})`}
                   >
-                    <FolderOpen className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
-                    <span className="truncate flex-1">Todos</span>
-                    <span className="text-[10px] text-muted-foreground">{stats?.total_files || 0}</span>
+                    <FolderOpen className={`h-4 w-4 ${!selectedCategory ? "text-blue-600" : "text-blue-500"}`} />
                   </button>
                   
-                  {/* Pastas por Categoria */}
+                  {/* Pastas por Categoria - apenas ícones */}
                   {CATEGORIES.map((cat) => {
                     const Icon = cat.icon;
                     const count = getCategoryCount(cat.id);
@@ -1260,14 +1258,11 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       <button
                         key={cat.id}
                         onClick={() => setSelectedCategory(cat.id)}
-                        className={`w-full px-2 py-1.5 text-xs text-left flex items-center gap-1.5 hover:bg-accent/50 transition-colors ${selectedCategory === cat.id ? "bg-accent font-medium" : ""}`}
+                        className={`w-full px-1 py-2 text-xs flex items-center justify-center hover:bg-accent/50 transition-colors ${selectedCategory === cat.id ? "bg-accent" : ""}`}
                         data-testid={`folder-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
+                        title={`${cat.label} (${count})`}
                       >
-                        <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${colorMap[cat.color] || "text-gray-500"}`} />
-                        <span className="truncate flex-1">{cat.label}</span>
-                        {count > 0 && (
-                          <span className="text-[10px] text-muted-foreground">{count}</span>
-                        )}
+                        <Icon className={`h-4 w-4 ${selectedCategory === cat.id ? "text-primary font-bold" : colorMap[cat.color] || "text-gray-500"}`} />
                       </button>
                     );
                   })}
@@ -1389,6 +1384,15 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             <Button 
                               variant="ghost" 
                               size="icon" 
+                              className="h-5 w-5 text-amber-500 hover:text-amber-600" 
+                              onClick={(e) => { e.stopPropagation(); handleSmartRename(); }}
+                              title="Renomear"
+                            >
+                              <Sparkles className="h-3 w-3" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
                               className="h-5 w-5 text-red-500 hover:text-red-600" 
                               onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
                               title="Eliminar"
@@ -1437,20 +1441,22 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
               {/* Painel de Preview Lateral */}
               {previewFile && (
                 <div className="w-80 flex-shrink-0 border rounded-lg overflow-hidden flex flex-col bg-muted/30">
-                  {/* Header do Preview */}
-                  <div className="bg-muted/50 px-3 py-2 text-xs font-medium border-b flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <Eye className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="truncate">{previewFile.name}</span>
+                  {/* Header do Preview - nome visível */}
+                  <div className="bg-muted/50 px-2 py-2 border-b">
+                    <div className="flex items-center gap-2">
+                      <Eye className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                      <span className="text-xs font-medium truncate flex-1" title={previewFile.name || previewFile.filename}>
+                        {previewFile.name || previewFile.filename || "Documento"}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 flex-shrink-0"
+                        onClick={closePreview}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 flex-shrink-0"
-                      onClick={closePreview}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
                   </div>
                   
                   {/* Área de Preview */}
