@@ -278,7 +278,7 @@ async def list_client_files(
     return files
 
 @router.post("/client/{client_id}/upload", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 async def upload_file_s3(
     client_id: str,
     request: Request,
@@ -356,14 +356,14 @@ async def upload_file_s3(
         try:
             validate_file_content(file_content, original_filename)
         except HTTPException as e:
-            logger.warning(f"[SECURITY] Ficheiro rejeitado: {original_filename} - {e.detail}")
+            logger.warning(f"[UPLOAD] Ficheiro rejeitado: {sanitize_for_log(original_filename)} - {e.detail}")
             raise
         
         # Verificar se é uma imagem e converter para PDF
         converted_to_pdf = False
         if is_image_file(original_filename, content_type) and IMG2PDF_AVAILABLE:
             try:
-                logger.info(f"A converter imagem para PDF")
+                logger.info(f"[UPLOAD] A converter imagem para PDF: {sanitize_for_log(original_filename)}")
                 pdf_bytes, new_filename = await convert_image_to_pdf(file_content, original_filename)
                 
                 if new_filename != original_filename:
@@ -371,10 +371,17 @@ async def upload_file_s3(
                     original_filename = new_filename
                     content_type = MIME_TYPE_PDF
                     converted_to_pdf = True
-                    logger.info(f"Conversão concluída")
+                    logger.info(f"[UPLOAD] Conversão concluída: {sanitize_for_log(new_filename)}")
             except (IOError, OSError, ValueError, KeyError, TypeError) as e:
-                logger.warning(f"Não foi possível converter imagem para PDF: {e}")
+                logger.warning(f"[UPLOAD] Não foi possível converter imagem para PDF: {e}")
                 # Continua com o ficheiro original
+        
+        # Verificar se é HEIC/HEIF (formato iPhone) - não suportado para conversão
+        ext_lower = original_filename.lower().rsplit('.', 1)[-1] if '.' in original_filename else ''
+        if ext_lower in ['heic', 'heif'] and not converted_to_pdf:
+            logger.info(f"[UPLOAD] Ficheiro HEIC/HEIF aceite: {sanitize_for_log(original_filename)}")
+            # HEIC/HEIF são aceites mas não convertidos automaticamente
+            # O utilizador deve converter para JPEG antes do upload idealmente
         
         # Normalizar nome do ficheiro
         normalized_filename = normalize_filename(original_filename, category)
@@ -427,10 +434,10 @@ async def upload_file_s3(
         raise
     except Exception as e:
         # Log do erro completo para debugging
-        logger.error(f"Erro inesperado no upload: {type(e).__name__}: {str(e)}", exc_info=True)
+        logger.error(f"[UPLOAD] Erro inesperado: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, 
-            detail=f"Erro ao processar upload: {str(e)}"
+            detail=f"Erro interno ao processar upload. Por favor tente novamente ou contacte o suporte se o problema persistir."
         )
 
 @router.post("/client/{client_id}/init-folders", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})

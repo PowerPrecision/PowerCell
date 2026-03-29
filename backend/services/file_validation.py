@@ -11,13 +11,15 @@ Este módulo:
 - Lê os "magic bytes" (primeiros bytes do ficheiro)
 - Valida o MIME type real contra uma whitelist
 - Rejeita ficheiros que não correspondem ao tipo declarado
+- FALLBACK: Para formatos não reconhecidos pelo magic (HEIC/HEIF),
+  usa verificação por extensão como backup
 
 Tipos permitidos (whitelist):
 - PDF (.pdf)
 - JPEG (.jpg, .jpeg)
 - PNG (.png)
 - TIFF (.tif, .tiff)
-- HEIC/HEIF (.heic, .heif) - fotos iPhone
+- HEIC/HEIF (.heic, .heif) - fotos iPhone (verificação por extensão)
 - Microsoft Word (.docx)
 - Microsoft Excel (.xlsx)
 
@@ -123,6 +125,13 @@ DANGEROUS_MIME_TYPES = [
     "application/x-httpd-php",
 ]
 
+# Extensões que requerem verificação especial (magic bytes não reconhecidos)
+# HEIC/HEIF: formato Apple que python-magic não detecta corretamente
+EXTENSION_MIME_FALLBACK = {
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+}
+
 
 def validate_file_content(
     file_content: bytes,
@@ -133,6 +142,7 @@ def validate_file_content(
     Valida o conteúdo de um ficheiro usando magic bytes.
     
     NÃO confia na extensão declarada - analisa os bytes reais.
+    Para formatos não reconhecidos pelo magic (HEIC/HEIF), usa fallback por extensão.
     
     Args:
         file_content: Conteúdo binário do ficheiro
@@ -152,20 +162,35 @@ def validate_file_content(
         logger.warning("[SECURITY] Ficheiro vazio rejeitado")
         raise HTTPException(
             status_code=400,
-            detail="Ficheiro vazio ou corrompido"
+            detail="Ficheiro vazio ou corrompido. O ficheiro não contém dados."
         )
     
-    # 2. Detectar MIME type real usando magic bytes
+    # 2. Obter extensão do ficheiro para verificação de fallback
+    declared_ext = ""
+    if declared_filename and "." in declared_filename:
+        declared_ext = "." + declared_filename.lower().rsplit(".", 1)[-1]
+    
+    # 3. Detectar MIME type real usando magic bytes
     try:
         detected_mime = magic.from_buffer(file_content, mime=True)
     except OSError as e:
         logger.error(f"[SECURITY] Erro ao detectar MIME type: {e}")
         raise HTTPException(
             status_code=400,
-            detail="Não foi possível validar o formato do ficheiro"
+            detail="Não foi possível validar o formato do ficheiro. Tente novamente."
         )
     
-    # 3. Verificar se é um tipo perigoso (executáveis, scripts)
+    # 4. FALLBACK: Para formatos não reconhecidos pelo magic (HEIC/HEIF)
+    # O python-magic retorna genericamente "application/octet-stream" para HEIC
+    # Neste caso, verificamos pela extensão como fallback
+    if detected_mime == "application/octet-stream" and declared_ext in EXTENSION_MIME_FALLBACK:
+        detected_mime = EXTENSION_MIME_FALLBACK[declared_ext]
+        logger.info(
+            f"[SECURITY] MIME fallback por extensão: {sanitize_for_log(filename)} "
+            f"-> {detected_mime}"
+        )
+    
+    # 5. Verificar se é um tipo perigoso (executáveis, scripts)
     if detected_mime in DANGEROUS_MIME_TYPES:
         logger.critical(
             f"[SECURITY] FICHEIRO PERIGOSO BLOQUEADO! "
@@ -173,20 +198,25 @@ def validate_file_content(
         )
         raise HTTPException(
             status_code=400,
-            detail="Formato de ficheiro não permitido por razões de segurança"
+            detail="Formato de ficheiro não permitido por razões de segurança. Ficheiros executáveis não são aceites."
         )
     
-    # 4. Verificar se está na whitelist
+    # 6. Verificar se está na whitelist
     if detected_mime not in ALLOWED_MIME_TYPES:
+        # Mensagem de erro mais detalhada para ajudar o utilizador
+        ext_info = f" (extensão: {declared_ext})" if declared_ext else ""
         logger.warning(
-            f"[SECURITY] MIME type não permitido: {detected_mime}"
+            f"[SECURITY] MIME type não permitido: {detected_mime}{ext_info} "
+            f"ficheiro: {sanitize_for_log(filename)}"
         )
         raise HTTPException(
             status_code=400,
-            detail=f"Formato de ficheiro inválido. Tipos permitidos: PDF, JPEG, PNG, TIFF, DOCX, XLSX"
+            detail=f"Formato de ficheiro não suportado ({detected_mime}{ext_info}). "
+                   f"Tipos permitidos: PDF, JPEG, PNG, TIFF, HEIC, DOCX, XLSX. "
+                   f"Se está a enviar uma foto de iPhone, tente converter para JPEG primeiro."
         )
     
-    # 5. Verificar tamanho
+    # 7. Verificar tamanho
     file_config = ALLOWED_MIME_TYPES[detected_mime]
     max_allowed_mb = max_size_mb or file_config.get("max_size_mb", 50)
     file_size_mb = len(file_content) / (1024 * 1024)
@@ -198,12 +228,11 @@ def validate_file_content(
         )
         raise HTTPException(
             status_code=400,
-            detail=f"Ficheiro demasiado grande. Máximo permitido: {max_allowed_mb}MB"
+            detail=f"Ficheiro demasiado grande ({file_size_mb:.1f}MB). O máximo permitido para este tipo é {max_allowed_mb}MB."
         )
     
-    # 6. Verificação adicional: extensão vs conteúdo (warning apenas)
+    # 8. Verificação adicional: extensão vs conteúdo (warning apenas)
     if declared_filename:
-        declared_ext = "." + declared_filename.lower().rsplit(".", 1)[-1] if "." in declared_filename else ""
         allowed_exts = file_config.get("extensions", [])
         
         if declared_ext and declared_ext not in allowed_exts:
