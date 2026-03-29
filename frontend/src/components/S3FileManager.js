@@ -77,6 +77,7 @@ import {
   ZoomIn,
   ZoomOut,
   Pencil,
+  FolderSync,
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { format } from "date-fns";
@@ -166,6 +167,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Estado para renomeação manual (por ficheiro individual)
   const [manualRenameDialog, setManualRenameDialog] = useState({ open: false, file: null, newName: "" });
   const [manualRenaming, setManualRenaming] = useState(false);
+  
+  // Estado para organização rápida de documentos
+  const [organizing, setOrganizing] = useState(false);
+  const [organizeResults, setOrganizeResults] = useState(null);
   
   // Estado para ordenação de ficheiros
   const [sortBy, setSortBy] = useState("date"); // "date", "name", "size", "category"
@@ -1003,6 +1008,97 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
+  // Organização rápida de documentos
+  const handleQuickOrganize = async () => {
+    const allFiles = getAllFiles();
+    
+    if (allFiles.length === 0) {
+      toast.error("Não há ficheiros para organizar");
+      return;
+    }
+
+    setOrganizing(true);
+    setOrganizeResults(null);
+    toast.info(`A organizar ${allFiles.length} documento(s)...`);
+
+    try {
+      // Passo 1: Analisar documentos com IA
+      const formData = new FormData();
+      
+      for (const file of allFiles) {
+        try {
+          const proxyResponse = await fetch(
+            `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          
+          if (proxyResponse.ok) {
+            const blob = await proxyResponse.blob();
+            formData.append('files', blob, file.name);
+          }
+        } catch (e) {
+          console.error(`Erro ao obter ficheiro ${file.name}:`, e);
+        }
+      }
+
+      // Análise IA
+      const analyzeResponse = await fetch(
+        `${API_URL}/api/documents/ai-analyze/${processId}`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        }
+      );
+
+      if (!analyzeResponse.ok) {
+        const error = await analyzeResponse.json();
+        throw new Error(error.detail || "Erro na análise IA");
+      }
+
+      const analyzeResult = await analyzeResponse.json();
+
+      // Passo 2: Organizar documentos nas pastas
+      const organizeResponse = await fetch(
+        `${API_URL}/api/documents/organize/${processId}`,
+        {
+          method: 'POST',
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            documents: analyzeResult.documents || [],
+            create_folders: true
+          })
+        }
+      );
+
+      if (organizeResponse.ok) {
+        const organizeResult = await organizeResponse.json();
+        
+        setOrganizeResults({
+          analyzed: analyzeResult.documents_count || allFiles.length,
+          organized: organizeResult.organized_count || organizeResult.organized?.length || 0,
+          categories: analyzeResult.categories_found || [],
+          details: organizeResult.organized || []
+        });
+
+        toast.success(`Organização completa! ${organizeResult.organized_count || 0} documento(s) organizado(s).`);
+        fetchFiles(); // Recarregar lista
+      } else {
+        const error = await organizeResponse.json();
+        throw new Error(error.detail || "Erro ao organizar documentos");
+      }
+
+    } catch (error) {
+      console.error("Erro na organização:", error);
+      toast.error(error.message || "Erro ao organizar documentos");
+    } finally {
+      setOrganizing(false);
+    }
+  };
+
   if (loading) {
     return (
       <Card data-testid="s3-file-manager">
@@ -1187,6 +1283,22 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   <Sparkles className="h-3.5 w-3.5 text-amber-600 sm:mr-1" />
                 )}
                 <span className="hidden md:inline">Renomear</span> IA
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleQuickOrganize}
+                disabled={organizing || aiAnalyzing || getAllFiles().length === 0}
+                data-testid="quick-organize-btn"
+                title="Analisar e organizar documentos automaticamente nas pastas corretas"
+                className="bg-teal-50 hover:bg-teal-100 border-teal-200 dark:bg-teal-950/50 dark:border-teal-800 dark:hover:bg-teal-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
+              >
+                {organizing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600 sm:mr-1" />
+                ) : (
+                  <FolderSync className="h-3.5 w-3.5 text-teal-600 sm:mr-1" />
+                )}
+                <span className="hidden sm:inline">Organizar</span>
               </Button>
               <input
                 ref={fileInputRef}
@@ -2350,6 +2462,86 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 <Pencil className="h-4 w-4 mr-2" />
               )}
               Renomear
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de resultados da organização */}
+      <Dialog open={!!organizeResults} onOpenChange={(open) => !open && setOrganizeResults(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FolderSync className="h-5 w-5 text-teal-600" />
+              Organização Completa
+            </DialogTitle>
+            <DialogDescription>
+              Os documentos foram analisados e organizados automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {organizeResults && (
+            <div className="space-y-4 py-4">
+              {/* Resumo */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="text-center p-3 bg-muted rounded-lg">
+                  <p className="text-2xl font-bold text-blue-600">{organizeResults.analyzed}</p>
+                  <p className="text-xs text-muted-foreground">Analisados</p>
+                </div>
+                <div className="text-center p-3 bg-teal-50 dark:bg-teal-950/30 rounded-lg">
+                  <p className="text-2xl font-bold text-teal-600">{organizeResults.organized}</p>
+                  <p className="text-xs text-teal-600">Organizados</p>
+                </div>
+              </div>
+
+              {/* Categorias encontradas */}
+              {organizeResults.categories?.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Categorias identificadas:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {organizeResults.categories.map((cat, idx) => (
+                      <Badge key={idx} variant="outline" className="text-xs">
+                        {cat}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Detalhes */}
+              {organizeResults.details?.length > 0 && (
+                <div className="border rounded-lg max-h-40 overflow-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted sticky top-0">
+                      <tr>
+                        <th className="text-left p-2">Ficheiro</th>
+                        <th className="text-left p-2">Pasta</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {organizeResults.details.slice(0, 10).map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="p-2 truncate max-w-[150px]">{item.filename || item.file_name}</td>
+                          <td className="p-2">{item.target_folder || item.category}</td>
+                        </tr>
+                      ))}
+                      {organizeResults.details.length > 10 && (
+                        <tr>
+                          <td colSpan={2} className="p-2 text-center text-muted-foreground">
+                            +{organizeResults.details.length - 10} mais...
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button onClick={() => setOrganizeResults(null)} className="bg-teal-600 hover:bg-teal-700">
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>
