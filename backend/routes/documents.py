@@ -768,8 +768,12 @@ async def proxy_s3_file(
             finally:
                 body.close()
         
+        # Codificar filename para HTTP header (suporta Unicode)
+        from urllib.parse import quote
+        encoded_filename = quote(filename, safe='')
+        
         headers = {
-            'Content-Disposition': f'inline; filename="{filename}"',
+            'Content-Disposition': f"inline; filename*=UTF-8''{encoded_filename}",
             'Content-Length': str(content_length),
             'Cache-Control': 'private, max-age=3600',
         }
