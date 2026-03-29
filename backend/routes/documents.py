@@ -691,34 +691,31 @@ async def proxy_s3_file(
             Key=key
         )
     
-    # Função para gerar variações do path (underscore <-> espaço)
-    def get_path_variations(original_path):
-        variations = [original_path]
-        
-        # Variação com underscores -> espaços
-        if '_' in original_path:
-            variations.append(original_path.replace('_', ' '))
-        
-        # Variação com espaços -> underscores
-        if ' ' in original_path:
-            variations.append(original_path.replace(' ', '_'))
-        
-        # Variação com a pasta "Documentação Clientes" <-> "Documentação_Clientes"
-        if 'Documentação Clientes/' in original_path:
-            variations.append(original_path.replace('Documentação Clientes/', 'Documentação_Clientes/'))
-        if 'Documentação_Clientes/' in original_path:
-            variations.append(original_path.replace('Documentação_Clientes/', 'Documentação Clientes/'))
-        
-        return variations
+    # Gerar variações do path (underscore <-> espaço)
+    path_variations = [file_path]
     
-    # Tentar path original e variações
-    path_variations = get_path_variations(file_path)
+    # Variação com underscores -> espaços
+    if '_' in file_path:
+        path_variations.append(file_path.replace('_', ' '))
+    
+    # Variação com espaços -> underscores  
+    if ' ' in file_path:
+        path_variations.append(file_path.replace(' ', '_'))
+    
+    # Variação com a pasta "Documentação Clientes" <-> "Documentação_Clientes"
+    if 'Documentação Clientes/' in file_path:
+        path_variations.append(file_path.replace('Documentação Clientes/', 'Documentação_Clientes/'))
+    if 'Documentação_Clientes/' in file_path:
+        path_variations.append(file_path.replace('Documentação_Clientes/', 'Documentação Clientes/'))
+    
     response = None
     used_path = None
+    last_error = None
+    
+    loop = asyncio.get_event_loop()
     
     for try_path in path_variations:
         try:
-            loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, lambda p=try_path: get_s3_object(p))
             used_path = try_path
             logger.info(f"[PROXY] Ficheiro encontrado com path: {try_path}")
@@ -727,13 +724,23 @@ async def proxy_s3_file(
             error_code = e.response.get('Error', {}).get('Code', 'Unknown')
             if error_code == 'NoSuchKey':
                 logger.debug(f"[PROXY] Path não encontrado: {try_path}")
+                last_error = f"Ficheiro não encontrado: {try_path}"
+                continue
+            elif error_code == 'AccessDenied':
+                logger.error(f"[PROXY] Acesso negado ao ficheiro: {try_path}")
+                last_error = f"Acesso negado: {try_path}"
                 continue
             else:
-                # Outros erros S3, relançar
-                raise
+                logger.error(f"[PROXY] Erro S3 ({error_code}) no path {try_path}: {e}")
+                last_error = f"Erro S3 ({error_code}): {try_path}"
+                continue
         except NoCredentialsError:
             logger.error("[PROXY] Credenciais S3 não configuradas")
             raise HTTPException(status_code=500, detail="Credenciais S3 não configuradas")
+        except Exception as e:
+            logger.error(f"[PROXY] Erro inesperado ao tentar {try_path}: {type(e).__name__}: {e}")
+            last_error = f"Erro: {str(e)}"
+            continue
     
     if response is None:
         logger.warning(f"[PROXY] Ficheiro não encontrado em nenhuma variação: {file_path}")
