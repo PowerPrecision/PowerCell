@@ -141,13 +141,99 @@ class S3Service:
         else:
             base_name = safe_name
         
-        # Verificar se a pasta base já existe - se sim, usar essa!
-        base_path = f"Documentação Clientes/{base_name}"
-        if self._folder_exists(base_path):
-            return base_path
+        # PRIMEIRO: Tentar encontrar pasta existente (case-insensitive)
+        # Isto é crucial para evitar criar pastas duplicadas
+        existing_folder = self._find_client_folder_combined(client_name, second_client_name)
+        if existing_folder:
+            logger.info(f"Pasta existente encontrada para {client_name}: {existing_folder}")
+            return existing_folder
         
-        # Se não existe, criar nova (sem incrementador)
+        # Se não existe, usar o nome sanitizado (sem incrementador)
+        base_path = f"Documentação Clientes/{base_name}"
+        logger.info(f"Nova pasta será usada para {client_name}: {base_path}")
         return base_path
+    
+    def _find_client_folder_combined(self, client_name: str, second_client_name: str = None) -> Optional[str]:
+        """
+        Procura a pasta real do cliente no S3, suportando clientes com dois titulares.
+        Faz match case-insensitive e flexível para encontrar a pasta correta.
+        """
+        if not self.is_configured() or not client_name:
+            return None
+        
+        try:
+            # Listar pastas em "Documentação Clientes/"
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix="Documentação Clientes/",
+                Delimiter="/"
+            )
+            
+            # Construir nome de busca
+            clean_name = client_name.strip()
+            search_name = clean_name.lower()
+            
+            # Se há segundo titular, incluir na busca
+            if second_client_name and second_client_name.strip():
+                clean_second = second_client_name.strip()
+                search_name = f"{clean_name.lower()} e {clean_second.lower()}"
+                # Também buscar versão com underscore
+                safe_name = sanitize_folder_name(client_name)
+                safe_second = sanitize_folder_name(second_client_name)
+                search_name_underscore = f"{safe_name.lower()}_e_{safe_second.lower()}"
+            else:
+                search_name_underscore = sanitize_folder_name(client_name).lower()
+            
+            best_match = None
+            best_score = 0
+            
+            for prefix in response.get("CommonPrefixes", []):
+                folder_path = prefix.get("Prefix", "").rstrip("/")
+                folder_name = folder_path.replace("Documentação Clientes/", "")
+                folder_lower = folder_name.lower()
+                
+                # Match exato (case-insensitive)
+                if folder_lower == search_name or folder_lower == search_name_underscore:
+                    return folder_path
+                
+                # Match flexível - calcular score de similaridade
+                # Comparar palavras
+                search_words = set(search_name.replace("_", " ").split())
+                folder_words = set(folder_lower.replace("_", " ").split())
+                
+                # Ignorar palavras comuns que não ajudam no match
+                common_words = {"de", "da", "do", "dos", "das", "e", "a", "o"}
+                search_words_filtered = search_words - common_words
+                folder_words_filtered = folder_words - common_words
+                
+                if search_words_filtered and folder_words_filtered:
+                    # Calcular interseção
+                    intersection = search_words_filtered & folder_words_filtered
+                    score = len(intersection) / max(len(search_words_filtered), len(folder_words_filtered))
+                    
+                    # Bonus se o primeiro nome está presente
+                    first_name = clean_name.split()[0].lower()
+                    if first_name in folder_lower:
+                        score += 0.2
+                    
+                    # Bonus se segundo titular está presente
+                    if second_client_name and second_client_name.strip():
+                        second_first_name = second_client_name.strip().split()[0].lower()
+                        if second_first_name in folder_lower:
+                            score += 0.2
+                    
+                    if score > best_score and score >= 0.7:
+                        best_score = score
+                        best_match = folder_path
+            
+            if best_match:
+                logger.info(f"Encontrada pasta por similaridade ({best_score:.2f}): {best_match}")
+                return best_match
+                        
+        except Exception as e:
+            logger.warning(f"Erro ao procurar pasta do cliente: {e}")
+        
+        return None
     
     def _folder_exists(self, folder_path: str) -> bool:
         """
