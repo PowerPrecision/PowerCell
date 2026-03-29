@@ -866,17 +866,23 @@ async def move_file_to_category(
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
     
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    second_client_name = process.get("second_client_name") or process.get("titular2", {}).get("nome")
+    s3_folder = process.get("s3_folder")  # Pasta S3 configurada manualmente
     
     # Extrair nome do ficheiro
     filename = source_path.split('/')[-1] if '/' in source_path else source_path
     
-    # Extrair pasta base (antes da categoria)
-    # Formato: "Documentação Clientes/NomeCliente/Categoria/ficheiro.pdf"
-    parts = source_path.split('/')
-    if len(parts) >= 3:
-        base_path = '/'.join(parts[:-2])  # "Documentação Clientes/NomeCliente"
+    # Determinar o caminho base CORRETO para o cliente
+    # Prioridade: s3_folder configurado > encontrar pasta existente > criar nova
+    if s3_folder:
+        base_path = s3_folder.rstrip('/')
     else:
-        raise HTTPException(status_code=400, detail="Caminho de ficheiro inválido")
+        # Usar a função do S3 que respeita pastas existentes
+        base_path = s3_service._get_client_base_path_for_upload(
+            process_id, 
+            client_name, 
+            second_client_name
+        )
     
     # Construir novo caminho
     safe_category = sanitize_folder_name(target_category)
