@@ -34,7 +34,7 @@ from services.s3_storage import s3_service, sanitize_folder_name
 from services.document_processor import convert_image_to_pdf, IMG2PDF_AVAILABLE
 
 # Importar serviço de validação de ficheiros (MIME type validation)
-from services.file_validation import validate_file_content
+from services.file_validation import validate_file_content, validate_and_extract_file
 from services.history import log_history
 
 router = APIRouter(prefix="/documents", tags=["Document Management"])
@@ -353,9 +353,25 @@ async def upload_file_s3(
         # ====================================================================
         # SEGURANÇA: Validar MIME type usando magic bytes (não apenas extensão)
         # Isto previne uploads de executáveis disfarçados como documentos
+        # TAMBÉM: Tenta extrair conteúdo de wrappers (Java serialization, base64)
         # ====================================================================
         try:
-            validate_file_content(file_content, original_filename)
+            # Usar validate_and_extract_file para tentar extrair de wrappers
+            validated_content, detected_mime, mime_description, was_extracted, extraction_info = validate_and_extract_file(
+                file_content, original_filename
+            )
+            
+            # Se o conteúdo foi extraído, usar o conteúdo extraído
+            if was_extracted:
+                logger.info(f"[UPLOAD] Conteúdo extraído de wrapper: {sanitize_for_log(original_filename)} -> {detected_mime}")
+                file_content = validated_content
+                # Atualizar content_type baseado no MIME detectado
+                content_type = detected_mime
+                
+                # Se era PDF extraído, atualizar o nome do ficheiro
+                if detected_mime == MIME_TYPE_PDF and not original_filename.lower().endswith('.pdf'):
+                    original_filename = original_filename.rsplit('.', 1)[0] + '.pdf' if '.' in original_filename else original_filename + '.pdf'
+                    
         except HTTPException as e:
             logger.warning(f"[UPLOAD] Ficheiro rejeitado: {sanitize_for_log(original_filename)} - {e.detail}")
             raise
