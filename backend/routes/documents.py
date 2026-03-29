@@ -617,6 +617,7 @@ async def get_download_url_by_path(
 ):
     """
     Gera URL temporário para download/preview de ficheiro por path S3.
+    Tenta variações de path (underscore <-> espaço) se o original falhar.
     
     Args:
         file_path: Path completo do ficheiro no S3 (URL encoded)
@@ -624,11 +625,37 @@ async def get_download_url_by_path(
     Returns:
         URL presigned para acesso temporário
     """
-    url = s3_service.get_presigned_url(file_path)
-    if not url:
-        raise HTTPException(status_code=500, detail=ERROR_PRESIGNED_URL)
+    import asyncio
     
-    return {"url": url, "path": file_path}
+    # Tentar path original e variações
+    variations = [file_path]
+    
+    # Variação com underscores -> espaços
+    if '_' in file_path:
+        variations.append(file_path.replace('_', ' '))
+    
+    # Variação com espaços -> underscores
+    if ' ' in file_path:
+        variations.append(file_path.replace(' ', '_'))
+    
+    # Variação com a pasta "Documentação Clientes"
+    if 'Documentação Clientes/' in file_path:
+        variations.append(file_path.replace('Documentação Clientes/', 'Documentação_Clientes/'))
+    if 'Documentação_Clientes/' in file_path:
+        variations.append(file_path.replace('Documentação_Clientes/', 'Documentação Clientes/'))
+    
+    # Verificar qual variação existe no S3
+    loop = asyncio.get_event_loop()
+    for path in variations:
+        exists = await loop.run_in_executor(None, lambda p=path: s3_service.file_exists(p))
+        if exists:
+            url = s3_service.get_presigned_url(path)
+            if url:
+                logger.info(f"[DOWNLOAD-URL] URL gerado para: {path}")
+                return {"url": url, "path": path}
+    
+    logger.warning(f"[DOWNLOAD-URL] Ficheiro não encontrado (tentadas {len(variations)} variações): {file_path}")
+    raise HTTPException(status_code=404, detail=ERROR_S3_FILE_NOT_FOUND)
 
 
 @router.get("/proxy/{file_path:path}", responses={500: HTTP_500_RESPONSE})

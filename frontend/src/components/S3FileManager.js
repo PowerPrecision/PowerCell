@@ -713,22 +713,19 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setPreviewLoading(true);
     
     try {
-      // Usar o temporary_url se disponível, ou buscar via API
-      if (file.temporary_url) {
-        setPreviewUrl(file.temporary_url);
+      // Buscar novo URL (evita URLs expirados ou paths desatualizados)
+      const response = await fetch(
+        `${API_URL}/api/documents/download-url/${encodeURIComponent(file.path)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPreviewUrl(data.url);
       } else {
-        const response = await fetch(
-          `${API_URL}/api/documents/client/${processId}/download?file_path=${encodeURIComponent(file.path)}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          setPreviewUrl(data.url);
-        } else {
-          toast.error("Erro ao carregar preview");
-          setPreviewFile(null);
-        }
+        const error = await response.json();
+        toast.error(error.detail || "Erro ao carregar preview");
+        setPreviewFile(null);
       }
     } catch (error) {
       console.error("Erro ao carregar preview:", error);

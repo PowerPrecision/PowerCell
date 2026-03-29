@@ -465,6 +465,32 @@ class S3Service:
         else:
             return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
+    def file_exists(self, object_name: str) -> bool:
+        """
+        Verifica se um ficheiro existe no S3.
+        
+        Args:
+            object_name: Caminho S3 do ficheiro
+            
+        Returns:
+            True se existe, False caso contrário
+        """
+        if not self.is_configured():
+            return False
+            
+        try:
+            self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=object_name
+            )
+            return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == '404':
+                return False
+            logger.error(f"Erro ao verificar ficheiro S3: {e}")
+            return False
+
     def get_presigned_url(self, object_name: str, expiration: int = 3600) -> Optional[str]:
         """
         Gera um link temporário (1 hora por defeito) para download/visualização.
