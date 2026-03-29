@@ -82,6 +82,7 @@ from routes.admin_encryption import router as admin_encryption_router
 from routes.restore import router as restore_router
 from routes.automation import router as automation_router
 from routes.form_config import router as form_config_router
+from routes.async_jobs import router as async_jobs_router
 
 # Configuração Sentry
 if SENTRY_DSN:
@@ -429,6 +430,7 @@ app.include_router(admin_encryption_router, prefix="/api")
 app.include_router(automation_router, prefix="/api")
 app.include_router(form_config_router, prefix="/api")
 app.include_router(restore_router, prefix="/api")
+app.include_router(async_jobs_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
