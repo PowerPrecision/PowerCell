@@ -72,6 +72,10 @@ import {
   LayoutGrid,
   List,
   HardDrive,
+  Eye,
+  ExternalLink,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { format } from "date-fns";
@@ -167,6 +171,11 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   
   // Estado para categoria seleccionada na sidebar
   const [selectedCategory, setSelectedCategory] = useState(null); // null = todos
+  
+  // Estado para preview do documento
+  const [previewFile, setPreviewFile] = useState(null); // ficheiro em preview
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
   
   // Estado para NIF da empresa (obrigatório para indexacao)
   const [empresaNifDialog, setEmpresaNifDialog] = useState({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
@@ -692,6 +701,50 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
     return filteredFiles;
   };
+  
+  // Abrir preview do documento
+  const handlePreview = async (file) => {
+    setPreviewFile(file);
+    setPreviewLoading(true);
+    
+    try {
+      // Usar o temporary_url se disponível, ou buscar via API
+      if (file.temporary_url) {
+        setPreviewUrl(file.temporary_url);
+      } else {
+        const response = await fetch(
+          `${API_URL}/api/documents/client/${processId}/download?file_path=${encodeURIComponent(file.path)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          setPreviewUrl(data.url);
+        } else {
+          toast.error("Erro ao carregar preview");
+          setPreviewFile(null);
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao carregar preview:", error);
+      toast.error("Erro ao carregar preview");
+      setPreviewFile(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+  
+  // Fechar preview
+  const closePreview = () => {
+    setPreviewFile(null);
+    setPreviewUrl(null);
+  };
+  
+  // Verificar se ficheiro é previewable (PDF ou imagem)
+  const isPreviewable = (filename) => {
+    const ext = filename?.split('.').pop()?.toLowerCase();
+    return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+  };
 
   // Análise IA dos documentos
   const handleAIAnalysis = async () => {
@@ -1173,25 +1226,23 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           {/* VISTA DE LISTA - Explorador de Ficheiros */}
           {/* ========================================= */}
           {viewMode === "list" && (
-            <div className="flex gap-3 mt-3 h-[450px]">
-              {/* Sidebar - Árvore de Categorias/Pastas */}
-              <div className="w-44 flex-shrink-0 border rounded-lg overflow-hidden flex flex-col">
-                <div className="bg-muted/50 px-3 py-2 text-xs font-medium border-b flex items-center gap-2">
-                  <HardDrive className="h-4 w-4" />
-                  Categorias
+            <div className="flex gap-2 mt-3 h-[450px]">
+              {/* Sidebar - Categorias (compacta) */}
+              <div className="w-24 flex-shrink-0 border rounded-lg overflow-hidden flex flex-col">
+                <div className="bg-muted/50 px-2 py-1.5 text-[10px] font-medium border-b flex items-center gap-1">
+                  <HardDrive className="h-3 w-3" />
+                  <span className="truncate">Pastas</span>
                 </div>
                 <ScrollArea className="flex-1">
                   {/* Pasta "Todos" */}
                   <button
                     onClick={() => setSelectedCategory(null)}
-                    className={`w-full px-3 py-2 text-sm text-left flex items-center gap-2 hover:bg-accent/50 transition-colors ${!selectedCategory ? "bg-accent font-medium" : ""}`}
+                    className={`w-full px-2 py-1.5 text-xs text-left flex items-center gap-1.5 hover:bg-accent/50 transition-colors ${!selectedCategory ? "bg-accent font-medium" : ""}`}
                     data-testid="folder-all"
                   >
-                    <FolderOpen className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                    <span className="truncate">Todos</span>
-                    <Badge variant="secondary" className="ml-auto text-[10px] h-4 px-1">
-                      {stats?.total_files || 0}
-                    </Badge>
+                    <FolderOpen className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+                    <span className="truncate flex-1">Todos</span>
+                    <span className="text-[10px] text-muted-foreground">{stats?.total_files || 0}</span>
                   </button>
                   
                   {/* Pastas por Categoria */}
@@ -1209,15 +1260,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       <button
                         key={cat.id}
                         onClick={() => setSelectedCategory(cat.id)}
-                        className={`w-full px-3 py-2 text-sm text-left flex items-center gap-2 hover:bg-accent/50 transition-colors ${selectedCategory === cat.id ? "bg-accent font-medium" : ""}`}
+                        className={`w-full px-2 py-1.5 text-xs text-left flex items-center gap-1.5 hover:bg-accent/50 transition-colors ${selectedCategory === cat.id ? "bg-accent font-medium" : ""}`}
                         data-testid={`folder-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
                       >
-                        <Icon className={`h-4 w-4 flex-shrink-0 ${colorMap[cat.color] || "text-gray-500"}`} />
-                        <span className="truncate">{cat.label}</span>
+                        <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${colorMap[cat.color] || "text-gray-500"}`} />
+                        <span className="truncate flex-1">{cat.label}</span>
                         {count > 0 && (
-                          <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1">
-                            {count}
-                          </Badge>
+                          <span className="text-[10px] text-muted-foreground">{count}</span>
                         )}
                       </button>
                     );
@@ -1226,19 +1275,19 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
               </div>
 
               {/* Área Principal - Tabela de Ficheiros */}
-              <div className="flex-1 border rounded-lg overflow-hidden flex flex-col">
+              <div className={`${previewFile ? 'flex-1' : 'flex-1'} border rounded-lg overflow-hidden flex flex-col min-w-0`}>
                 {/* Header da tabela - clicável para ordenar */}
-                <div className="grid grid-cols-[32px_1fr_100px_80px_130px_70px] gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground border-b items-center">
-                  <div className="w-8 flex justify-center">
+                <div className="grid grid-cols-[28px_1fr_90px_100px_70px] gap-2 bg-muted/50 px-2 py-1.5 text-[10px] font-medium text-muted-foreground border-b items-center">
+                  <div className="w-7 flex justify-center">
                     <button
                       onClick={() => toggleSelectAll(getDisplayFiles())}
                       className="hover:bg-accent rounded p-0.5"
                       title={selectedFilesForAI.length === getDisplayFiles().length && getDisplayFiles().length > 0 ? "Desselecionar todos" : "Selecionar todos"}
                     >
                       {selectedFilesForAI.length === getDisplayFiles().length && getDisplayFiles().length > 0 ? (
-                        <CheckSquare className="h-4 w-4 text-blue-600" />
+                        <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
                       ) : (
-                        <Square className="h-4 w-4" />
+                        <Square className="h-3.5 w-3.5" />
                       )}
                     </button>
                   </div>
@@ -1255,18 +1304,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                     onClick={() => toggleSort("category")} 
                     className="text-left"
                   >
-                    Categoria
+                    Cat.
                     {sortBy === "category" && (
-                      sortOrder === "asc" ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />
-                    )}
-                  </button>
-                  <button 
-                    onClick={() => toggleSort("size")} 
-                    className="text-right"
-                  >
-                    Tam.
-                    {sortBy === "size" && (
-                      sortOrder === "asc" ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />
+                      sortOrder === "asc" ? <ChevronUp className="h-2.5 w-2.5 inline ml-0.5" /> : <ChevronDown className="h-2.5 w-2.5 inline ml-0.5" />
                     )}
                   </button>
                   <button 
@@ -1275,7 +1315,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   >
                     Data
                     {sortBy === "date" && (
-                      sortOrder === "asc" ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />
+                      sortOrder === "asc" ? <ChevronUp className="h-2.5 w-2.5 inline ml-0.5" /> : <ChevronDown className="h-2.5 w-2.5 inline ml-0.5" />
                     )}
                   </button>
                   <div className="text-center">Ações</div>
@@ -1286,19 +1326,20 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   {getDisplayFiles().length > 0 ? (
                     getDisplayFiles().map((file, idx) => {
                       const isSelected = selectedFilesForAI.some(f => f.path === file.path);
+                      const isPreviewing = previewFile?.path === file.path;
                       return (
                         <div
                           key={`${file.path}-${idx}`}
-                          className={`grid grid-cols-[32px_1fr_100px_80px_130px_70px] gap-2 px-3 py-2 text-sm items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""}`}
-                          onClick={() => toggleFileSelection(file)}
+                          className={`grid grid-cols-[28px_1fr_90px_100px_70px] gap-2 px-2 py-1.5 text-xs items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""} ${isPreviewing ? "bg-accent" : ""}`}
+                          onClick={() => { toggleFileSelection(file); handlePreview(file); }}
                           data-testid={`file-row-${idx}`}
                         >
                           {/* Checkbox */}
-                          <div className="w-8 flex justify-center">
+                          <div className="w-7 flex justify-center">
                             {isSelected ? (
-                              <CheckSquare className="h-4 w-4 text-blue-600" />
+                              <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
                             ) : (
-                              <Square className="h-4 w-4 text-muted-foreground" />
+                              <Square className="h-3.5 w-3.5 text-muted-foreground" />
                             )}
                           </div>
 
@@ -1306,8 +1347,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                           <div className="flex items-center gap-2 min-w-0">
                             <FileIcon filename={file.name} />
                             <span 
-                              className="truncate font-medium hover:text-blue-600 hover:underline"
-                              onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
+                              className="truncate font-medium"
                               title={file.name}
                             >
                               {file.name}
@@ -1315,39 +1355,45 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                           </div>
 
                           {/* Categoria */}
-                          <Badge variant="outline" className="text-[10px] justify-center py-0 h-5 truncate">
+                          <Badge variant="outline" className="text-[10px] justify-center py-0 h-4 truncate">
                             {file.category || "Outros"}
                           </Badge>
 
-                          {/* Tamanho */}
-                          <span className="text-xs text-muted-foreground text-right">
-                            {file.size_formatted}
-                          </span>
-
-                          {/* Data */}
-                          <span className="text-xs text-muted-foreground truncate">
+                          {/* Data - mais pequena */}
+                          <span className="text-[10px] text-muted-foreground truncate">
                             {formatDate(file.last_modified)}
                           </span>
 
                           {/* Ações */}
                           <div className="flex items-center justify-center gap-0.5">
+                            {isPreviewable(file.name) && (
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-5 w-5" 
+                                onClick={(e) => { e.stopPropagation(); handlePreview(file); }}
+                                title="Preview"
+                              >
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                            )}
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              className="h-6 w-6" 
+                              className="h-5 w-5" 
                               onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
                               title="Download"
                             >
-                              <Download className="h-3.5 w-3.5" />
+                              <Download className="h-3 w-3" />
                             </Button>
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              className="h-6 w-6 text-red-500 hover:text-red-600" 
+                              className="h-5 w-5 text-red-500 hover:text-red-600" 
                               onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
                               title="Eliminar"
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-3 w-3" />
                             </Button>
                           </div>
                         </div>
@@ -1368,12 +1414,12 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 
                 {/* Footer com contador de seleção */}
                 {selectedFilesForAI.length > 0 && (
-                  <div className="bg-blue-50 dark:bg-blue-950/50 px-3 py-2 text-xs text-blue-700 dark:text-blue-300 flex items-center justify-between border-t">
+                  <div className="bg-blue-50 dark:bg-blue-950/50 px-2 py-1.5 text-[10px] text-blue-700 dark:text-blue-300 flex items-center justify-between border-t">
                     <span>{selectedFilesForAI.length} ficheiro(s) selecionado(s)</span>
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-6 text-xs bg-purple-50 hover:bg-purple-100 border-purple-200"
+                      className="h-5 text-[10px] bg-purple-50 hover:bg-purple-100 border-purple-200 px-2"
                       onClick={handleAIAnalysis}
                       disabled={aiAnalyzing}
                     >
@@ -1382,11 +1428,95 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       ) : (
                         <Brain className="h-3 w-3 mr-1" />
                       )}
-                      Analisar Seleção
+                      Analisar
                     </Button>
                   </div>
                 )}
               </div>
+
+              {/* Painel de Preview Lateral */}
+              {previewFile && (
+                <div className="w-80 flex-shrink-0 border rounded-lg overflow-hidden flex flex-col bg-muted/30">
+                  {/* Header do Preview */}
+                  <div className="bg-muted/50 px-3 py-2 text-xs font-medium border-b flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Eye className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="truncate">{previewFile.name}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 flex-shrink-0"
+                      onClick={closePreview}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  
+                  {/* Área de Preview */}
+                  <div className="flex-1 flex items-center justify-center p-2 overflow-hidden">
+                    {previewLoading ? (
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-6 w-6 animate-spin" />
+                        <span className="text-xs">A carregar...</span>
+                      </div>
+                    ) : previewUrl ? (
+                      previewFile.name?.toLowerCase().endsWith('.pdf') ? (
+                        <iframe
+                          src={previewUrl}
+                          className="w-full h-full border-0 rounded"
+                          title={`Preview de ${previewFile.name}`}
+                        />
+                      ) : (
+                        <img
+                          src={previewUrl}
+                          alt={previewFile.name}
+                          className="max-w-full max-h-full object-contain rounded"
+                        />
+                      )
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <File className="h-10 w-10 opacity-40" />
+                        <span className="text-xs">Preview não disponível</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Footer do Preview */}
+                  <div className="border-t p-2 space-y-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-muted-foreground">Categoria:</span>
+                      <Badge variant="outline" className="text-[10px] h-4">
+                        {previewFile.category || "Outros"}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-muted-foreground">Tamanho:</span>
+                      <span>{previewFile.size_formatted}</span>
+                    </div>
+                    <div className="flex gap-1 mt-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 h-6 text-[10px]"
+                        onClick={() => handleDownload(previewFile)}
+                      >
+                        <Download className="h-3 w-3 mr-1" />
+                        Download
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 w-6 p-0"
+                        onClick={() => window.open(previewUrl, '_blank')}
+                        title="Abrir em nova aba"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
