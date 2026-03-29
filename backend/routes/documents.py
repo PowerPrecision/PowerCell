@@ -768,8 +768,12 @@ async def proxy_s3_file(
             finally:
                 body.close()
         
+        # Codificar filename para HTTP header (suporta Unicode)
+        from urllib.parse import quote
+        encoded_filename = quote(filename, safe='')
+        
         headers = {
-            'Content-Disposition': f'inline; filename="{filename}"',
+            'Content-Disposition': f"inline; filename*=UTF-8''{encoded_filename}",
             'Content-Length': str(content_length),
             'Cache-Control': 'private, max-age=3600',
         }
@@ -831,6 +835,94 @@ async def delete_file_s3(
     )
     
     return {"success": True, "message": "Ficheiro eliminado"}
+
+
+@router.post("/move-file/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+async def move_file_to_category(
+    process_id: str,
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Move um ficheiro para uma categoria/pasta específica.
+    
+    Body:
+    - source_path: Caminho atual do ficheiro no S3
+    - target_category: Nome da categoria destino (ex: "Documentos Pessoais", "Financeiros")
+    
+    Returns:
+    - success: True/False
+    - new_path: Novo caminho no S3
+    """
+    source_path = data.get("source_path")
+    target_category = data.get("target_category")
+    
+    if not source_path or not target_category:
+        raise HTTPException(status_code=400, detail="source_path e target_category são obrigatórios")
+    
+    # Buscar processo
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    
+    # Extrair nome do ficheiro
+    filename = source_path.split('/')[-1] if '/' in source_path else source_path
+    
+    # Extrair pasta base (antes da categoria)
+    # Formato: "Documentação Clientes/NomeCliente/Categoria/ficheiro.pdf"
+    parts = source_path.split('/')
+    if len(parts) >= 3:
+        base_path = '/'.join(parts[:-2])  # "Documentação Clientes/NomeCliente"
+    else:
+        raise HTTPException(status_code=400, detail="Caminho de ficheiro inválido")
+    
+    # Construir novo caminho
+    safe_category = sanitize_folder_name(target_category)
+    new_path = f"{base_path}/{safe_category}/{filename}"
+    
+    # Verificar se o caminho mudou
+    if new_path == source_path:
+        return {
+            "success": True,
+            "message": "Ficheiro já está na categoria correta",
+            "new_path": new_path
+        }
+    
+    # Mover ficheiro no S3
+    success = s3_service.rename_file(source_path, new_path)
+    
+    if success:
+        # Atualizar metadados se existirem
+        await db.document_metadata.update_one(
+            {"s3_path": source_path},
+            {"$set": {
+                "s3_path": new_path,
+                "ai_category": target_category,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        # Registar no histórico
+        await log_history(
+            process_id=process_id,
+            user=user,
+            action=f"Moveu documento para {target_category}",
+            field="documento",
+            old_value=filename
+        )
+        
+        logger.info(f"Ficheiro movido: {source_path} -> {new_path}")
+        
+        return {
+            "success": True,
+            "message": f"Ficheiro movido para {target_category}",
+            "new_path": new_path,
+            "old_path": source_path
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Erro ao mover ficheiro")
 
 
 # ====================================================================
