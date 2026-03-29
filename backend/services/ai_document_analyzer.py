@@ -102,13 +102,25 @@ Para Caderneta Predial:
 
 def get_openai_client():
     """
-    Retorna o cliente OpenAI configurado.
+    Retorna o cliente OpenAI configurado com verificação de privacidade.
     Usa OPENAI_API_KEY ou EMERGENT_LLM_KEY como fallback.
     
     Nota: Para usar chaves emergent, configure um OPENAI_API_KEY válido da OpenAI.
     Chaves EMERGENT_LLM_KEY requerem um provedor OpenAI-compatible.
+    
+    IMPORTANTE: Garantir que OPENAI_DATA_TRAINING_OPT_OUT=true está configurado
+    para que dados PII (NIFs, rendimentos) não sejam usados para treino.
     """
     from openai import AsyncOpenAI
+    from services.openai_privacy import OPENAI_ORGANIZATION_ID, OPENAI_DATA_TRAINING_OPT_OUT
+    
+    # Aviso se opt-out não está configurado
+    if not OPENAI_DATA_TRAINING_OPT_OUT:
+        logger.warning(
+            "OPENAI_DATA_TRAINING_OPT_OUT não está configurado como 'true'. "
+            "Dados PII podem ser usados para treino de modelos. "
+            "Configure esta variável e verifique https://platform.openai.com/account/organization"
+        )
     
     # Prioridade: OPENAI_API_KEY > EMERGENT_LLM_KEY
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -133,10 +145,19 @@ def get_openai_client():
     if not api_key:
         return None
     
+    # Configurar cliente com opções de privacidade
+    client_kwargs = {"api_key": api_key}
+    
+    # Adicionar base_url se necessário (Emergent)
     if base_url:
-        return AsyncOpenAI(api_key=api_key, base_url=base_url)
-    else:
-        return AsyncOpenAI(api_key=api_key)
+        client_kwargs["base_url"] = base_url
+    
+    # Adicionar organization ID para contas corporativas (só para OpenAI direta)
+    if OPENAI_ORGANIZATION_ID and not base_url:
+        client_kwargs["organization"] = OPENAI_ORGANIZATION_ID
+        logger.info(f"Usando Organization ID: {OPENAI_ORGANIZATION_ID}")
+    
+    return AsyncOpenAI(**client_kwargs)
 
 
 async def analyze_document_with_ai(

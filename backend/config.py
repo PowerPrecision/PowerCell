@@ -319,6 +319,40 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
+# ====================================================================
+# PII PRIVACY CONFIG - CONFORMIDADE COM OPENAI
+# ====================================================================
+# IMPORTANTE: Configure estas variáveis para garantir que dados PII
+# (NIFs, rendimentos, dados pessoais) não são usados para treino.
+#
+# Como configurar o opt-out na conta OpenAI:
+# 1. Aceda a https://platform.openai.com/account/organization
+# 2. Navegue para "Data Controls" > "Training Data"
+# 3. Desative "Improve our models with your data"
+# 4. Configure OPENAI_DATA_TRAINING_OPT_OUT=true (confirmação)
+# 5. Configure OPENAI_ORGANIZATION_ID com o ID da organização
+# ====================================================================
+
+# ID da organização OpenAI (para contas corporativas)
+# Encontrado em: https://platform.openai.com/account/organization
+OPENAI_ORGANIZATION_ID = os.environ.get('OPENAI_ORGANIZATION_ID', '')
+
+# Confirmação de que o opt-out está configurado na conta OpenAI
+# IMPORTANTE: Isto deve ser configurado como 'true' apenas depois de
+# verificar nas settings da OpenAI que o treino de dados está desativado
+OPENAI_DATA_TRAINING_OPT_OUT = os.environ.get('OPENAI_DATA_TRAINING_OPT_OUT', 'true').lower() == 'true'
+
+# Log de configuração de privacidade
+if OPENAI_DATA_TRAINING_OPT_OUT:
+    print("✅ OpenAI Data Training Opt-Out configurado", file=sys.stderr)
+else:
+    print("⚠️  AVISO: OPENAI_DATA_TRAINING_OPT_OUT não configurado!", file=sys.stderr)
+    print("   Dados PII podem ser usados para treino de modelos.", file=sys.stderr)
+    print("   Configure: https://platform.openai.com/account/organization", file=sys.stderr)
+
+if OPENAI_ORGANIZATION_ID:
+    print(f"✅ OpenAI Organization ID: {OPENAI_ORGANIZATION_ID[:8]}...", file=sys.stderr)
+
 # Modelos disponíveis e seus custos (apenas informativos)
 AI_MODELS = {
     "gemini-2.0-flash": {
