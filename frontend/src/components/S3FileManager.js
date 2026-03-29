@@ -172,6 +172,11 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [organizing, setOrganizing] = useState(false);
   const [organizeResults, setOrganizeResults] = useState(null);
   
+  // Estado para drag and drop
+  const [draggedFile, setDraggedFile] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+  const [moving, setMoving] = useState(false);
+  
   // Estado para ordenação de ficheiros
   const [sortBy, setSortBy] = useState("date"); // "date", "name", "size", "category"
   const [sortOrder, setSortOrder] = useState("desc"); // "asc", "desc"
@@ -1099,6 +1104,78 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
+  // Drag and Drop handlers
+  const handleDragStart = (e, file) => {
+    setDraggedFile(file);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", file.path);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedFile(null);
+    setDropTarget(null);
+  };
+
+  const handleDragOver = (e, category) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropTarget(category);
+  };
+
+  const handleDragLeave = () => {
+    setDropTarget(null);
+  };
+
+  const handleDrop = async (e, targetCategory) => {
+    e.preventDefault();
+    setDropTarget(null);
+    
+    if (!draggedFile) return;
+    
+    // Verificar se a categoria é diferente
+    const currentCategory = draggedFile.category || "Outros";
+    if (currentCategory === targetCategory) {
+      toast.info("Ficheiro já está nesta categoria");
+      setDraggedFile(null);
+      return;
+    }
+
+    setMoving(true);
+    toast.info(`A mover "${draggedFile.name}" para ${targetCategory}...`);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/documents/move-file/${processId}`,
+        {
+          method: 'POST',
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            source_path: draggedFile.path,
+            target_category: targetCategory
+          })
+        }
+      );
+
+      if (response.ok) {
+        const result = await response.json();
+        toast.success(`Ficheiro movido para ${targetCategory}`);
+        fetchFiles(); // Recarregar lista
+      } else {
+        const error = await response.json();
+        toast.error(error.detail || "Erro ao mover ficheiro");
+      }
+    } catch (error) {
+      console.error("Erro ao mover ficheiro:", error);
+      toast.error("Erro ao mover ficheiro");
+    } finally {
+      setMoving(false);
+      setDraggedFile(null);
+    }
+  };
+
   if (loading) {
     return (
       <Card data-testid="s3-file-manager">
@@ -1431,16 +1508,29 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       orange: "text-orange-500",
                       gray: "text-gray-500",
                     };
+                    const isDropTarget = dropTarget === cat.id;
                     return (
-                      <button
+                      <div
                         key={cat.id}
-                        onClick={() => setSelectedCategory(cat.id)}
-                        className={`w-full px-1 py-2 text-xs flex items-center justify-center hover:bg-accent/50 transition-colors ${selectedCategory === cat.id ? "bg-accent" : ""}`}
-                        data-testid={`folder-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
-                        title={`${cat.label} (${count})`}
+                        onDragOver={(e) => handleDragOver(e, cat.id)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, cat.id)}
+                        className={`relative ${isDropTarget ? "ring-2 ring-teal-500 ring-inset bg-teal-50 dark:bg-teal-950/30 rounded" : ""}`}
                       >
-                        <Icon className={`h-4 w-4 ${selectedCategory === cat.id ? "text-primary font-bold" : colorMap[cat.color] || "text-gray-500"}`} />
-                      </button>
+                        <button
+                          onClick={() => setSelectedCategory(cat.id)}
+                          className={`w-full px-1 py-2 text-xs flex items-center justify-center hover:bg-accent/50 transition-colors ${selectedCategory === cat.id ? "bg-accent" : ""}`}
+                          data-testid={`folder-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
+                          title={`${cat.label} (${count}) - Arraste ficheiros para mover`}
+                        >
+                          <Icon className={`h-4 w-4 ${isDropTarget ? "text-teal-600" : selectedCategory === cat.id ? "text-primary font-bold" : colorMap[cat.color] || "text-gray-500"}`} />
+                        </button>
+                        {isDropTarget && (
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <span className="text-[8px] text-teal-600 font-medium">Mover</span>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </ScrollArea>
@@ -1499,15 +1589,19 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                     getDisplayFiles().map((file, idx) => {
                       const isSelected = selectedFilesForAI.some(f => f.path === file.path);
                       const isPreviewing = previewFile?.path === file.path;
+                      const isDragging = draggedFile?.path === file.path;
                       return (
                         <div
                           key={`${file.path}-${idx}`}
-                          className={`grid grid-cols-[28px_1fr_80px_90px_auto] gap-2 px-2 py-1.5 text-xs items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""} ${isPreviewing ? "bg-accent" : ""}`}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, file)}
+                          onDragEnd={handleDragEnd}
+                          className={`grid grid-cols-[28px_1fr_80px_90px_auto] gap-2 px-2 py-1.5 text-xs items-center hover:bg-accent/50 cursor-pointer border-b last:border-b-0 transition-colors select-none ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""} ${isPreviewing ? "bg-accent" : ""} ${isDragging ? "opacity-50 bg-accent/50" : ""}`}
                           onClick={() => { toggleFileSelection(file); handlePreview(file); }}
                           data-testid={`file-row-${idx}`}
                         >
-                          {/* Checkbox */}
-                          <div className="w-7 flex justify-center">
+                          {/* Checkbox / Drag handle */}
+                          <div className="w-7 flex justify-center cursor-grab active:cursor-grabbing">
                             {isSelected ? (
                               <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
                             ) : (
