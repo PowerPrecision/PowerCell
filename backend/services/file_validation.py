@@ -13,6 +13,8 @@ Este módulo:
 - Rejeita ficheiros que não correspondem ao tipo declarado
 - FALLBACK: Para formatos não reconhecidos pelo magic (HEIC/HEIF),
   usa verificação por extensão como backup
+- EXTRAÇÃO AUTOMÁTICA: Detecta e extrai ficheiros válidos de wrappers
+  (Java serialization, base64, etc.)
 
 Tipos permitidos (whitelist):
 - PDF (.pdf)
@@ -29,6 +31,13 @@ import magic
 import logging
 from typing import Tuple, Optional
 from fastapi import HTTPException
+
+# Importar serviço de extração
+from services.file_extraction import (
+    extract_valid_content,
+    get_extraction_info,
+    detect_java_serialization,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +305,103 @@ def get_safe_mime_type(file_content: bytes) -> str:
         return "application/octet-stream"
 
 
+def validate_and_extract_file(
+    file_content: bytes,
+    declared_filename: Optional[str] = None,
+    max_size_mb: Optional[int] = None
+) -> Tuple[bytes, str, str, bool, dict]:
+    """
+    Valida ficheiro com extração automática de wrappers.
+    
+    Esta função tenta:
+    1. Validar o ficheiro diretamente
+    2. Se falhar, tentar extrair conteúdo válido de wrappers
+    3. Validar o conteúdo extraído
+    
+    Args:
+        file_content: Conteúdo binário do ficheiro
+        declared_filename: Nome do ficheiro (para logging)
+        max_size_mb: Tamanho máximo em MB (opcional)
+    
+    Returns:
+        Tuple (content, mime_type, description, was_extracted, extraction_info)
+        - content: Conteúdo validado (original ou extraído)
+        - mime_type: Tipo MIME detectado
+        - description: Descrição do tipo
+        - was_extracted: True se o conteúdo foi extraído de um wrapper
+        - extraction_info: Informações sobre a extração
+    
+    Raises:
+        HTTPException: Se o ficheiro não puder ser validado nem extraído
+    """
+    filename = declared_filename or "unknown"
+    was_extracted = False
+    extraction_info = {}
+    
+    # 1. Tentar validação direta primeiro
+    try:
+        valid, mime_type, description = validate_file_content(
+            file_content, declared_filename, max_size_mb
+        )
+        return file_content, mime_type, description, False, extraction_info
+    except HTTPException as e:
+        # Guardar erro para possível feedback
+        original_error = e.detail
+        
+        # 2. Verificar se parece ser um ficheiro embrulhado
+        extraction_info = get_extraction_info(file_content, filename)
+        
+        if extraction_info.get("was_extracted"):
+            logger.info(f"[VALIDATE] Attempting extraction for: {sanitize_for_log(filename)}")
+            
+            # 3. Tentar extrair conteúdo válido
+            extracted_content, detected_mime, detected_ext, was_extracted = extract_valid_content(
+                file_content, filename
+            )
+            
+            if was_extracted and detected_mime in ALLOWED_MIME_TYPES:
+                # 4. Validar conteúdo extraído
+                try:
+                    valid, mime_type, description = validate_file_content(
+                        extracted_content, declared_filename, max_size_mb
+                    )
+                    
+                    logger.info(
+                        f"[VALIDATE] Successfully extracted and validated: "
+                        f"{sanitize_for_log(filename)} -> {mime_type} "
+                        f"(wrapper: {extraction_info.get('wrapper_type', 'unknown')})"
+                    )
+                    
+                    extraction_info["success"] = True
+                    extraction_info["extracted_mime_type"] = mime_type
+                    
+                    return extracted_content, mime_type, description, True, extraction_info
+                    
+                except HTTPException:
+                    # Conteúdo extraído também não passou na validação
+                    logger.warning(
+                        f"[VALIDATE] Extracted content failed validation: {sanitize_for_log(filename)}"
+                    )
+        
+        # 5. Não foi possível extrair - dar erro útil
+        # Verificar se é Java serialization para dar mensagem específica
+        if detect_java_serialization(file_content):
+            raise HTTPException(
+                status_code=400,
+                detail=f"O ficheiro parece estar num formato Java Serialization que não foi possível processar. "
+                       f"Tente exportar o ficheiro diretamente da aplicação original como PDF ou imagem. "
+                       f"(detectado: {extraction_info.get('detected_mime_type', 'desconhecido')})"
+            )
+        
+        # Erro genérico
+        raise HTTPException(
+            status_code=400,
+            detail=f"{original_error} "
+                   f"O sistema tentou extrair o conteúdo automaticamente mas não foi possível. "
+                   f"Certifique-se que o ficheiro é um PDF, imagem (JPEG, PNG) ou documento Office válido."
+        )
+
+
 # ====================================================================
 # MAGIC BYTES REFERENCE (para debug)
 # ====================================================================
@@ -304,4 +410,5 @@ def get_safe_mime_type(file_content: bytes) -> str:
 # PNG:  89 50 4E 47 0D 0A 1A 0A
 # ZIP:  50 4B 03 04 (também DOCX, XLSX)
 # TIFF: 49 49 2A 00 (little endian) ou 4D 4D 00 2A (big endian)
+# Java Serialization: AC ED 00 05
 # ====================================================================
