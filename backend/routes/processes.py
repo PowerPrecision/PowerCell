@@ -661,7 +661,8 @@ async def get_kanban_board(
 @router.get("/my-clients")
 async def get_my_clients(user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
-    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO
+    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
+    UserRole.INDEXACAO
 ]))):
     """
     Obter lista de clientes atribuídos ao utilizador atual.
@@ -700,8 +701,11 @@ async def get_my_clients(user: dict = Depends(require_roles([
                 {"created_by": user_email}
             ]
         }
+    elif role == UserRole.INDEXACAO:
+        # Indexação vê apenas processos atribuídos a ele para indexação de documentos
+        query = {"assigned_indexacao_id": user_id}
     else:
-        # Admin/CEO vêem todos
+        # Admin/CEO/Diretor/Administrativo vêem todos
         query = {}
     
     # Buscar processos com campos necessários

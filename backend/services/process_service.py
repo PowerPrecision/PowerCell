@@ -86,6 +86,7 @@ def can_view_process(user: dict, process: dict) -> bool:
     Regras:
     - Staff (admin, ceo, diretor, administrativo, consultor, mediador, intermediario): 
       podem ver TODOS os processos da empresa
+    - Indexação: apenas processos atribuídos a ele (assigned_indexacao_id)
     - Clientes: apenas os seus próprios processos
     
     Args:
@@ -98,8 +99,12 @@ def can_view_process(user: dict, process: dict) -> bool:
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    # Todos os staff podem ver todos os processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
+    # INDEXACAO só vê processos atribuídos a ele
+    if user_role == "indexacao":
+        return process.get("assigned_indexacao_id") == user_id
+    
+    # Outros staff podem ver todos os processos
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]
     if user_role in staff_roles:
         return True
     
@@ -124,8 +129,12 @@ def build_query_filter(user: dict) -> dict:
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    # Todos os staff veem todos os processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
+    # INDEXACAO só vê processos atribuídos a ele
+    if user_role == "indexacao":
+        return {"assigned_indexacao_id": user_id}
+    
+    # Outros staff veem todos os processos
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]
     if user_role in staff_roles:
         return {}
     
