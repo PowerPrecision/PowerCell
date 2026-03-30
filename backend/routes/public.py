@@ -17,6 +17,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, BackgroundTasks
+from fastapi.responses import JSONResponse
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -95,12 +96,15 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # Verificar se já existe cliente com o mesmo email
     existing_by_email = await db.clients.find_one({"contacto.email": clean_email.lower()})
     if existing_by_email:
-        return {
-            "success": False,
-            "blocked": True,
-            "reason": "email",
-            "message": "Já existe um registo com este email. A nossa equipa entrará em contacto consigo em breve."
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": False,
+                "blocked": True,
+                "reason": "email",
+                "message": "Já existe um registo com este email. A nossa equipa entrará em contacto consigo em breve."
+            }
+        )
     
     # Verificar se já existe cliente com o mesmo NIF
     nif = None
@@ -110,12 +114,15 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     if nif:
         existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": nif})
         if existing_by_nif:
-            return {
-                "success": False,
-                "blocked": True,
-                "reason": "nif",
-                "message": "Já existe um registo com este NIF. A nossa equipa entrará em contacto consigo em breve."
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": False,
+                    "blocked": True,
+                    "reason": "nif",
+                    "message": "Já existe um registo com este NIF. A nossa equipa entrará em contacto consigo em breve."
+                }
+            )
     
     client_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -301,21 +308,25 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
                 staff_name=first_admin["name"]
             )
     
-    return {
-        "success": True,
-        "message": "Registo criado com sucesso. Verifique o seu email.",
-        "client_id": client_id,
-        "has_property": has_property,
-        "idade_menos_35": idade_menos_35,
-        "email_queued": bool(job_id)
-    }
+    # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "message": "Registo criado com sucesso. Verifique o seu email.",
+            "client_id": client_id,
+            "has_property": has_property,
+            "idade_menos_35": idade_menos_35,
+            "email_queued": bool(job_id)
+        }
+    )
 
 
 @router.get("/health")
 @limiter.limit("30/minute")
 async def public_health(request: Request):
     """Health check público."""
-    return {"status": "ok", "public": True}
+    return JSONResponse(status_code=200, content={"status": "ok", "public": True})
 
 
 @router.get("/form-config")
@@ -324,7 +335,7 @@ async def get_public_form_config(request: Request):
     """Obter configuração do formulário público (campos personalizados incluídos)."""
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
     if not config:
-        return {"custom_fields": []}
+        return JSONResponse(status_code=200, content={"custom_fields": []})
     
     # Retornar apenas campos personalizados e visíveis
     fields = config.get("fields", [])
@@ -333,4 +344,4 @@ async def get_public_form_config(request: Request):
         if f.get("is_custom") and f.get("is_visible")
     ]
     
-    return {"custom_fields": custom_fields}
+    return JSONResponse(status_code=200, content={"custom_fields": custom_fields})
