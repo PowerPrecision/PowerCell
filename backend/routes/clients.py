@@ -297,14 +297,11 @@ async def assign_client_to_user(
     Permissões:
     - Admin/CEO/Diretor: Podem atribuir a qualquer utilizador
     - Consultor/Intermediario: Atribuem a si próprios
-    - Gestor de Documentos: Não pode atribuir clientes
     """
     # Verificar permissões
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    if user_role == "gestor_documentos":
-        raise HTTPException(status_code=403, detail="Gestor de Documentos não pode atribuir clientes")
     
     # Determinar utilizador de destino
     if user_role in ["admin", "ceo", "diretor"]:
@@ -734,9 +731,6 @@ async def create_client(
     user: dict = Depends(get_current_user)
 ):
     """Criar um novo cliente."""
-    # Gestor de Documentos não pode criar clientes
-    if user.get("role") == "gestor_documentos":
-        raise HTTPException(status_code=403, detail="Gestor de Documentos não pode criar clientes. Apenas gerir documentos.")
     
     # Verificar se já existe cliente com mesmo NIF ou email
     existing_query = []
@@ -928,9 +922,6 @@ async def create_process_for_client(
     - Um ID real de cliente na colecção clients
     - Um ID de processo (quando o cliente é virtual/agregado de processos)
     """
-    # Gestor de Documentos não pode criar processos
-    if user.get("role") == "gestor_documentos":
-        raise HTTPException(status_code=403, detail="Gestor de Documentos não pode criar processos. Apenas gerir documentos.")
     
     client = None
     source_process = None

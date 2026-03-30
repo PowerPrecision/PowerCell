@@ -13,7 +13,6 @@ class UserRoleEnum(str, Enum):
     INTERMEDIARIO = "intermediario"  # Intermediário de Crédito (antes: mediador)
     MEDIADOR = "mediador"  # Legacy alias
     ADMINISTRATIVO = "administrativo"  # Administrativo(a) - gestão administrativa
-    GESTOR_DOCUMENTOS = "gestor_documentos"  # Gestor de Documentos - só documentos
     INDEXACAO = "indexacao"  # Indexação - só visualiza dados e gere documentos (upload/delete)
     DIRETOR = "diretor"  # Diretor(a) - gestão de direção
     CEO = "ceo"  # Between admin and staff - can manage basic things + consultor/intermediário tasks
@@ -40,7 +39,6 @@ class UserRole:
     INTERMEDIARIO = UserRoleEnum.INTERMEDIARIO.value
     MEDIADOR = UserRoleEnum.MEDIADOR.value
     ADMINISTRATIVO = UserRoleEnum.ADMINISTRATIVO.value
-    GESTOR_DOCUMENTOS = UserRoleEnum.GESTOR_DOCUMENTOS.value
     INDEXACAO = UserRoleEnum.INDEXACAO.value
     DIRETOR = UserRoleEnum.DIRETOR.value
     CEO = UserRoleEnum.CEO.value
@@ -55,7 +53,6 @@ class UserRole:
         UserRoleEnum.INTERMEDIARIO.value,
         UserRoleEnum.MEDIADOR.value,
         UserRoleEnum.ADMINISTRATIVO.value,
-        UserRoleEnum.GESTOR_DOCUMENTOS.value,
         UserRoleEnum.INDEXACAO.value,
         UserRoleEnum.DIRETOR.value,
         UserRoleEnum.CEO.value,
@@ -64,7 +61,6 @@ class UserRole:
     
     # Roles que podem gerir documentos (upload/delete)
     DOCUMENT_ROLES = [
-        UserRoleEnum.GESTOR_DOCUMENTOS.value,
         UserRoleEnum.INDEXACAO.value,
         UserRoleEnum.ADMINISTRATIVO.value,
         UserRoleEnum.CONSULTOR.value,
@@ -128,8 +124,8 @@ class UserRole:
     
     @classmethod
     def is_document_only(cls, role: str) -> bool:
-        """Check if role is document-only (gestor_documentos)"""
-        return role == cls.GESTOR_DOCUMENTOS
+        """Check if role is document-only (indexacao)"""
+        return role == cls.INDEXACAO
 
 
 class UserRegister(BaseModel):

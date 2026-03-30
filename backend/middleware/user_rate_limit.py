@@ -37,7 +37,6 @@ RATE_LIMITS_BY_ROLE = {
     "intermediario": {"requests": 200, "window": 60},
     "consultor_intermediario": {"requests": 200, "window": 60},
     "administrativo": {"requests": 200, "window": 60},
-    "gestor_documentos": {"requests": 150, "window": 60},
     
     # Clientes - limite baixo
     "cliente": {"requests": 100, "window": 60},  # 100 req/min

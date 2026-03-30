@@ -23,7 +23,7 @@ router = APIRouter(prefix="/my-clients", tags=["My Clients"])
 @router.get("")
 async def get_my_clients(user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
-    UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS,
+    UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO,
     UserRole.DIRETOR, UserRole.ADMINISTRATIVO
 ]))):
     """
@@ -37,7 +37,7 @@ async def get_my_clients(user: dict = Depends(require_roles([
     Permissões:
     - Consultor: Apenas os seus clientes (assigned_consultor_id)
     - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_id ou criados por eles)
-    - Indexacao/Gestor Documentos: Apenas os processos atribuídos (assigned_indexacao_id)
+    - Indexacao: Apenas os processos atribuídos (assigned_indexacao_id)
     - Admin/CEO/Diretor: Todos os clientes (para supervisão)
     """
     user_id = user["id"]
@@ -55,8 +55,8 @@ async def get_my_clients(user: dict = Depends(require_roles([
                 {"created_by": user_email}
             ]
         }
-    elif role in [UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]:
-        # Indexacao e Gestor de Documentos vêem processos atribuídos a eles
+    elif role == UserRole.INDEXACAO:
+        # Indexacao vê apenas processos atribuídos a ele
         query = {"assigned_indexacao_id": user_id}
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         # Admin/CEO/Diretor vêem todos
@@ -111,7 +111,7 @@ async def get_my_clients(user: dict = Depends(require_roles([
 @router.get("/stats")
 async def get_my_clients_stats(user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
-    UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS,
+    UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO,
     UserRole.DIRETOR, UserRole.ADMINISTRATIVO
 ]))):
     """
@@ -131,7 +131,7 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
                 {"created_by": user_email}
             ]
         }
-    elif role in [UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]:
+    elif role == UserRole.INDEXACAO:
         query = {"assigned_indexacao_id": user_id}
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         query = {}

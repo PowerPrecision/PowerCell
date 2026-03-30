@@ -1101,8 +1101,8 @@ const ProcessDetails = () => {
           
           {/* Linha 2: Botões de Ação */}
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pl-0 sm:pl-12">
-            {/* Botão para Gerir Atribuições - escondido para gestor_documentos */}
-            {user?.role !== "gestor_documentos" && (
+            {/* Botão para Gerir Atribuições - escondido para indexacao */}
+            {user?.role !== "indexacao" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1116,7 +1116,7 @@ const ProcessDetails = () => {
             )}
             
             {/* Botão RGPD */}
-            {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
+            {user?.role !== "indexacao" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1155,7 +1155,7 @@ const ProcessDetails = () => {
             )}
             
             {/* Botão CPCV */}
-            {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
+            {user?.role !== "indexacao" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1169,7 +1169,7 @@ const ProcessDetails = () => {
             )}
 
             {/* Calculadoras */}
-            {user?.role !== "gestor_documentos" && user?.role !== "indexacao" && (
+            {user?.role !== "indexacao" && (
               <>
                 <TempLinkButton
                   processId={id}
@@ -2900,7 +2900,7 @@ const ProcessDetails = () => {
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
                     {appUsers
-                      .filter(u => ["indexacao", "gestor_documentos", "administrativo", "admin", "ceo"].includes(u.role))
+                      .filter(u => ["indexacao", "administrativo", "admin", "ceo"].includes(u.role))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})
