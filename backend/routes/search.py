@@ -103,16 +103,28 @@ async def global_search(
         # Formatar resultados dos clientes
         formatted_clients = []
         for client in clients:
-            # Se tem processos, usar o primeiro processo para navegação
+            # Se tem processos, usar o primeiro processo válido para navegação
             process_ids = client.get("process_ids", [])
+            first_process_id = None
+            
+            # Verificar se o primeiro processo existe realmente
+            if process_ids:
+                # Verificar se o processo existe na coleção processes
+                existing_process = await db.processes.find_one(
+                    {"id": process_ids[0]},
+                    {"_id": 0, "id": 1}
+                )
+                if existing_process:
+                    first_process_id = process_ids[0]
+            
             formatted_clients.append({
                 "id": client.get("id"),
                 "client_name": client.get("nome"),
                 "personal_data": client.get("dados_pessoais", {}),
                 "contacto": client.get("contacto", {}),
-                "has_process": bool(process_ids),
+                "has_process": bool(first_process_id),
                 "process_count": len(process_ids),
-                "first_process_id": process_ids[0] if process_ids else None
+                "first_process_id": first_process_id
             })
         
         results["clients"] = formatted_clients
