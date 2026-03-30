@@ -30,6 +30,7 @@ from services.auth import get_current_user, require_roles
 from models.auth import UserRole
 from services.encryption import encryption_service
 from services.process_service import get_next_process_number
+from services.s3_storage import s3_service
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
@@ -349,16 +350,26 @@ async def assign_client_to_user(
             personal_data["nome"] = client_name
         
         # Criar documento do processo
-        # Gerar caminho S3 com nome do cliente (formato: Documentação Clientes/Nome_Cliente)
-        safe_name = "_".join(w.capitalize() for w in client_name.strip().split()) if client_name else process_id[:8]
-        s3_folder = f"Documentação Clientes/{safe_name}"
-        
-        # Se houver segundo titular, incluir no nome da pasta
+        # Gerar caminho S3 com verificação de pasta existente para evitar duplicados
         titular2_data = client.get("titular2_data")
-        if titular2_data and titular2_data.get("name"):
-            second_name = titular2_data.get("name")
-            safe_second_name = "_".join(w.capitalize() for w in second_name.strip().split())
-            s3_folder = f"Documentação Clientes/{safe_name}_e_{safe_second_name}"
+        second_client_name = titular2_data.get("name") if titular2_data else None
+        
+        # IMPORTANTE: Usar função que verifica pastas existentes antes de criar
+        # Isto evita criar pastas duplicadas como "Romina_Araujo" quando já existe "Romina_e_Leyzller"
+        if s3_service.is_configured():
+            s3_folder = s3_service._get_client_base_path_for_upload(
+                process_id, 
+                client_name, 
+                second_client_name
+            )
+            logger.info(f"Pasta S3 definida para novo processo: {s3_folder}")
+        else:
+            # Fallback se S3 não estiver configurado
+            safe_name = "_".join(w.capitalize() for w in client_name.strip().split()) if client_name else process_id[:8]
+            s3_folder = f"Documentação Clientes/{safe_name}"
+            if second_client_name:
+                safe_second_name = "_".join(w.capitalize() for w in second_client_name.strip().split())
+                s3_folder = f"Documentação Clientes/{safe_name}_e_{safe_second_name}"
         
         process_doc = {
             "id": process_id,
