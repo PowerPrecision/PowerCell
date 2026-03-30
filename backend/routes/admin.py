@@ -458,7 +458,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
         raise HTTPException(status_code=400, detail="Cliente não pode ser criado como utilizador. O cliente é representado pelo processo.")
     
     if data.role not in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.ADMIN]:
-        raise HTTPException(status_code=400, detail="Role inválido"))
+        raise HTTPException(status_code=400, detail="Role inválido")
     
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
