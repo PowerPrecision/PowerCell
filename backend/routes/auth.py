@@ -2,6 +2,7 @@ import uuid
 import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Response, HTTPException
+from fastapi.responses import JSONResponse
 
 from database import db
 from models.auth import (
@@ -280,21 +281,25 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
         ip_address=ip_address
     )
     
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        "user": UserResponse(
-            id=user["id"],
-            email=user["email"],
-            name=user["name"],
-            phone=user.get("phone"),
-            role=user["role"],
-            created_at=user["created_at"],
-            onedrive_folder=user.get("onedrive_folder")
-        )
-    }
+    # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
+    return JSONResponse(
+        status_code=200,
+        content={
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "user": {
+                "id": user["id"],
+                "email": user["email"],
+                "name": user["name"],
+                "phone": user.get("phone"),
+                "role": user["role"],
+                "created_at": user["created_at"],
+                "onedrive_folder": user.get("onedrive_folder")
+            }
+        }
+    )
 
 
 @router.post("/refresh")
