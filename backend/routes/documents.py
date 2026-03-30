@@ -189,16 +189,17 @@ async def auto_categorize_document_background(
 
 def normalize_filename(filename: str, category: str = None) -> str:
     """
-    Normaliza o nome do ficheiro para um formato consistente.
+    Sanitiza o nome do ficheiro para armazenamento seguro no S3.
     
-    Formato: {Categoria}_{Data}_{NomeOriginalNormalizado}.{ext}
+    NOTA: NÃO altera o nome original - apenas remove caracteres perigosos.
+    Mantém o nome original do ficheiro para não confundir o utilizador.
     
     Args:
         filename: Nome original do ficheiro
-        category: Categoria do documento (opcional)
+        category: Categoria do documento (IGNORADO - mantido para compatibilidade)
         
     Returns:
-        Nome normalizado
+        Nome sanitizado (mantém o original, apenas remove caracteres perigosos)
     """
     if not filename:
         return f"documento_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -211,26 +212,23 @@ def normalize_filename(filename: str, category: str = None) -> str:
         name_part = filename
         ext = 'pdf'
     
-    # Normalizar texto (remover acentos)
-    name_normalized = unicodedata.normalize('NFKD', name_part)
-    name_normalized = name_normalized.encode('ASCII', 'ignore').decode('ASCII')
+    # Sanitizar APENAS caracteres realmente perigosos para S3
+    # Manter acentos, espaços e caracteres portugueses
+    # Remover apenas: / \ : * ? " < > | (caracteres inválidos em paths)
+    name_sanitized = re.sub(r'[/\\:*?"<>|]', '', name_part)
     
-    # Substituir espaços e caracteres especiais
-    name_normalized = re.sub(r'[^\w\s-]', '', name_normalized)
-    name_normalized = re.sub(r'[\s_]+', '_', name_normalized.strip())
-    name_normalized = name_normalized[:50] if name_normalized else "documento"
+    # Remover caracteres de controlo
+    name_sanitized = re.sub(r'[\x00-\x1f\x7f]', '', name_sanitized)
     
-    # Construir nome final
-    date_str = datetime.now().strftime('%Y%m%d')
+    # Limitar tamanho mas manter nome reconhecível
+    if len(name_sanitized) > 200:
+        name_sanitized = name_sanitized[:200]
     
-    if category:
-        # Normalizar categoria
-        cat_normalized = unicodedata.normalize('NFKD', category)
-        cat_normalized = cat_normalized.encode('ASCII', 'ignore').decode('ASCII')
-        cat_normalized = re.sub(r'[^\w]', '', cat_normalized)[:20]
-        return f"{cat_normalized}_{date_str}_{name_normalized}.{ext}"
+    # Se ficou vazio, usar fallback
+    if not name_sanitized.strip():
+        name_sanitized = f"documento_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
-    return f"{date_str}_{name_normalized}.{ext}"
+    return f"{name_sanitized}.{ext}"
 
 
 def is_image_file(filename: str, content_type: str = None) -> bool:
@@ -347,8 +345,16 @@ async def upload_file_s3(
         
         # Ler o conteúdo do ficheiro
         file_content = await file.read()
-        original_filename = file.filename
-        content_type = file.content_type
+        original_filename = file.filename or f"documento_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+        content_type = file.content_type or "application/octet-stream"
+        
+        # ====================================================================
+        # Inicializar todas as variáveis de controlo
+        # ====================================================================
+        was_extracted = False
+        was_converted = False
+        converted_to_pdf = False
+        conversion_info = {}
         
         # ====================================================================
         # SEGURANÇA: Validar MIME type usando magic bytes (não apenas extensão)
@@ -357,11 +363,6 @@ async def upload_file_s3(
         # E: Converte automaticamente ficheiros para PDF quando possível
         # ====================================================================
         from services.file_validation import validate_and_convert_file
-        
-        # Inicializar variáveis de conversão
-        was_extracted = False
-        was_converted = False
-        conversion_info = {}  # Inicializar para evitar UnboundLocalError
         
         try:
             # Usar validate_and_convert_file para validação, extração e conversão
@@ -441,27 +442,37 @@ async def upload_file_s3(
         if not s3_path:
             raise HTTPException(status_code=500, detail=ERROR_S3_UPLOAD_FAILED)
         
-        # Gerar link temporário para acesso imediato
-        temporary_url = s3_service.get_presigned_url(s3_path) or ""
+        # Gerar link temporário para acesso imediato (não falha se houver erro)
+        try:
+            temporary_url = s3_service.get_presigned_url(s3_path) or ""
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Erro ao gerar URL temporário: {e}")
+            temporary_url = ""
         
         # Agendar categorização automática em background (não bloqueia o response)
-        background_tasks.add_task(
-            auto_categorize_document_background,
-            process_id=client_id,
-            client_name=client_name,
-            s3_path=s3_path,
-            filename=normalized_filename,
-            file_content=file_content
-        )
+        try:
+            background_tasks.add_task(
+                auto_categorize_document_background,
+                process_id=client_id,
+                client_name=client_name,
+                s3_path=s3_path,
+                filename=normalized_filename,
+                file_content=file_content
+            )
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Erro ao agendar categorização: {e}")
         
-        # Registar no histórico
-        await log_history(
-            process_id=client_id,
-            user=user,
-            action="Carregou documento",
-            field="documento",
-            new_value=f"{normalized_filename} ({category})"
-        )
+        # Registar no histórico (não falha o upload se houver erro)
+        try:
+            await log_history(
+                process_id=client_id,
+                user=user,
+                action="Carregou documento",
+                field="documento",
+                new_value=f"{normalized_filename} ({category})"
+            )
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Erro ao registar histórico: {e}")
         
         return {
             "success": True, 
@@ -842,6 +853,112 @@ async def delete_file_s3(
     return {"success": True, "message": "Ficheiro eliminado"}
 
 
+@router.post("/check-move-conflict", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE})
+async def check_move_conflict(
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Verifica se existe conflito ao mover/renomear um ficheiro.
+    
+    Body:
+    - process_id: ID do processo
+    - source_path: Caminho atual do ficheiro no S3
+    - target_category: Categoria destino (opcional, para mover)
+    - target_filename: Novo nome do ficheiro (opcional, para renomear)
+    
+    Returns:
+    - has_conflict: True se existe ficheiro com mesmo nome
+    - conflict_path: Caminho do ficheiro existente (se houver conflito)
+    - suggested_names: Lista de nomes alternativos (se houver conflito)
+    """
+    process_id = data.get("process_id")
+    source_path = data.get("source_path")
+    target_category = data.get("target_category")
+    target_filename = data.get("target_filename")
+    
+    if not process_id or not source_path:
+        raise HTTPException(status_code=400, detail="process_id e source_path são obrigatórios")
+    
+    # Buscar processo
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    second_client_name = process.get("second_client_name") or process.get("titular2", {}).get("nome")
+    s3_folder = process.get("s3_folder")
+    
+    # Determinar o caminho base
+    if s3_folder:
+        base_path = s3_folder.rstrip('/')
+    else:
+        base_path = s3_service._get_client_base_path_for_upload(
+            process_id, 
+            client_name, 
+            second_client_name
+        )
+    
+    # Extrair nome e categoria atuais
+    current_filename = source_path.split('/')[-1] if '/' in source_path else source_path
+    current_category_part = source_path.split('/')[-2] if '/' in source_path else ""
+    
+    # Determinar categoria destino
+    if target_category:
+        safe_category = sanitize_folder_name(target_category)
+    elif current_category_part:
+        safe_category = current_category_part
+    else:
+        safe_category = "Outros"
+    
+    # Determinar nome do ficheiro destino
+    final_filename = target_filename if target_filename else current_filename
+    
+    # Construir caminho destino
+    target_path = f"{base_path}/{safe_category}/{final_filename}"
+    
+    # Verificar se é o mesmo caminho (sem conflito)
+    if target_path == source_path:
+        return {
+            "has_conflict": False,
+            "target_path": target_path,
+            "message": "O ficheiro já está no destino pretendido"
+        }
+    
+    # Verificar se existe ficheiro no destino
+    conflict_exists = s3_service.file_exists(target_path)
+    
+    # Gerar nomes alternativos se houver conflito
+    suggested_names = []
+    if conflict_exists:
+        name_part, ext = final_filename.rsplit('.', 1) if '.' in final_filename else (final_filename, 'pdf')
+        
+        # Gerar 3 nomes alternativos
+        for i in range(1, 4):
+            new_name = f"{name_part}_{i+1}.{ext}"
+            new_path = f"{base_path}/{safe_category}/{new_name}"
+            if not s3_service.file_exists(new_path):
+                suggested_names.append({
+                    "filename": new_name,
+                    "path": new_path
+                })
+        
+        return {
+            "has_conflict": True,
+            "source_path": source_path,
+            "conflict_path": target_path,
+            "conflict_filename": final_filename,
+            "suggested_names": suggested_names,
+            "message": f"Já existe um ficheiro chamado '{final_filename}' no destino"
+        }
+    
+    return {
+        "has_conflict": False,
+        "target_path": target_path,
+        "message": "Nenhum conflito detectado"
+    }
+
+
 @router.post("/move-file/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def move_file_to_category(
     process_id: str,
@@ -854,13 +971,20 @@ async def move_file_to_category(
     Body:
     - source_path: Caminho atual do ficheiro no S3
     - target_category: Nome da categoria destino (ex: "Documentos Pessoais", "Financeiros")
+    - target_filename: Novo nome do ficheiro (opcional, para renomear ao mover)
+    - overwrite: Se True, substitui ficheiro existente (padrão: False)
+    - auto_rename: Se True e existir conflito, renomeia automaticamente (padrão: False)
     
     Returns:
     - success: True/False
     - new_path: Novo caminho no S3
+    - was_renamed: Se o nome foi alterado automaticamente devido a conflito
     """
     source_path = data.get("source_path")
     target_category = data.get("target_category")
+    target_filename = data.get("target_filename")
+    overwrite = data.get("overwrite", False)
+    auto_rename = data.get("auto_rename", False)
     
     if not source_path or not target_category:
         raise HTTPException(status_code=400, detail="source_path e target_category são obrigatórios")
@@ -875,7 +999,8 @@ async def move_file_to_category(
     s3_folder = process.get("s3_folder")  # Pasta S3 configurada manualmente
     
     # Extrair nome do ficheiro
-    filename = source_path.split('/')[-1] if '/' in source_path else source_path
+    current_filename = source_path.split('/')[-1] if '/' in source_path else source_path
+    final_filename = target_filename if target_filename else current_filename
     
     # Determinar o caminho base CORRETO para o cliente
     # Prioridade: s3_folder configurado > encontrar pasta existente > criar nova
@@ -891,15 +1016,55 @@ async def move_file_to_category(
     
     # Construir novo caminho
     safe_category = sanitize_folder_name(target_category)
-    new_path = f"{base_path}/{safe_category}/{filename}"
+    new_path = f"{base_path}/{safe_category}/{final_filename}"
     
     # Verificar se o caminho mudou
     if new_path == source_path:
         return {
             "success": True,
             "message": "Ficheiro já está na categoria correta",
-            "new_path": new_path
+            "new_path": new_path,
+            "was_renamed": False
         }
+    
+    # Verificar se existe conflito
+    conflict_exists = s3_service.file_exists(new_path)
+    was_renamed = False
+    
+    if conflict_exists and not overwrite:
+        if auto_rename:
+            # Gerar nome automático
+            name_part, ext = final_filename.rsplit('.', 1) if '.' in final_filename else (final_filename, 'pdf')
+            counter = 2
+            while s3_service.file_exists(f"{base_path}/{safe_category}/{name_part}_{counter}.{ext}"):
+                counter += 1
+                if counter > 100:  # Limite de segurança
+                    raise HTTPException(status_code=409, detail="Não foi possível gerar um nome único para o ficheiro")
+            
+            final_filename = f"{name_part}_{counter}.{ext}"
+            new_path = f"{base_path}/{safe_category}/{final_filename}"
+            was_renamed = True
+            logger.info(f"Ficheiro renomeado automaticamente para evitar conflito: {final_filename}")
+        else:
+            # Retornar erro com informações do conflito
+            # Gerar sugestões de nomes alternativos
+            suggested_names = []
+            name_part, ext = final_filename.rsplit('.', 1) if '.' in final_filename else (final_filename, 'pdf')
+            for i in range(1, 4):
+                new_name = f"{name_part}_{i+1}.{ext}"
+                suggested_path = f"{base_path}/{safe_category}/{new_name}"
+                if not s3_service.file_exists(suggested_path):
+                    suggested_names.append(new_name)
+            
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "FILE_EXISTS",
+                    "message": f"Já existe um ficheiro chamado '{final_filename}' no destino",
+                    "conflict_path": new_path,
+                    "suggested_names": suggested_names
+                }
+            )
     
     # Mover ficheiro no S3
     success = s3_service.rename_file(source_path, new_path)
@@ -911,17 +1076,23 @@ async def move_file_to_category(
             {"$set": {
                 "s3_path": new_path,
                 "ai_category": target_category,
+                "filename": final_filename,
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }}
         )
         
         # Registar no histórico
+        action_msg = f"Moveu documento para {target_category}"
+        if was_renamed:
+            action_msg += f" (renomeado para {final_filename})"
+        
         await log_history(
             process_id=process_id,
             user=user,
-            action=f"Moveu documento para {target_category}",
+            action=action_msg,
             field="documento",
-            old_value=filename
+            old_value=current_filename,
+            new_value=final_filename
         )
         
         logger.info(f"Ficheiro movido: {source_path} -> {new_path}")
@@ -930,7 +1101,9 @@ async def move_file_to_category(
             "success": True,
             "message": f"Ficheiro movido para {target_category}",
             "new_path": new_path,
-            "old_path": source_path
+            "old_path": source_path,
+            "new_filename": final_filename,
+            "was_renamed": was_renamed
         }
     else:
         raise HTTPException(status_code=500, detail="Erro ao mover ficheiro")
