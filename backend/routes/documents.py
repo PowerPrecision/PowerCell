@@ -2033,6 +2033,11 @@ async def organize_documents_after_analysis(
     results = {"organized": [], "errors": [], "folders_created": []}
     
     if create_folders and s3_service.is_configured():
+        # IMPORTANTE: Obter base_path UMA única vez ANTES do loop
+        # Usar _get_client_base_path_for_upload para respeitar pastas existentes
+        base_path = s3_service._get_client_base_path_for_upload(process_id, client_name, None)
+        logger.info(f"Organizar documentos: usando pasta {base_path} para {client_name}")
+        
         # Criar pastas standard se não existirem
         standard_folders = [
             "Identificação",
@@ -2052,7 +2057,6 @@ async def organize_documents_after_analysis(
         
         for folder in standard_folders:
             try:
-                base_path = s3_service._get_client_base_path(process_id, client_name)
                 folder_key = f"{base_path}/{folder}/.keep"
                 
                 # Verificar se pasta já existe
