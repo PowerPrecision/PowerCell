@@ -50,7 +50,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UVICORN_PORT=8001 \
     UVICORN_WORKERS=4 \
     # App settings
-    APP_ENV=production
+    APP_ENV=production \
+    # Render porta (será sobrescrita pelo Render se disponível)
+    PORT=8001
 
 # Instalar dependências de runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -86,8 +88,8 @@ EXPOSE 8001
 
 # Comando de arranque
 # Produção: múltiplos workers
-# Dev: single worker com reload
-CMD ["sh", "-c", "uvicorn server:app --host ${UVICORN_HOST} --port ${UVICORN_PORT} --workers ${UVICORN_WORKERS}"]
+# Render: usa a variável PORT se definida, senão usa UVICORN_PORT
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-${UVICORN_PORT}} --workers ${UVICORN_WORKERS}"]
 
 
 # -----------------------------
