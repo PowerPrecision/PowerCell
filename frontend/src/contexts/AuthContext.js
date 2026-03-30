@@ -205,7 +205,7 @@ export const AuthProvider = ({ children }) => {
       setToken(access_token);
       setUser(userData);
       setIsImpersonating(true);
-      setOriginalAdminName(userData.impersonated_by);
+      setOriginalAdminName(userData.impersonated_by_name);
       
       return userData;
     } catch (error) {
