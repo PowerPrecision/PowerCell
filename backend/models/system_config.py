@@ -178,6 +178,15 @@ class SystemSettings(BaseModel):
     date_format: str = "dd/MM/yyyy"
 
 
+class DocumentRecipientsConfig(BaseModel):
+    """Configuração de destinatários para envio de documentação"""
+    enabled: bool = False
+    recipients: Optional[str] = None  # JSON string com lista de destinatários
+    email_template: Optional[str] = None  # Template do email com variáveis
+    default_to: Optional[str] = None  # Email principal (TO)
+    default_to_name: Optional[str] = None  # Nome do destinatário TO
+
+
 class SystemConfig(BaseModel):
     """Configuração completa do sistema"""
     storage: StorageConfig = StorageConfig()
@@ -186,6 +195,7 @@ class SystemConfig(BaseModel):
     trello: TrelloConfig = TrelloConfig()
     settings: SystemSettings = SystemSettings()
     credit_services: CreditServicesConfig = CreditServicesConfig()
+    document_recipients: DocumentRecipientsConfig = DocumentRecipientsConfig()
     setup_completed: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -201,7 +211,7 @@ class ConfigField(BaseModel):
     """Definição de um campo de configuração para o frontend"""
     key: str
     label: str
-    type: str  # "text", "password", "number", "select", "boolean"
+    type: str  # "text", "password", "number", "select", "boolean", "textarea"
     required: bool = False
     placeholder: Optional[str] = None
     options: Optional[List[Dict[str, str]]] = None  # Para select
