@@ -23,7 +23,8 @@ router = APIRouter(prefix="/my-clients", tags=["My Clients"])
 @router.get("")
 async def get_my_clients(user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
-    UserRole.ADMIN, UserRole.CEO
+    UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS,
+    UserRole.DIRETOR, UserRole.ADMINISTRATIVO
 ]))):
     """
     Obter lista de clientes atribuídos ao utilizador actual.
@@ -36,7 +37,8 @@ async def get_my_clients(user: dict = Depends(require_roles([
     Permissões:
     - Consultor: Apenas os seus clientes (assigned_consultor_id)
     - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_id ou criados por eles)
-    - Admin/CEO: Todos os clientes (para supervisão)
+    - Indexacao/Gestor Documentos: Apenas os processos atribuídos (assigned_indexacao_id)
+    - Admin/CEO/Diretor: Todos os clientes (para supervisão)
     """
     user_id = user["id"]
     user_email = user.get("email", "")
@@ -53,9 +55,15 @@ async def get_my_clients(user: dict = Depends(require_roles([
                 {"created_by": user_email}
             ]
         }
-    else:
-        # Admin/CEO vêem todos
+    elif role in [UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]:
+        # Indexacao e Gestor de Documentos vêem processos atribuídos a eles
+        query = {"assigned_indexacao_id": user_id}
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+        # Admin/CEO/Diretor vêem todos
         query = {}
+    else:
+        # Outros roles não têm acesso
+        query = {"_id": None}  # Query que não retorna nada
     
     # Buscar processos
     processes = await db.processes.find(
@@ -103,12 +111,14 @@ async def get_my_clients(user: dict = Depends(require_roles([
 @router.get("/stats")
 async def get_my_clients_stats(user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
-    UserRole.ADMIN, UserRole.CEO
+    UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS,
+    UserRole.DIRETOR, UserRole.ADMINISTRATIVO
 ]))):
     """
     Obter estatísticas dos clientes do utilizador.
     """
     user_id = user["id"]
+    user_email = user.get("email", "")
     role = user["role"]
     
     # Construir query baseada no papel do utilizador
@@ -118,11 +128,15 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
         query = {
             "$or": [
                 {"assigned_mediador_id": user_id},
-                {"created_by": user.get("email", "")}
+                {"created_by": user_email}
             ]
         }
-    else:
+    elif role in [UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]:
+        query = {"assigned_indexacao_id": user_id}
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         query = {}
+    else:
+        query = {"_id": None}
     
     # Contar por status
     pipeline = [

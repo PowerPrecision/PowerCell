@@ -766,7 +766,8 @@ async def impersonate_user(user_id: str, user: dict = Depends(require_roles([Use
             "name": target_user["name"],
             "role": target_user["role"],
             "is_impersonated": True,
-            "impersonated_by": user["name"]
+            "impersonated_by": user["id"],
+            "impersonated_by_name": user["name"]
         }
     }
 
