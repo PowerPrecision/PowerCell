@@ -24,7 +24,6 @@ const roleLabels = {
   diretor: "Diretor(a)",
   administrativo: "Administrativo(a)",
   indexacao: "Indexação",
-  gestor_documentos: "Gestor de Documentos",
   ceo: "CEO",
   admin: "Administrador",
 };
@@ -37,7 +36,6 @@ const roleColors = {
   diretor: "bg-indigo-100 text-indigo-800",
   administrativo: "bg-amber-100 text-amber-800",
   indexacao: "bg-cyan-100 text-cyan-800",
-  gestor_documentos: "bg-teal-100 text-teal-800",
   ceo: "bg-orange-100 text-orange-800",
   admin: "bg-red-100 text-red-800",
 };
@@ -259,7 +257,7 @@ const UsersManagementPage = () => {
               </div>
               <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                 {/* Esconder botão para roles sem permissão de criar utilizadores */}
-                {currentUser?.role !== "indexacao" && currentUser?.role !== "gestor_documentos" && (
+                {currentUser?.role !== "indexacao"  && (
                 <DialogTrigger asChild>
                   <Button size="sm" className="shrink-0">
                     <UserPlus className="h-4 w-4 sm:mr-2" />
@@ -468,7 +466,7 @@ const UsersManagementPage = () => {
                         <Button variant="ghost" size="icon" onClick={() => handleToggleUserStatus(u.id, u.is_active)}>
                           {u.is_active ? <UserX className="h-4 w-4 text-orange-600" /> : <UserCheck className="h-4 w-4 text-green-600" />}
                         </Button>
-                        {currentUser?.role !== "indexacao" && currentUser?.role !== "gestor_documentos" && (
+                        {currentUser?.role !== "indexacao"  && (
                           <>
                             <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}>
                               <Edit className="h-4 w-4" />
@@ -547,7 +545,7 @@ const UsersManagementPage = () => {
                               <UserCheck className="h-4 w-4 text-green-600" />
                             )}
                           </Button>
-                          {currentUser?.role !== "indexacao" && currentUser?.role !== "gestor_documentos" && (
+                          {currentUser?.role !== "indexacao"  && (
                           <>
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(user)}>
                             <Edit className="h-4 w-4" />

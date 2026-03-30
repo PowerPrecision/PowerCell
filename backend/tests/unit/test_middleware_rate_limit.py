@@ -19,7 +19,6 @@ class TestRateLimitConfig:
             "mediador": 200,
             "consultor_intermediario": 200,
             "cliente": 100,
-            "gestor_documentos": 200,
             "default": 100
         }
         

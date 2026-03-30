@@ -52,10 +52,7 @@ class TestRateLimitConfiguration:
         # Cliente: 100 req/min
         assert RATE_LIMITS_BY_ROLE["cliente"]["requests"] == 100
     
-    def test_gestor_documentos_has_custom_limit(self):
         """Gestor documentos deve ter limite personalizado."""
-        assert "gestor_documentos" in RATE_LIMITS_BY_ROLE
-        assert RATE_LIMITS_BY_ROLE["gestor_documentos"]["requests"] == 150
 
 
 class TestRateLimitHeaders:

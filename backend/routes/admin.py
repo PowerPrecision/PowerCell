@@ -105,7 +105,7 @@ async def reset_user_permissions(
 # ============== WORKFLOW STATUS ROUTES ==============
 
 @router.get("/workflow-statuses", response_model=List[WorkflowStatusResponse])
-async def get_workflow_statuses(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.GESTOR_DOCUMENTOS, UserRole.INDEXACAO, UserRole.INTERMEDIARIO, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))):
+async def get_workflow_statuses(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))):
     """Get all workflow statuses ordered by order field"""
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     return [WorkflowStatusResponse(**s) for s in statuses]
@@ -457,8 +457,8 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     if data.role == UserRole.CLIENTE:
         raise HTTPException(status_code=400, detail="Cliente não pode ser criado como utilizador. O cliente é representado pelo processo.")
     
-    if data.role not in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS, UserRole.CEO, UserRole.ADMIN]:
-        raise HTTPException(status_code=400, detail="Role inválido")
+    if data.role not in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.ADMIN]:
+        raise HTTPException(status_code=400, detail="Role inválido"))
     
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -490,7 +490,6 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
             UserRole.DIRETOR: "Diretor",
             UserRole.ADMINISTRATIVO: "Administrativo",
             UserRole.INDEXACAO: "Indexação",
-            UserRole.GESTOR_DOCUMENTOS: "Gestor de Documentos",
             UserRole.CEO: "CEO",
             UserRole.ADMIN: "Administrador"
         }
@@ -657,7 +656,7 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
     if data.phone is not None:
         update_data["phone"] = data.phone
     if data.role is not None:
-        if data.role not in [UserRole.CLIENTE, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS, UserRole.CEO, UserRole.ADMIN]:
+        if data.role not in [UserRole.CLIENTE, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.ADMIN]:
             raise HTTPException(status_code=400, detail="Role inválido")
         if data.role != old_role:
             role_changed = True
@@ -773,7 +772,7 @@ async def impersonate_user(user_id: str, user: dict = Depends(require_roles([Use
 
 
 @router.post("/stop-impersonate")
-async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]))):
+async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO]))):
     """
     Terminar sessão de impersonate e voltar à conta original.
     Requer o token do admin original.

@@ -7,7 +7,6 @@ Tests for:
 - POST /api/auth/refresh (renew tokens)
 - GET /api/auth/sessions (list active sessions)
 - Rate limit headers (X-RateLimit-Limit, X-RateLimit-Remaining)
-- gestor_documentos role cannot see "Novo Processo" button
 ====================================================================
 """
 import pytest
@@ -65,8 +64,6 @@ class TestLoginV2WithRefreshTokens:
         assert "detail" in data
         assert "inválidas" in data["detail"].lower() or "invalid" in data["detail"].lower()
     
-    def test_login_v2_gestor_documentos_role(self):
-        """Login-v2 should work for gestor_documentos role."""
         response = requests.post(
             f"{BASE_URL}/api/auth/login-v2",
             json=GESTOR_DOCS_CREDENTIALS,
@@ -78,7 +75,6 @@ class TestLoginV2WithRefreshTokens:
         data = response.json()
         assert "access_token" in data
         assert "refresh_token" in data
-        assert data["user"]["role"] == "gestor_documentos"
 
 
 class TestRefreshEndpoint:
@@ -292,22 +288,17 @@ class TestRateLimitHeaders:
 
 
 class TestGestorDocumentosRestrictions:
-    """Test that gestor_documentos role has correct restrictions."""
     
     @pytest.fixture
     def gestor_docs_token(self):
-        """Get token for gestor_documentos user."""
         response = requests.post(
             f"{BASE_URL}/api/auth/login-v2",
             json=GESTOR_DOCS_CREDENTIALS,
             timeout=30
         )
         if response.status_code != 200:
-            pytest.skip(f"Could not login as gestor_documentos: {response.text}")
         return response.json()["access_token"]
     
-    def test_gestor_documentos_cannot_edit_process(self, gestor_docs_token):
-        """gestor_documentos should not be able to edit processes."""
         # First get a process ID
         response = requests.get(
             f"{BASE_URL}/api/processes?limit=1",
@@ -328,7 +319,6 @@ class TestGestorDocumentosRestrictions:
         response = requests.put(
             f"{BASE_URL}/api/processes/{process_id}",
             headers={"Authorization": f"Bearer {gestor_docs_token}"},
-            json={"notas": "Test note from gestor_documentos"},
             timeout=30
         )
         
@@ -338,8 +328,6 @@ class TestGestorDocumentosRestrictions:
         data = response.json()
         assert "gestor" in data.get("detail", "").lower() or "documentos" in data.get("detail", "").lower()
     
-    def test_gestor_documentos_can_view_processes(self, gestor_docs_token):
-        """gestor_documentos should be able to view processes."""
         response = requests.get(
             f"{BASE_URL}/api/processes?limit=5",
             headers={"Authorization": f"Bearer {gestor_docs_token}"},
@@ -375,12 +363,8 @@ class TestRateLimitsPerRole:
         
         assert RATE_LIMITS_BY_ROLE["cliente"]["requests"] == 100
     
-    def test_gestor_documentos_has_rate_limit(self):
-        """gestor_documentos should have rate limit (150/min)."""
         from middleware.user_rate_limit import RATE_LIMITS_BY_ROLE
         
-        assert "gestor_documentos" in RATE_LIMITS_BY_ROLE
-        assert RATE_LIMITS_BY_ROLE["gestor_documentos"]["requests"] == 150
 
 
 if __name__ == "__main__":
