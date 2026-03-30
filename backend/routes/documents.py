@@ -20,6 +20,7 @@ from io import BytesIO
 
 # Adicionados UploadFile, File, Form para o S3
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response
+from fastapi.responses import JSONResponse
 
 from database import db
 from models.auth import UserRole
@@ -142,7 +143,7 @@ async def auto_categorize_document_background(
         
         now = datetime.now(timezone.utc).isoformat()
         
-        # Criar ou actualizar metadados
+        # Criar ou actualizar metadados - CORRIGIDO: verificar se existing é None
         doc_id = existing.get("id") if existing else str(uuid.uuid4())
         
         metadata = {
@@ -179,8 +180,9 @@ async def auto_categorize_document_background(
         
         logger.info(f"[AUTO-CAT] Categorização concluída")
         
-    except (IOError, OSError, ValueError, KeyError, TypeError):
-        logger.error("[AUTO-CAT] Erro ao categorizar documento")
+    except Exception as e:
+        # Capturar TODOS os erros para não crashar a tarefa de background
+        logger.error(f"[AUTO-CAT] Erro ao categorizar documento: {type(e).__name__}: {e}")
 
 
 # ====================================================================
@@ -450,14 +452,17 @@ async def upload_file_s3(
             temporary_url = ""
         
         # Agendar categorização automática em background (não bloqueia o response)
+        # IMPORTANTE: Fazer cópia do file_content para a tarefa de background
+        # para evitar problemas com referências
         try:
+            file_content_copy = bytes(file_content)  # Cópia explícita
             background_tasks.add_task(
                 auto_categorize_document_background,
                 process_id=client_id,
                 client_name=client_name,
                 s3_path=s3_path,
                 filename=normalized_filename,
-                file_content=file_content
+                file_content=file_content_copy
             )
         except Exception as e:
             logger.warning(f"[UPLOAD] Erro ao agendar categorização: {e}")
@@ -474,19 +479,25 @@ async def upload_file_s3(
         except Exception as e:
             logger.warning(f"[UPLOAD] Erro ao registar histórico: {e}")
         
-        return {
-            "success": True, 
-            "path": s3_path, 
-            "message": "Ficheiro guardado com sucesso",
-            "original_filename": file.filename,
-            "normalized_filename": normalized_filename,
-            "converted_to_pdf": converted_to_pdf,
-            "was_extracted": was_extracted,
-            "was_converted": was_converted,
-            "conversion_method": conversion_info.get("conversion_method"),
-            "auto_categorization": "iniciada",  # Indica que categorização foi agendada
-            "temporary_url": temporary_url  # URL para acesso imediato (válido 1 hora)
-        }
+        logger.info(f"[UPLOAD] Upload concluído com sucesso: {normalized_filename}")
+        
+        # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True, 
+                "path": s3_path, 
+                "message": "Ficheiro guardado com sucesso",
+                "original_filename": file.filename,
+                "normalized_filename": normalized_filename,
+                "converted_to_pdf": converted_to_pdf,
+                "was_extracted": was_extracted,
+                "was_converted": was_converted,
+                "conversion_method": conversion_info.get("conversion_method"),
+                "auto_categorization": "iniciada",
+                "temporary_url": temporary_url
+            }
+        )
     
     except HTTPException:
         # Re-raise HTTPExceptions para manter o status code correto
