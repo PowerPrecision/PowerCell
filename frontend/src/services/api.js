@@ -92,10 +92,10 @@ api.interceptors.response.use(
       
       // Se estiver em modo impersonate e existe originalToken, tentar restaurar
       const originalToken = localStorage.getItem("originalToken");
-      if (originalToken && !isStopImpersonate) {
-        // Estamos em modo impersonate e o token expirou
+      if (originalToken) {
+        // Estamos em modo impersonate e o token expirou ou stop-impersonate falhou
         // Tentar voltar à conta original automaticamente
-        console.log("[API] Token de impersonate expirado, tentando restaurar sessão original...");
+        console.log("[API] Token de impersonate expirou ou stop-impersonate falhou, restaurando sessão original...");
         
         // Restaurar token original
         localStorage.setItem("token", originalToken);
@@ -103,7 +103,7 @@ api.interceptors.response.use(
         
         // Mostrar toast a informar
         toast({
-          title: "Sessão de Visualização Expirada",
+          title: "Sessão de Visualização Terminada",
           description: "Voltou à sua conta de administrador.",
         });
         
