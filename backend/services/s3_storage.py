@@ -228,6 +228,9 @@ class S3Service:
                 search_words_filtered = search_words - common_words
                 folder_words_filtered = folder_words - common_words
                 
+                # Inicializar score
+                score = 0
+                
                 if search_words_filtered and folder_words_filtered:
                     # Calcular interseção
                     intersection = search_words_filtered & folder_words_filtered
