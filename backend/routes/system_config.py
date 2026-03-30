@@ -454,6 +454,46 @@ CONFIG_FIELDS = {
             ),
         ]
     },
+    "document_recipients": {
+        "title": "Destinatários de Documentação",
+        "description": "Configurar balcões/bancos para envio de documentação de clientes",
+        "fields": [
+            ConfigField(
+                key="enabled",
+                label="Activar Envio de Documentação",
+                type="boolean",
+                help_text="Permitir envio de documentação para balcões"
+            ),
+            ConfigField(
+                key="recipients",
+                label="Lista de Destinatários (JSON)",
+                type="textarea",
+                placeholder='[{"name": "Millennium BCP", "email": "millennium@exemplo.pt", "active": true}, ...]',
+                help_text="Lista de balcões/bancos em formato JSON. Cada entrada deve ter: name, email, active (true/false)"
+            ),
+            ConfigField(
+                key="email_template",
+                label="Template de Email",
+                type="textarea",
+                placeholder="Prezados,\n\nSegue em anexo a documentação do cliente {client_name}...",
+                help_text="Template do email. Variáveis disponíveis: {client_name}, {client_nif}, {process_number}, {documents_list}"
+            ),
+            ConfigField(
+                key="default_to",
+                label="Destinatário TO (Email Principal)",
+                type="text",
+                placeholder="geral@powerealestate.pt",
+                help_text="Email principal que aparecerá no campo TO"
+            ),
+            ConfigField(
+                key="default_to_name",
+                label="Nome do Destinatário TO",
+                type="text",
+                placeholder="Power Real Estate",
+                help_text="Nome do destinatário principal"
+            ),
+        ]
+    },
 }
 
 
