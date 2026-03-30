@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from database import db
 from models.system_config import (
     SystemConfig, StorageConfig, EmailConfig, AIConfig, 
-    TrelloConfig, SystemSettings, StorageProvider, CreditServicesConfig
+    TrelloConfig, SystemSettings, StorageProvider, CreditServicesConfig,
+    DocumentRecipientsConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,14 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
         current = config.credit_services.model_dump()
         current.update(filtered_data)
         config.credit_services = CreditServicesConfig(**current)
+    elif section == "document_recipients":
+        current = config.document_recipients.model_dump()
+        current.update(filtered_data)
+        # Se recipients é uma lista, converter para JSON string
+        if isinstance(current.get("recipients"), list):
+            import json
+            current["recipients"] = json.dumps(current["recipients"], ensure_ascii=False)
+        config.document_recipients = DocumentRecipientsConfig(**current)
     else:
         raise ValueError(f"Secção desconhecida: {section}")
     
