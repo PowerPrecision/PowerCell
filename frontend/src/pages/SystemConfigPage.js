@@ -13,6 +13,7 @@ import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
 import { Textarea } from "../components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import DocumentRecipientsManager from "../components/DocumentRecipientsManager";
 import {
   Select,
   SelectContent,
@@ -28,6 +29,7 @@ import {
   Sparkles,
   Trello,
   Building,
+  Building2,
   Save,
   Loader2,
   CheckCircle,
@@ -56,7 +58,7 @@ const SECTION_ICONS = {
   trello: Trello,
   settings: Building,
   maintenance: Wrench,
-  document_recipients: Mail,
+  document_recipients: Building2,
 };
 
 // Componente para campo de configuração
@@ -1076,14 +1078,18 @@ const SystemConfigPage = () => {
 
           {sections.map((key) => (
             <TabsContent key={key} value={key} className="mt-6">
-              <ConfigSection
-                section={fields[key]}
-                sectionKey={key}
-                config={config?.[key]}
-                fields={fields[key]?.fields || []}
-                onSave={handleSave}
-                onTest={handleTest}
-              />
+              {key === "document_recipients" ? (
+                <DocumentRecipientsManager token={token} user={user} />
+              ) : (
+                <ConfigSection
+                  section={fields[key]}
+                  sectionKey={key}
+                  config={config?.[key]}
+                  fields={fields[key]?.fields || []}
+                  onSave={handleSave}
+                  onTest={handleTest}
+                />
+              )}
             </TabsContent>
           ))}
           
