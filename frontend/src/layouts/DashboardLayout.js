@@ -431,6 +431,11 @@ const DashboardLayout = ({ children, title }) => {
               href: "/staff",
             },
             {
+              label: "Os Meus Processos",
+              icon: Users,
+              href: "/meus-clientes",
+            },
+            {
               label: "Registo de Clientes",
               icon: Users,
               href: "/registos-clientes",
