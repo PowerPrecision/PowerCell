@@ -234,20 +234,14 @@ export const AuthProvider = ({ children }) => {
       setIsImpersonating(false);
       setOriginalAdminName(null);
       
-      // Forçar reload da página para limpar estado
-      window.location.href = "/admin";
+      // Redirecionar para a página apropriada baseado no role
+      const redirectPage = userData.role === "admin" ? "/admin" : "/staff";
+      window.location.href = redirectPage;
       
       return userData;
     } catch (error) {
       console.error("Error stopping impersonate:", error);
-      // Fallback: limpar estado local e redirecionar para login
-      localStorage.removeItem("token");
-      localStorage.removeItem("originalToken");
-      setToken(null);
-      setUser(null);
-      setIsImpersonating(false);
-      setOriginalAdminName(null);
-      window.location.href = "/login";
+      // Não redirecionar para login - apenas propagar o erro para o componente tratar
       throw error;
     }
   };
