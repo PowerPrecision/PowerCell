@@ -165,7 +165,7 @@ async def get_notifications(
     Obter notificações do sistema.
     
     Regras de visibilidade:
-    - Admin, CEO, Diretor, Indexação, Gestor de Documentos, Administrativo: vêem TODAS as notificações (incluindo novos registos)
+    - Admin, CEO, Diretor, Indexação Administrativo: vêem TODAS as notificações (incluindo novos registos)
     - Outros: vêem apenas notificações dos seus processos
     """
     query = {}
@@ -173,8 +173,8 @@ async def get_notifications(
     if unread_only:
         query["read"] = False
     
-    # Admin, CEO, Diretor, Indexação, Gestor de Documentos e Administrativo vêem todas as notificações
-    if user["role"] not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS, UserRole.ADMINISTRATIVO]:
+    # Admin, CEO, Diretor, Indexação e Administrativo vêem todas as notificações
+    if user["role"] not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.INDEXACAO, UserRole.ADMINISTRATIVO]:
         # Outros utilizadores vêem apenas notificações dos seus processos
         # E NÃO vêem notificações de novos registos
         processes = await db.processes.find({

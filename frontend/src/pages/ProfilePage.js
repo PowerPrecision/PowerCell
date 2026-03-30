@@ -272,7 +272,6 @@ const ProfilePage = () => {
       intermediario: "Intermediário de Crédito",
       mediador: "Mediador",
       administrativo: "Administrativo(a)",
-      gestor_documentos: "Gestor de Documentos",
       indexacao: "Indexação",
       cliente: "Cliente",
     };

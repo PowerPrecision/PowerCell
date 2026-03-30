@@ -67,7 +67,7 @@ const PageLoadingSkeleton = () => (
 import "./App.css";
 
 // Staff roles that can access the Kanban dashboard
-const STAFF_ROLES = ["consultor", "mediador", "intermediario", "consultor_intermediario", "gestor_documentos", "indexacao", "diretor", "administrativo", "ceo", "admin"];
+const STAFF_ROLES = ["consultor", "mediador", "intermediario", "consultor_intermediario", "indexacao", "diretor", "administrativo", "ceo", "admin"];
 
 // Admin roles for automation and system config
 const ADMIN_ROLES = ["admin", "ceo"];

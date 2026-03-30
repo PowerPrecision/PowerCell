@@ -40,7 +40,6 @@ const ROLES = [
   { value: "mediador", label: "Mediador", color: "bg-teal-100 text-teal-800" },
   { value: "intermediario", label: "Intermediário", color: "bg-cyan-100 text-cyan-800" },
   { value: "administrativo", label: "Administrativo", color: "bg-amber-100 text-amber-800" },
-  { value: "gestor_documentos", label: "Gestor Documentos", color: "bg-slate-100 text-slate-800" },
   { value: "indexacao", label: "Indexação", color: "bg-gray-100 text-gray-800" },
 ];
 

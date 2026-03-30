@@ -47,16 +47,6 @@ async def seed_database():
                 "updated_at": datetime.now(timezone.utc).isoformat()
             },
             {
-                "id": "user-gestor-001",
-                "email": "powerprecision@sistema.pt",
-                "password": hash_password("PowerCell"),
-                "name": "Gestor de Documentos",
-                "role": "gestor_documentos",
-                "is_active": True,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            },
-            {
                 "id": "user-consultor-001",
                 "email": "consultor@sistema.pt",
                 "password": hash_password("consultor123"),

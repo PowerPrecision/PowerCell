@@ -33,8 +33,6 @@ class TestProcessEndpoints:
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_cannot_create_process(self):
-        """gestor_documentos não pode criar processos."""
         # Em ambiente real:
         # response = await client.post("/api/processes", 
         #     headers={"Authorization": f"Bearer {gestor_token}"},
@@ -113,11 +111,9 @@ class TestProcessPermissions:
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_can_view_process_details(self):
         """Gestor documentos pode ver detalhes do processo."""
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_cannot_update_process(self):
         """Gestor documentos não pode actualizar processo."""
         assert True

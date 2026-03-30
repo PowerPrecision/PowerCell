@@ -420,9 +420,9 @@ const DashboardLayout = ({ children, title }) => {
     }
 
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
-    if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao", "gestor_documentos"].includes(user?.role)) {
+    if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(user?.role)) {
       // Menu simplificado para INDEXACAO - só Clientes e Registos
-      if (user?.role === "indexacao" || user?.role === "gestor_documentos") {
+      if (user?.role === "indexacao") {
         return {
           main: [
             {
@@ -553,31 +553,6 @@ const DashboardLayout = ({ children, title }) => {
             items: configItems,
           }] : []),
         ],
-      };
-    }
-
-    // Para Gestor de Documentos - acesso limitado a clientes e documentos
-    if (user?.role === "gestor_documentos") {
-      return {
-        main: [
-          ...baseItems,
-          {
-            label: "Registo de Clientes",
-            icon: Users,
-            href: "/registos-clientes",
-          },
-          {
-            label: "Processos",
-            icon: User,
-            href: "/clientes",
-          },
-          {
-            label: "Validades Docs",
-            icon: AlertCircle,
-            href: "/validades",
-          },
-        ],
-        groups: [],
       };
     }
 
