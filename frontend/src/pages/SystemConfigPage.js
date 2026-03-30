@@ -11,6 +11,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
+import { Textarea } from "../components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
   Select,
@@ -55,6 +56,7 @@ const SECTION_ICONS = {
   trello: Trello,
   settings: Building,
   maintenance: Wrench,
+  document_recipients: Mail,
 };
 
 // Componente para campo de configuração
@@ -175,6 +177,23 @@ const ConfigFieldInput = ({ field, value, onChange, allValues }) => {
             value={value || ""}
             onChange={(e) => onChange(field.key, parseInt(e.target.value) || "")}
             placeholder={field.placeholder}
+          />
+          {field.help_text && (
+            <p className="text-xs text-muted-foreground">{field.help_text}</p>
+          )}
+        </div>
+      );
+
+    case "textarea":
+      return (
+        <div className="space-y-2">
+          <Label htmlFor={field.key}>{field.label}</Label>
+          <Textarea
+            id={field.key}
+            value={value || ""}
+            onChange={(e) => onChange(field.key, e.target.value)}
+            placeholder={field.placeholder}
+            className="min-h-[100px] font-mono text-sm"
           />
           {field.help_text && (
             <p className="text-xs text-muted-foreground">{field.help_text}</p>

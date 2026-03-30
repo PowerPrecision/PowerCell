@@ -1075,3 +1075,255 @@ async def remove_monitored_email(
         "success": True,
         "monitored_emails": monitored
     }
+
+
+# ==== ENVIO DE DOCUMENTAÇÃO PARA BALCÕES ====
+
+@router.get("/document-recipients")
+async def get_document_recipients(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Obter lista de destinatários disponíveis para envio de documentação.
+    Apenas Admin e CEO podem editar as configurações.
+    """
+    from services.system_config import get_system_config
+    
+    config = await get_system_config()
+    doc_config = config.document_recipients
+    
+    if not doc_config.enabled:
+        return {
+            "enabled": False,
+            "recipients": [],
+            "email_template": None,
+            "default_to": None,
+            "default_to_name": None
+        }
+    
+    # Parse recipients JSON
+    recipients = []
+    if doc_config.recipients:
+        try:
+            import json
+            recipients = json.loads(doc_config.recipients)
+        except (json.JSONDecodeError, TypeError):
+            recipients = []
+    
+    return {
+        "enabled": True,
+        "recipients": recipients,
+        "email_template": doc_config.email_template,
+        "default_to": doc_config.default_to,
+        "default_to_name": doc_config.default_to_name,
+        "can_edit": current_user["role"] in ["admin", "ceo"]
+    }
+
+
+@router.post("/send-documentation/{process_id}")
+async def send_documentation_email(
+    process_id: str,
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Enviar documentação do processo para balcões/bancos.
+    
+    Body:
+    - document_ids: Lista de IDs dos documentos a enviar
+    - bcc_recipients: Lista de emails BCC (destinatários selecionados)
+    - cc_emails: Lista de emails CC (opcional)
+    - custom_message: Mensagem personalizada (opcional, apenas admin/ceo)
+    
+    Validações:
+    - Não enviar para bancos onde cliente tem conta ativa
+    - Não enviar para bancos onde cliente fez simulação
+    """
+    from services.system_config import get_system_config
+    
+    # Obter processo
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    # Obter configuração
+    config = await get_system_config()
+    doc_config = config.document_recipients
+    
+    if not doc_config.enabled:
+        raise HTTPException(status_code=400, detail="Envio de documentação não está activado")
+    
+    # Dados do request
+    document_ids = data.get("document_ids", [])
+    bcc_recipients = data.get("bcc_recipients", [])
+    cc_emails = data.get("cc_emails", [])
+    custom_message = data.get("custom_message")
+    
+    if not document_ids:
+        raise HTTPException(status_code=400, detail="Selecione pelo menos um documento")
+    
+    if not bcc_recipients:
+        raise HTTPException(status_code=400, detail="Selecione pelo menos um destinatário")
+    
+    # Validar destinatários contra contas ativas e simulações
+    financial_data = process.get("financial_data", {}) or {}
+    bancos_creditos = financial_data.get("bancos_creditos", []) or []
+    bancos_simulacoes = financial_data.get("bancos_simulacoes", []) or []
+    
+    # Normalizar nomes para comparação
+    def normalize_bank_name(name):
+        return name.lower().strip() if name else ""
+    
+    blocked_banks = [normalize_bank_name(b) for b in bancos_creditos + bancos_simulacoes]
+    
+    # Parse recipients para validar
+    recipients_list = []
+    if doc_config.recipients:
+        try:
+            import json
+            recipients_list = json.loads(doc_config.recipients)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    
+    # Validar cada BCC recipient
+    validated_bcc = []
+    warnings = []
+    
+    for bcc_email in bcc_recipients:
+        # Encontrar o destinatário na lista para obter o nome
+        recipient_info = next(
+            (r for r in recipients_list if r.get("email", "").lower() == bcc_email.lower()),
+            {"name": bcc_email, "email": bcc_email}
+        )
+        
+        # Verificar se está bloqueado
+        recipient_name = normalize_bank_name(recipient_info.get("name", ""))
+        is_blocked = any(blocked in recipient_name or recipient_name in blocked for blocked in blocked_banks)
+        
+        if is_blocked:
+            warnings.append(f"⚠️ {recipient_info.get('name', bcc_email)}: Cliente tem conta ativa ou simulação neste banco")
+        else:
+            validated_bcc.append(bcc_email)
+    
+    if warnings:
+        logger.warning(f"Destinatários bloqueados para processo {process_id}: {warnings}")
+    
+    if not validated_bcc:
+        raise HTTPException(
+            status_code=400, 
+            detail="Nenhum destinatário válido. O cliente tem contas ativas ou simulações em todos os bancos selecionados."
+        )
+    
+    # Obter documentos
+    documents = await db.documents.find(
+        {"id": {"$in": document_ids}, "process_id": process_id},
+        {"_id": 0}
+    ).to_list(100)
+    
+    if not documents:
+        raise HTTPException(status_code=404, detail="Nenhum documento encontrado")
+    
+    # Preparar lista de documentos para o email
+    documents_list = "\n".join([
+        f"- {doc.get('original_name', doc.get('filename', 'Documento'))}" 
+        for doc in documents
+    ])
+    
+    # Preparar template do email
+    email_template = doc_config.email_template or """Prezados,
+
+Segue em anexo a documentação do cliente:
+
+**Cliente:** {client_name}
+**NIF:** {client_nif}
+**Processo:** #{process_number}
+
+**Documentos enviados:**
+{documents_list}
+
+Esta documentação foi enviada através do sistema PowerCell.
+
+Com os melhores cumprimentos,
+{sender_name}
+{sender_email}"""
+    
+    # Substituir variáveis
+    client_name = process.get("client_name", "N/A")
+    personal_data = process.get("personal_data", {}) or {}
+    client_nif = personal_data.get("nif", process.get("client_nif", "N/A"))
+    process_number = process.get("process_number", "N/A")
+    
+    email_body = email_template.format(
+        client_name=client_name,
+        client_nif=client_nif,
+        process_number=process_number,
+        documents_list=documents_list,
+        sender_name=current_user.get("name", ""),
+        sender_email=current_user.get("email", "")
+    )
+    
+    # Se admin/CEO enviou mensagem personalizada, usar essa
+    if custom_message and current_user["role"] in ["admin", "ceo"]:
+        email_body = custom_message.format(
+            client_name=client_name,
+            client_nif=client_nif,
+            process_number=process_number,
+            documents_list=documents_list,
+            sender_name=current_user.get("name", ""),
+            sender_email=current_user.get("email", "")
+        )
+    
+    # Preparar destinatários
+    to_emails = [doc_config.default_to] if doc_config.default_to else [current_user["email"]]
+    subject = f"Documentação - {client_name} (Processo #{process_number})"
+    
+    # Enviar email
+    result = await send_email(
+        account_name="power",  # Usar conta Power Real Estate
+        to_emails=to_emails,
+        subject=subject,
+        body=email_body,
+        cc_emails=cc_emails if cc_emails else None,
+        bcc_emails=validated_bcc,
+        process_id=process_id,
+        created_by=current_user["id"]
+    )
+    
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
+    
+    # Registar envio no histórico
+    email_record = {
+        "id": str(uuid.uuid4()),
+        "process_id": process_id,
+        "direction": "sent",
+        "from_email": current_user["email"],
+        "to_emails": to_emails,
+        "cc_emails": cc_emails or [],
+        "bcc_emails": validated_bcc,
+        "subject": subject,
+        "body": email_body,
+        "attachments": [{"id": doc.get("id"), "filename": doc.get("original_name", doc.get("filename"))} for doc in documents],
+        "status": "sent",
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": current_user["id"],
+        "notes": f"Documentação enviada para {len(validated_bcc)} destinatário(s)",
+        "is_important": False,
+        "is_read": True,
+        "is_starred": False,
+        "is_archived": False,
+        "labels": ["documentação"]
+    }
+    
+    await db.emails.insert_one(email_record)
+    
+    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {len(validated_bcc)} destinatários")
+    
+    return {
+        "success": True,
+        "message": f"Documentação enviada com sucesso para {len(validated_bcc)} destinatário(s)",
+        "warnings": warnings,
+        "sent_to": validated_bcc,
+        "email_id": email_record["id"]
+    }
