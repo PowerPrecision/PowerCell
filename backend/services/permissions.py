@@ -108,14 +108,6 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
             "upload_docs", "delete_docs", "export_data"
         ],
     },
-    "gestor_documentos": {
-        "pages": [
-            "dashboard", "processes", "documents", "notifications"
-        ],
-        "actions": [
-            "upload_docs", "delete_docs"
-        ],
-    },
     "indexacao": {
         "pages": [
             "dashboard", "processes", "documents", "notifications"
@@ -241,7 +233,6 @@ def get_role_display_info() -> Dict[str, Dict[str, str]]:
         "mediador": {"label": "Mediador", "color": "bg-teal-100 text-teal-800"},
         "intermediario": {"label": "Intermediário", "color": "bg-cyan-100 text-cyan-800"},
         "administrativo": {"label": "Administrativo", "color": "bg-amber-100 text-amber-800"},
-        "gestor_documentos": {"label": "Gestor Documentos", "color": "bg-slate-100 text-slate-800"},
         "indexacao": {"label": "Indexação", "color": "bg-gray-100 text-gray-800"},
         "cliente": {"label": "Cliente", "color": "bg-neutral-100 text-neutral-800"},
     }

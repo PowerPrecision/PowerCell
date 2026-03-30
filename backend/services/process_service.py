@@ -99,7 +99,7 @@ def can_view_process(user: dict, process: dict) -> bool:
     user_id = user.get("id", "")
     
     # Todos os staff podem ver todos os processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "gestor_documentos", "indexacao"]
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return True
     
@@ -125,7 +125,7 @@ def build_query_filter(user: dict) -> dict:
     user_id = user.get("id", "")
     
     # Todos os staff veem todos os processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "gestor_documentos", "indexacao"]
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return {}
     

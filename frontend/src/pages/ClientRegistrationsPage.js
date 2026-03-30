@@ -87,7 +87,7 @@ const ClientRegistrationsPage = () => {
   const isIndexacao = userRole === "indexacao";
   
   // Verificar permissões
-  const canAssign = userRole !== "gestor_documentos" && userRole !== "indexacao";
+  const canAssign = userRole !== "indexacao";
 
   const fetchClients = useCallback(async () => {
     setLoading(true);

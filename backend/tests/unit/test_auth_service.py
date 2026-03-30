@@ -236,7 +236,6 @@ class TestUserRoles:
             "diretor": 80,
             "consultor": 50,
             "mediador": 50,
-            "gestor_documentos": 40,
             "cliente": 10
         }
         
@@ -273,7 +272,6 @@ class TestUserRoles:
             "consultor",
             "mediador",
             "consultor_intermediario",
-            "gestor_documentos",
             "cliente"
         ]
         

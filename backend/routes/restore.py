@@ -135,7 +135,7 @@ async def restore_process(
 @router.post("/documents/{document_id}/restore")
 async def restore_document(
     document_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.GESTOR_DOCUMENTOS]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INDEXACAO]))
 ):
     """
     Restaura um documento que foi eliminado.
