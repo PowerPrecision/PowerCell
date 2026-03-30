@@ -165,25 +165,28 @@ async def get_notifications(
     Obter notificações do sistema.
     
     Regras de visibilidade:
-    - Admin, CEO, Diretor, Indexação Administrativo: vêem TODAS as notificações (incluindo novos registos)
-    - Outros: vêem apenas notificações dos seus processos
+    - Admin, CEO, Diretor: vêem TODAS as notificações (incluindo novos registos)
+    - Outros (incluindo Indexação): vêem apenas notificações dos seus processos
     """
     query = {}
     
     if unread_only:
         query["read"] = False
     
-    # Admin, CEO, Diretor, Indexação e Administrativo vêem todas as notificações
-    if user["role"] not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.INDEXACAO, UserRole.ADMINISTRATIVO]:
+    # Apenas Admin, CEO e Diretor vêem todas as notificações
+    if user["role"] not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
         # Outros utilizadores vêem apenas notificações dos seus processos
         # E NÃO vêem notificações de novos registos
+        or_conditions = [
+            {"assigned_consultor_id": user["id"]},
+            {"consultor_id": user["id"]},
+            {"assigned_mediador_id": user["id"]},
+            {"intermediario_id": user["id"]},
+            {"assigned_indexacao_id": user["id"]}  # Indexação vê processos atribuídos a ele
+        ]
+        
         processes = await db.processes.find({
-            "$or": [
-                {"assigned_consultor_id": user["id"]},
-                {"consultor_id": user["id"]},
-                {"assigned_mediador_id": user["id"]},
-                {"intermediario_id": user["id"]}
-            ]
+            "$or": or_conditions
         }, {"id": 1, "_id": 0}).to_list(1000)
         process_ids = [p["id"] for p in processes]
         

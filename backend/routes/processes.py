@@ -389,9 +389,12 @@ async def get_processes(user: dict = Depends(get_current_user)):
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
-        # Admin, CEO, Administrativo, Diretor e Indexação vêem todos os processos
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+        # Admin, CEO, Administrativo e Diretor vêem todos os processos
         pass
+    elif role == UserRole.INDEXACAO:
+        # Indexação vê apenas processos atribuídos a ele
+        query["assigned_indexacao_id"] = user["id"]
     elif role == UserRole.CONSULTOR:
         # Suporte a múltiplos consultores: verificar no array ou campo único
         query["$or"] = [
@@ -443,9 +446,12 @@ async def get_processes_paginated(
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
-        # Admin, CEO, Administrativo, Diretor e Indexação vêem todos os processos
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+        # Admin, CEO, Administrativo e Diretor vêem todos os processos
         pass
+    elif role == UserRole.INDEXACAO:
+        # Indexação vê apenas processos atribuídos a ele
+        query["assigned_indexacao_id"] = user["id"]
     elif role == UserRole.CONSULTOR:
         # Suporte a múltiplos consultores
         query["$or"] = [
@@ -533,10 +539,13 @@ async def get_kanban_board(
             {"assigned_mediador_ids": user_id},
             {"assigned_mediador_id": user_id}
         ]
-    # Admin, CEO, Administrativo, Diretor e Indexação see all (no base filter)
+    elif role == UserRole.INDEXACAO:
+        # Indexação vê apenas processos atribuídos a ele
+        query["assigned_indexacao_id"] = user_id
+    # Admin, CEO, Administrativo e Diretor see all (no base filter)
 
     # Apply additional filters (only for roles that can see all)
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
+    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         if consultor_id:
             if consultor_id == "none":
                 # Sem consultor atribuído
