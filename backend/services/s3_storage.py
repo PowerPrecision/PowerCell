@@ -129,11 +129,23 @@ class S3Service:
         Returns:
             Caminho base no S3
         """
-        safe_name = sanitize_folder_name(client_name)
+        # Validar entradas
+        if not client_name:
+            client_name = "cliente"
+        
+        try:
+            safe_name = sanitize_folder_name(client_name)
+        except Exception as e:
+            logger.warning(f"Erro ao sanitizar nome do cliente: {e}")
+            safe_name = "cliente"
         
         # Incluir segundo titular se existir
         if second_client_name and second_client_name.strip():
-            safe_second_name = sanitize_folder_name(second_client_name)
+            try:
+                safe_second_name = sanitize_folder_name(second_client_name)
+            except Exception as e:
+                logger.warning(f"Erro ao sanitizar nome do segundo titular: {e}")
+                safe_second_name = "titular2"
             combined_name = f"{safe_name}_e_{safe_second_name}"
             if len(combined_name) > 100:
                 combined_name = combined_name[:100]
@@ -143,10 +155,14 @@ class S3Service:
         
         # PRIMEIRO: Tentar encontrar pasta existente (case-insensitive)
         # Isto é crucial para evitar criar pastas duplicadas
-        existing_folder = self._find_client_folder_combined(client_name, second_client_name)
-        if existing_folder:
-            logger.info(f"Pasta existente encontrada para {client_name}: {existing_folder}")
-            return existing_folder
+        try:
+            existing_folder = self._find_client_folder_combined(client_name, second_client_name)
+            if existing_folder:
+                logger.info(f"Pasta existente encontrada para {client_name}: {existing_folder}")
+                return existing_folder
+        except Exception as e:
+            logger.warning(f"Erro ao procurar pasta existente: {e}")
+            # Continuar com o nome sanitizado
         
         # Se não existe, usar o nome sanitizado (sem incrementador)
         base_path = f"Documentação Clientes/{base_name}"
@@ -169,8 +185,14 @@ class S3Service:
                 Delimiter="/"
             )
             
+            # Se não houver pastas, retornar None
+            if not response.get("CommonPrefixes"):
+                return None
+            
             # Construir nome de busca
-            clean_name = client_name.strip()
+            clean_name = client_name.strip() if client_name else ""
+            if not clean_name:
+                return None
             search_name = clean_name.lower()
             
             # Se há segundo titular, incluir na busca
@@ -209,18 +231,24 @@ class S3Service:
                 if search_words_filtered and folder_words_filtered:
                     # Calcular interseção
                     intersection = search_words_filtered & folder_words_filtered
-                    score = len(intersection) / max(len(search_words_filtered), len(folder_words_filtered))
+                    max_len = max(len(search_words_filtered), len(folder_words_filtered))
+                    if max_len > 0:
+                        score = len(intersection) / max_len
                     
                     # Bonus se o primeiro nome está presente
-                    first_name = clean_name.split()[0].lower()
-                    if first_name in folder_lower:
-                        score += 0.2
+                    first_name_parts = clean_name.split()
+                    if first_name_parts:
+                        first_name = first_name_parts[0].lower()
+                        if first_name in folder_lower:
+                            score += 0.2
                     
                     # Bonus se segundo titular está presente
                     if second_client_name and second_client_name.strip():
-                        second_first_name = second_client_name.strip().split()[0].lower()
-                        if second_first_name in folder_lower:
-                            score += 0.2
+                        second_parts = second_client_name.strip().split()
+                        if second_parts:
+                            second_first_name = second_parts[0].lower()
+                            if second_first_name in folder_lower:
+                                score += 0.2
                     
                     if score > best_score and score >= 0.7:
                         best_score = score
