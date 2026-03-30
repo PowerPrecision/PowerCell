@@ -142,7 +142,7 @@ async def auto_categorize_document_background(
         
         now = datetime.now(timezone.utc).isoformat()
         
-        # Criar ou actualizar metadados
+        # Criar ou actualizar metadados - CORRIGIDO: verificar se existing é None
         doc_id = existing.get("id") if existing else str(uuid.uuid4())
         
         metadata = {
@@ -179,8 +179,9 @@ async def auto_categorize_document_background(
         
         logger.info(f"[AUTO-CAT] Categorização concluída")
         
-    except (IOError, OSError, ValueError, KeyError, TypeError):
-        logger.error("[AUTO-CAT] Erro ao categorizar documento")
+    except Exception as e:
+        # Capturar TODOS os erros para não crashar a tarefa de background
+        logger.error(f"[AUTO-CAT] Erro ao categorizar documento: {type(e).__name__}: {e}")
 
 
 # ====================================================================
