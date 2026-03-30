@@ -56,8 +56,8 @@ async def get_my_clients(user: dict = Depends(require_roles([
             ]
         }
     elif role == UserRole.INDEXACAO:
-        # Indexacao vê todos os processos para gerir documentos
-        query = {}
+        # Indexacao vê apenas processos atribuídos a ele
+        query = {"assigned_indexacao_id": user_id}
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         # Admin/CEO/Diretor vêem todos
         query = {}
@@ -132,7 +132,7 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
             ]
         }
     elif role == UserRole.INDEXACAO:
-        query = {}
+        query = {"assigned_indexacao_id": user_id}
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         query = {}
     else:
