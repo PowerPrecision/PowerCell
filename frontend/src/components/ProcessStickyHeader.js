@@ -264,12 +264,6 @@ const ProcessStickyHeader = ({
                     </span>
                   </div>
                 )}
-                {process?.indexacao_name && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500">Indexação:</span>
-                    <span className="font-medium">{process.indexacao_name}</span>
-                  </div>
-                )}
               </div>
             </div>
           )}
