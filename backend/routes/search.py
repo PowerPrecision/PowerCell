@@ -77,6 +77,46 @@ async def global_search(
         
         results["processes"] = processes
         
+        # Pesquisar CLIENTES (registos de clientes)
+        client_query = {
+            "$or": [
+                {"nome": regex_pattern},
+                {"dados_pessoais.nif": regex_pattern},
+                {"contacto.email": regex_pattern},
+                {"contacto.telefone": regex_pattern},
+            ]
+        }
+        
+        clients = await db.clients.find(
+            client_query,
+            {
+                "_id": 0,
+                "id": 1,
+                "nome": 1,
+                "dados_pessoais": 1,
+                "contacto": 1,
+                "process_ids": 1,
+                "assigned_to": 1
+            }
+        ).limit(limit).to_list(limit)
+        
+        # Formatar resultados dos clientes
+        formatted_clients = []
+        for client in clients:
+            # Se tem processos, usar o primeiro processo para navegação
+            process_ids = client.get("process_ids", [])
+            formatted_clients.append({
+                "id": client.get("id"),
+                "client_name": client.get("nome"),
+                "personal_data": client.get("dados_pessoais", {}),
+                "contacto": client.get("contacto", {}),
+                "has_process": bool(process_ids),
+                "process_count": len(process_ids),
+                "first_process_id": process_ids[0] if process_ids else None
+            })
+        
+        results["clients"] = formatted_clients
+        
         # Pesquisar tarefas
         task_query = {
             "$or": [
@@ -100,11 +140,7 @@ async def global_search(
         
         results["tasks"] = tasks
         
-        # Clientes são os mesmos processos mas com filtro diferente
-        # (mantemos separado para compatibilidade com o frontend)
-        results["clients"] = []
-        
-        logger.info(f"Pesquisa global '{search_term}': {len(processes)} processos, {len(tasks)} tarefas")
+        logger.info(f"Pesquisa global '{search_term}': {len(processes)} processos, {len(formatted_clients)} clientes, {len(tasks)} tarefas")
         
     except Exception as e:
         logger.error(f"Erro na pesquisa global: {e}")
