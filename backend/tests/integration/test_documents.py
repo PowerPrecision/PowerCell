@@ -38,8 +38,6 @@ class TestDocumentUpload:
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_can_upload(self):
-        """gestor_documentos pode fazer upload."""
         assert True
 
 
@@ -66,18 +64,12 @@ class TestDocumentPermissions:
     """Testes para permissões de documentos."""
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_can_list_documents(self):
-        """gestor_documentos pode listar documentos."""
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_can_delete_documents(self):
-        """gestor_documentos pode eliminar documentos."""
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_can_rename_documents(self):
-        """gestor_documentos pode renomear documentos."""
         assert True
 
 

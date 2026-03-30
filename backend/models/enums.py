@@ -92,7 +92,7 @@ class UserRoleEnum(str, Enum):
     INTERMEDIARIO = "intermediario"
     MEDIADOR = "mediador"
     ADMINISTRATIVO = "administrativo"
-    GESTOR_DOCUMENTOS = "gestor_documentos"
+    INDEXACAO = "indexacao"
     DIRETOR = "diretor"
     CEO = "ceo"
     ADMIN = "admin"

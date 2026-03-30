@@ -1132,7 +1132,7 @@ EXPIRY_WARNING_DAYS = 60
 @router.post("/expiry", response_model=DocumentExpiryResponse, responses={404: HTTP_404_RESPONSE})
 async def create_document_expiry(
     data: DocumentExpiryCreate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.GESTOR_DOCUMENTOS]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INDEXACAO]))
 ):
     """Registar validade de um documento."""
     process = await db.processes.find_one({"id": data.process_id})
@@ -1229,7 +1229,7 @@ async def get_expiry_calendar_events(user: dict = Depends(get_current_user)):
     return events
 
 @router.delete("/expiry/{doc_id}", responses={404: HTTP_404_RESPONSE})
-async def delete_document_expiry(doc_id: str, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.GESTOR_DOCUMENTOS]))):
+async def delete_document_expiry(doc_id: str, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INDEXACAO]))):
     delete_result = await db.document_expiries.delete_one({"id": doc_id})
     if delete_result.deleted_count == 0:
         raise HTTPException(status_code=404, detail=ERROR_RECORD_NOT_FOUND)
