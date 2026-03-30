@@ -24,8 +24,6 @@ class TestClientEndpoints:
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_cannot_create_client(self):
-        """gestor_documentos não pode criar clientes."""
         # Verificar que retorna 403
         assert True
     
@@ -54,8 +52,6 @@ class TestClientProcessRelation:
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_cannot_create_process_for_client(self):
-        """gestor_documentos não pode criar processo para cliente."""
         # POST /api/clients/{id}/create-process deve retornar 403
         assert True
     
@@ -93,13 +89,9 @@ class TestClientPermissions:
     """Testes para permissões de clientes."""
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_can_view_clients(self):
-        """gestor_documentos pode ver lista de clientes."""
         assert True
     
     @pytest.mark.asyncio
-    async def test_gestor_documentos_can_view_client_details(self):
-        """gestor_documentos pode ver detalhes de cliente."""
         assert True
     
     @pytest.mark.asyncio

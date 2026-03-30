@@ -124,11 +124,11 @@ export default function ClientsPage() {
   // Verificar se pode eliminar clientes (apenas admin, ceo, diretor, administrativo)
   const canDeleteClients = ["admin", "ceo", "diretor", "administrativo"].includes(user?.role);
   
-  // Verificar se pode criar processos (gestor_documentos NÃO pode)
-  const canCreateProcess = user?.role !== "gestor_documentos" && user?.role !== "indexacao";
+  // Verificar se pode criar processos (indexacao NÃO pode)
+  const canCreateProcess = user?.role !== "indexacao";
   
-  // Verificar se pode criar clientes (gestor_documentos NÃO pode)
-  const canCreateClients = user?.role !== "gestor_documentos";
+  // Verificar se pode criar clientes
+  const canCreateClients = true;
 
   const fetchClients = useCallback(async () => {
     try {

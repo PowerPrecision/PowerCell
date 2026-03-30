@@ -389,8 +389,8 @@ async def get_processes(user: dict = Depends(get_current_user)):
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]:
-        # Admin, CEO, Administrativo, Diretor, Indexação e Gestor de Documentos vêem todos os processos
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
+        # Admin, CEO, Administrativo, Diretor e Indexação vêem todos os processos
         pass
     elif role == UserRole.CONSULTOR:
         # Suporte a múltiplos consultores: verificar no array ou campo único
@@ -443,8 +443,8 @@ async def get_processes_paginated(
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]:
-        # Admin, CEO, Administrativo, Diretor, Indexação e Gestor de Documentos vêem todos os processos
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
+        # Admin, CEO, Administrativo, Diretor e Indexação vêem todos os processos
         pass
     elif role == UserRole.CONSULTOR:
         # Suporte a múltiplos consultores
@@ -533,10 +533,10 @@ async def get_kanban_board(
             {"assigned_mediador_ids": user_id},
             {"assigned_mediador_id": user_id}
         ]
-    # Admin, CEO, Administrativo, Diretor, Indexação e Gestor de Documentos see all (no base filter)
+    # Admin, CEO, Administrativo, Diretor e Indexação see all (no base filter)
 
     # Apply additional filters (only for roles that can see all)
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]:
+    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
         if consultor_id:
             if consultor_id == "none":
                 # Sem consultor atribuído
@@ -1013,10 +1013,7 @@ async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depe
     
     role = user["role"]
     
-    # Gestor de Documentos e Indexação não podem actualizar dados do processo
-    if role == UserRole.GESTOR_DOCUMENTOS:
-        raise HTTPException(status_code=403, detail="Gestor de Documentos não pode alterar dados do processo. Apenas documentos.")
-    
+    # Indexação não pode actualizar dados do processo
     if role == UserRole.INDEXACAO:
         raise HTTPException(status_code=403, detail="Indexação não pode alterar dados do processo. Apenas visualizar e gerir documentos.")
     
