@@ -228,6 +228,9 @@ class S3Service:
                 search_words_filtered = search_words - common_words
                 folder_words_filtered = folder_words - common_words
                 
+                # Inicializar score
+                score = 0
+                
                 if search_words_filtered and folder_words_filtered:
                     # Calcular interseção
                     intersection = search_words_filtered & folder_words_filtered
@@ -661,6 +664,9 @@ class S3Service:
         Cria a estrutura de pastas padrão para um novo cliente.
         No S3, cria-se um ficheiro vazio '.keep' para marcar a pasta.
         
+        IMPORTANTE: Primeiro verifica se já existe pasta para o cliente
+        antes de criar nova, para evitar duplicados.
+        
         Args:
             client_id: ID do processo/cliente
             client_name: Nome do cliente
@@ -673,19 +679,36 @@ class S3Service:
         """
         if not self.is_configured():
             return (False, None)
-            
-        base_path = self._get_client_base_path(client_id, client_name, second_client_name)
         
+        # PRIMEIRO: Verificar se já existe pasta para este cliente
+        existing_folder = self._find_client_folder_combined(client_name, second_client_name)
+        if existing_folder:
+            logger.info(f"Usando pasta existente para {client_name}: {existing_folder}")
+            base_path = existing_folder
+        else:
+            # Só criar nova pasta se não existir nenhuma
+            base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
+            logger.info(f"Criando nova pasta para {client_name}: {base_path}")
+            
         try:
             for category in DEFAULT_CATEGORIES:
                 safe_category = sanitize_folder_name(category)
                 path = f"{base_path}/{safe_category}/.keep"
-                self.s3_client.put_object(
-                    Bucket=self.bucket_name, 
-                    Key=path,
-                    Body=b''
-                )
-            logger.info(f"Estrutura de pastas criada para cliente: {client_id} -> {base_path}")
+                # Verificar se já existe antes de criar
+                try:
+                    self.s3_client.head_object(
+                        Bucket=self.bucket_name,
+                        Key=path
+                    )
+                    # Já existe, não precisa criar
+                except Exception:
+                    # Não existe, criar
+                    self.s3_client.put_object(
+                        Bucket=self.bucket_name, 
+                        Key=path,
+                        Body=b''
+                    )
+            logger.info(f"Estrutura de pastas criada/verificada para cliente: {client_id} -> {base_path}")
             return (True, base_path)
         except ClientError as e:
             logger.error(f"Erro ao criar pastas S3: {e}")

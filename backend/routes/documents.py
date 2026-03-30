@@ -361,6 +361,7 @@ async def upload_file_s3(
         # Inicializar variáveis de conversão
         was_extracted = False
         was_converted = False
+        conversion_info = {}  # Inicializar para evitar UnboundLocalError
         
         try:
             # Usar validate_and_convert_file para validação, extração e conversão
@@ -388,6 +389,10 @@ async def upload_file_s3(
         except HTTPException as e:
             logger.warning(f"[UPLOAD] Ficheiro rejeitado: {sanitize_for_log(original_filename)} - {e.detail}")
             raise
+        except Exception as e:
+            # Se houver erro na validação, continuar com o ficheiro original
+            logger.warning(f"[UPLOAD] Erro na validação/conversão, usando ficheiro original: {e}")
+            # conversion_info já está inicializado como {} acima
         
         # Verificar se é uma imagem e converter para PDF (fallback para imagens puras)
         # Nota: was_converted já pode ter sido definido acima se a conversão automática funcionou
@@ -467,7 +472,7 @@ async def upload_file_s3(
             "converted_to_pdf": converted_to_pdf,
             "was_extracted": was_extracted,
             "was_converted": was_converted,
-            "conversion_method": conversion_info.get("conversion_method") if 'conversion_info' in dir() else None,
+            "conversion_method": conversion_info.get("conversion_method"),
             "auto_categorization": "iniciada",  # Indica que categorização foi agendada
             "temporary_url": temporary_url  # URL para acesso imediato (válido 1 hora)
         }
@@ -2033,6 +2038,11 @@ async def organize_documents_after_analysis(
     results = {"organized": [], "errors": [], "folders_created": []}
     
     if create_folders and s3_service.is_configured():
+        # IMPORTANTE: Obter base_path UMA única vez ANTES do loop
+        # Usar _get_client_base_path_for_upload para respeitar pastas existentes
+        base_path = s3_service._get_client_base_path_for_upload(process_id, client_name, None)
+        logger.info(f"Organizar documentos: usando pasta {base_path} para {client_name}")
+        
         # Criar pastas standard se não existirem
         standard_folders = [
             "Identificação",
@@ -2052,7 +2062,6 @@ async def organize_documents_after_analysis(
         
         for folder in standard_folders:
             try:
-                base_path = s3_service._get_client_base_path(process_id, client_name)
                 folder_key = f"{base_path}/{folder}/.keep"
                 
                 # Verificar se pasta já existe
