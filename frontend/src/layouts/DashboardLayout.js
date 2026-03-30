@@ -421,7 +421,7 @@ const DashboardLayout = ({ children, title }) => {
 
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
     if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(user?.role)) {
-      // Menu simplificado para INDEXACAO - só Clientes e Registos
+      // Menu simplificado para INDEXACAO - só Os Meus Processos onde está atribuído
       if (user?.role === "indexacao") {
         return {
           main: [
@@ -434,16 +434,6 @@ const DashboardLayout = ({ children, title }) => {
               label: "Os Meus Processos",
               icon: Users,
               href: "/meus-clientes",
-            },
-            {
-              label: "Registo de Clientes",
-              icon: Users,
-              href: "/registos-clientes",
-            },
-            {
-              label: "Processos",
-              icon: User,
-              href: "/clientes",
             },
           ],
           groups: [],
