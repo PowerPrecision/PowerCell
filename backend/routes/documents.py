@@ -347,8 +347,16 @@ async def upload_file_s3(
         
         # Ler o conteúdo do ficheiro
         file_content = await file.read()
-        original_filename = file.filename
-        content_type = file.content_type
+        original_filename = file.filename or f"documento_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+        content_type = file.content_type or "application/octet-stream"
+        
+        # ====================================================================
+        # Inicializar todas as variáveis de controlo
+        # ====================================================================
+        was_extracted = False
+        was_converted = False
+        converted_to_pdf = False
+        conversion_info = {}
         
         # ====================================================================
         # SEGURANÇA: Validar MIME type usando magic bytes (não apenas extensão)
@@ -357,11 +365,6 @@ async def upload_file_s3(
         # E: Converte automaticamente ficheiros para PDF quando possível
         # ====================================================================
         from services.file_validation import validate_and_convert_file
-        
-        # Inicializar variáveis de conversão
-        was_extracted = False
-        was_converted = False
-        conversion_info = {}  # Inicializar para evitar UnboundLocalError
         
         try:
             # Usar validate_and_convert_file para validação, extração e conversão
@@ -441,27 +444,37 @@ async def upload_file_s3(
         if not s3_path:
             raise HTTPException(status_code=500, detail=ERROR_S3_UPLOAD_FAILED)
         
-        # Gerar link temporário para acesso imediato
-        temporary_url = s3_service.get_presigned_url(s3_path) or ""
+        # Gerar link temporário para acesso imediato (não falha se houver erro)
+        try:
+            temporary_url = s3_service.get_presigned_url(s3_path) or ""
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Erro ao gerar URL temporário: {e}")
+            temporary_url = ""
         
         # Agendar categorização automática em background (não bloqueia o response)
-        background_tasks.add_task(
-            auto_categorize_document_background,
-            process_id=client_id,
-            client_name=client_name,
-            s3_path=s3_path,
-            filename=normalized_filename,
-            file_content=file_content
-        )
+        try:
+            background_tasks.add_task(
+                auto_categorize_document_background,
+                process_id=client_id,
+                client_name=client_name,
+                s3_path=s3_path,
+                filename=normalized_filename,
+                file_content=file_content
+            )
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Erro ao agendar categorização: {e}")
         
-        # Registar no histórico
-        await log_history(
-            process_id=client_id,
-            user=user,
-            action="Carregou documento",
-            field="documento",
-            new_value=f"{normalized_filename} ({category})"
-        )
+        # Registar no histórico (não falha o upload se houver erro)
+        try:
+            await log_history(
+                process_id=client_id,
+                user=user,
+                action="Carregou documento",
+                field="documento",
+                new_value=f"{normalized_filename} ({category})"
+            )
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Erro ao registar histórico: {e}")
         
         return {
             "success": True, 
