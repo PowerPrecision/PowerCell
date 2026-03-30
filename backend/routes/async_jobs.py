@@ -25,6 +25,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from database import db
@@ -287,13 +288,16 @@ async def enqueue_session_analysis(
             document_type=document_type
         )
         
-        return {
-            "status": "sync_completed",
-            "session_id": session_id,
-            "filename": filename,
-            "result": result,
-            "async_mode": False,
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "sync_completed",
+                "session_id": session_id,
+                "filename": filename,
+                "result": result,
+                "async_mode": False,
+            }
+        )
     
     # Enfileirar para processamento assíncrono
     job_id = await enqueue_document_analysis(
@@ -307,14 +311,17 @@ async def enqueue_session_analysis(
     )
     
     if job_id:
-        return {
-            "status": "queued",
-            "job_id": job_id,
-            "session_id": session_id,
-            "filename": filename,
-            "async_mode": True,
-            "message": f"Análise enfileirada. Use GET /jobs/{job_id} para status.",
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "queued",
+                "job_id": job_id,
+                "session_id": session_id,
+                "filename": filename,
+                "async_mode": True,
+                "message": f"Análise enfileirada. Use GET /jobs/{job_id} para status.",
+            }
+        )
     else:
         raise HTTPException(
             status_code=500,

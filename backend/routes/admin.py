@@ -772,7 +772,7 @@ async def impersonate_user(user_id: str, user: dict = Depends(require_roles([Use
 
 
 @router.post("/stop-impersonate")
-async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))):
+async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.GESTOR_DOCUMENTOS]))):
     """
     Terminar sessão de impersonate e voltar à conta original.
     Requer o token do admin original.

@@ -861,7 +861,11 @@ async def delete_file_s3(
         old_value=filename
     )
     
-    return {"success": True, "message": "Ficheiro eliminado"}
+    # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
+    return JSONResponse(
+        status_code=200,
+        content={"success": True, "message": "Ficheiro eliminado"}
+    )
 
 
 @router.post("/check-move-conflict", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE})
