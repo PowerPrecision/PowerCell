@@ -20,6 +20,7 @@ from io import BytesIO
 
 # Adicionados UploadFile, File, Form para o S3
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response
+from fastapi.responses import JSONResponse
 
 from database import db
 from models.auth import UserRole
@@ -480,19 +481,23 @@ async def upload_file_s3(
         
         logger.info(f"[UPLOAD] Upload concluído com sucesso: {normalized_filename}")
         
-        return {
-            "success": True, 
-            "path": s3_path, 
-            "message": "Ficheiro guardado com sucesso",
-            "original_filename": file.filename,
-            "normalized_filename": normalized_filename,
-            "converted_to_pdf": converted_to_pdf,
-            "was_extracted": was_extracted,
-            "was_converted": was_converted,
-            "conversion_method": conversion_info.get("conversion_method"),
-            "auto_categorization": "iniciada",  # Indica que categorização foi agendada
-            "temporary_url": temporary_url  # URL para acesso imediato (válido 1 hora)
-        }
+        # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True, 
+                "path": s3_path, 
+                "message": "Ficheiro guardado com sucesso",
+                "original_filename": file.filename,
+                "normalized_filename": normalized_filename,
+                "converted_to_pdf": converted_to_pdf,
+                "was_extracted": was_extracted,
+                "was_converted": was_converted,
+                "conversion_method": conversion_info.get("conversion_method"),
+                "auto_categorization": "iniciada",
+                "temporary_url": temporary_url
+            }
+        )
     
     except HTTPException:
         # Re-raise HTTPExceptions para manter o status code correto
