@@ -179,6 +179,15 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [moving, setMoving] = useState(false);
   const [dragCounter, setDragCounter] = useState(0); // Contador para drag enter/leave correto
   
+  // Estado para conflito de nomes ao mover/renomear
+  const [conflictDialog, setConflictDialog] = useState({ 
+    open: false, 
+    files: [], 
+    targetCategory: null,
+    currentIndex: 0,
+    conflicts: []
+  });
+  
   // Estado para ordenação de ficheiros
   const [sortBy, setSortBy] = useState("date"); // "date", "name", "size", "category"
   const [sortOrder, setSortOrder] = useState("desc"); // "asc", "desc"
@@ -1155,6 +1164,83 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
+  // Função para verificar conflitos antes de mover
+  const checkMoveConflicts = async (filesToMove, targetCategory) => {
+    const conflicts = [];
+    
+    for (const file of filesToMove) {
+      try {
+        const response = await fetch(
+          `${API_URL}/api/documents/check-move-conflict`,
+          {
+            method: 'POST',
+            headers: { 
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              process_id: processId,
+              source_path: file.path,
+              target_category: targetCategory
+            })
+          }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.has_conflict) {
+            conflicts.push({
+              file,
+              conflictPath: data.conflict_path,
+              conflictFilename: data.conflict_filename,
+              suggestedNames: data.suggested_names
+            });
+          }
+        }
+      } catch (err) {
+        console.error(`Erro ao verificar conflito para ${file.name}:`, err);
+      }
+    }
+    
+    return conflicts;
+  };
+
+  // Função para mover um ficheiro com opções de conflito
+  const moveFileWithConflictHandling = async (file, targetCategory, action = 'rename', customName = null) => {
+    const body = {
+      source_path: file.path,
+      target_category: targetCategory
+    };
+    
+    if (action === 'overwrite') {
+      body.overwrite = true;
+    } else if (action === 'rename') {
+      body.auto_rename = true;
+    } else if (action === 'custom' && customName) {
+      body.target_filename = customName;
+      body.auto_rename = true;
+    }
+    
+    const response = await fetch(
+      `${API_URL}/api/documents/move-file/${processId}`,
+      {
+        method: 'POST',
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      }
+    );
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail?.message || errorData.detail || 'Erro ao mover ficheiro');
+    }
+    
+    return response.json();
+  };
+
   const handleDrop = async (e, targetCategory) => {
     e.preventDefault();
     const previousDropTarget = dropTarget;
@@ -1182,37 +1268,47 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
 
     setMoving(true);
-    const fileCount = filesToActuallyMove.length;
-    toast.info(`A mover ${fileCount} ficheiro${fileCount > 1 ? 's' : ''} para ${targetCategory}...`);
+    toast.info(`A verificar conflitos...`);
 
+    try {
+      // Verificar conflitos antes de mover
+      const conflicts = await checkMoveConflicts(filesToActuallyMove, targetCategory);
+      
+      if (conflicts.length > 0) {
+        // Existem conflitos - mostrar diálogo de confirmação
+        setConflictDialog({
+          open: true,
+          files: filesToActuallyMove,
+          targetCategory,
+          currentIndex: 0,
+          conflicts,
+          totalFiles: filesToActuallyMove.length
+        });
+        setMoving(false);
+        return;
+      }
+      
+      // Sem conflitos - mover diretamente
+      await executeMoveFiles(filesToActuallyMove, targetCategory);
+      
+    } catch (error) {
+      console.error("Erro ao mover ficheiros:", error);
+      toast.error("Erro ao mover ficheiros");
+      setMoving(false);
+    }
+  };
+
+  // Função para executar a movimentação dos ficheiros
+  const executeMoveFiles = async (filesToMove, targetCategory, conflictAction = 'rename') => {
+    setMoving(true);
     let successCount = 0;
     let errorCount = 0;
 
     try {
-      // Mover cada ficheiro
-      for (const file of filesToActuallyMove) {
+      for (const file of filesToMove) {
         try {
-          const response = await fetch(
-            `${API_URL}/api/documents/move-file/${processId}`,
-            {
-              method: 'POST',
-              headers: { 
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                source_path: file.path,
-                target_category: targetCategory
-              })
-            }
-          );
-
-          if (response.ok) {
-            successCount++;
-          } else {
-            errorCount++;
-            console.error(`Erro ao mover ${file.name}`);
-          }
+          await moveFileWithConflictHandling(file, targetCategory, conflictAction);
+          successCount++;
         } catch (err) {
           errorCount++;
           console.error(`Erro ao mover ${file.name}:`, err);
@@ -1237,6 +1333,74 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       setDraggedFile(null);
       setDraggedFiles([]);
     }
+  };
+
+  // Função para lidar com a decisão do utilizador no diálogo de conflito
+  const handleConflictDecision = async (decision, customName = null) => {
+    const { files, targetCategory, currentIndex, conflicts } = conflictDialog;
+    const currentConflict = conflicts.find(c => c.file === files[currentIndex]);
+    
+    if (decision === 'skip') {
+      // Pular este ficheiro
+      if (currentIndex < files.length - 1) {
+        setConflictDialog(prev => ({ ...prev, currentIndex: currentIndex + 1 }));
+        return;
+      }
+    } else {
+      // Mover o ficheiro atual com a decisão tomada
+      try {
+        if (currentConflict) {
+          await moveFileWithConflictHandling(
+            currentConflict.file, 
+            targetCategory, 
+            decision,
+            customName
+          );
+          toast.success(`${currentConflict.file.name} movido com sucesso`);
+        }
+      } catch (err) {
+        toast.error(`Erro ao mover ${currentConflict?.file?.name || 'ficheiro'}: ${err.message}`);
+      }
+    }
+    
+    // Passar ao próximo ficheiro ou fechar diálogo
+    if (currentIndex < files.length - 1) {
+      // Verificar se há mais conflitos
+      const nextFiles = files.slice(currentIndex + 1);
+      const remainingConflicts = conflicts.filter(c => nextFiles.includes(c.file));
+      
+      if (remainingConflicts.length > 0) {
+        setConflictDialog(prev => ({ 
+          ...prev, 
+          currentIndex: currentIndex + 1,
+          conflicts: remainingConflicts
+        }));
+        return;
+      } else {
+        // Mover os restantes sem conflito
+        await executeMoveFiles(nextFiles, targetCategory);
+      }
+    }
+    
+    // Fechar diálogo e limpar
+    setConflictDialog({ open: false, files: [], targetCategory: null, currentIndex: 0, conflicts: [] });
+    setDraggedFile(null);
+    setDraggedFiles([]);
+    fetchFiles();
+  };
+
+  // Função para aplicar decisão a todos os conflitos restantes
+  const handleConflictDecisionForAll = async (decision) => {
+    const { files, targetCategory, currentIndex } = conflictDialog;
+    const remainingFiles = files.slice(currentIndex);
+    
+    setConflictDialog(prev => ({ ...prev, open: false }));
+    
+    // Mover todos os ficheiros restantes com a ação escolhida
+    await executeMoveFiles(remainingFiles, targetCategory, decision);
+    
+    setDraggedFile(null);
+    setDraggedFiles([]);
   };
 
   if (loading) {
@@ -2147,6 +2311,119 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog para conflito de nomes ao mover/renomear */}
+      <Dialog open={conflictDialog.open} onOpenChange={(open) => {
+        if (!open) {
+          setConflictDialog({ open: false, files: [], targetCategory: null, currentIndex: 0, conflicts: [] });
+          setDraggedFile(null);
+          setDraggedFiles([]);
+        }
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Ficheiro com Nome Duplicado
+            </DialogTitle>
+            <DialogDescription>
+              Já existe um ficheiro com o mesmo nome na pasta de destino.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {conflictDialog.conflicts?.length > 0 && (
+            <div className="space-y-4 py-4">
+              {/* Info do ficheiro em conflito */}
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-8 w-8 text-amber-600" />
+                  <div>
+                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                      {conflictDialog.conflicts[0]?.conflictFilename || conflictDialog.conflicts[0]?.file?.name}
+                    </p>
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                      Destino: {conflictDialog.targetCategory}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Mostrar mais ficheiros se houver múltiplos conflitos */}
+              {conflictDialog.conflicts.length > 1 && (
+                <p className="text-sm text-muted-foreground">
+                  +{conflictDialog.conflicts.length - 1} outro(s) ficheiro(s) com conflito
+                </p>
+              )}
+              
+              {/* Opções de resolução */}
+              <div className="space-y-2">
+                <p className="text-sm font-medium">O que deseja fazer?</p>
+                
+                {/* Sugestões de nomes alternativos */}
+                {conflictDialog.conflicts[0]?.suggestedNames?.length > 0 && (
+                  <div className="bg-muted/50 rounded-lg p-3 mb-3">
+                    <p className="text-xs text-muted-foreground mb-2">Nomes sugeridos:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {conflictDialog.conflicts[0].suggestedNames.slice(0, 3).map((suggestion, idx) => (
+                        <Button
+                          key={idx}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleConflictDecision('custom', suggestion.filename)}
+                          className="text-xs"
+                        >
+                          <Save className="h-3 w-3 mr-1" />
+                          {suggestion.filename || suggestion}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => handleConflictDecision('rename')}
+                    className="w-full"
+                  >
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Renomear Automaticamente
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => handleConflictDecision('overwrite')}
+                    className="w-full"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Substituir Existente
+                  </Button>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleConflictDecision('skip')}
+                    className="w-full"
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Ignorar Este
+                  </Button>
+                  {conflictDialog.conflicts?.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => handleConflictDecisionForAll('rename')}
+                      className="w-full text-amber-600 hover:text-amber-700"
+                    >
+                      <FolderSync className="h-4 w-4 mr-2" />
+                      Renomear Todos
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog para geração de minutas */}
       <Dialog open={templateDialog.open} onOpenChange={(open) => {
