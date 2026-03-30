@@ -75,6 +75,7 @@ import ProcessStickyHeader from "../components/ProcessStickyHeader";
 import DSTICalculator from "../components/DSTICalculator";
 import RiskCalculator from "../components/RiskCalculator";
 import TempLinkButton from "../components/TempLinkButton";
+import SendDocumentationModal from "../components/SendDocumentationModal";
 import {
   ArrowLeft,
   User,
@@ -98,6 +99,7 @@ import {
   ExternalLink,
   Users,
   Sparkles,
+  Mail,
   Phone,
   MapPin,
   FileSignature,
@@ -273,7 +275,10 @@ const ProcessDetails = () => {
   
   // Estado para o modal CPCV
   const [showCPCVModal, setShowCPCVModal] = useState(false);
-  
+
+  // Estado para o modal de envio de documentação
+  const [showSendDocsModal, setShowSendDocsModal] = useState(false);
+
   // Buscar utilizadores
   const fetchUsers = async () => {
     setLoadingUsers(true);
@@ -1165,6 +1170,20 @@ const ProcessDetails = () => {
               >
                 <FileSignature className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">CPCV</span>
+              </Button>
+            )}
+
+            {/* Botão Enviar Documentação para Balcões */}
+            {user?.role !== "indexacao" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-teal-600 border-teal-200 hover:bg-teal-50 h-8 px-2 sm:px-3"
+                onClick={() => setShowSendDocsModal(true)}
+                title="Enviar documentação para balcões/bancos"
+              >
+                <Mail className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">Enviar Balcões</span>
               </Button>
             )}
 
@@ -3078,6 +3097,16 @@ const ProcessDetails = () => {
         financialData={financialData}
         realEstateData={realEstateData}
         token={token}
+      />
+
+      {/* Modal para Enviar Documentação para Balcões */}
+      <SendDocumentationModal
+        open={showSendDocsModal}
+        onOpenChange={setShowSendDocsModal}
+        processId={id}
+        process={process}
+        token={token}
+        user={user}
       />
     </DashboardLayout>
   );
