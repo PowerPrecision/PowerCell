@@ -15,7 +15,7 @@ import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { 
   Search, FileText, User, CheckSquare, 
-  Building2, Loader2, ArrowRight
+  Building2, Loader2, ArrowRight, Users, FolderOpen
 } from "lucide-react";
 import api from "../services/api";
 
@@ -79,7 +79,16 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
         navigate(`/processo/${item.data.id}`);
         break;
       case "client":
-        navigate(`/processo/${item.data.id}`);
+        // Se o cliente tem processo, navega para o primeiro processo
+        if (item.data.first_process_id) {
+          navigate(`/processo/${item.data.first_process_id}`);
+        } else if (item.data.has_process && item.data.id) {
+          // Fallback: navega para clientes com filtro
+          navigate(`/clientes?cliente=${item.data.id}`);
+        } else {
+          // Cliente sem processo: navega para página de clientes
+          navigate(`/clientes?cliente=${item.data.id}`);
+        }
         break;
       case "task":
         navigate(`/pendentes`);
@@ -127,7 +136,8 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
           <div className="border-t max-h-[300px] overflow-y-auto">
             {results.processes.length > 0 && (
               <div className="p-2">
-                <p className="text-xs font-medium text-muted-foreground px-2 py-1">
+                <p className="text-xs font-medium text-muted-foreground px-2 py-1 flex items-center gap-1">
+                  <FileText className="h-3 w-3" />
                   Processos
                 </p>
                 {results.processes.map((process, idx) => (
@@ -153,7 +163,8 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
 
             {results.clients.length > 0 && (
               <div className="p-2 border-t">
-                <p className="text-xs font-medium text-muted-foreground px-2 py-1">
+                <p className="text-xs font-medium text-muted-foreground px-2 py-1 flex items-center gap-1">
+                  <Users className="h-3 w-3" />
                   Clientes
                 </p>
                 {results.clients.map((client, idx) => (
@@ -166,9 +177,17 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
                   >
                     <User className="h-4 w-4 text-muted-foreground" />
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{client.client_name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium truncate">{client.client_name}</p>
+                        {client.has_process && (
+                          <Badge variant="outline" className="text-[10px] h-4 px-1">
+                            <FolderOpen className="h-2.5 w-2.5 mr-0.5" />
+                            {client.process_count} processo{client.process_count !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground truncate">
-                        {client.personal_data?.nif || "Sem NIF"}
+                        {client.personal_data?.nif || client.contacto?.email || "Sem dados"}
                       </p>
                     </div>
                     <ArrowRight className="h-4 w-4 text-muted-foreground" />
@@ -179,7 +198,8 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
 
             {results.tasks.length > 0 && (
               <div className="p-2 border-t">
-                <p className="text-xs font-medium text-muted-foreground px-2 py-1">
+                <p className="text-xs font-medium text-muted-foreground px-2 py-1 flex items-center gap-1">
+                  <CheckSquare className="h-3 w-3" />
                   Tarefas
                 </p>
                 {results.tasks.map((task, idx) => (
