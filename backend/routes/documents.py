@@ -451,14 +451,17 @@ async def upload_file_s3(
             temporary_url = ""
         
         # Agendar categorização automática em background (não bloqueia o response)
+        # IMPORTANTE: Fazer cópia do file_content para a tarefa de background
+        # para evitar problemas com referências
         try:
+            file_content_copy = bytes(file_content)  # Cópia explícita
             background_tasks.add_task(
                 auto_categorize_document_background,
                 process_id=client_id,
                 client_name=client_name,
                 s3_path=s3_path,
                 filename=normalized_filename,
-                file_content=file_content
+                file_content=file_content_copy
             )
         except Exception as e:
             logger.warning(f"[UPLOAD] Erro ao agendar categorização: {e}")
@@ -474,6 +477,8 @@ async def upload_file_s3(
             )
         except Exception as e:
             logger.warning(f"[UPLOAD] Erro ao registar histórico: {e}")
+        
+        logger.info(f"[UPLOAD] Upload concluído com sucesso: {normalized_filename}")
         
         return {
             "success": True, 
