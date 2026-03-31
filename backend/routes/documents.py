@@ -1509,6 +1509,57 @@ async def categorize_all_documents(
     return results
 
 
+@router.get("/process/{process_id}", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+async def get_process_documents(
+    process_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Obter lista simples de documentos de um processo.
+    Usado pelo modal de envio de documentação para balcões.
+    
+    Retorna:
+    - id: ID do documento
+    - filename: Nome do ficheiro
+    - original_name: Nome original
+    - category: Categoria (se disponível)
+    - s3_path: Caminho no S3
+    - file_size: Tamanho do ficheiro
+    - upload_date: Data de upload
+    """
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    # Obter metadados dos documentos
+    metadata_docs = await db.document_metadata.find(
+        {"process_id": process_id},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    # Converter para formato simples
+    documents = []
+    for doc in metadata_docs:
+        documents.append({
+            "id": doc.get("id"),
+            "filename": doc.get("filename"),
+            "original_name": doc.get("filename"),
+            "category": doc.get("ai_category"),
+            "subcategory": doc.get("ai_subcategory"),
+            "s3_path": doc.get("s3_path"),
+            "file_size": doc.get("file_size"),
+            "upload_date": doc.get("created_at") or doc.get("categorized_at"),
+            "mime_type": doc.get("mime_type")
+        })
+    
+    return {
+        "process_id": process_id,
+        "client_name": process.get("client_name"),
+        "documents": documents,
+        "total": len(documents)
+    }
+
+
 @router.get("/metadata/{process_id}", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def get_document_metadata(
     process_id: str,
