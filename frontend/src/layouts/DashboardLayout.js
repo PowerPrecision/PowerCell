@@ -149,7 +149,7 @@ const DashboardLayout = ({ children, title }) => {
 
   const getNavItems = () => {
     // Admin vai para /admin, CEO e outros staff vão para /staff
-    const dashboardHref = user?.role === "admin" ? "/admin" : "/staff";
+    const dashboardHref = user?.role?.toLowerCase() === "admin" ? "/admin" : "/staff";
     
     const baseItems = [
       {
@@ -181,7 +181,7 @@ const DashboardLayout = ({ children, title }) => {
     }
 
     // CEO tem menu limitado
-    if (user?.role === "ceo") {
+    if (user?.role?.toLowerCase() === "ceo") {
       return {
         main: [
           ...baseItems,
@@ -272,7 +272,7 @@ const DashboardLayout = ({ children, title }) => {
     }
 
     // Admin tem menu completo
-    if (user?.role === "admin") {
+    if (user?.role?.toLowerCase() === "admin") {
       return {
         main: [
           ...baseItems,
@@ -420,9 +420,10 @@ const DashboardLayout = ({ children, title }) => {
     }
 
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
-    if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(user?.role)) {
+    const userRole = user?.role?.toLowerCase();
+    if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(userRole)) {
       // Menu simplificado para INDEXACAO - só Os Meus Processos onde está atribuído
-      if (user?.role === "indexacao") {
+      if (userRole === "indexacao") {
         return {
           main: [
             {
@@ -448,7 +449,7 @@ const DashboardLayout = ({ children, title }) => {
       const negocioItems = [];
       
       // Adicionar "Os Meus Processos" para consultores e intermediários (incluindo intermediário de crédito)
-      if (["consultor", "intermediario", "mediador", "consultor_intermediario"].includes(user?.role)) {
+      if (["consultor", "intermediario", "mediador", "consultor_intermediario"].includes(userRole)) {
         negocioItems.push({
           label: "Os Meus Processos",
           icon: Users,
@@ -471,7 +472,7 @@ const DashboardLayout = ({ children, title }) => {
       });
       
       // Gestor de Visitas - NÃO para intermediários de crédito
-      if (!["intermediario", "consultor_intermediario"].includes(user?.role)) {
+      if (!["intermediario", "consultor_intermediario"].includes(userRole)) {
         negocioItems.push({
           label: "Gestor de Visitas",
           icon: Search,
@@ -480,7 +481,7 @@ const DashboardLayout = ({ children, title }) => {
       }
       
       // Imóveis apenas para roles que não são intermediário/mediador
-      if (!["intermediario", "mediador", "consultor_intermediario"].includes(user?.role)) {
+      if (!["intermediario", "mediador", "consultor_intermediario"].includes(userRole)) {
         negocioItems.push({
           label: "Imóveis",
           icon: Building2,
@@ -504,7 +505,7 @@ const DashboardLayout = ({ children, title }) => {
       
       // Estados do Workflow apenas para Admin e CEO
       const configItems = [];
-      if (["admin", "ceo"].includes(user?.role)) {
+      if (["admin", "ceo"].includes(userRole)) {
         configItems.push({
           label: "Estados do Workflow",
           icon: Settings,
