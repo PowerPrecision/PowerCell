@@ -1624,6 +1624,9 @@ async def get_process_documents(
     Obter lista simples de documentos de um processo.
     Usado pelo modal de envio de documentação para balcões.
     
+    Retorna documentos da coleção document_metadata.
+    Se não houver metadados, faz fallback para listar ficheiros do S3.
+    
     Retorna:
     - id: ID do documento
     - filename: Nome do ficheiro
@@ -1657,6 +1660,45 @@ async def get_process_documents(
             "upload_date": doc.get("created_at") or doc.get("categorized_at"),
             "mime_type": doc.get("mime_type")
         })
+    
+    # Fallback: se não há documentos nos metadados, tentar listar do S3
+    if not documents and s3_service.is_configured():
+        try:
+            client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+            titular2 = process.get("titular2_data") or {}
+            second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
+            s3_folder = process.get("s3_folder")
+            
+            loop = asyncio.get_event_loop()
+            files_by_category = await loop.run_in_executor(
+                None,
+                lambda: s3_service.list_files(process_id, client_name, second_client_name, s3_folder)
+            )
+            
+            # Verificar se veio erro
+            if isinstance(files_by_category, dict) and files_by_category.get("error"):
+                logger.warning(f"[DOCS-PROCESS] S3 error: {files_by_category['error']}")
+            else:
+                # Achatamento: files_by_category = {"Financeiros": [...], "Pessoais": [...], ...}
+                for category, files in files_by_category.items():
+                    if isinstance(files, list):
+                        for f in files:
+                            s3_path = f.get("path") or f.get("key") or ""
+                            filename = f.get("name") or f.get("filename") or ""
+                            # Evitar duplicados por s3_path
+                            if s3_path and not any(d.get("s3_path") == s3_path for d in documents):
+                                documents.append({
+                                    "id": str(uuid.uuid4()),
+                                    "filename": filename,
+                                    "original_name": filename,
+                                    "category": category if category != "Outros" else None,
+                                    "s3_path": s3_path,
+                                    "file_size": f.get("size"),
+                                    "upload_date": f.get("last_modified"),
+                                    "mime_type": None
+                                })
+        except Exception as e:
+            logger.warning(f"[DOCS-PROCESS] Fallback S3 falhou: {e}")
     
     return {
         "process_id": process_id,
