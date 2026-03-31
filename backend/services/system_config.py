@@ -10,7 +10,7 @@ from database import db
 from models.system_config import (
     SystemConfig, StorageConfig, EmailConfig, AIConfig, 
     TrelloConfig, SystemSettings, StorageProvider, CreditServicesConfig,
-    DocumentRecipientsConfig
+    DocumentRecipientsConfig, AutoDraftConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -199,6 +199,17 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
             import json
             current["recipients"] = json.dumps(current["recipients"], ensure_ascii=False)
         config.document_recipients = DocumentRecipientsConfig(**current)
+    elif section == "auto_draft":
+        current = config.auto_draft.model_dump()
+        current.update(filtered_data)
+        # Se eligible_doc_types é uma string, tentar parsear para lista
+        if isinstance(current.get("eligible_doc_types"), str):
+            import json
+            try:
+                current["eligible_doc_types"] = json.loads(current["eligible_doc_types"])
+            except json.JSONDecodeError:
+                logger.warning("eligible_doc_types não é um JSON válido, a manter valor original")
+        config.auto_draft = AutoDraftConfig(**current)
     else:
         raise ValueError(f"Secção desconhecida: {section}")
     

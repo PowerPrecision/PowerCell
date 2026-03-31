@@ -11,10 +11,11 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Loader2, LayoutGrid, Calendar, Users, FileText, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert } from "lucide-react";
+import { Textarea } from "../components/ui/textarea";
+import { Loader2, LayoutGrid, Calendar, Users, FileText, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert, Mail, Send, Trash2, Edit3, ChevronRight, AlertCircle } from "lucide-react";
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
-import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess } from "../services/api";
+import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft } from "../services/api";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -39,6 +40,13 @@ const StaffDashboard = () => {
   const [deadlines, setDeadlines] = useState([]);
   const [dstiAlerts, setDstiAlerts] = useState(null);
   const [activeTab, setActiveTab] = useState("kanban");
+  
+  // Estado para rascunhos automáticos
+  const [drafts, setDrafts] = useState([]);
+  const [draftStats, setDraftStats] = useState({ total: 0, by_type: [] });
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [expandedDraft, setExpandedDraft] = useState(null);
+  const [sendingDraft, setSendingDraft] = useState(null);
   
   // Estado para criação de nova lead
   const [showLeadDialog, setShowLeadDialog] = useState(false);
@@ -82,6 +90,8 @@ const StaffDashboard = () => {
 
     // Carregar alertas DSTI em paralelo (não bloqueia o loading principal)
     fetchDSTIAlerts();
+    // Carregar rascunhos em paralelo
+    fetchDrafts();
   };
 
   const fetchDSTIAlerts = async () => {
@@ -97,6 +107,45 @@ const StaffDashboard = () => {
       }
     } catch (err) {
       // Silenciar - DSTI pode estar desactivado
+    }
+  };
+
+  // Carregar rascunhos automáticos
+  const fetchDrafts = async () => {
+    try {
+      setDraftLoading(true);
+      const res = await getAutoDrafts(10).catch(() => ({ data: { drafts: [], stats: { total: 0, by_type: [] } } }));
+      setDrafts(res.data.drafts || []);
+      setDraftStats(res.data.stats || { total: 0, by_type: [] });
+    } catch (error) {
+      console.error("Error fetching drafts:", error);
+    } finally {
+      setDraftLoading(false);
+    }
+  };
+
+  // Enviar rascunho
+  const handleSendDraft = async (draftId) => {
+    setSendingDraft(draftId);
+    try {
+      await sendAutoDraft(draftId);
+      toast.success("Rascunho enviado com sucesso!");
+      fetchDrafts();
+    } catch (error) {
+      toast.error("Erro ao enviar rascunho");
+    } finally {
+      setSendingDraft(null);
+    }
+  };
+
+  // Descartar rascunho
+  const handleDeleteDraft = async (draftId) => {
+    try {
+      await deleteAutoDraft(draftId);
+      toast.success("Rascunho descartado");
+      fetchDrafts();
+    } catch (error) {
+      toast.error("Erro ao descartar rascunho");
     }
   };
 
@@ -332,6 +381,16 @@ const StaffDashboard = () => {
               <span className="hidden sm:inline">Documentos</span>
               <span className="sm:hidden">Docs</span>
             </TabsTrigger>
+            {draftStats.total > 0 && (
+              <TabsTrigger value="drafts" className="gap-2">
+                <Mail className="h-4 w-4" />
+                <span className="hidden sm:inline">Rascunhos</span>
+                <span className="sm:hidden">Rasc.</span>
+                <Badge className="bg-orange-500 text-white text-[10px] px-1.5 py-0 min-w-[20px] text-center">
+                  {draftStats.total}
+                </Badge>
+              </TabsTrigger>
+            )}
             {canManageUsers && (
               <TabsTrigger value="users" className="gap-2">
                 <Users className="h-4 w-4" />
@@ -484,6 +543,127 @@ const StaffDashboard = () => {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* Auto-Drafts Tab - Rascunhos Pendentes */}
+          {draftStats.total > 0 && (
+            <TabsContent value="drafts" className="mt-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Mail className="h-5 w-5" />
+                        Rascunhos Pendentes
+                      </CardTitle>
+                      <CardDescription>
+                        {draftStats.total} rascunho(s) de e-mail gerados automaticamente pela IA
+                      </CardDescription>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={fetchDrafts} disabled={draftLoading}>
+                      {draftLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertCircle className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {drafts.length === 0 ? (
+                    <p className="text-muted-foreground text-center py-8">Nenhum rascunho pendente</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {drafts.map((draft) => {
+                        const isExpanded = expandedDraft === draft.id;
+                        return (
+                          <div key={draft.id} className="border rounded-lg overflow-hidden hover:shadow-sm transition-shadow">
+                            {/* Header - always visible */}
+                            <div 
+                              className="p-3 bg-muted/20 cursor-pointer flex items-center justify-between"
+                              onClick={() => setExpandedDraft(isExpanded ? null : draft.id)}
+                            >
+                              <div className="flex items-center gap-3 min-w-0 flex-1">
+                                <div className="w-8 h-8 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
+                                  <Mail className="h-4 w-4 text-orange-600" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium text-sm truncate">{draft.subject}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-xs text-muted-foreground">
+                                      {draft.client_name || "Cliente"}
+                                    </span>
+                                    <Badge variant="outline" className="text-[10px]">
+                                      {draft.auto_draft_doc_label || draft.auto_draft_doc_type}
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`} />
+                            </div>
+
+                            {/* Expanded content */}
+                            {isExpanded && (
+                              <div className="p-4 border-t space-y-3">
+                                {/* Email details */}
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div>
+                                    <span className="text-muted-foreground">Para:</span>{" "}
+                                    <span className="font-medium">{draft.to_emails?.[0] || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Processo:</span>{" "}
+                                    <span 
+                                      className="font-medium text-primary hover:underline cursor-pointer"
+                                      onClick={(e) => { e.stopPropagation(); navigate(`/process/${draft.process_id}`); }}
+                                    >
+                                      {draft.process_number || draft.process_id}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Email body preview */}
+                                <div className="bg-muted/30 rounded-lg p-3">
+                                  <p className="text-sm whitespace-pre-wrap">{draft.body}</p>
+                                </div>
+
+                                {/* Action buttons */}
+                                <div className="flex items-center gap-2 pt-2">
+                                  <Button 
+                                    size="sm" 
+                                    className="bg-teal-600 hover:bg-teal-700"
+                                    onClick={(e) => { e.stopPropagation(); handleSendDraft(draft.id); }}
+                                    disabled={sendingDraft === draft.id}
+                                  >
+                                    {sendingDraft === draft.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                                    ) : (
+                                      <Send className="h-4 w-4 mr-1" />
+                                    )}
+                                    Enviar
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={(e) => { e.stopPropagation(); navigate(`/process/${draft.process_id}`); }}
+                                  >
+                                    Ver Processo
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="ghost"
+                                    className="text-red-600 hover:text-red-700 hover:bg-red-50 ml-auto"
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteDraft(draft.id); }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
 
           {/* Users Tab (Admin only) */}
           {canManageUsers && (
