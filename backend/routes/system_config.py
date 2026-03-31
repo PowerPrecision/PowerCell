@@ -494,6 +494,32 @@ CONFIG_FIELDS = {
             ),
         ]
     },
+    "dsti_analysis": {
+        "title": "Análise DSTI Automática",
+        "description": "Cálculo automático da taxa de esforço (DSTI) a partir dos dados extraídos pela IA. Sinaliza instantaneamente processos de alto risco.",
+        "fields": [
+            ConfigField(
+                key="enabled",
+                label="Activar Análise DSTI Automática",
+                type="boolean",
+                help_text="Calcula automaticamente o DSTI e mostra alertas de risco nos processos"
+            ),
+            ConfigField(
+                key="high_risk_threshold",
+                label="Limiar de Risco Elevado (%)",
+                type="number",
+                placeholder="40",
+                help_text="DSTI acima deste valor é considerado de alto risco (default: 40%)"
+            ),
+            ConfigField(
+                key="critical_risk_threshold",
+                label="Limiar de Risco Crítico (%)",
+                type="number",
+                placeholder="50",
+                help_text="DSTI acima deste valor ultrapassa o limite do Banco de Portugal (default: 50%)"
+            ),
+        ]
+    },
 }
 
 

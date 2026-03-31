@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/emails", tags=["Emails"])
 
+# Subrouter dedicado para documentação — montado separadamente para evitar conflitos com /{email_id}
+doc_router = APIRouter(prefix="/emails", tags=["Email Documentation"])
+
 # Armazenar status de sincronizações em progresso
 _sync_status = {}
 
@@ -65,7 +68,7 @@ async def enrich_email(email: dict) -> dict:
 
 # ==== DOCUMENT RECIPIENTS & SEND DOCUMENTATION (antes de /{email_id} para evitar conflito) ====
 
-@router.get("/document-recipients")
+@doc_router.get("/document-recipients")
 async def get_document_recipients(
     current_user: dict = Depends(get_current_user)
 ):
@@ -106,7 +109,7 @@ async def get_document_recipients(
     }
 
 
-@router.post("/send-documentation/{process_id}")
+@doc_router.post("/send-documentation/{process_id}")
 async def send_documentation_email(
     process_id: str,
     data: dict = Body(...),

@@ -1013,6 +1013,103 @@ async def move_process_kanban(
     }
 
 
+# ==== DSTI AUTOMÁTICO (antes de /{process_id}) ====
+
+@router.get("/dsti/{process_id}")
+async def get_process_dsti(
+    process_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Calcula o DSTI automático de um processo.
+    
+    Usa dados extraídos pela IA (rendimento_liquido e mapa_responsabilidades)
+    para calcular automaticamente a taxa de esforço e sinalizar risco.
+    
+    Retorna:
+    - dsti_pct: DSTI em percentagem
+    - effort_rate_pct: Taxa de esforço global
+    - risk_level: baixo, moderado, elevado, critico, sem_dados
+    - components: breakdown dos valores
+    """
+    # Verificar se funcionalidade está activada
+    from services.system_config import get_system_config
+    config = await get_system_config()
+    if not config.dsti_analysis.enabled:
+        raise HTTPException(status_code=403, detail="Análise DSTI automática desactivada pelo administrador")
+    
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    if not can_view_process(user, process):
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    
+    from services.dsti_service import calculate_dsti, get_risk_label
+    
+    result = calculate_dsti(process)
+    result["process_id"] = process_id
+    result["process_number"] = process.get("process_number")
+    result["client_name"] = process.get("client_name")
+    result["high_risk_threshold"] = config.dsti_analysis.high_risk_threshold
+    result["critical_risk_threshold"] = config.dsti_analysis.critical_risk_threshold
+    result["risk_label"] = get_risk_label(result["risk_level"])
+    
+    return result
+
+
+@router.get("/dsti-alerts")
+async def get_dsti_high_risk_processes(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Lista processos com DSTI de alto risco.
+    
+    Retorna todos os processos onde o DSTI ultrapassa o limiar
+    configurado pelo administrador (default: 40%).
+    """
+    from services.system_config import get_system_config
+    config = await get_system_config()
+    if not config.dsti_analysis.enabled:
+        return {"enabled": False, "processes": [], "total": 0}
+    
+    threshold = config.dsti_analysis.high_risk_threshold
+    processes = await db.processes.find(
+        {"financial_data.rendimento_bruto_mensal": {"$gt": 0}},
+        {"_id": 0, "id": 1, "process_number": 1, "client_name": 1, 
+         "financial_data": 1, "personal_data": 1, "status": 1}
+    ).to_list(length=500)
+    
+    from services.dsti_service import calculate_dsti, is_high_risk
+    
+    high_risk = []
+    for proc in processes:
+        dsti_result = calculate_dsti(proc)
+        if is_high_risk(dsti_result, threshold):
+            high_risk.append({
+                "process_id": proc.get("id"),
+                "process_number": proc.get("process_number"),
+                "client_name": proc.get("client_name"),
+                "status": proc.get("status"),
+                "dsti_pct": dsti_result["dsti_pct"],
+                "effort_rate_pct": dsti_result["effort_rate_pct"],
+                "risk_level": dsti_result["risk_level"],
+                "risk_color": dsti_result["risk_color"],
+                "prestacao_creditos": dsti_result["components"]["prestacao_creditos_mensal"],
+                "rendimento_bruto": dsti_result["components"]["rendimento_bruto_total"],
+            })
+    
+    # Ordenar por DSTI descendente (mais grave primeiro)
+    high_risk.sort(key=lambda x: x["dsti_pct"], reverse=True)
+    
+    return {
+        "enabled": True,
+        "threshold": threshold,
+        "processes": high_risk,
+        "total": len(high_risk),
+    }
+
+
 @router.get("/{process_id}", response_model=ProcessResponse)
 async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
