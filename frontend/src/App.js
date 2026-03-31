@@ -248,11 +248,11 @@ function App() {
             }
           />
           
-          {/* My Clients - For Consultors and Intermediários */}
+          {/* My Clients - For Consultors, Intermediários e Indexação */}
           <Route
             path="/meus-clientes"
             element={
-              <ProtectedRoute allowedRoles={["consultor", "intermediario", "mediador", "consultor_intermediario", "admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["consultor", "intermediario", "mediador", "consultor_intermediario", "admin", "ceo", "indexacao"]}>
                 <MyClientsPage />
               </ProtectedRoute>
             }
