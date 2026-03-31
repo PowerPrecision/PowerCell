@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { toast } from "sonner";
+import PDFAnnotationViewer from "./PDFAnnotationViewer";
 import {
   FileText,
   Upload,
@@ -78,6 +79,7 @@ import {
   ZoomOut,
   Pencil,
   FolderSync,
+  MessageSquare,
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { format } from "date-fns";
@@ -202,6 +204,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [previewFile, setPreviewFile] = useState(null); // ficheiro em preview
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
+  
+  // Estado para o visualizador de anotações
+  const [annotationViewer, setAnnotationViewer] = useState(null); // { path, name }
   
   // Estado para NIF da empresa (obrigatório para indexacao)
   const [empresaNifDialog, setEmpresaNifDialog] = useState({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
@@ -982,6 +987,22 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const isPreviewable = (filename) => {
     const ext = filename?.split('.').pop()?.toLowerCase();
     return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+  };
+  
+  // Verificar se ficheiro é PDF (para anotações)
+  const isPdfFile = (filename) => {
+    const ext = filename?.split('.').pop()?.toLowerCase();
+    return ext === 'pdf';
+  };
+  
+  // Abrir visualizador de anotações
+  const handleOpenAnnotations = (file) => {
+    setAnnotationViewer({ path: file.path, name: file.name });
+  };
+  
+  // Fechar visualizador de anotações
+  const handleCloseAnnotations = () => {
+    setAnnotationViewer(null);
   };
 
   // Análise IA dos documentos
@@ -2101,13 +2122,24 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                 <Eye className="h-3 w-3" />
                               </Button>
                             )}
+                            {isPdfFile(file.name) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 flex-shrink-0 text-amber-500 hover:text-amber-600"
+                                onClick={(e) => { e.stopPropagation(); handleOpenAnnotations(file); }}
+                                title="Anotações"
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                              </Button>
+                            )}
                             <Button 
                               variant="ghost" 
                               size="icon" 
                               className="h-5 w-5 flex-shrink-0" 
                               onClick={(e) => { e.stopPropagation(); handleDownload(file); }}
                               title="Download"
-                            >
+                              >
                               <Download className="h-3 w-3" />
                             </Button>
                             <Button 
@@ -2358,6 +2390,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             <div className="flex items-center justify-between mb-2">
                               <FileIcon filename={file.name} />
                               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {isPdfFile(file.name) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-amber-500 hover:text-amber-600"
+                                    onClick={(e) => { e.stopPropagation(); handleOpenAnnotations(file); }}
+                                    title="Anotações"
+                                  >
+                                    <MessageSquare className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -2436,6 +2479,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               <div className="flex items-center justify-between mb-2">
                                 <FileIcon filename={file.name} />
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {isPdfFile(file.name) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-amber-500 hover:text-amber-600"
+                                      onClick={(e) => { e.stopPropagation(); handleOpenAnnotations(file); }}
+                                      title="Anotações"
+                                    >
+                                      <MessageSquare className="h-3.5 w-3.5" />
+                                    </Button>
+                                  )}
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -3428,6 +3482,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Visualizador de Anotações Contextuais */}
+      {annotationViewer && (
+        <PDFAnnotationViewer
+          processId={processId}
+          document={annotationViewer}
+          token={token}
+          onClose={handleCloseAnnotations}
+          user={{ id: user?.id, name: user?.name || user?.email, role: user?.role }}
+        />
+      )}
     </>
   );
 };
