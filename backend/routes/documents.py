@@ -1648,21 +1648,26 @@ async def get_process_documents(
     
     # Converter para formato simples
     documents = []
+    # Conjunto de s3_paths já adicionados via metadados (para evitar duplicados)
+    existing_s3_paths = set()
     for doc in metadata_docs:
+        s3_path = doc.get("s3_path", "")
+        if s3_path:
+            existing_s3_paths.add(s3_path)
         documents.append({
-            "id": doc.get("id"),
+            "id": doc.get("id") or str(uuid.uuid4()),
             "filename": doc.get("filename"),
             "original_name": doc.get("filename"),
             "category": doc.get("ai_category"),
             "subcategory": doc.get("ai_subcategory"),
-            "s3_path": doc.get("s3_path"),
+            "s3_path": s3_path,
             "file_size": doc.get("file_size"),
             "upload_date": doc.get("created_at") or doc.get("categorized_at"),
             "mime_type": doc.get("mime_type")
         })
     
-    # Fallback: se não há documentos nos metadados, tentar listar do S3
-    if not documents and s3_service.is_configured():
+    # Complementar com ficheiros do S3 que não estão nos metadados
+    if s3_service.is_configured():
         try:
             client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
             titular2 = process.get("titular2_data") or {}
@@ -1670,23 +1675,24 @@ async def get_process_documents(
             s3_folder = process.get("s3_folder")
             
             loop = asyncio.get_event_loop()
-            files_by_category = await loop.run_in_executor(
+            files_result = await loop.run_in_executor(
                 None,
                 lambda: s3_service.list_files(process_id, client_name, second_client_name, s3_folder)
             )
             
-            # Verificar se veio erro
-            if isinstance(files_by_category, dict) and files_by_category.get("error"):
-                logger.warning(f"[DOCS-PROCESS] S3 error: {files_by_category['error']}")
-            else:
-                # Achatamento: files_by_category = {"Financeiros": [...], "Pessoais": [...], ...}
-                for category, files in files_by_category.items():
+            if isinstance(files_result, dict) and files_result.get("error"):
+                logger.warning(f"[DOCS-PROCESS] S3 error: {files_result['error']}")
+            elif isinstance(files_result, dict) and files_result.get("files"):
+                # list_files retorna: {"files": {"Financeiros": [...], "Pessoais": [...], ...}, ...}
+                s3_files_map = files_result["files"]
+                for category, files in s3_files_map.items():
                     if isinstance(files, list):
                         for f in files:
                             s3_path = f.get("path") or f.get("key") or ""
                             filename = f.get("name") or f.get("filename") or ""
-                            # Evitar duplicados por s3_path
-                            if s3_path and not any(d.get("s3_path") == s3_path for d in documents):
+                            # Só adicionar se não existe nos metadados
+                            if s3_path and s3_path not in existing_s3_paths:
+                                existing_s3_paths.add(s3_path)
                                 documents.append({
                                     "id": str(uuid.uuid4()),
                                     "filename": filename,
