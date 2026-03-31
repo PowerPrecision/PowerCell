@@ -352,6 +352,42 @@ async def create_indexes(db) -> dict:
                 results["errors"].append(f"chat_groups.{idx['name']}: {str(e)}")
                 logger.error(f"Erro ao criar índice chat_groups.{idx['name']}: {e}")
     
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'document_annotations' (Anotações Contextuais)
+    # ====================================================================
+    annotation_indexes = [
+        # Índice no processo - queries por processo
+        {"keys": [("process_id", 1)], "name": "idx_ann_process"},
+        
+        # Índice composto documento + processo - lookup principal
+        {"keys": [("document_path", 1), ("process_id", 1)], "name": "idx_ann_document_process"},
+        
+        # Índice no autor - queries por utilizador
+        {"keys": [("author_id", 1)], "name": "idx_ann_author"},
+        
+        # Índice no estado de resolução
+        {"keys": [("resolved", 1)], "name": "idx_ann_resolved"},
+        
+        # Índice composto processo + página - ordenação por página
+        {"keys": [("process_id", 1), ("page", 1)], "name": "idx_ann_process_page"},
+    ]
+    
+    for idx in annotation_indexes:
+        try:
+            await db.document_annotations.create_index(
+                idx["keys"],
+                name=idx["name"],
+                background=True
+            )
+            results["created"].append(f"document_annotations.{idx['name']}")
+            logger.info(f"Índice criado: document_annotations.{idx['name']}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["skipped"].append(f"document_annotations.{idx['name']}")
+            else:
+                results["errors"].append(f"document_annotations.{idx['name']}: {str(e)}")
+                logger.error(f"Erro ao criar índice document_annotations.{idx['name']}: {e}")
+    
     # Resumo
     logger.info(
         f"Criação de índices concluída: "
