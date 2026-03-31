@@ -152,7 +152,7 @@ const FilteredProcessList = () => {
 
   const getStatusInfo = (statusName) => {
     const status = workflowStatuses.find(s => s.name === statusName);
-    return status || { label: statusName, color: "gray" };
+    return status || { label: statusName, color: "gray", order: null };
   };
 
   const getDeadlineInfo = (processId) => {
@@ -260,7 +260,7 @@ const FilteredProcessList = () => {
                           variant="outline"
                           className={`shrink-0 text-[10px] bg-${statusInfo.color}-50 text-${statusInfo.color}-700 border-${statusInfo.color}-200`}
                         >
-                          {statusInfo.label}
+                          {statusInfo.order || ''} - {statusInfo.label}
                         </Badge>
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -328,7 +328,7 @@ const FilteredProcessList = () => {
                               variant="outline"
                               className={`bg-${statusInfo.color}-50 text-${statusInfo.color}-700 border-${statusInfo.color}-200`}
                             >
-                              {statusInfo.label}
+                              {statusInfo.order || ''} - {statusInfo.label}
                             </Badge>
                           </TableCell>
                           <TableCell className="font-medium">
