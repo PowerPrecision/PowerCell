@@ -29,6 +29,7 @@ from models.process import (
     ProcessType, ProcessCreate, ProcessUpdate, ProcessResponse
 )
 from services.auth import get_current_user, require_roles, require_staff
+from fastapi import Request
 from services.notification_service import (
     send_notification_with_preference_check,
     send_status_change_notification,
@@ -36,6 +37,7 @@ from services.notification_service import (
     send_to_admins
 )
 from services.history import log_history, log_data_changes
+from services.audit_trail_service import log_audit_event
 from services.alerts import (
     get_process_alerts,
     check_property_documents,
@@ -1156,12 +1158,22 @@ async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_
 
 
 @router.put("/{process_id}", response_model=ProcessResponse)
-async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depends(get_current_user)):
+async def update_process(process_id: str, data: ProcessUpdate, request: Request, user: dict = Depends(get_current_user)):
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
     
     role = user["role"]
+    
+    # Extrair campos opcionais do body para auditoria (não são parte do modelo ProcessUpdate)
+    audit_reason = None
+    ai_suggested = False
+    try:
+        body = await request.json()
+        audit_reason = body.get("audit_reason")
+        ai_suggested = bool(body.get("ai_suggested", False))
+    except Exception:
+        pass
     
     # Indexação não pode actualizar dados do processo
     if role == UserRole.INDEXACAO:
@@ -1183,14 +1195,18 @@ async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depe
             raise HTTPException(status_code=403, detail="Acesso negado")
         if data.personal_data:
             await log_data_changes(process_id, user, process.get("personal_data"), data.personal_data.model_dump(), "dados pessoais")
+            # Registar no audit trail enriquecido
+            await log_audit_event(process_id, user, "Alterou dados pessoais", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["personal_data"] = data.personal_data.model_dump()
         if data.financial_data:
             await log_data_changes(process_id, user, process.get("financial_data"), data.financial_data.model_dump(), "dados financeiros")
+            await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["financial_data"] = data.financial_data.model_dump()
     else:
         # Staff updates
         if data.personal_data and can_update_personal:
             await log_data_changes(process_id, user, process.get("personal_data"), data.personal_data.model_dump(), "dados pessoais")
+            await log_audit_event(process_id, user, "Alterou dados pessoais", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["personal_data"] = data.personal_data.model_dump()
             
             # Atualizar client_name se nome_completo ou nome for fornecido
@@ -1201,14 +1217,17 @@ async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depe
         
         if data.financial_data and can_update_financial:
             await log_data_changes(process_id, user, process.get("financial_data"), data.financial_data.model_dump(), "dados financeiros")
+            await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["financial_data"] = data.financial_data.model_dump()
         
         if data.real_estate_data and can_update_real_estate:
             await log_data_changes(process_id, user, process.get("real_estate_data"), data.real_estate_data.model_dump(), "dados imobiliários")
+            await log_audit_event(process_id, user, "Alterou dados imobiliários", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["real_estate_data"] = data.real_estate_data.model_dump()
         
         if data.credit_data and can_update_credit:
             await log_data_changes(process_id, user, process.get("credit_data"), data.credit_data.model_dump(), "dados de crédito")
+            await log_audit_event(process_id, user, "Alterou dados de crédito", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["credit_data"] = data.credit_data.model_dump()
         
         # Atualizar email e telefone do cliente
@@ -1229,6 +1248,7 @@ async def update_process(process_id: str, data: ProcessUpdate, user: dict = Depe
         
         if data.status and can_update_status and (data.status in valid_statuses or not valid_statuses):
             await log_history(process_id, user, "Alterou estado", "status", process["status"], data.status)
+            await log_audit_event(process_id, user, "Alterou estado", field="status", old_value=process["status"], new_value=data.status, request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["status"] = data.status
             
             # Send email notification (com verificação de preferências)

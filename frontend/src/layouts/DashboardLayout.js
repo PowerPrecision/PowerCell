@@ -59,6 +59,7 @@ import {
   FileSignature,
   Zap,
   Shield,
+  ClipboardList,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import MobileBottomNav from "../components/layout/MobileBottomNav";
@@ -110,7 +111,7 @@ const DashboardLayout = ({ children, title }) => {
     // Rotas do grupo IA
     const iaRoutes = ["/configuracoes/ia", "/ai-insights", "/revisao-dados-ia", "/configuracoes/treino-ia"];
     // Rotas do grupo Configurações (unificado com Sistema)
-    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/admin/rgpd"];
+    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/admin/rgpd", "/auditoria"];
     
     return {
       negocio: negocioRoutes.some(r => path.startsWith(r)),
@@ -265,6 +266,11 @@ const DashboardLayout = ({ children, title }) => {
                 icon: FileSignature,
                 href: "/admin/rgpd",
               },
+              {
+                label: "Auditoria",
+                icon: ClipboardList,
+                href: "/auditoria",
+              },
             ],
           },
         ],
@@ -382,6 +388,11 @@ const DashboardLayout = ({ children, title }) => {
                 label: "Logs do Sistema",
                 icon: AlertCircle,
                 href: "/admin/logs",
+              },
+              {
+                label: "Auditoria",
+                icon: ClipboardList,
+                href: "/auditoria",
               },
               {
                 label: "Diagnósticos",

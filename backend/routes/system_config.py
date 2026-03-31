@@ -548,6 +548,55 @@ CONFIG_FIELDS = {
             ),
         ]
     },
+    "audit_trail": {
+        "title": "Auditoria (Audit Trail)",
+        "description": "Configurar o sistema de registo de auditoria que rastreia todas as alterações aos dados",
+        "fields": [
+            ConfigField(
+                key="enabled",
+                label="Activar Audit Trail",
+                type="boolean",
+                help_text="Regista todas as alterações aos processos com detalhes (IP, origem, justificação)"
+            ),
+            ConfigField(
+                key="log_ip_address",
+                label="Registar Endereço IP",
+                type="boolean",
+                help_text="Inclui o endereço IP do utilizador nos registos de auditoria",
+                depends_on={"enabled": True},
+            ),
+            ConfigField(
+                key="log_ai_approvals",
+                label="Registar Aprovações de IA",
+                type="boolean",
+                help_text="Regista quando um utilizador aprova ou rejeita sugestões de IA",
+                depends_on={"enabled": True},
+            ),
+            ConfigField(
+                key="require_reason_for_critical_fields",
+                label="Exigir Justificação em Campos Críticos",
+                type="boolean",
+                help_text="Quando activo, alterações a campos críticos devem incluir justificação",
+                depends_on={"enabled": True},
+            ),
+            ConfigField(
+                key="critical_fields",
+                label="Campos Críticos (JSON)",
+                type="textarea",
+                placeholder='["financial_data", "credit_data", "status"]',
+                help_text="Lista JSON de campos que exigem justificação quando alterados",
+                depends_on={"enabled": True},
+            ),
+            ConfigField(
+                key="retention_days",
+                label="Dias de Retenção",
+                type="number",
+                placeholder="365",
+                help_text="Número de dias para manter os registos de auditoria (default: 365)",
+                depends_on={"enabled": True},
+            ),
+        ]
+    },
 }
 
 

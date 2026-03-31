@@ -125,7 +125,8 @@ async def create_workflow_status(data: WorkflowStatusCreate, user: dict = Depend
         "order": data.order,
         "color": data.color,
         "description": data.description,
-        "is_default": False
+        "is_default": False,
+        "internal_code": str(data.order).zfill(2)
     }
     
     await db.workflow_statuses.insert_one(status_doc)
