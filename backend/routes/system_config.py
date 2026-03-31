@@ -498,10 +498,10 @@ CONFIG_FIELDS = {
 
 
 @router.get("")
-async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """
     Obter todas as configurações do sistema.
-    Apenas admin pode aceder.
+    Apenas admin e CEO podem aceder.
     """
     config = await get_system_config()
     
@@ -512,7 +512,9 @@ async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     sensitive_fields = [
         "onedrive_client_secret", "google_client_secret", 
         "dropbox_app_secret", "smtp_password", "imap_password",
-        "api_key", "api_token", "dropbox_access_token"
+        "smtp_password_2", "imap_password_2",
+        "api_key", "api_token", "dropbox_access_token",
+        "hcpro_password", "decisoes_password", "doutorfinancas_password", "custom_portal_password"
     ]
     
     def mask_sensitive(obj, parent_key=""):
@@ -533,7 +535,7 @@ async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN]))):
 
 
 @router.get("/fields")
-async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """
     Obter definição dos campos de configuração.
     Útil para o frontend construir os formulários.
@@ -545,7 +547,7 @@ async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN])
 async def update_config(
     section: str,
     data: Dict[str, Any],
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Actualizar uma secção da configuração.
@@ -570,7 +572,7 @@ async def update_config(
 @router.post("/test-connection/{service}")
 async def test_service_connection(
     service: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Testar ligação a um serviço (email, storage, etc.).
@@ -751,7 +753,7 @@ async def test_service_connection(
 
 
 @router.post("/complete-setup")
-async def complete_setup(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def complete_setup(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """
     Marcar a configuração inicial como concluída.
     """
@@ -830,3 +832,42 @@ async def reset_cache(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """
     invalidate_config_cache()
     return {"success": True, "message": "Cache de configurações limpo"}
+
+
+@router.get("/reveal-secrets")
+async def reveal_secrets(
+    section: Optional[str] = Query(None, description="Secção a revelar (email, ai, storage, trello, credit_services)"),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Revelar valores sensíveis (passwords, API keys) de uma secção de configuração.
+    Apenas para Admin e CEO.
+    """
+    config = await get_system_config()
+    config_dict = config.model_dump()
+    
+    # Todos os campos sensíveis
+    sensitive_fields = [
+        "onedrive_client_secret", "google_client_secret", 
+        "dropbox_app_secret", "smtp_password", "imap_password",
+        "smtp_password_2", "imap_password_2",
+        "api_key", "api_token", "dropbox_access_token",
+        "hcpro_password", "decisoes_password", "doutorfinancas_password", "custom_portal_password"
+    ]
+    
+    # Filtrar apenas a secção pedida
+    if section:
+        section_data = config_dict.get(section, {})
+        if not section_data:
+            raise HTTPException(status_code=400, detail=f"Secção '{section}' não encontrada")
+        result = {k: v for k, v in section_data.items() if k in sensitive_fields and v}
+    else:
+        # Revelar todos os campos sensíveis de todas as secções
+        result = {}
+        for sec_name in ["storage", "email", "ai", "trello", "credit_services"]:
+            sec_data = config_dict.get(sec_name, {})
+            sec_secrets = {k: v for k, v in sec_data.items() if k in sensitive_fields and v}
+            if sec_secrets:
+                result[sec_name] = sec_secrets
+    
+    return {"secrets": result}

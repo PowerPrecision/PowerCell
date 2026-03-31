@@ -275,7 +275,7 @@ const WorkflowEditor = () => {
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-sm truncate">{status.label}</span>
                     <Badge variant="outline" className="text-xs flex-shrink-0">
-                      {status.name}
+                      {status.order || ''} - {status.name}
                     </Badge>
                     {status.is_default && (
                       <Badge className="bg-blue-100 text-blue-800 text-xs flex-shrink-0">

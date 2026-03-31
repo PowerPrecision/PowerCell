@@ -99,9 +99,9 @@ def can_view_process(user: dict, process: dict) -> bool:
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    # INDEXACAO só vê processos atribuídos a ele
+    # INDEXACAO pode ver todos os processos (acesso total de leitura)
     if user_role == "indexacao":
-        return process.get("assigned_indexacao_id") == user_id
+        return True
     
     # Outros staff podem ver todos os processos
     staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]
@@ -129,9 +129,9 @@ def build_query_filter(user: dict) -> dict:
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    # INDEXACAO só vê processos atribuídos a ele
+    # INDEXACAO vê todos os processos (acesso total de leitura)
     if user_role == "indexacao":
-        return {"assigned_indexacao_id": user_id}
+        return {}
     
     # Outros staff veem todos os processos
     staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]

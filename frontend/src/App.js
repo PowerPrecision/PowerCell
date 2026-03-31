@@ -342,11 +342,11 @@ function App() {
             }
           />
           
-          {/* System Configuration - Admin only */}
+          {/* System Configuration - Admin and CEO only */}
           <Route
             path="/configuracoes"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <SystemConfigPage />
               </ProtectedRoute>
             }

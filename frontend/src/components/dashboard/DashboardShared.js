@@ -122,7 +122,7 @@ export const StatusBadge = ({ status, workflowStatuses }) => {
   
   return (
     <Badge className={`${colorClasses[statusInfo.color] || "bg-gray-100 text-gray-800"} border`}>
-      {statusInfo.label}
+      {statusInfo.order || ''} - {statusInfo.label}
     </Badge>
   );
 };

@@ -1202,6 +1202,13 @@ async def update_notification_preferences(
         upsert=True
     )
     
+    # Invalidar cache de preferências de notificação
+    try:
+        from services.realtime_notifications import _invalidate_pref_cache
+        _invalidate_pref_cache(user_id)
+    except ImportError:
+        pass
+    
     return {"success": True, "preferences": filtered_prefs}
 
 
@@ -1268,6 +1275,14 @@ async def bulk_update_notification_preferences(
         )
         if result.modified_count > 0 or result.upserted_id:
             updated += 1
+    
+    # Invalidar cache de preferências de notificação para todos os utilizadores afectados
+    try:
+        from services.realtime_notifications import _invalidate_pref_cache
+        for uid in user_ids:
+            _invalidate_pref_cache(uid)
+    except ImportError:
+        pass
     
     return {"success": True, "updated_count": updated}
 

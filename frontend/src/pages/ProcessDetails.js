@@ -1114,8 +1114,8 @@ const ProcessDetails = () => {
           
           {/* Linha 2: Botões de Ação */}
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pl-0 sm:pl-12">
-            {/* Botão para Gerir Atribuições - escondido para indexacao */}
-            {userRole !== "indexacao" && (
+            {/* Botão para Gerir Atribuições - disponível para todos os staff */}
+            {userRole !== "cliente" && (
               <Button
                 variant="outline"
                 size="sm"

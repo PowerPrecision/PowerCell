@@ -62,8 +62,39 @@ const SECTION_ICONS = {
 };
 
 // Componente para campo de configuração
-const ConfigFieldInput = ({ field, value, onChange, allValues }) => {
+const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) => {
   const [showPassword, setShowPassword] = useState(false);
+  const [revealedValue, setRevealedValue] = useState(null);
+  const [loadingReveal, setLoadingReveal] = useState(false);
+
+  const handleRevealSecret = async () => {
+    setLoadingReveal(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_URL}/api/system-config/reveal-secrets?section=${sectionName}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const secretVal = data.secrets?.[field.key];
+        if (secretVal) {
+          setRevealedValue(secretVal);
+          setShowPassword(true);
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao revelar password:", err);
+    } finally {
+      setLoadingReveal(false);
+    }
+  };
+
+  // Reset revealed value when password field value changes
+  useEffect(() => {
+    if (field.type === "password" && value && value !== "••••••••" && value !== revealedValue) {
+      setRevealedValue(null);
+    }
+  }, [value]);
 
   // Verificar dependências
   if (field.depends_on) {
@@ -140,28 +171,33 @@ const ConfigFieldInput = ({ field, value, onChange, allValues }) => {
       return (
         <div className="space-y-2">
           <Label htmlFor={field.key}>{field.label}</Label>
-          <div className="relative">
-            <Input
-              id={field.key}
-              type={inputType}
-              value={value || ""}
-              onChange={(e) => onChange(field.key, e.target.value)}
-              placeholder={field.placeholder}
-              className="pr-10"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
-              onClick={() => setShowPassword(!showPassword)}
-            >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </Button>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                id={field.key}
+                type={inputType}
+                value={showPassword && revealedValue ? revealedValue : (value || "")}
+                onChange={(e) => { setRevealedValue(null); onChange(field.key, e.target.value); }}
+                placeholder={field.placeholder}
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+                onClick={() => { if (showPassword) { setShowPassword(false); setRevealedValue(null); } else { handleRevealSecret(); } }}
+                title={showPassword ? "Ocultar valor" : "Mostrar valor actual"}
+              >
+                {loadingReveal ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
           </div>
           {field.help_text && (
             <p className="text-xs text-muted-foreground">{field.help_text}</p>
@@ -300,6 +336,7 @@ const ConfigSection = ({ section, sectionKey, config, fields, onSave, onTest }) 
             value={localConfig[field.key]}
             onChange={handleChange}
             allValues={localConfig}
+            sectionName={sectionKey}
           />
         ))}
 
