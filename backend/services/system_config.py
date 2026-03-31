@@ -139,7 +139,9 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
     sensitive_fields = [
         "onedrive_client_secret", "google_client_secret", 
         "dropbox_app_secret", "smtp_password", "imap_password",
-        "api_key", "api_token", "dropbox_access_token"
+        "smtp_password_2", "imap_password_2",
+        "api_key", "api_token", "dropbox_access_token",
+        "hcpro_password", "decisoes_password", "doutorfinancas_password", "custom_portal_password"
     ]
     
     # Remover campos mascarados dos dados recebidos
