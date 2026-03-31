@@ -723,9 +723,9 @@ async def send_documentation_email(
             detail="Nenhum destinatário válido. O cliente tem contas ativas ou simulações em todos os bancos selecionados."
         )
     
-    # Obter documentos
-    documents = await db.documents.find(
-        {"id": {"$in": document_ids}, "process_id": process_id},
+    # Obter documentos da coleção document_metadata (onde são guardados)
+    documents = await db.document_metadata.find(
+        {"id": {"$in": document_ids}},
         {"_id": 0}
     ).to_list(100)
     
