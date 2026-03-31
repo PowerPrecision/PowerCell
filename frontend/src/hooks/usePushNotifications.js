@@ -18,13 +18,15 @@ export function usePushNotifications() {
     setIsSupported(pushService.checkSupport());
     setPermission(pushService.getPermissionState());
     
-    // Registar service worker automaticamente
+    // Registar service worker automaticamente (apenas registo, sem subscrição)
     if (pushService.checkSupport()) {
-      pushService.registerServiceWorker().then(() => {
-        // Verificar se já está subscrito
-        if (pushService.swRegistration) {
-          pushService.swRegistration.pushManager.getSubscription().then(sub => {
+      pushService.registerServiceWorker().then((registration) => {
+        // Apenas verificar se já existe subscrição activa (não criar nova)
+        if (registration) {
+          registration.pushManager.getSubscription().then(sub => {
             setIsSubscribed(!!sub);
+          }).catch(() => {
+            // Silenciar erro de subscrição (VAPID key pode não estar configurada)
           });
         }
       });

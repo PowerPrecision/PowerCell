@@ -91,15 +91,17 @@ class PushNotificationService {
       let subscription = await this.swRegistration.pushManager.getSubscription();
       
       if (!subscription) {
+        // VAPID key é obrigatória para push notifications no browser
+        if (!VAPID_PUBLIC_KEY) {
+          console.warn('VAPID public key não configurada (REACT_APP_VAPID_PUBLIC_KEY). Push notifications indisponíveis.');
+          return { success: false, error: 'VAPID key não configurada' };
+        }
+
         // Criar nova subscrição
         const options = {
-          userVisibleOnly: true
+          userVisibleOnly: true,
+          applicationServerKey: this.urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
         };
-
-        // Adicionar VAPID key se disponível
-        if (VAPID_PUBLIC_KEY) {
-          options.applicationServerKey = this.urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
-        }
 
         subscription = await this.swRegistration.pushManager.subscribe(options);
         console.log('Nova subscrição criada:', subscription);
