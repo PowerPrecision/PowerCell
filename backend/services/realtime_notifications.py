@@ -18,6 +18,59 @@ from services.push_notifications import send_push_notification
 logger = logging.getLogger(__name__)
 
 
+# Mapeamento de tipo de notificação para chave de preferência inapp
+NOTIFICATION_TYPE_TO_PREF_KEY = {
+    "process_created": "inapp_new_process",
+    "process_updated": "inapp_new_process",
+    "process_status_change": "inapp_status_change",
+    "process_assigned": "inapp_new_process",
+    "document_uploaded": "inapp_document_upload",
+    "task_assigned": "inapp_task_assigned",
+    "deadline_approaching": "inapp_deadline_reminder",
+    "deadline_missed": "inapp_deadline_reminder",
+}
+
+# Cache simples de preferências (por user_id)
+_pref_cache: dict = {}
+
+
+async def _get_user_prefs(user_id: str) -> dict:
+    """Obter preferências de notificação de um utilizador, com cache."""
+    if user_id in _pref_cache:
+        return _pref_cache[user_id]
+    
+    prefs_doc = await db.notification_preferences.find_one({"user_id": user_id})
+    prefs = prefs_doc["preferences"] if prefs_doc and prefs_doc.get("preferences") else {}
+    _pref_cache[user_id] = prefs
+    return prefs
+
+
+def _invalidate_pref_cache(user_id: Optional[str] = None):
+    """Invalidar cache de preferências."""
+    if user_id:
+        _pref_cache.pop(user_id, None)
+    else:
+        _pref_cache.clear()
+
+
+async def _should_send_inapp_notification(user_id: str, notification_type: str) -> bool:
+    """
+    Verificar se o utilizador tem notificações in-app activadas para este tipo.
+    Se não encontrar preferências, assume True (envia por defeito).
+    """
+    prefs = await _get_user_prefs(user_id)
+    
+    # Mapear tipo de notificação para chave de preferência
+    pref_key = NOTIFICATION_TYPE_TO_PREF_KEY.get(notification_type)
+    if pref_key:
+        # Se o utilizador definiu explicitamente a preferência, respeitar
+        if pref_key in prefs:
+            return bool(prefs[pref_key])
+    
+    # Por defeito, enviar notificação
+    return True
+
+
 async def send_realtime_notification(
     user_id: str,
     title: str,
@@ -30,18 +83,25 @@ async def send_realtime_notification(
     """
     Enviar notificação em tempo real para um utilizador.
     
+    Verifica as preferências de notificação do utilizador antes de enviar.
+    
     Args:
         user_id: ID do utilizador destinatário
         title: Título da notificação
         message: Mensagem da notificação
-        notification_type: Tipo (info, warning, error, success)
+        notification_type: Tipo (info, warning, error, success, process_status_change, etc.)
         link: Link opcional para redireccionamento
         process_id: ID do processo relacionado (opcional)
         save_to_db: Se deve guardar na base de dados
     
     Returns:
-        Notificação criada
+        Notificação criada, ou None se o utilizador desactivou este tipo
     """
+    # Verificar preferências do utilizador
+    if not await _should_send_inapp_notification(user_id, notification_type):
+        logger.info(f"Notificação in-app bloqueada para {user_id} (tipo: {notification_type})")
+        return None
+    
     notification = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,

@@ -137,10 +137,10 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
     },
     "indexacao": {
         "pages": [
-            "dashboard", "processes", "documents", "notifications"
+            "dashboard", "kanban", "processes", "clients", "documents", "notifications"
         ],
         "actions": [
-            "upload_docs", "delete_docs"
+            "upload_docs", "delete_docs", "assign_clients"
         ],
     },
     "cliente": {
