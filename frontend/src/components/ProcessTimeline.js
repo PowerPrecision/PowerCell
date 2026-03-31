@@ -13,26 +13,37 @@ import { pt } from "date-fns/locale";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-// Fases do processo de crédito habitação
+// Fases do processo - IDs correspondem aos slugs na BD (workflow_statuses)
 const PROCESS_PHASES = [
   { id: "clientes_espera", label: "Clientes em Espera", color: "#FCD34D", order: 1 },
   { id: "fase_documental", label: "Fase Documental", color: "#60A5FA", order: 2 },
-  { id: "entregue_aos_intermediarios", label: "Entregue aos Intermediários", color: "#A78BFA", order: 3 },
-  { id: "enviado_ao_bruno", label: "Enviado ao Bruno", color: "#F97316", order: 4 },
-  { id: "enviado_ao_luis", label: "Enviado ao Luís", color: "#FB923C", order: 5 },
-  { id: "banco_em_analise", label: "Banco em Análise", color: "#38BDF8", order: 6 },
-  { id: "aprovado_pelo_banco", label: "Aprovado pelo Banco", color: "#4ADE80", order: 7 },
-  { id: "cpcv", label: "CPCV", color: "#22D3EE", order: 8 },
-  { id: "a_escriturar", label: "A Escriturar", color: "#818CF8", order: 9 },
-  { id: "escriturado", label: "Escriturado", color: "#10B981", order: 10 },
-  { id: "recusado", label: "Recusado", color: "#EF4444", order: 99 },
-  { id: "desistiu", label: "Desistiu", color: "#6B7280", order: 98 },
+  { id: "fase_documental_ii", label: "Fase Documental II", color: "#60A5FA", order: 3 },
+  { id: "enviado_bruno", label: "Enviado ao Bruno", color: "#F97316", order: 4 },
+  { id: "enviado_luis", label: "Enviado ao Luís", color: "#FB923C", order: 5 },
+  { id: "enviado_bcp_rui", label: "Enviado BCP Rui", color: "#FB923C", order: 6 },
+  { id: "entradas_precision", label: "Entradas Precision", color: "#F97316", order: 7 },
+  { id: "fase_bancaria", label: "Fase Bancária - Pré Aprovação", color: "#38BDF8", order: 8 },
+  { id: "fase_visitas", label: "Fase de Visitas", color: "#60A5FA", order: 9 },
+  { id: "ch_aprovado", label: "CH Aprovado - Avaliação", color: "#4ADE80", order: 10 },
+  { id: "fase_escritura", label: "Fase de Escritura", color: "#22D3EE", order: 11 },
+  { id: "escritura_agendada", label: "Escritura Agendada", color: "#818CF8", order: 12 },
+  { id: "concluidos", label: "Concluídos", color: "#10B981", order: 13 },
+  { id: "desistencias", label: "Desistências", color: "#6B7280", order: 14 },
 ];
 
 // Normalizar status (mapear variantes para o ID principal)
 const normalizeStatus = (status) => {
   const statusMap = {
     "clientes_em_espera": "clientes_espera",
+    "enviado_ao_bruno": "enviado_bruno",
+    "enviado_ao_luis": "enviado_luis",
+    "banco_em_analise": "fase_bancaria",
+    "aprovado_pelo_banco": "ch_aprovado",
+    "cpcv": "fase_escritura",
+    "a_escriturar": "escritura_agendada",
+    "escriturado": "concluidos",
+    "recusado": "desistencias",
+    "desistiu": "desistencias",
   };
   return statusMap[status] || status;
 };
