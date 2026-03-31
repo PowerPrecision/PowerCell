@@ -423,6 +423,17 @@ export const addMonitoredEmail = (processId, email) =>
 export const removeMonitoredEmail = (processId, email) => 
   api.delete(`/emails/monitored/${processId}/${encodeURIComponent(email)}`);
 
+// Auto-Email Drafts (Rascunhos Automáticos)
+export const getAutoDrafts = (limit = 20) => 
+  api.get("/emails/drafts", { params: { limit } });
+export const getAutoDraftStats = () => api.get("/emails/drafts/stats");
+export const editAutoDraft = (draftId, data) => api.put(`/emails/drafts/${draftId}`, data);
+export const sendAutoDraft = (draftId, account = "power") => 
+  api.post(`/emails/drafts/${draftId}/send`, null, { params: { account } });
+export const deleteAutoDraft = (draftId) => api.delete(`/emails/drafts/${draftId}`);
+export const createAutoDraft = (processId, docType) =>
+  api.post("/emails/drafts/create", { process_id: processId, doc_type: docType });
+
 // Trello
 export const getTrelloStatus = () => api.get("/trello/status");
 export const syncProcessWithTrello = (processId) => api.post(`/trello/sync/${processId}`);

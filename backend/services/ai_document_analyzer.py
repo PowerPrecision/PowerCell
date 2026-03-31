@@ -487,7 +487,40 @@ async def analyze_multiple_documents(
                         "source": empty["source"],
                         "confidence": analysis.get("confianca", 0.5)
                     }
-            
+
+            # Auto-Draft: gerar rascunhos para documentos em falta
+            try:
+                from services.email_draft_service import create_missing_doc_draft
+                if hasattr(existing_client_data, 'get'):
+                    client_name = existing_client_data.get("client_name", "")
+                    process_number = existing_client_data.get("process_number", "")
+                else:
+                    client_name = str(existing_client_data) if existing_client_data else ""
+                    process_number = ""
+
+                process_id = existing_client_data.get("process_id", "") if hasattr(existing_client_data, 'get') else ""
+
+                if process_id and client_name:
+                    # Determinar tipos de documentos em falta baseado na análise
+                    doc_type = analysis.get("tipo_documento", "")
+                    if doc_type and doc_type not in ["outro", "outro"]:
+                        # Se o documento foi categorizado, verificar se falta algum outro
+                        draft_result = await create_missing_doc_draft(
+                            process_id=process_id,
+                            client_name=client_name,
+                            missing_doc_type=doc_type,
+                            process_number=process_number,
+                        )
+                        if draft_result.get("success"):
+                            results.setdefault("auto_drafts_created", []).append({
+                                "doc_type": doc_type,
+                                "draft_id": draft_result.get("draft_id"),
+                            })
+                        elif draft_result.get("reason") != "disabled":
+                            logger.debug(f"Auto-draft não criado: {draft_result.get('reason')}")
+            except Exception as draft_error:
+                logger.warning(f"Erro ao criar rascunho automático: {draft_error}")
+
             # Actualizar log com sucesso
             doc_result.update({
                 "status": "success",

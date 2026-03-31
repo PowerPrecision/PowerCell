@@ -196,6 +196,24 @@ class DSTIConfig(BaseModel):
     critical_risk_threshold: float = 50.0
 
 
+class AutoDraftConfig(BaseModel):
+    """Configuração de rascunhos automáticos de e-mails"""
+    enabled: bool = False
+    base_prompt: Optional[str] = None  # Prompt base para geração de rascunhos pela IA
+    eligible_doc_types: List[str] = [
+        "irs",
+        "recibo_vencimento",
+        "declaracao_irs",
+        "extrato_bancario",
+        "mapa_responsabilidades",
+        "comprovativo_morada",
+        "cc",
+        "caderneta_predial",
+        "certidao_teor",
+        "licenca_habitacao",
+    ]
+
+
 class SystemConfig(BaseModel):
     """Configuração completa do sistema"""
     storage: StorageConfig = StorageConfig()
@@ -206,6 +224,7 @@ class SystemConfig(BaseModel):
     credit_services: CreditServicesConfig = CreditServicesConfig()
     document_recipients: DocumentRecipientsConfig = DocumentRecipientsConfig()
     dsti_analysis: DSTIConfig = DSTIConfig()
+    auto_draft: AutoDraftConfig = AutoDraftConfig()
     setup_completed: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
