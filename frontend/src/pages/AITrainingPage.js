@@ -131,6 +131,7 @@ const AITrainingPage = () => {
   const [saving, setSaving] = useState(false);
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [editingEntry, setEditingEntry] = useState(null);
+  const [trainingStats, setTrainingStats] = useState({ total_executions: 0, last_executed_at: null, last_executed_by: null, active_entries: 0 });
   const [formData, setFormData] = useState({
     category: "document_types",
     title: "",
@@ -150,6 +151,20 @@ const AITrainingPage = () => {
       if (response.ok) {
         const data = await response.json();
         setEntries(data.data || {});
+      }
+
+      // Carregar estatísticas de uso do treino
+      try {
+        const statsRes = await fetch(`${API_URL}/api/admin/ai-training/stats`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          setTrainingStats(statsData);
+        }
+      } catch (e) {
+        // Não bloquear carregamento se stats falhar
+        console.warn("Erro ao carregar stats:", e);
       }
     } catch (error) {
       console.error("Erro ao carregar treino:", error);
@@ -312,6 +327,17 @@ const AITrainingPage = () => {
   const totalActive = Object.values(entries).flat().filter(e => e.is_active).length;
   const totalEntries = Object.values(entries).flat().length;
 
+  // Formatar data da última execução
+  const formatLastExecution = (dateStr) => {
+    if (!dateStr) return "Nunca executado";
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return dateStr;
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -343,7 +369,22 @@ const AITrainingPage = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-2">
+                <Brain className="h-5 w-5 text-purple-500" />
+                <div className="text-2xl font-bold">{trainingStats.total_executions}</div>
+              </div>
+              <p className="text-sm text-muted-foreground">Chamadas ao Agente IA</p>
+              {trainingStats.last_executed_at && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Última: {formatLastExecution(trainingStats.last_executed_at)}
+                  {trainingStats.last_executed_by && ` por ${trainingStats.last_executed_by}`}
+                </p>
+              )}
+            </CardContent>
+          </Card>
           <Card>
             <CardContent className="pt-4">
               <div className="text-2xl font-bold">{totalEntries}</div>

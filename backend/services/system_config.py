@@ -10,7 +10,7 @@ from database import db
 from models.system_config import (
     SystemConfig, StorageConfig, EmailConfig, AIConfig, 
     TrelloConfig, SystemSettings, StorageProvider, CreditServicesConfig,
-    DocumentRecipientsConfig, AutoDraftConfig
+    DocumentRecipientsConfig, AutoDraftConfig, AuditTrailConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -137,7 +137,7 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
     
     # Lista de campos sensíveis que são mascarados na API
     sensitive_fields = [
-        "onedrive_client_secret", "google_client_secret", 
+        "aws_secret_access_key", "onedrive_client_secret", "google_client_secret", 
         "dropbox_app_secret", "smtp_password", "imap_password",
         "smtp_password_2", "imap_password_2",
         "api_key", "api_token", "dropbox_access_token",
@@ -210,6 +210,17 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
             except json.JSONDecodeError:
                 logger.warning("eligible_doc_types não é um JSON válido, a manter valor original")
         config.auto_draft = AutoDraftConfig(**current)
+    elif section == "audit_trail":
+        current = config.audit_trail.model_dump()
+        current.update(filtered_data)
+        # Se critical_fields é uma string, tentar parsear para lista
+        if isinstance(current.get("critical_fields"), str):
+            import json
+            try:
+                current["critical_fields"] = json.loads(current["critical_fields"])
+            except json.JSONDecodeError:
+                logger.warning("critical_fields não é um JSON válido, a manter valor original")
+        config.audit_trail = AuditTrailConfig(**current)
     else:
         raise ValueError(f"Secção desconhecida: {section}")
     

@@ -214,6 +214,16 @@ class AutoDraftConfig(BaseModel):
     ]
 
 
+class AuditTrailConfig(BaseModel):
+    """Configuração do sistema de auditoria (Audit Trail)"""
+    enabled: bool = True
+    log_ip_address: bool = True
+    log_ai_approvals: bool = True
+    require_reason_for_critical_fields: bool = True
+    critical_fields: List[str] = ["financial_data", "credit_data", "status"]
+    retention_days: int = 365
+
+
 class SystemConfig(BaseModel):
     """Configuração completa do sistema"""
     storage: StorageConfig = StorageConfig()
@@ -225,6 +235,7 @@ class SystemConfig(BaseModel):
     document_recipients: DocumentRecipientsConfig = DocumentRecipientsConfig()
     dsti_analysis: DSTIConfig = DSTIConfig()
     auto_draft: AutoDraftConfig = AutoDraftConfig()
+    audit_trail: AuditTrailConfig = AuditTrailConfig()
     setup_completed: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
