@@ -25,3 +25,4 @@ class WorkflowStatusResponse(BaseModel):
     color: str
     description: Optional[str] = None
     is_default: bool = False
+    internal_code: Optional[str] = None

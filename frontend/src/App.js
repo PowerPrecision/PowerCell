@@ -53,6 +53,7 @@ const AutomationPage = React.lazy(() => import("./pages/AutomationPage"));
 const ProfilePage = React.lazy(() => import("./pages/ProfilePage"));
 const ProfileSettingsPage = React.lazy(() => import("./pages/ProfileSettingsPage"));
 const FormManagementPage = React.lazy(() => import("./pages/FormManagementPage"));
+const AuditTrailPage = React.lazy(() => import("./pages/AuditTrailPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -484,6 +485,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
                 <AIDataReviewPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Audit Trail - Admin and CEO */}
+          <Route
+            path="/auditoria"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <AuditTrailPage />
               </ProtectedRoute>
             }
           />

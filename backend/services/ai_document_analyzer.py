@@ -281,6 +281,22 @@ async def analyze_document_with_ai(
         response_text = response.choices[0].message.content
         logger.info(f"Resposta recebida para {file_name}")
         
+        # Incrementar contador de execuções do treino IA
+        try:
+            from database import db
+            now = datetime.now(timezone.utc).isoformat()
+            await db.ai_config.update_one(
+                {"type": "execution_stats"},
+                {
+                    "$inc": {"total_executions": 1},
+                    "$set": {"last_executed_at": now},
+                    "$setOnInsert": {"type": "execution_stats", "created_at": now, "total_executions": 0}
+                },
+                upsert=True
+            )
+        except Exception as counter_err:
+            logger.warning(f"Erro ao incrementar contador de treino IA: {counter_err}")
+        
         # Parse da resposta JSON
         import json
         
