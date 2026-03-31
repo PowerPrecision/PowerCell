@@ -482,5 +482,11 @@ export const getProcessTempLinks = (processId) => api.get(`/temp-links/process/$
 export const cancelTempLink = (linkId) => api.post(`/temp-links/${linkId}/cancel`);
 export const deleteTempLink = (linkId) => api.delete(`/temp-links/${linkId}`);
 
+// Audit Trail
+export const getAuditTrail = (params = {}) => api.get("/audit/trail", { params });
+export const getAuditStats = () => api.get("/audit/stats");
+export const exportAuditTrail = (params = {}) => api.get("/audit/export", { params, responseType: "blob" });
+export const cleanupAuditTrail = (days) => api.post("/audit/cleanup", null, { params: { days } });
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
