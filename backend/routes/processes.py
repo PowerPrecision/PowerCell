@@ -18,6 +18,7 @@ Autor: PowerCell Development Team
 """
 import uuid
 import logging
+import re
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -74,6 +75,43 @@ from services.process_kanban import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def create_accent_insensitive_regex(search_term: str) -> dict:
+    """
+    Cria um regex MongoDB que ignora acentos.
+    
+    Exemplo: pesquisar 'jose' encontra 'José', 'JOSE', 'josé', 'JÓSÉ'
+    """
+    if not search_term:
+        return {"$regex": "", "$options": "i"}
+    
+    # Mapeamento de caracteres base para todas as suas variantes acentuadas
+    accent_map = {
+        'a': '[aàáâãäåAÀÁÂÃÄÅ]',
+        'e': '[eèéêëEÈÉÊË]',
+        'i': '[iìíîïIÌÍÎÏ]',
+        'o': '[oòóôõöOÒÓÔÕÖ]',
+        'u': '[uùúûüUÙÚÛÜ]',
+        'c': '[cçCÇ]',
+        'n': '[nñNÑ]',
+        'y': '[yýÿYÝŸ]',
+    }
+    
+    # Construir padrão regex caractere a caractere
+    pattern_parts = []
+    for char in search_term.lower():
+        if char in accent_map:
+            pattern_parts.append(accent_map[char])
+        elif char.isalpha():
+            pattern_parts.append(f'[{char}{char.upper()}]')
+        elif char.isalnum():
+            pattern_parts.append(char)
+        else:
+            pattern_parts.append(re.escape(char))
+    
+    pattern = ''.join(pattern_parts)
+    return {"$regex": pattern, "$options": ""}
 
 
 async def sync_process_to_trello(process: dict):
@@ -470,10 +508,12 @@ async def get_processes_paginated(
         query["status"] = status
     
     if search:
+        name_regex = create_accent_insensitive_regex(search)
+        simple_regex = {"$regex": re.escape(search), "$options": "i"}
         search_condition = {
             "$or": [
-                {"client_name": {"$regex": search, "$options": "i"}},
-                {"client_email": {"$regex": search, "$options": "i"}}
+                {"client_name": name_regex},
+                {"client_email": simple_regex}
             ]
         }
         if "$and" not in query:
