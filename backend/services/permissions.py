@@ -24,6 +24,18 @@ AVAILABLE_PAGES = [
     "email_search",
     "ai_insights",
     "system_config",
+    # Páginas adicionais em falta
+    "properties",        # Imóveis
+    "minutas",           # Minutas
+    "validades",         # Validades Docs
+    "rgpd",               # RGPD
+    "backups",           # Backups
+    "logs",               # Logs do Sistema
+    "diagnostics",       # Diagnósticos
+    "background_jobs",   # Processos Background
+    "leads",             # Gestor de Visitas / Leads
+    "permissions",       # Perfis e Permissões
+    "form_manager",      # Gestão do Formulário
 ]
 
 # Ações disponíveis no sistema
@@ -40,6 +52,17 @@ AVAILABLE_ACTIONS = [
     "view_financials",
     "export_data",
     "assign_clients",
+    # Ações adicionais em falta
+    "manage_backups",    # Gerir backups
+    "view_logs",         # Ver logs do system
+    "manage_properties", # Gerir imóveis
+    "manage_minutas",    # Gerir minutas
+    "manage_leads",      # Gerir leads
+    "manage_rgpd",       # Gerir RGPD
+    "manage_workflow",   # Gerir estados do workflow
+    "manage_automation", # Gerir automações
+    "view_reports",      # Ver relatórios
+    "manage_ai",         # Gerir configurações de IA
 ]
 
 # Permissões padrão por role
@@ -56,29 +79,33 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
     "diretor": {
         "pages": [
             "dashboard", "kanban", "processes", "clients", "documents",
-            "calendar", "notifications", "stats", "email_search", "ai_insights"
+            "calendar", "notifications", "stats", "email_search", "ai_insights",
+            "properties", "minutas", "validades", "leads"
         ],
         "actions": [
             "create_process", "edit_process", "delete_process",
             "create_client", "edit_client", "delete_client",
-            "upload_docs", "delete_docs", "view_financials", "export_data", "assign_clients"
+            "upload_docs", "delete_docs", "view_financials", "export_data", "assign_clients",
+            "manage_properties", "manage_minutas", "manage_leads", "view_reports"
         ],
     },
     "consultor": {
         "pages": [
             "dashboard", "kanban", "processes", "clients", "documents",
-            "calendar", "notifications", "ai_insights"
+            "calendar", "notifications", "ai_insights",
+            "properties", "minutas", "leads"
         ],
         "actions": [
             "create_process", "edit_process",
             "create_client", "edit_client",
-            "upload_docs", "view_financials", "export_data"
+            "upload_docs", "view_financials", "export_data",
+            "manage_properties", "manage_minutas"
         ],
     },
     "intermediario": {
         "pages": [
             "dashboard", "kanban", "processes", "clients", "documents",
-            "calendar", "notifications", "ai_insights"
+            "calendar", "notifications", "ai_insights", "minutas"
         ],
         "actions": [
             "create_process", "edit_process",
@@ -89,7 +116,7 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
     "mediador": {
         "pages": [
             "dashboard", "kanban", "processes", "clients", "documents",
-            "calendar", "notifications", "ai_insights"
+            "calendar", "notifications", "ai_insights", "minutas"
         ],
         "actions": [
             "create_process", "edit_process",
@@ -100,7 +127,7 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
     "administrativo": {
         "pages": [
             "dashboard", "kanban", "processes", "clients", "documents",
-            "calendar", "notifications", "registrations"
+            "calendar", "notifications", "registrations", "validades"
         ],
         "actions": [
             "create_process", "edit_process",
