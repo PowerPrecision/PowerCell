@@ -137,7 +137,7 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
     
     # Lista de campos sensíveis que são mascarados na API
     sensitive_fields = [
-        "onedrive_client_secret", "google_client_secret", 
+        "aws_secret_access_key", "onedrive_client_secret", "google_client_secret", 
         "dropbox_app_secret", "smtp_password", "imap_password",
         "smtp_password_2", "imap_password_2",
         "api_key", "api_token", "dropbox_access_token",

@@ -5,6 +5,22 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 ## [Não publicado]
 
+## [2026-04-01] - Correções e Melhorias
+
+### Corrigido
+- **AWS Secret Access Key visível na UI**: O campo `aws_secret_access_key` não estava na lista de campos sensíveis, fazendo com que o valor real fosse retornado em vez de ser mascarado. Adicionado à lista de campos sensíveis no backend (rotas e serviço de system_config).
+- **Campos de password adicionados à lista de mascaragem**: Todos os campos de password foram adicionados à lista de campos sensíveis para mascaragem adequada na interface de configurações: `aws_secret_access_key`, `smtp_password_2`, `imap_password_2`, `hcpro_password`, `decisoes_password`, `doutorfinancas_password`, `custom_portal_password`.
+- **Erros 403 DSTI / 404 send-documentation**: Investigação completa confirma que nenhum destes erros é originado pelo código atual do frontend. O cálculo DSTI é puramente client-side (DSTICalculator.js). O endpoint `POST /emails/send-documentation/{id}` existe corretamente em emails.py. Estes erros provavelmente resultam de cache do browser ou de uma versão antiga do frontend em produção (Render).
+
+### Adicionado
+- **Contador de Chamadas ao Agente IA**: Nova secção "Chamadas ao Agente IA" na página de Treino do Agente IA, mostrando:
+  - Total de chamadas efectuadas (incrementado automaticamente a cada análise de documento)
+  - Data e autor da última execução
+  - O contador é persistido na colecção `ai_config` da MongoDB
+  - Backend: `analyze_document_with_ai()` agora incrementa o contador a cada análise bem-sucedida
+  - Backend: Endpoint existente `GET /api/admin/ai-training/stats` já fornecia os dados (a UI agora consome-os)
+  - Backend: Endpoint existente `POST /api/admin/ai-training/prompt/execute` disponível para execução manual
+
 ## [2026-03-24] - Pré-visualização para Consultores e Correções de Build
 
 ### Nota
