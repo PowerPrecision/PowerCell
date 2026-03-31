@@ -514,7 +514,7 @@ const ProcessDetails = () => {
     }
 
     // Verificar se o utilizador pode mudar o status
-    const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "diretor", "administrativo"].includes(user?.role);
+    const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "diretor", "administrativo"].includes(user?.role?.toLowerCase());
     if (!canChangeStatus) {
       return;
     }
@@ -961,18 +961,21 @@ const ProcessDetails = () => {
     return statusInfo || { label: statusName, color: "blue" };
   };
 
-  const canEditPersonal = ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
-  const canEditFinancial = ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
-  const canEditRealEstate = ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
-  const canEditCredit = ["mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao" && 
+  // Normalizar role para comparação case-insensitive
+  const userRole = user?.role?.toLowerCase() || "";
+  
+  const canEditPersonal = ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
+  const canEditFinancial = ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
+  const canEditRealEstate = ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
+  const canEditCredit = ["mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao" && 
     (workflowStatuses.filter(s => s.order >= 3).map(s => s.name).includes(process?.status) || 
      process?.status === "ch_aprovado" || process?.status === "fase_bancaria");
-  const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
-  const canManageDeadlines = ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(user?.role) && user?.role !== "indexacao";
-  const canDeleteClient = ["admin", "ceo", "diretor", "administrativo"].includes(user?.role);
+  const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
+  const canManageDeadlines = ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
+  const canDeleteClient = ["admin", "ceo", "diretor", "administrativo"].includes(userRole);
   
   // Role INDEXACAO: só pode ver dados e gerir documentos (upload/delete)
-  const isIndexacaoRole = user?.role === "indexacao";
+  const isIndexacaoRole = userRole === "indexacao";
 
   // Função para eliminar o cliente/processo
   const handleDeleteClient = async () => {
@@ -1107,7 +1110,7 @@ const ProcessDetails = () => {
           {/* Linha 2: Botões de Ação */}
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pl-0 sm:pl-12">
             {/* Botão para Gerir Atribuições - escondido para indexacao */}
-            {user?.role !== "indexacao" && (
+            {userRole !== "indexacao" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1121,7 +1124,7 @@ const ProcessDetails = () => {
             )}
             
             {/* Botão RGPD */}
-            {user?.role !== "indexacao" && (
+            {userRole !== "indexacao" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1160,7 +1163,7 @@ const ProcessDetails = () => {
             )}
             
             {/* Botão CPCV */}
-            {user?.role !== "indexacao" && (
+            {userRole !== "indexacao" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1174,7 +1177,7 @@ const ProcessDetails = () => {
             )}
 
             {/* Botão Enviar Documentação para Balcões */}
-            {user?.role !== "indexacao" && (
+            {userRole !== "indexacao" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1188,7 +1191,7 @@ const ProcessDetails = () => {
             )}
 
             {/* Calculadoras */}
-            {user?.role !== "indexacao" && (
+            {userRole !== "indexacao" && (
               <>
                 <TempLinkButton
                   processId={id}
@@ -2424,7 +2427,7 @@ const ProcessDetails = () => {
                 )}
 
                 {/* Conexões de Dados - Visível apenas para admin */}
-                {user?.role === "admin" && (
+                {userRole === "admin" && (
                   <Card className="mt-6 border-blue-200 bg-blue-50/50">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm flex items-center gap-2 text-blue-700">
