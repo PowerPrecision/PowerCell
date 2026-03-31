@@ -832,6 +832,13 @@ async def delete_file_s3(
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
+    # Verificar se é um caminho de ficheiro válido (não pode terminar com /)
+    if file_path.endswith('/'):
+        raise HTTPException(
+            status_code=400, 
+            detail="Caminho inválido: não pode eliminar pastas. Selecione um ficheiro específico."
+        )
+    
     # Verificar se o ficheiro pertence ao cliente (segurança)
     client_name = process.get("client_name", "")
     safe_name = sanitize_folder_name(client_name) if client_name else ""
