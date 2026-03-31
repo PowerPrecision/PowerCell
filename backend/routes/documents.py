@@ -287,6 +287,7 @@ async def upload_file_s3(
     file: UploadFile = File(...),
     category: str = Form(...), # Ex: "Financeiros", "Imovel"
     empresa_nif: Optional[str] = Form(None),  # NIF da empresa - obrigatório para indexacao
+    custom_filename: Optional[str] = Form(None),  # Nome personalizado para evitar conflitos
     user: dict = Depends(get_current_user)
 ):
     """
@@ -296,6 +297,9 @@ async def upload_file_s3(
     - Normalização do nome do ficheiro
     - Conversão de imagens (JPG, PNG) para PDF
     - Categorização automática com IA (em background)
+    
+    Parâmetros:
+    - custom_filename: Nome personalizado para o ficheiro (usado quando há conflito de nomes)
     
     Nota para utilizadores "indexacao":
     - O campo empresa_nif é OBRIGATÓRIO
@@ -422,9 +426,15 @@ async def upload_file_s3(
             # HEIC/HEIF são aceites mas não convertidos automaticamente
             # O utilizador deve converter para JPEG antes do upload idealmente
         
-        # Normalizar nome do ficheiro
-        normalized_filename = normalize_filename(original_filename, category)
-        logger.info(f"Nome normalizado")
+        # Usar nome personalizado se fornecido (para evitar conflitos), senão normalizar
+        if custom_filename:
+            # Sanitizar o nome personalizado para segurança
+            normalized_filename = normalize_filename(custom_filename, category)
+            logger.info(f"Nome personalizado usado: {sanitize_for_log(normalized_filename)}")
+        else:
+            # Normalizar nome do ficheiro original
+            normalized_filename = normalize_filename(original_filename, category)
+            logger.info(f"Nome normalizado: {sanitize_for_log(normalized_filename)}")
         
         # Criar BytesIO para o upload
         file_buffer = BytesIO(file_content)
@@ -509,6 +519,95 @@ async def upload_file_s3(
             status_code=500, 
             detail=f"Erro interno ao processar upload. Por favor tente novamente ou contacte o suporte se o problema persistir."
         )
+
+
+@router.post("/check-upload-conflict", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE})
+async def check_upload_conflict(
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Verifica se existe conflito de nomes ANTES do upload.
+    
+    Body:
+    - process_id: ID do processo
+    - filenames: Lista de nomes de ficheiros a verificar
+    - category: Categoria destino (opcional, default: "Outros")
+    
+    Returns:
+    - conflicts: Lista de ficheiros com conflito
+    - for each conflict:
+        - filename: Nome do ficheiro
+        - existing_path: Caminho do ficheiro existente
+        - suggested_names: Lista de nomes alternativos
+    """
+    process_id = data.get("process_id")
+    filenames = data.get("filenames", [])
+    category = data.get("category", "Outros")
+    
+    if not process_id or not filenames:
+        raise HTTPException(status_code=400, detail="process_id e filenames são obrigatórios")
+    
+    # Buscar processo
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    second_client_name = process.get("second_client_name") or process.get("titular2", {}).get("nome")
+    s3_folder = process.get("s3_folder")
+    
+    # Determinar o caminho base
+    if s3_folder:
+        base_path = s3_folder.rstrip('/')
+    else:
+        base_path = s3_service._get_client_base_path_for_upload(
+            process_id, 
+            client_name, 
+            second_client_name
+        )
+    
+    safe_category = sanitize_folder_name(category)
+    conflicts = []
+    
+    for filename in filenames:
+        # Normalizar nome do ficheiro como seria no upload
+        normalized = normalize_filename(filename, category)
+        
+        # Construir caminho completo
+        target_path = f"{base_path}/{safe_category}/{normalized}"
+        
+        # Verificar se existe
+        if s3_service.file_exists(target_path):
+            # Gerar nomes alternativos
+            name_part, ext = normalized.rsplit('.', 1) if '.' in normalized else (normalized, 'pdf')
+            suggested = []
+            
+            for i in range(2, 5):
+                new_name = f"{name_part}_{i}.{ext}"
+                new_path = f"{base_path}/{safe_category}/{new_name}"
+                if not s3_service.file_exists(new_path):
+                    suggested.append({
+                        "filename": new_name,
+                        "path": new_path
+                    })
+            
+            conflicts.append({
+                "original_filename": filename,
+                "normalized_filename": normalized,
+                "existing_path": target_path,
+                "existing_size": None,  # Could add file size if needed
+                "suggested_names": suggested
+            })
+    
+    return {
+        "has_conflicts": len(conflicts) > 0,
+        "conflict_count": len(conflicts),
+        "total_files": len(filenames),
+        "conflicts": conflicts,
+        "base_path": base_path,
+        "category": category
+    }
 
 
 @router.post("/check-file", responses={400: HTTP_400_RESPONSE, 500: HTTP_500_RESPONSE})
