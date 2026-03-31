@@ -16,6 +16,8 @@ SEGURANÇA:
 import uuid
 import logging
 import copy
+import re
+import unicodedata
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -34,6 +36,43 @@ from services.s3_storage import s3_service
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
+
+
+def create_accent_insensitive_regex(search_term: str) -> dict:
+    """
+    Cria um regex MongoDB que ignora acentos.
+    
+    Exemplo: pesquisar 'jose' encontra 'José', 'JOSE', 'josé', 'JÓSÉ'
+    """
+    if not search_term:
+        return {"$regex": "", "$options": "i"}
+    
+    # Mapeamento de caracteres base para todas as suas variantes acentuadas
+    accent_map = {
+        'a': '[aàáâãäåAÀÁÂÃÄÅ]',
+        'e': '[eèéêëEÈÉÊË]',
+        'i': '[iìíîïIÌÍÎÏ]',
+        'o': '[oòóôõöOÒÓÔÕÖ]',
+        'u': '[uùúûüUÙÚÛÜ]',
+        'c': '[cçCÇ]',
+        'n': '[nñNÑ]',
+        'y': '[yýÿYÝŸ]',
+    }
+    
+    # Construir padrão regex caractere a caractere
+    pattern_parts = []
+    for char in search_term.lower():
+        if char in accent_map:
+            pattern_parts.append(accent_map[char])
+        elif char.isalpha():
+            pattern_parts.append(f'[{char}{char.upper()}]')
+        elif char.isalnum():
+            pattern_parts.append(char)
+        else:
+            pattern_parts.append(re.escape(char))
+    
+    pattern = ''.join(pattern_parts)
+    return {"$regex": pattern, "$options": ""}
 
 
 def encrypt_client_data(data: dict) -> dict:
@@ -145,13 +184,14 @@ async def list_registered_clients(
     # Construir query
     query = {"registration_completed": True}
     
-    # Filtro de pesquisa
+    # Filtro de pesquisa - ignora acentos no nome
     if search:
-        search_regex = {"$regex": search, "$options": "i"}
+        name_regex = create_accent_insensitive_regex(search)
+        simple_regex = {"$regex": re.escape(search), "$options": "i"}
         query["$or"] = [
-            {"nome": search_regex},
-            {"contacto.email": search_regex},
-            {"dados_pessoais.nif": search_regex}
+            {"nome": name_regex},
+            {"contacto.email": simple_regex},
+            {"dados_pessoais.nif": simple_regex}
         ]
     
     # Filtro por ter processo
@@ -474,11 +514,13 @@ async def list_clients(
         process_query = {}
         
         if search:
+            name_regex = create_accent_insensitive_regex(search)
+            simple_regex = {"$regex": re.escape(search), "$options": "i"}
             process_query = {
                 "$or": [
-                    {"client_name": {"$regex": search, "$options": "i"}},
-                    {"client_email": {"$regex": search, "$options": "i"}},
-                    {"personal_data.nif": {"$regex": search, "$options": "i"}}
+                    {"client_name": name_regex},
+                    {"client_email": simple_regex},
+                    {"personal_data.nif": simple_regex}
                 ]
             }
         
@@ -637,11 +679,13 @@ async def list_clients(
     process_query = role_query
     
     if search:
+        name_regex = create_accent_insensitive_regex(search)
+        simple_regex = {"$regex": re.escape(search), "$options": "i"}
         search_filter = {
             "$or": [
-                {"client_name": {"$regex": search, "$options": "i"}},
-                {"client_email": {"$regex": search, "$options": "i"}},
-                {"personal_data.nif": {"$regex": search, "$options": "i"}}
+                {"client_name": name_regex},
+                {"client_email": simple_regex},
+                {"personal_data.nif": simple_regex}
             ]
         }
         process_query = {"$and": [process_query, search_filter]}

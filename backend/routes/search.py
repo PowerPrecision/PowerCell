@@ -3,6 +3,7 @@ Search Routes - Pesquisa Global
 Endpoint para pesquisa unificada em processos, clientes e tarefas
 """
 import logging
+import unicodedata
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Query
 import re
@@ -13,6 +14,77 @@ from services.auth import get_current_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/search", tags=["Search"])
+
+
+def normalize_text(text: str) -> str:
+    """
+    Remove acentos e normaliza texto para pesquisa.
+    Exemplo: 'José' -> 'Jose', 'São Paulo' -> 'Sao Paulo'
+    """
+    if not text:
+        return ""
+    # Normalizar para forma NFD e remover caracteres combinantes (acentos)
+    normalized = unicodedata.normalize('NFD', text)
+    # Remover caracteres diacríticos (acentos, cedilhas, etc.)
+    result = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    return result.lower()
+
+
+def create_accent_insensitive_regex(search_term: str) -> dict:
+    """
+    Cria um regex MongoDB que ignora acentos.
+    
+    Exemplo: pesquisar 'jose' encontra 'José', 'JOSE', 'josé', 'JÓSÉ'
+    
+    Funciona convertendo cada caractere numa classe que inclui todas as variantes acentuadas.
+    """
+    if not search_term:
+        return {"$regex": "", "$options": "i"}
+    
+    # Mapeamento de caracteres base para todas as suas variantes acentuadas
+    accent_map = {
+        'a': '[aàáâãäåAÀÁÂÃÄÅ]',
+        'e': '[eèéêëEÈÉÊË]',
+        'i': '[iìíîïIÌÍÎÏ]',
+        'o': '[oòóôõöOÒÓÔÕÖ]',
+        'u': '[uùúûüUÙÚÛÜ]',
+        'c': '[cçCÇ]',
+        'n': '[nñNÑ]',
+        'y': '[yýÿYÝŸ]',
+        's': '[sS]',  # Não há variante acentuada comum
+        'r': '[rR]',
+        'l': '[lL]',
+        't': '[tT]',
+        'd': '[dD]',
+        'm': '[mM]',
+        'p': '[pP]',
+        'b': '[bB]',
+        'f': '[fF]',
+        'g': '[gG]',
+        'h': '[hH]',
+        'j': '[jJ]',
+        'k': '[kK]',
+        'q': '[qQ]',
+        'v': '[vV]',
+        'w': '[wW]',
+        'x': '[xX]',
+        'z': '[zZ]',
+    }
+    
+    # Construir padrão regex caractere a caractere
+    pattern_parts = []
+    for char in search_term.lower():
+        if char in accent_map:
+            pattern_parts.append(accent_map[char])
+        elif char.isalnum():
+            # Outros caracteres alfanuméricos sem variantes acentuadas
+            pattern_parts.append(f'[{char}{char.upper()}]' if char.isalpha() else char)
+        else:
+            # Caracteres especiais - escapar
+            pattern_parts.append(re.escape(char))
+    
+    pattern = ''.join(pattern_parts)
+    return {"$regex": pattern, "$options": ""}  # Não precisa de 'i' porque já incluímos maiúsculas
 
 
 @router.get("/global")
@@ -43,8 +115,12 @@ async def global_search(
             "tasks": []
         }
     
-    # Criar regex para pesquisa case-insensitive
-    regex_pattern = {"$regex": search_term, "$options": "i"}
+    # Criar regex para pesquisa que ignora acentos e case
+    regex_pattern = create_accent_insensitive_regex(search_term)
+    
+    # Para campos que não precisam de ignorar acentos (NIF, email, telefone)
+    # usamos regex simples case-insensitive
+    simple_regex = {"$regex": re.escape(search_term), "$options": "i"}
     
     results = {
         "processes": [],
@@ -57,8 +133,8 @@ async def global_search(
         process_query = {
             "$or": [
                 {"client_name": regex_pattern},
-                {"personal_data.nif": regex_pattern},
-                {"personal_data.email": regex_pattern},
+                {"personal_data.nif": simple_regex},
+                {"personal_data.email": simple_regex},
                 {"process_type": regex_pattern},
             ]
         }
@@ -81,9 +157,9 @@ async def global_search(
         client_query = {
             "$or": [
                 {"nome": regex_pattern},
-                {"dados_pessoais.nif": regex_pattern},
-                {"contacto.email": regex_pattern},
-                {"contacto.telefone": regex_pattern},
+                {"dados_pessoais.nif": simple_regex},
+                {"contacto.email": simple_regex},
+                {"contacto.telefone": simple_regex},
             ]
         }
         
@@ -178,14 +254,15 @@ async def search_processes(
         limit: Limite de resultados
     """
     search_term = q.strip()
-    regex_pattern = {"$regex": search_term, "$options": "i"}
+    regex_pattern = create_accent_insensitive_regex(search_term)
+    simple_regex = {"$regex": re.escape(search_term), "$options": "i"}
     
     query = {
         "$or": [
             {"client_name": regex_pattern},
-            {"personal_data.nif": regex_pattern},
-            {"personal_data.email": regex_pattern},
-            {"personal_data.telefone": regex_pattern},
+            {"personal_data.nif": simple_regex},
+            {"personal_data.email": simple_regex},
+            {"personal_data.telefone": simple_regex},
         ]
     }
     
@@ -214,9 +291,12 @@ async def get_search_suggestions(
     search_term = q.strip().lower()
     suggestions = set()
     
+    # Regex que ignora acentos para sugestões
+    regex_pattern = create_accent_insensitive_regex(search_term)
+    
     # Buscar nomes de clientes que começam com o termo
     clients = await db.processes.find(
-        {"client_name": {"$regex": f"^{search_term}", "$options": "i"}},
+        {"client_name": regex_pattern},
         {"_id": 0, "client_name": 1}
     ).limit(5).to_list(5)
     
@@ -225,7 +305,7 @@ async def get_search_suggestions(
     
     # Buscar títulos de tarefas
     tasks = await db.tasks.find(
-        {"title": {"$regex": f"^{search_term}", "$options": "i"}},
+        {"title": regex_pattern},
         {"_id": 0, "title": 1}
     ).limit(3).to_list(3)
     

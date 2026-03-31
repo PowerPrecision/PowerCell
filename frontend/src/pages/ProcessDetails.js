@@ -233,6 +233,7 @@ const ProcessDetails = () => {
 
   // Form states
   const [personalData, setPersonalData] = useState({});
+  const [titular2Data, setTitular2Data] = useState({});  // Estado para 2º titular
   const [financialData, setFinancialData] = useState({});
   const [realEstateData, setRealEstateData] = useState({});
   const [creditData, setCreditData] = useState({});
@@ -568,6 +569,7 @@ const ProcessDetails = () => {
       setWorkflowStatuses(statusesRes.data);
       setStatus(processData.status);
       setPersonalData(processData.personal_data || {});
+      setTitular2Data(processData.titular2_data || {});  // Carregar dados do 2º titular
       setFinancialData(processData.financial_data || {});
       setRealEstateData(processData.real_estate_data || {});
       setCreditData(processData.credit_data || {});
@@ -734,17 +736,20 @@ const ProcessDetails = () => {
       if (user.role === "cliente" || user.role === "admin") {
         updateData.personal_data = cleanedPersonalData;
         updateData.financial_data = cleanedFinancialData;
+        updateData.titular2_data = titular2Data;  // Incluir dados do 2º titular
       }
 
       if (user.role === "consultor" || user.role === "admin") {
         updateData.personal_data = cleanedPersonalData;
         updateData.financial_data = cleanedFinancialData;
         updateData.real_estate_data = realEstateData;
+        updateData.titular2_data = titular2Data;  // Incluir dados do 2º titular
       }
 
       if (user.role === "mediador" || user.role === "admin") {
         updateData.personal_data = cleanedPersonalData;
         updateData.financial_data = cleanedFinancialData;
+        updateData.titular2_data = titular2Data;  // Incluir dados do 2º titular
         const allowedStatuses = workflowStatuses.filter(s => s.order >= 3).map(s => s.name);
         if (allowedStatuses.includes(process.status) || process.status === "ch_aprovado" || process.status === "fase_bancaria") {
           updateData.credit_data = creditData;
@@ -1611,7 +1616,7 @@ const ProcessDetails = () => {
                       </Card>
                       
                       {/* 2º Titular */}
-                      {process?.titular2_data && (
+                      {(process?.titular2_data || Object.keys(titular2Data).length > 0) && (
                         <Card className="border-l-4 border-l-cyan-500">
                           <CardContent className="pt-4">
                             <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
@@ -1622,66 +1627,139 @@ const ProcessDetails = () => {
                               </Badge>
                             </h4>
                             <div className="grid grid-cols-2 gap-4">
-                              {process.titular2_data.name && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Nome</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.name}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.nif && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">NIF</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.nif}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.email && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Email</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.email}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.phone && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Telefone</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.phone}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.birth_date && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.birth_date}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.estado_civil && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Estado Civil</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.estado_civil}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.naturalidade && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Naturalidade</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.naturalidade}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.nacionalidade && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Nacionalidade</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.nacionalidade}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.documento_id && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Nº Documento</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.documento_id}</p>
-                                </div>
-                              )}
-                              {process.titular2_data.morada_fiscal && (
-                                <div className="space-y-1 col-span-2">
-                                  <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
-                                  <p className="text-sm font-medium">{process.titular2_data.morada_fiscal}</p>
-                                </div>
-                              )}
+                              {/* Nome */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Nome</Label>
+                                <Input
+                                  value={titular2Data.name || ""}
+                                  onChange={(e) => setTitular2Data({ ...titular2Data, name: e.target.value })}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                  placeholder="Nome completo"
+                                />
+                              </div>
+                              
+                              {/* NIF */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">NIF</Label>
+                                <Input
+                                  value={titular2Data.nif || ""}
+                                  onChange={(e) => {
+                                    const value = e.target.value.replace(/\D/g, '').slice(0, 9);
+                                    setTitular2Data({ ...titular2Data, nif: value });
+                                  }}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                  placeholder="999999999"
+                                  maxLength={9}
+                                />
+                              </div>
+                              
+                              {/* Email */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Email</Label>
+                                <Input
+                                  type="email"
+                                  value={titular2Data.email || ""}
+                                  onChange={(e) => setTitular2Data({ ...titular2Data, email: e.target.value })}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                  placeholder="email@exemplo.com"
+                                />
+                              </div>
+                              
+                              {/* Telefone */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Telefone</Label>
+                                <Input
+                                  value={titular2Data.phone || ""}
+                                  onChange={(e) => setTitular2Data({ ...titular2Data, phone: e.target.value })}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                  placeholder="912345678"
+                                />
+                              </div>
+                              
+                              {/* Data de Nascimento */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
+                                <Input
+                                  type="date"
+                                  value={titular2Data.birth_date || ""}
+                                  onChange={(e) => setTitular2Data({ ...titular2Data, birth_date: e.target.value })}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                />
+                              </div>
+                              
+                              {/* Estado Civil */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Estado Civil</Label>
+                                <Select
+                                  value={titular2Data.estado_civil || ""}
+                                  onValueChange={(value) => setTitular2Data({ ...titular2Data, estado_civil: value })}
+                                  disabled={!canEditPersonal}
+                                >
+                                  <SelectTrigger className="h-9">
+                                    <SelectValue placeholder="Selecionar" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="Solteiro">Solteiro(a)</SelectItem>
+                                    <SelectItem value="Casado">Casado(a)</SelectItem>
+                                    <SelectItem value="Divorciado">Divorciado(a)</SelectItem>
+                                    <SelectItem value="Viúvo">Viúvo(a)</SelectItem>
+                                    <SelectItem value="União de Facto">União de Facto</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              
+                              {/* Naturalidade */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Naturalidade</Label>
+                                <Input
+                                  value={titular2Data.naturalidade || ""}
+                                  onChange={(e) => setTitular2Data({ ...titular2Data, naturalidade: e.target.value })}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                  placeholder="Cidade/País"
+                                />
+                              </div>
+                              
+                              {/* Nacionalidade */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Nacionalidade</Label>
+                                <Input
+                                  value={titular2Data.nacionalidade || ""}
+                                  onChange={(e) => setTitular2Data({ ...titular2Data, nacionalidade: e.target.value })}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                  placeholder="Portuguesa"
+                                />
+                              </div>
+                              
+                              {/* Nº Documento */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Nº Documento</Label>
+                                <Input
+                                  value={titular2Data.documento_id || ""}
+                                  onChange={(e) => setTitular2Data({ ...titular2Data, documento_id: e.target.value })}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                  placeholder="Nº do Cartão de Cidadão"
+                                />
+                              </div>
+                              
+                              {/* Morada Fiscal */}
+                              <div className="space-y-1 col-span-2">
+                                <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
+                                <Input
+                                  value={titular2Data.morada_fiscal || ""}
+                                  onChange={(e) => setTitular2Data({ ...titular2Data, morada_fiscal: e.target.value })}
+                                  disabled={!canEditPersonal}
+                                  className="h-9"
+                                  placeholder="Rua, número, código postal"
+                                />
+                              </div>
                             </div>
                           </CardContent>
                         </Card>

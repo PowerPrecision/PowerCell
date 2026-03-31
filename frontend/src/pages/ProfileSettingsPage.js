@@ -59,6 +59,18 @@ const AVAILABLE_PAGES = [
   { key: "email_search", label: "Pesquisa Emails" },
   { key: "ai_insights", label: "IA / Insights" },
   { key: "system_config", label: "Configurações Sistema" },
+  // Páginas adicionais em falta
+  { key: "properties", label: "Imóveis" },
+  { key: "minutas", label: "Minutas" },
+  { key: "validades", label: "Validades Docs" },
+  { key: "rgpd", label: "RGPD" },
+  { key: "backups", label: "Backups" },
+  { key: "logs", label: "Logs do Sistema" },
+  { key: "diagnostics", label: "Diagnósticos" },
+  { key: "background_jobs", label: "Processos Background" },
+  { key: "leads", label: "Gestor de Visitas" },
+  { key: "permissions", label: "Perfis e Permissões" },
+  { key: "form_manager", label: "Gestão do Formulário" },
 ];
 
 const AVAILABLE_ACTIONS = [
@@ -74,6 +86,17 @@ const AVAILABLE_ACTIONS = [
   { key: "view_financials", label: "Ver Dados Financeiros" },
   { key: "export_data", label: "Exportar Dados" },
   { key: "assign_clients", label: "Atribuir Clientes" },
+  // Ações adicionais em falta
+  { key: "manage_backups", label: "Gerir Backups" },
+  { key: "view_logs", label: "Ver Logs do Sistema" },
+  { key: "manage_properties", label: "Gerir Imóveis" },
+  { key: "manage_minutas", label: "Gerir Minutas" },
+  { key: "manage_leads", label: "Gerir Leads" },
+  { key: "manage_rgpd", label: "Gerir RGPD" },
+  { key: "manage_workflow", label: "Gerir Estados Workflow" },
+  { key: "manage_automation", label: "Gerir Automações" },
+  { key: "view_reports", label: "Ver Relatórios" },
+  { key: "manage_ai", label: "Gerir Configurações IA" },
 ];
 
 const ProfileSettingsPage = () => {

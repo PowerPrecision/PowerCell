@@ -207,6 +207,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [empresaNifDialog, setEmpresaNifDialog] = useState({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
   const [pendingFiles, setPendingFiles] = useState(null);
   
+  // Estado para conflitos de upload (ficheiros duplicados)
+  const [uploadConflictDialog, setUploadConflictDialog] = useState({
+    open: false,
+    conflicts: [],
+    files: [],
+    empresaNif: null,
+    currentConflictIndex: 0,
+    selectedAction: null, // 'overwrite' | 'rename' | 'skip'
+    selectedRename: null
+  });
+  
   // Verificar se o utilizador pode mapear S3 (apenas admin)
   const canMapS3 = user?.role === "admin";
   
@@ -513,10 +524,61 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
+  // Verificar conflitos de upload antes de enviar
+  const checkUploadConflicts = async (filenames, category) => {
+    try {
+      const response = await fetch(
+        `${API_URL}/api/documents/check-upload-conflict`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            process_id: processId,
+            filenames: filenames,
+            category: category
+          })
+        }
+      );
+      
+      if (response.ok) {
+        return await response.json();
+      }
+      return { has_conflicts: false, conflicts: [] };
+    } catch (error) {
+      console.error("Erro ao verificar conflitos:", error);
+      return { has_conflicts: false, conflicts: [] };
+    }
+  };
+
   // Upload de ficheiro
   const handleUpload = async (e) => {
     const selectedFiles = Array.from(e.target.files || []);
     if (selectedFiles.length === 0) return;
+
+    // Determinar categoria (quando está no tab "all", usar "Outros")
+    const category = activeTab === "all" ? "Outros" : activeTab;
+
+    // Verificar conflitos antes de fazer upload
+    const filenames = selectedFiles.map(f => f.name);
+    const conflictCheck = await checkUploadConflicts(filenames, category);
+    
+    if (conflictCheck.has_conflicts) {
+      // Há conflitos - mostrar diálogo
+      setUploadConflictDialog({
+        open: true,
+        conflicts: conflictCheck.conflicts,
+        files: selectedFiles,
+        empresaNif: null,
+        currentConflictIndex: 0,
+        category: category,
+        // Para cada conflito, guardar a ação escolhida
+        resolutions: conflictCheck.conflicts.map(() => ({ action: null, customName: null }))
+      });
+      return;
+    }
 
     // Se o utilizador é "indexacao", pedir NIF da empresa
     if (isIndexacao) {
@@ -533,6 +595,156 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
     // Upload normal para outros utilizadores
     await executeUpload(selectedFiles);
+  };
+  
+  // Resolver conflito individual
+  const handleConflictResolution = (action, customName = null) => {
+    const { currentConflictIndex, resolutions } = uploadConflictDialog;
+    const newResolutions = [...resolutions];
+    newResolutions[currentConflictIndex] = { action, customName };
+    
+    setUploadConflictDialog(prev => ({
+      ...prev,
+      resolutions: newResolutions
+    }));
+  };
+  
+  // Avançar para próximo conflito ou iniciar upload
+  const handleNextConflict = async () => {
+    const { currentConflictIndex, conflicts, resolutions, files, empresaNif, category } = uploadConflictDialog;
+    
+    // Verificar se ação foi selecionada
+    if (!resolutions[currentConflictIndex]?.action) {
+      toast.error("Por favor, selecione uma ação para o conflito");
+      return;
+    }
+    
+    // Se há mais conflitos, mostrar o próximo
+    if (currentConflictIndex < conflicts.length - 1) {
+      setUploadConflictDialog(prev => ({
+        ...prev,
+        currentConflictIndex: prev.currentConflictIndex + 1
+      }));
+      return;
+    }
+    
+    // Todos os conflitos foram resolvidos - iniciar upload
+    setUploadConflictDialog(prev => ({ ...prev, open: false }));
+    
+    // Executar upload com resoluções
+    await executeUploadWithResolutions(files, conflicts, resolutions, empresaNif, category);
+  };
+  
+  // Cancelar todo o upload
+  const handleCancelUpload = () => {
+    setUploadConflictDialog({
+      open: false,
+      conflicts: [],
+      files: [],
+      empresaNif: null,
+      currentConflictIndex: 0,
+      resolutions: []
+    });
+    // Limpar input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    toast.info("Upload cancelado");
+  };
+  
+  // Executar upload com resoluções de conflitos
+  const executeUploadWithResolutions = async (files, conflicts, resolutions, empresaNif, category) => {
+    setUploading(true);
+    setUploadProgress(0);
+
+    let successCount = 0;
+    let errorCount = 0;
+    const totalFiles = files.length;
+
+    // Criar mapa de resoluções por nome original
+    const resolutionMap = new Map();
+    conflicts.forEach((conflict, idx) => {
+      resolutionMap.set(conflict.original_filename, resolutions[idx]);
+    });
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("category", category);
+      
+      // Adicionar NIF da empresa se fornecido
+      if (empresaNif) {
+        formData.append("empresa_nif", empresaNif);
+      }
+      
+      // Verificar se há resolução para este ficheiro
+      const resolution = resolutionMap.get(file.name);
+      if (resolution) {
+        if (resolution.action === 'rename' && resolution.customName) {
+          formData.append("custom_filename", resolution.customName);
+        } else if (resolution.action === 'skip') {
+          // Saltar este ficheiro
+          continue;
+        }
+        // Se action === 'overwrite', não enviar custom_filename (S3 sobrepõe por defeito)
+      }
+
+      try {
+        const response = await fetch(
+          `${API_URL}/api/documents/client/${processId}/upload`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          }
+        );
+
+        if (response.ok) {
+          successCount++;
+        } else if (response.status === 429) {
+          const retryAfter = response.headers.get("Retry-After") || 60;
+          toast.warning(`Aguardar ${retryAfter} segundos antes de continuar...`);
+          await new Promise(resolve => setTimeout(resolve, parseInt(retryAfter) * 1000));
+          i--;
+          continue;
+        } else {
+          const error = await response.json();
+          const errorMsg = error.detail || `Erro ${response.status}`;
+          toast.error(`${file.name}: ${errorMsg}`);
+          errorCount++;
+        }
+      } catch (error) {
+        toast.error(`Erro de conexão ao enviar ${file.name}`);
+        errorCount++;
+      }
+
+      setUploadProgress(((i + 1) / totalFiles) * 100);
+      
+      if (i < files.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+
+    if (successCount > 0) {
+      const skipped = resolutions.filter(r => r.action === 'skip').length;
+      const message = skipped > 0
+        ? `${successCount} ficheiro(s) enviado(s), ${skipped} ignorado(s)`
+        : `${successCount} ficheiro(s) enviado(s) com sucesso`;
+      toast.success(message);
+      fetchFiles();
+    }
+    
+    if (errorCount > 0 && successCount === 0) {
+      toast.error(`Falha no upload de ${errorCount} ficheiro(s).`);
+    }
+
+    setUploading(false);
+    setUploadProgress(0);
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   // Download de ficheiro - usa proxy para evitar CORS
@@ -3031,6 +3243,187 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           <DialogFooter>
             <Button onClick={() => setOrganizeResults(null)} className="bg-teal-600 hover:bg-teal-700">
               Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de conflitos de upload (ficheiros duplicados) */}
+      <Dialog open={uploadConflictDialog.open} onOpenChange={(open) => {
+        if (!open) handleCancelUpload();
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Ficheiro Duplicado Detetado
+            </DialogTitle>
+            <DialogDescription>
+              Já existe um ficheiro com o mesmo nome no destino.
+              Escolha como pretende resolver este conflito.
+            </DialogDescription>
+          </DialogHeader>
+
+          {uploadConflictDialog.conflicts.length > 0 && (
+            <>
+              {/* Indicador de progresso */}
+              {uploadConflictDialog.conflicts.length > 1 && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                  <span>
+                    Conflito {uploadConflictDialog.currentConflictIndex + 1} de {uploadConflictDialog.conflicts.length}
+                  </span>
+                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-amber-500 transition-all"
+                      style={{ 
+                        width: `${((uploadConflictDialog.currentConflictIndex + 1) / uploadConflictDialog.conflicts.length) * 100}%` 
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Conflito atual */}
+              {(() => {
+                const conflict = uploadConflictDialog.conflicts[uploadConflictDialog.currentConflictIndex];
+                const resolution = uploadConflictDialog.resolutions?.[uploadConflictDialog.currentConflictIndex];
+                
+                if (!conflict) return null;
+                
+                return (
+                  <div className="space-y-4 py-4">
+                    {/* Info do ficheiro */}
+                    <div className="p-4 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800">
+                      <div className="flex items-start gap-3">
+                        <FileText className="h-8 w-8 text-amber-600 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-amber-800 dark:text-amber-200 truncate">
+                            {conflict.original_filename}
+                          </p>
+                          <p className="text-sm text-amber-700 dark:text-amber-300">
+                            Já existe um ficheiro com este nome na categoria "{uploadConflictDialog.category}"
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Opções de resolução */}
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium">Escolha uma ação:</p>
+                      
+                      {/* Opção: Substituir */}
+                      <label className={`
+                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
+                        ${resolution?.action === 'overwrite' 
+                          ? 'border-red-500 bg-red-50 dark:bg-red-950/30' 
+                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
+                        }
+                      `}>
+                        <input
+                          type="radio"
+                          name="conflict-action"
+                          checked={resolution?.action === 'overwrite'}
+                          onChange={() => handleConflictResolution('overwrite')}
+                          className="mt-1"
+                        />
+                        <div>
+                          <p className="font-medium text-red-700 dark:text-red-300">
+                            Substituir ficheiro existente
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            O ficheiro atual será eliminado e substituído pelo novo
+                          </p>
+                        </div>
+                      </label>
+
+                      {/* Opção: Renomear */}
+                      <label className={`
+                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
+                        ${resolution?.action === 'rename' 
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' 
+                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
+                        }
+                      `}>
+                        <input
+                          type="radio"
+                          name="conflict-action"
+                          checked={resolution?.action === 'rename'}
+                          onChange={() => {
+                            // Selecionar o primeiro nome sugerido automaticamente
+                            const suggested = conflict.suggested_names?.[0]?.filename;
+                            handleConflictResolution('rename', suggested || null);
+                          }}
+                          className="mt-1"
+                        />
+                        <div className="flex-1">
+                          <p className="font-medium text-blue-700 dark:text-blue-300">
+                            Guardar com nome diferente
+                          </p>
+                          <p className="text-sm text-muted-foreground mb-2">
+                            O ficheiro será guardado com um novo nome
+                          </p>
+                          
+                          {/* Seleção de nome */}
+                          {resolution?.action === 'rename' && conflict.suggested_names?.length > 0 && (
+                            <select
+                              value={resolution.customName || ''}
+                              onChange={(e) => handleConflictResolution('rename', e.target.value)}
+                              className="w-full text-sm p-2 border rounded bg-white dark:bg-gray-800"
+                            >
+                              {conflict.suggested_names.map((s, idx) => (
+                                <option key={idx} value={s.filename}>{s.filename}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      </label>
+
+                      {/* Opção: Ignorar */}
+                      <label className={`
+                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
+                        ${resolution?.action === 'skip' 
+                          ? 'border-gray-500 bg-gray-50 dark:bg-gray-800' 
+                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
+                        }
+                      `}>
+                        <input
+                          type="radio"
+                          name="conflict-action"
+                          checked={resolution?.action === 'skip'}
+                          onChange={() => handleConflictResolution('skip')}
+                          className="mt-1"
+                        />
+                        <div>
+                          <p className="font-medium text-gray-700 dark:text-gray-300">
+                            Ignorar este ficheiro
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            O ficheiro não será enviado e o existente será mantido
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
+          )}
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handleCancelUpload}
+            >
+              Cancelar Tudo
+            </Button>
+            <Button
+              onClick={handleNextConflict}
+              disabled={!uploadConflictDialog.resolutions?.[uploadConflictDialog.currentConflictIndex]?.action}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {uploadConflictDialog.currentConflictIndex < uploadConflictDialog.conflicts.length - 1 
+                ? 'Próximo' 
+                : 'Continuar Upload'}
             </Button>
           </DialogFooter>
         </DialogContent>
