@@ -187,6 +187,15 @@ class DocumentRecipientsConfig(BaseModel):
     default_to_name: Optional[str] = None  # Nome do destinatário TO
 
 
+class DSTIConfig(BaseModel):
+    """Configuração da análise DSTI automática"""
+    enabled: bool = False
+    # Limiar para alerta de risco elevado (percentagem, default 40%)
+    high_risk_threshold: float = 40.0
+    # Limiar para alerta de risco muito elevado (percentagem, default 50% - limite BdP)
+    critical_risk_threshold: float = 50.0
+
+
 class SystemConfig(BaseModel):
     """Configuração completa do sistema"""
     storage: StorageConfig = StorageConfig()
@@ -196,6 +205,7 @@ class SystemConfig(BaseModel):
     settings: SystemSettings = SystemSettings()
     credit_services: CreditServicesConfig = CreditServicesConfig()
     document_recipients: DocumentRecipientsConfig = DocumentRecipientsConfig()
+    dsti_analysis: DSTIConfig = DSTIConfig()
     setup_completed: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
