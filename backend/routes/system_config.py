@@ -520,6 +520,34 @@ CONFIG_FIELDS = {
             ),
         ]
     },
+    "auto_draft": {
+        "title": "Rascunhos Automáticos de E-mails",
+        "description": "Gerar automaticamente rascunhos de e-mails solicitando documentos em falta",
+        "fields": [
+            ConfigField(
+                key="enabled",
+                label="Activar Rascunhos Automáticos",
+                type="boolean",
+                help_text="Gera automaticamente rascunhos de e-mail quando documentos em falta são detetados pela IA"
+            ),
+            ConfigField(
+                key="base_prompt",
+                label="Prompt Base para IA",
+                type="textarea",
+                placeholder="Escreve um e-mail profissional em português...",
+                help_text="Prompt utilizado pela IA para gerar o conteúdo do e-mail. Variáveis: {client_name}, {document_type}, {process_number}, {company_name}",
+                depends_on={"enabled": True},
+            ),
+            ConfigField(
+                key="eligible_doc_types",
+                label="Tipos de Documento Elegíveis",
+                type="textarea",
+                placeholder='["irs", "recibo_vencimento", "extrato_bancario"]',
+                help_text="Lista JSON com os tipos de documento que geram rascunhos automáticos quando em falta",
+                depends_on={"enabled": True},
+            ),
+        ]
+    },
 }
 
 

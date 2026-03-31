@@ -31,6 +31,15 @@ from models.email import (
 )
 from services.auth import get_current_user
 from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts
+from services.email_draft_service import (
+    get_pending_drafts,
+    get_draft_stats,
+    update_draft,
+    send_draft,
+    discard_draft,
+    create_missing_doc_draft,
+    batch_create_missing_doc_drafts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1117,6 +1126,113 @@ async def send_email_endpoint(
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
     
+    return result
+
+
+# ==== RASCUNHOS AUTOMÁTICOS (Auto-Draft) ====
+
+@router.get("/drafts")
+async def list_auto_drafts(
+    limit: int = Query(20, le=100),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Listar rascunhos automáticos pendentes.
+    Admin/CEO veem todos, outros só os dos seus processos.
+    """
+    drafts = await get_pending_drafts(
+        user_id=current_user["id"],
+        user_role=current_user["role"],
+        limit=limit,
+    )
+    stats = await get_draft_stats(
+        user_id=current_user["id"],
+        user_role=current_user["role"],
+    )
+    return {"drafts": drafts, "stats": stats}
+
+
+@router.get("/drafts/stats")
+async def auto_drafts_stats(
+    current_user: dict = Depends(get_current_user)
+):
+    """Obter estatísticas de rascunhos automáticos pendentes."""
+    stats = await get_draft_stats(
+        user_id=current_user["id"],
+        user_role=current_user["role"],
+    )
+    return stats
+
+
+@router.put("/drafts/{draft_id}")
+async def edit_auto_draft(
+    draft_id: str,
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Editar um rascunho automático (subject, body, to_emails)."""
+    result = await update_draft(draft_id, data)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result.get("error", "Erro ao atualizar"))
+    return result
+
+
+@router.post("/drafts/{draft_id}/send")
+async def send_auto_draft(
+    draft_id: str,
+    account: str = Query("power", description="Conta de email (power/precision)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Enviar um rascunho automático."""
+    result = await send_draft(
+        draft_id=draft_id,
+        user_id=current_user["id"],
+        account=account,
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Erro ao enviar"))
+    return result
+
+
+@router.delete("/drafts/{draft_id}")
+async def delete_auto_draft(
+    draft_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Descartar (eliminar) um rascunho automático."""
+    result = await discard_draft(draft_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result.get("error", "Rascunho não encontrado"))
+    return result
+
+
+@router.post("/drafts/create")
+async def manually_create_draft(
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Criar manualmente um rascunho automático para um documento em falta.
+    Útil quando o admin quer gerar um rascunho para um processo específico.
+    """
+    process_id = data.get("process_id")
+    doc_type = data.get("doc_type")
+
+    if not process_id or not doc_type:
+        raise HTTPException(status_code=400, detail="process_id e doc_type são obrigatórios")
+
+    # Obter dados do processo
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    result = await create_missing_doc_draft(
+        process_id=process_id,
+        client_name=process.get("client_name", ""),
+        missing_doc_type=doc_type,
+        process_number=process.get("process_number", ""),
+    )
+
     return result
 
 
