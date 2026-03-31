@@ -11,10 +11,12 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Loader2, LayoutGrid, Calendar, Users, FileText, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus } from "lucide-react";
+import { Loader2, LayoutGrid, Calendar, Users, FileText, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert } from "lucide-react";
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
 import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess } from "../services/api";
+
+const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const roleLabels = {
   admin: "Administrador",
@@ -35,6 +37,7 @@ const StaffDashboard = () => {
   const [users, setUsers] = useState([]);
   const [expiries, setExpiries] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
+  const [dstiAlerts, setDstiAlerts] = useState(null);
   const [activeTab, setActiveTab] = useState("kanban");
   
   // Estado para criação de nova lead
@@ -75,6 +78,25 @@ const StaffDashboard = () => {
       toast.error("Erro ao carregar dados");
     } finally {
       setLoading(false);
+    }
+
+    // Carregar alertas DSTI em paralelo (não bloqueia o loading principal)
+    fetchDSTIAlerts();
+  };
+
+  const fetchDSTIAlerts = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/processes/dsti-alerts`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enabled) {
+          setDstiAlerts(data);
+        }
+      }
+    } catch (err) {
+      // Silenciar - DSTI pode estar desactivado
     }
   };
 
@@ -237,6 +259,55 @@ const StaffDashboard = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* DSTI Alerts Banner */}
+        {dstiAlerts && dstiAlerts.total > 0 && (
+          <Card className="border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-900">
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldAlert className="h-5 w-5 text-red-600" />
+                <span className="font-semibold text-red-800 dark:text-red-200">
+                  Alertas DSTI ({dstiAlerts.total} processo{dstiAlerts.total !== 1 ? "s" : ""})
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {dstiAlerts.processes.slice(0, 6).map((p) => (
+                  <button
+                    key={p.process_id}
+                    onClick={() => navigate(`/processo/${p.process_id}`)}
+                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white dark:bg-gray-900 border border-red-100 dark:border-red-900 hover:bg-red-100 dark:hover:bg-red-950 transition-colors text-left"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {p.client_name}
+                        <span className="text-muted-foreground font-normal ml-1">
+                          #{p.process_number || "N/A"}
+                        </span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        DSTI: <span className="font-semibold" style={{ color: p.risk_color }}>{p.dsti_pct}%</span>
+                        {" · "}
+                        Créditos: {p.prestacao_creditos}€ / {p.rendimento_bruto}€
+                      </p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="shrink-0"
+                      style={{ borderColor: p.risk_color, color: p.risk_color }}
+                    >
+                      {p.risk_level === "critico" ? "Crítico" : "Elevado"}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+              {dstiAlerts.total > 6 && (
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  ...e mais {dstiAlerts.total - 6} processos com DSTI elevado
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Main Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>

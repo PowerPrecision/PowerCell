@@ -74,6 +74,7 @@ import CPCVModal from "../components/CPCVModal";
 import ProcessStickyHeader from "../components/ProcessStickyHeader";
 import DSTICalculator from "../components/DSTICalculator";
 import RiskCalculator from "../components/RiskCalculator";
+import AutoDSTIBadge from "../components/AutoDSTIBadge";
 import TempLinkButton from "../components/TempLinkButton";
 import SendDocumentationModal from "../components/SendDocumentationModal";
 import {
@@ -1198,6 +1199,7 @@ const ProcessDetails = () => {
             {/* Calculadoras */}
             {userRole !== "indexacao" && (
               <>
+                <AutoDSTIBadge processId={id} token={token} compact={true} />
                 <TempLinkButton
                   processId={id}
                   clientName={process?.client_name}
@@ -1879,6 +1881,8 @@ const ProcessDetails = () => {
                   {/* Financial Data Tab */}
                   <TabsContent value="financial" className="mt-4">
                     <div className="space-y-4">
+                      {/* DSTI Automático */}
+                      <AutoDSTIBadge processId={id} token={token} compact={false} showDetails={true} />
                       {/* Rendimentos */}
                       <Card className="border-l-4 border-l-green-500">
                         <CardContent className="pt-4">
