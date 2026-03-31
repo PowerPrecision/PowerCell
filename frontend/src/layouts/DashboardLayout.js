@@ -422,7 +422,7 @@ const DashboardLayout = ({ children, title }) => {
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
     const userRole = user?.role?.toLowerCase();
     if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(userRole)) {
-      // Menu simplificado para INDEXACAO - só Os Meus Processos onde está atribuído
+      // Menu para INDEXACAO - acesso a processos, kanban, documentos
       if (userRole === "indexacao") {
         return {
           main: [
@@ -432,9 +432,19 @@ const DashboardLayout = ({ children, title }) => {
               href: "/staff",
             },
             {
-              label: "Os Meus Processos",
+              label: "Processos",
+              icon: FileText,
+              href: "/processos",
+            },
+            {
+              label: "Kanban",
+              icon: LayoutGrid,
+              href: "/kanban",
+            },
+            {
+              label: "Clientes",
               icon: Users,
-              href: "/meus-clientes",
+              href: "/clientes",
             },
           ],
           groups: [],
