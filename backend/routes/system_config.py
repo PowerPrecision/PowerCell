@@ -3,8 +3,8 @@ Rotas para Configurações do Sistema
 Permite ao admin configurar o sistema via interface
 """
 import logging
-from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, Depends, Query
 
 from services.auth import get_current_user, require_roles
 from models.auth import UserRole
