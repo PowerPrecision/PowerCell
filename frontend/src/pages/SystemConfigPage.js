@@ -46,6 +46,7 @@ import {
   FolderOpen,
   Link,
   UserCheck,
+  FileEdit,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -59,6 +60,7 @@ const SECTION_ICONS = {
   settings: Building,
   maintenance: Wrench,
   document_recipients: Building2,
+  auto_draft: FileEdit,
 };
 
 // Componente para campo de configuração
@@ -400,6 +402,14 @@ const SystemConfigPage = () => {
 
       if (response.ok) {
         const data = await response.json();
+        // Converter arrays para string em campos textarea
+        if (data.config?.auto_draft?.eligible_doc_types) {
+          data.config.auto_draft.eligible_doc_types = JSON.stringify(
+            data.config.auto_draft.eligible_doc_types,
+            null,
+            2
+          );
+        }
         setConfig(data.config);
         setFields(data.fields);
       } else {
@@ -418,13 +428,24 @@ const SystemConfigPage = () => {
   }, [fetchConfig]);
 
   const handleSave = async (section, data) => {
+    // Pré-processar campos especiais
+    const processedData = { ...data };
+    if (section === "auto_draft" && typeof processedData.eligible_doc_types === "string") {
+      try {
+        processedData.eligible_doc_types = JSON.parse(processedData.eligible_doc_types);
+      } catch {
+        toast.error("Formato inválido em Tipos de Documento Elegíveis (deve ser JSON array)");
+        return;
+      }
+    }
+
     const response = await fetch(`${API_URL}/api/system-config/${section}`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(processedData),
     });
 
     if (!response.ok) {
@@ -1097,7 +1118,7 @@ const SystemConfigPage = () => {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             {sections.map((key) => {
               const Icon = SECTION_ICONS[key] || Settings;
               return (
