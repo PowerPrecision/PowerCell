@@ -488,5 +488,17 @@ export const getAuditStats = () => api.get("/audit/stats");
 export const exportAuditTrail = (params = {}) => api.get("/audit/export", { params, responseType: "blob" });
 export const cleanupAuditTrail = (days) => api.post("/audit/cleanup", null, { params: { days } });
 
+// Document Annotations (Anotações Contextuais)
+export const getDocumentAnnotations = (documentPath, processId) => 
+  api.get("/annotations/document", { params: { document_path: documentPath, process_id: processId } });
+export const getProcessAnnotations = (processId, includeResolved = true) => 
+  api.get(`/annotations/process/${processId}`, { params: { include_resolved: includeResolved } });
+export const createAnnotation = (data) => api.post("/annotations", data);
+export const updateAnnotation = (annotationId, data) => api.put(`/annotations/${annotationId}`, data);
+export const deleteAnnotation = (annotationId) => api.delete(`/annotations/${annotationId}`);
+export const resolveAnnotation = (annotationId, resolved) => 
+  api.put(`/annotations/${annotationId}/resolve`, { resolved });
+export const getAnnotationStats = (processId) => api.get(`/annotations/process/${processId}/stats`);
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
