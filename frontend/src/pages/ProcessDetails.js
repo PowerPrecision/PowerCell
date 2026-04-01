@@ -428,15 +428,17 @@ const ProcessDetails = () => {
 
   // Estado para dados extraídos pela IA com conflitos
   const [aiExtractedData, setAiExtractedData] = useState(null);
+  const [aiFieldConfidence, setAiFieldConfidence] = useState({});
   const [aiConflicts, setAiConflicts] = useState([]);
   const [showAIReviewDialog, setShowAIReviewDialog] = useState(false);
 
   // Handler para dados extraídos pela IA dos documentos
-  const handleAIDataExtractedFromDocs = async ({ extractedData, conflicts, documentsProcessed, suggestions }) => {
-    console.log("Dados extraídos pela IA:", { extractedData, conflicts, documentsProcessed });
+  const handleAIDataExtractedFromDocs = async ({ extractedData, fieldConfidence, conflicts, documentsProcessed, suggestions }) => {
+    console.log("Dados extraídos pela IA:", { extractedData, fieldConfidence, conflicts, documentsProcessed });
     
-    // Guardar dados e conflitos
+    // Guardar dados, confiança e conflitos
     setAiExtractedData(extractedData);
+    setAiFieldConfidence(fieldConfidence || {});
     setAiConflicts(conflicts || []);
     
     // Pré-preencher campos nos formulários
@@ -498,6 +500,19 @@ const ProcessDetails = () => {
         } catch (applyErr) {
           console.warn("Erro ao aplicar sugestões IA:", applyErr);
           toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
+        }
+      }
+      
+      // Alertar sobre campos com baixa confiança (< 0.8)
+      if (fieldConfidence) {
+        const lowConfidenceFields = Object.entries(fieldConfidence)
+          .filter(([_, conf]) => conf < 0.8)
+          .map(([field, conf]) => `${field} (${Math.round(conf * 100)}%)`);
+        if (lowConfidenceFields.length > 0) {
+          toast.warning(
+            `${lowConfidenceFields.length} campo(s) com baixa confiança da IA: ${lowConfidenceFields.join(", ")}. Por favor, verifique manualmente.`,
+            { duration: 8000 }
+          );
         }
       }
       
@@ -1026,6 +1041,20 @@ const ProcessDetails = () => {
     }
   };
 
+  // Helper: indicador visual de confiança da IA para campos extraídos
+  const getConfidenceIndicator = (fieldName) => {
+    const conf = aiFieldConfidence?.[fieldName];
+    if (conf === undefined || conf === null || !aiExtractedData) return null;
+    const pct = Math.round(conf * 100);
+    if (conf >= 0.8) {
+      return { badge: "bg-green-100 text-green-700 border-green-300", label: `${pct}%`, borderClass: "border-l-4 border-l-green-400", level: "high" };
+    } else if (conf >= 0.6) {
+      return { badge: "bg-amber-100 text-amber-700 border-amber-300", label: `${pct}%`, borderClass: "border-l-4 border-l-amber-400", level: "medium" };
+    } else {
+      return { badge: "bg-red-100 text-red-700 border-red-300", label: `${pct}%`, borderClass: "border-l-4 border-l-red-400", level: "low" };
+    }
+  };
+
   if (loading) {
     return (
       <DashboardLayout title="Detalhes do Processo">
@@ -1485,7 +1514,14 @@ const ProcessDetails = () => {
                               </p>
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">NIF</Label>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs text-muted-foreground">NIF</Label>
+                                {getConfidenceIndicator("nif") && (
+                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("nif").badge}`}>
+                                    IA {getConfidenceIndicator("nif").label}
+                                  </Badge>
+                                )}
+                              </div>
                               <Input
                                 value={personalData.nif || ""}
                                 onChange={(e) => {
@@ -1497,7 +1533,7 @@ const ProcessDetails = () => {
                                 }}
                                 disabled={!canEditPersonal}
                                 data-testid="personal-nif"
-                                className={`h-9 ${nifError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                                className={`h-9 ${nifError ? 'border-red-500 focus:ring-red-500' : ''} ${getConfidenceIndicator("nif")?.borderClass || ''}`}
                                 placeholder="9 dígitos"
                               />
                               {nifError && (
@@ -1505,32 +1541,53 @@ const ProcessDetails = () => {
                               )}
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Nº Documento (CC)</Label>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs text-muted-foreground">Nº Documento (CC)</Label>
+                                {getConfidenceIndicator("documento_id") && (
+                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("documento_id").badge}`}>
+                                    IA {getConfidenceIndicator("documento_id").label}
+                                  </Badge>
+                                )}
+                              </div>
                               <Input
                                 value={personalData.documento_id || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, documento_id: e.target.value })}
                                 disabled={!canEditPersonal}
-                                className="h-9"
+                                className={`h-9 ${getConfidenceIndicator("documento_id")?.borderClass || ''}`}
                               />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
+                                {getConfidenceIndicator("birth_date") && (
+                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("birth_date").badge}`}>
+                                    IA {getConfidenceIndicator("birth_date").label}
+                                  </Badge>
+                                )}
+                              </div>
                               <Input
                                 type="date"
                                 value={formatDateForInput(personalData.data_nascimento || personalData.birth_date)}
                                 onChange={(e) => setPersonalData({ ...personalData, data_nascimento: e.target.value })}
                                 disabled={!canEditPersonal}
-                                className="h-9"
+                                className={`h-9 ${getConfidenceIndicator("birth_date")?.borderClass || ''}`}
                               />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Validade CC</Label>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs text-muted-foreground">Validade CC</Label>
+                                {getConfidenceIndicator("cc_validity") && (
+                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("cc_validity").badge}`}>
+                                    IA {getConfidenceIndicator("cc_validity").label}
+                                  </Badge>
+                                )}
+                              </div>
                               <Input
                                 type="date"
                                 value={formatDateForInput(personalData.data_validade_cc)}
                                 onChange={(e) => setPersonalData({ ...personalData, data_validade_cc: e.target.value })}
                                 disabled={!canEditPersonal}
-                                className="h-9"
+                                className={`h-9 ${getConfidenceIndicator("cc_validity")?.borderClass || ''}`}
                               />
                             </div>
                             <div className="space-y-1">
