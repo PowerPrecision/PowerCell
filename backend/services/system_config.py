@@ -10,7 +10,7 @@ from database import db
 from models.system_config import (
     SystemConfig, StorageConfig, EmailConfig, AIConfig, 
     TrelloConfig, SystemSettings, StorageProvider, CreditServicesConfig,
-    DocumentRecipientsConfig, AutoDraftConfig, AuditTrailConfig
+    DocumentRecipientsConfig, DSTIConfig, AutoDraftConfig, AuditTrailConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -210,6 +210,10 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
             except json.JSONDecodeError:
                 logger.warning("eligible_doc_types não é um JSON válido, a manter valor original")
         config.auto_draft = AutoDraftConfig(**current)
+    elif section == "dsti_analysis":
+        current = config.dsti_analysis.model_dump()
+        current.update(filtered_data)
+        config.dsti_analysis = DSTIConfig(**current)
     elif section == "audit_trail":
         current = config.audit_trail.model_dump()
         current.update(filtered_data)

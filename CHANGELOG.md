@@ -5,6 +5,19 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 ## [Não publicado]
 
+## [2026-04-02] - Correções de Bugs
+
+### Corrigido
+- **Erro 500 em PATCH /system-config/dsti_analysis**: A secção `dsti_analysis` estava definida em CONFIG_FIELDS mas não tinha handler na função `update_config_section()`. Adicionado handler para actualizar correctamente as configurações de análise DSTI (enabled, high_risk_threshold, critical_risk_threshold).
+- **AWS Secret Key - Olho de revelação não funcionava**: O endpoint `/reveal-secrets` tinha a sua própria lista de `sensitive_fields` que não incluía `aws_secret_access_key`. Ao clicar no olho, a API não retornava o valor real. Adicionado `aws_secret_access_key` à lista de campos reveláveis.
+
+## [2026-04-01] - Funcionalidades e Correções
+
+### Adicionado
+- **Auto-Rascunhos de E-mails por IA**: Sistema automático de geração de rascunhos de e-mails quando documentos em falta são detetados pela análise de IA. Inclui: toggle on/off via SystemConfig, 6 endpoints REST (CRUD de rascunhos + envio), tab "Rascunhos Pendentes" no StaffDashboard, integração com `analyze_multiple_documents()`, deduplicação por tipo de documento.
+- **Sistema de Anotações Contextuais em Documentos**: Sistema completo de anotações em PDFs com 5 tipos (Nota, Questão, Aviso, Financeiro, Aprovação). Inclui: backend (modelo, serviço, 7 endpoints REST, índices MongoDB), frontend (PDFAnnotationViewer com pdfjs-dist ~1540 linhas, zoom, navegação, sidebar, filtros), integração com botão 🗨️ no S3FileManager (lista e grelha).
+- **Trilhas de Auditoria (Audit Trails)**: Sistema completo de registo de auditoria que rastreia todas as alterações aos processos. Inclui: colecção MongoDB separada (`audit_trail`), IP tracking via headers, 4 origens (web, api, ai_automation, email), acompanhamento de aprovações/rejeições de IA, página admin com filtros avançados e exportação CSV, toggle on/off via SystemConfig, retenção configurável.
+
 ## [2026-04-01] - Correções e Melhorias
 
 ### Corrigido
