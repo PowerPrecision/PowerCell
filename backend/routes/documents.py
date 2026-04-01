@@ -2167,18 +2167,38 @@ async def ai_analyze_documents(
         raise HTTPException(status_code=400, detail=ERROR_NO_VALID_FILES)
     
     # Extrair dados existentes do cliente para comparação
+    # Ler dos subdocumentos aninhados (personal_data, financial_data, real_estate_data)
+    personal = process.get("personal_data", {}) or {}
+    financial = process.get("financial_data", {}) or {}
+    real_estate = process.get("real_estate_data", {}) or {}
+    
     existing_data = {
+        # Dados pessoais (de personal_data + top-level para compatibilidade)
         "client_name": process.get("client_name"),
-        "nif": process.get("client_nif") or process.get("nif"),
-        "birth_date": process.get("data_nascimento"),
-        "cc_number": process.get("cc_number"),
-        "cc_validity": process.get("cc_validity") or process.get("validade_cc"),
-        "nationality": process.get("nacionalidade") or process.get("nationality"),
-        "gender": process.get("sexo") or process.get("gender"),
-        "address": process.get("morada") or process.get("address"),
-        "fiscal_address": process.get("morada_fiscal") or process.get("fiscal_address"),
-        "phone": process.get("phone") or process.get("telefone"),
-        "email": process.get("email") or process.get("client_email"),
+        "nif": personal.get("nif") or process.get("client_nif") or process.get("nif"),
+        "birth_date": personal.get("data_nascimento") or process.get("data_nascimento"),
+        "documento_id": personal.get("documento_id") or process.get("cc_number"),
+        "cc_number": personal.get("documento_id") or process.get("cc_number"),
+        "cc_validity": personal.get("cc_validity") or process.get("validade_cc"),
+        "nationality": personal.get("nacionalidade"),
+        "gender": personal.get("sexo"),
+        "address": personal.get("morada"),
+        "fiscal_address": personal.get("morada_fiscal"),
+        "phone": personal.get("telefone") or process.get("phone"),
+        "email": personal.get("email") or process.get("client_email"),
+        "estado_civil": personal.get("estado_civil"),
+        # Dados financeiros (de financial_data)
+        "rendimento_mensal": financial.get("rendimento_mensal") or financial.get("renda_habitacao_atual"),
+        "rendimento_bruto": financial.get("rendimento_bruto"),
+        "salario_liquido": financial.get("rendimento_mensal") or financial.get("renda_habitacao_atual"),
+        "salario_bruto": financial.get("rendimento_bruto"),
+        "empresa": financial.get("empresa") or financial.get("employer_name"),
+        "tipo_contrato": financial.get("tipo_contrato") or ("sim" if financial.get("efetivo") == "sim" else None),
+        # Dados imóvel (de real_estate_data)
+        "valor_imovel": real_estate.get("valor_imovel"),
+        "localizacao": real_estate.get("localizacao"),
+        "tipologia": real_estate.get("tipologia"),
+        "area": real_estate.get("area"),
     }
     
     # Analisar documentos
@@ -2204,32 +2224,39 @@ async def ai_analyze_documents(
     
     # Processar resultados da análise
     if results and isinstance(results, dict):
-        analysis_data = results.get("merged_data", {})
-        field_sources = results.get("field_sources", {})
-        
-        # Mapear campos extraídos
-        for field, value in analysis_data.items():
-            if value and str(value).strip():
+        # Ler auto_fill_suggestions (campos que o AI identificou como preenchíveis)
+        auto_fill = results.get("auto_fill_suggestions", {})
+        for field, suggestion in auto_fill.items():
+            value = suggestion.get("value")
+            if value is not None and str(value).strip():
                 extracted_data[field] = value
                 
                 # Verificar se há conflito com dados existentes
                 existing_value = existing_data.get(field)
-                if existing_value and str(existing_value).strip() and str(existing_value) != str(value):
+                if existing_value and str(existing_value).strip() and str(existing_value).lower() != str(value).lower():
                     conflicts.append({
                         "field": field,
                         "existing_value": existing_value,
                         "new_value": value,
-                        "source": field_sources.get(field, "documento")
+                        "source": suggestion.get("source", "documento")
                     })
         
+        # Também adicionar dados da comparison (empty_fields = campos novos descobertos)
+        comparison = results.get("comparison", {})
+        for empty_field in comparison.get("empty_fields", []):
+            field = empty_field.get("field")
+            suggested = empty_field.get("suggested_value")
+            if field and suggested and field not in extracted_data:
+                extracted_data[field] = suggested
+        
         # Extrair tipos de documentos processados
-        for doc_result in results.get("documents", []):
-            doc_type = doc_result.get("type") or doc_result.get("document_type")
+        for doc_result in results.get("documents_analyzed", []):
+            doc_type = doc_result.get("tipo_documento") or doc_result.get("type") or doc_result.get("document_type")
             if doc_type:
                 document_types.append({
                     "file_name": doc_result.get("file_name", ""),
                     "type": doc_type,
-                    "source_path": doc_result.get("source_path", "")
+                    "confidence": doc_result.get("confianca", 0.5)
                 })
     
     # Finalizar log
@@ -2278,36 +2305,59 @@ async def apply_ai_suggestions(
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
     
-    # Mapeamento de campos frontend para backend
-    field_mapping = {
-        "client_name": "client_name",
-        "nif": "client_nif",
-        "birth_date": "data_nascimento",
-        "cc_number": "cc_number",
-        "cc_validity": "validade_cc",
-        "nationality": "nacionalidade",
-        "gender": "sexo",
-        "address": "morada",
-        "fiscal_address": "morada_fiscal"
+    # Mapeamento de campos frontend para subdocumentos aninhados no backend
+    # Cada entrada: (campo_frontend) → (subdocumento.campo_backend)
+    personal_fields = {
+        "client_name": "client_name",       # top-level
+        "nif": "personal_data.nif",
+        "documento_id": "personal_data.documento_id",
+        "cc_number": "personal_data.documento_id",
+        "birth_date": "personal_data.data_nascimento",
+        "cc_validity": "personal_data.cc_validity",
+        "nationality": "personal_data.nacionalidade",
+        "gender": "personal_data.sexo",
+        "address": "personal_data.morada",
+        "fiscal_address": "personal_data.morada_fiscal",
+        "estado_civil": "personal_data.estado_civil",
+    }
+    financial_fields = {
+        "rendimento_mensal": "financial_data.rendimento_mensal",
+        "salario_liquido": "financial_data.rendimento_mensal",
+        "rendimento_bruto": "financial_data.rendimento_bruto",
+        "salario_bruto": "financial_data.rendimento_bruto",
+        "empresa": "financial_data.empresa",
+        "tipo_contrato": "financial_data.tipo_contrato",
+    }
+    real_estate_fields = {
+        "valor_imovel": "real_estate_data.valor_imovel",
+        "localizacao": "real_estate_data.localizacao",
+        "tipologia": "real_estate_data.tipologia",
+        "area": "real_estate_data.area",
     }
     
-    # Preparar atualização
+    all_field_mappings = {**personal_fields, **financial_fields, **real_estate_fields}
+    
+    # Preparar atualizações por subdocumento
     update_data = {}
     for field, value in suggestions.items():
-        if field in field_mapping:
-            backend_field = field_mapping[field]
-            update_data[backend_field] = value
+        if field in all_field_mappings:
+            dot_path = all_field_mappings[field]
+            update_data[dot_path] = value
     
     if not update_data:
         return {"success": True, "updated_fields": 0, "message": "Nenhum campo válido para atualizar"}
     
-    # Atualizar processo
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    update_data["updated_by"] = user.get("id")
+    # Construir update com dot notation para subdocumentos
+    mongo_update = {}
+    for dot_path, value in update_data.items():
+        mongo_update[dot_path] = value
+    
+    mongo_update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    mongo_update["updated_by"] = user.get("id")
     
     await db.processes.update_one(
         {"id": process_id},
-        {"$set": update_data}
+        {"$set": mongo_update}
     )
     
     logger.info(f"Campos atualizados via IA para processo: {sanitize_for_log(process_id)}")

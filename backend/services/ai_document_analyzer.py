@@ -69,34 +69,38 @@ Regras importantes:
 1. Extraia APENAS dados que estão claramente visíveis no documento
 2. Para campos não encontrados, use null
 3. Datas devem estar no formato YYYY-MM-DD
-4. Valores monetários devem ser números sem símbolos de moeda
+4. Valores monetários devem ser números (float) sem símbolos de moeda ou espaços
 5. NIF deve ter 9 dígitos
 6. Seja preciso e não invente dados
+7. Mantenha exatamente os nomes de campo indicados abaixo
 
 Retorne APENAS um JSON válido com a seguinte estrutura:
 {
     "tipo_documento": "cc|irs|recibo_vencimento|extrato_bancario|caderneta_predial|comprovativo_morada|outro",
     "confianca": 0.0 a 1.0,
     "dados_extraidos": {
-        // campos específicos do documento
+        // campos específicos do documento (usar EXATAMENTE estes nomes)
     },
     "observacoes": "notas relevantes sobre o documento"
 }
 
 Para CC/Cartão de Cidadão:
-- nome_completo, data_nascimento (YYYY-MM-DD), nif, numero_documento, validade (YYYY-MM-DD), nacionalidade, sexo, morada
+- nome_completo (nome completo), data_nascimento (YYYY-MM-DD), nif (9 dígitos), numero_documento (número do CC), numero_cc (número do CC), validade (YYYY-MM-DD), nacionalidade, sexo (M/F), morada, estado_civil
 
 Para IRS/Declaração de Rendimentos:
-- nome, nif, ano, rendimento_bruto, rendimento_liquido, agregado_familiar
+- nome, nif, ano, rendimento_bruto (valor numérico), rendimento_liquido (valor numérico), salario_bruto (valor numérico), salario_liquido (valor numérico), agregado_familiar
 
 Para Recibo de Vencimento:
-- nome, nif, entidade_empregadora, valor_bruto, valor_liquido, data (YYYY-MM-DD)
+- nome, nif, entidade_empregadora (nome da empresa), valor_bruto (valor numérico), valor_liquido (valor numérico), salario_bruto (valor numérico), salario_liquido (valor numérico), data (YYYY-MM-DD), tipo_contrato (ex: "termo indeterminado", "termo resolutivo"), categoria_profissional, subsidiario_alimentacao (valor numérico ou null)
 
 Para Extrato Bancário:
 - titular, iban, saldo, banco
 
 Para Caderneta Predial:
-- artigo_matricial, fracao, area, valor_patrimonial, morada_imovel
+- artigo_matricial, fracao, area (m²), valor_patrimonial (valor numérico), valor_imovel (valor numérico), morada_imovel, tipologia
+
+Para Comprovativo de Morada:
+- nome, nif, morada (endereço completo), data
 """
 
 
@@ -355,17 +359,43 @@ def compare_extracted_with_existing(
     }
     
     # Mapeamento de campos do documento para campos do cliente
+    # Pessoais
     field_mapping = {
         "nome_completo": "client_name",
         "nome": "client_name",
         "data_nascimento": "birth_date",
         "nif": "nif",
-        "numero_documento": "cc_number",
+        "numero_documento": "documento_id",
+        "numero_cc": "documento_id",
         "validade": "cc_validity",
         "nacionalidade": "nationality",
+        "naturalidade": "naturalidade",
         "sexo": "gender",
         "morada": "address",
-        "morada_fiscal": "fiscal_address"
+        "morada_fiscal": "fiscal_address",
+        "estado_civil": "estado_civil",
+        # Financeiros
+        "salario_liquido": "rendimento_mensal",
+        "valor_liquido": "rendimento_mensal",
+        "rendimento_liquido": "rendimento_mensal",
+        "salario_bruto": "rendimento_bruto",
+        "valor_bruto": "rendimento_bruto",
+        "rendimento_bruto": "rendimento_bruto",
+        "entidade_empregadora": "empresa",
+        "empresa": "empresa",
+        "employer_name": "empresa",
+        "tipo_contrato": "tipo_contrato",
+        "categoria_profissional": "categoria_profissional",
+        "data": "data_referencia",
+        "subsidiario_alimentacao": "subsidiario_alimentacao",
+        # Imóvel
+        "valor_imovel": "valor_imovel",
+        "valor_patrimonial": "valor_imovel",
+        "morada_imovel": "localizacao",
+        "area": "area",
+        "tipologia": "tipologia",
+        "fracao": "tipologia",
+        "artigo_matricial": "artigo_matricial",
     }
     
     dados = extracted_data.get("dados_extraidos", {})
