@@ -73,13 +73,26 @@ Regras importantes:
 5. NIF deve ter 9 dígitos
 6. Seja preciso e não invente dados
 7. Mantenha exatamente os nomes de campo indicados abaixo
+8. Atribua uma confiança (0.0 a 1.0) para CADA campo extraído:
+   - 1.0: Campo claramente legível e sem ambiguidade
+   - 0.9: Campo legível mas com formatação ligeiramente diferente
+   - 0.8: Campo parcialmente legível ou com leve ambiguidade
+   - 0.7: Campo difícil de ler ou com possível erro de interpretação
+   - 0.5 ou menos: Campo muito ilegível, cortado ou com alta probabilidade de erro
 
 Retorne APENAS um JSON válido com a seguinte estrutura:
 {
     "tipo_documento": "cc|irs|recibo_vencimento|extrato_bancario|caderneta_predial|comprovativo_morada|outro",
     "confianca": 0.0 a 1.0,
     "dados_extraidos": {
-        // campos específicos do documento (usar EXATAMENTE estes nomes)
+        "nome_completo": "valor",
+        "nif": "valor",
+        ...
+    },
+    "confianca_campos": {
+        "nome_completo": 0.95,
+        "nif": 1.0,
+        ...
     },
     "observacoes": "notas relevantes sobre o documento"
 }
@@ -479,7 +492,8 @@ async def analyze_multiple_documents(
             "empty_fields": []
         },
         "organization_suggestions": [],
-        "auto_fill_suggestions": {}
+        "auto_fill_suggestions": {},
+        "field_confidence": {}  # Confiança por campo (0.0-1.0)
     }
     
     # Analisar cada documento
@@ -548,6 +562,42 @@ async def analyze_multiple_documents(
                         "type": "override",
                         "current_value": diff["current_value"]
                     }
+
+            # Confiança por campo (de confianca_campos ou fallback para confianca geral)
+            confianca_campos = analysis.get("confianca_campos", {})
+            doc_confidence = analysis.get("confianca", 0.5)
+            
+            # Mapeamento inverso: doc_field -> client_field para encontrar confiança
+            field_mapping = {
+                "nome_completo": "client_name", "nome": "client_name",
+                "data_nascimento": "birth_date", "nif": "nif",
+                "numero_documento": "documento_id", "numero_cc": "documento_id",
+                "validade": "cc_validity", "nacionalidade": "nationality",
+                "naturalidade": "naturalidade", "sexo": "gender",
+                "morada": "address", "morada_fiscal": "fiscal_address",
+                "estado_civil": "estado_civil",
+                "salario_liquido": "rendimento_mensal", "valor_liquido": "rendimento_mensal",
+                "rendimento_liquido": "rendimento_mensal",
+                "salario_bruto": "rendimento_bruto", "valor_bruto": "rendimento_bruto",
+                "rendimento_bruto": "rendimento_bruto",
+                "entidade_empregadora": "empresa", "empresa": "empresa",
+                "employer_name": "empresa", "tipo_contrato": "tipo_contrato",
+                "categoria_profissional": "categoria_profissional",
+                "data": "data_referencia", "subsidiario_alimentacao": "subsidiario_alimentacao",
+                "valor_imovel": "valor_imovel", "valor_patrimonial": "valor_imovel",
+                "morada_imovel": "localizacao", "area": "area",
+                "tipologia": "tipologia", "fracao": "tipologia",
+                "artigo_matricial": "artigo_matricial",
+            }
+            
+            dados = analysis.get("dados_extraidos", {})
+            for doc_field, client_field in field_mapping.items():
+                if doc_field in dados and dados[doc_field] is not None:
+                    # Usar confiança do campo se disponível, senão confiança geral do documento
+                    field_conf = confianca_campos.get(doc_field, doc_confidence)
+                    # Só actualizar se a nova confiança for maior (de documento mais confiável)
+                    if client_field not in results["field_confidence"] or field_conf > results["field_confidence"][client_field]:
+                        results["field_confidence"][client_field] = field_conf
 
             # Auto-Draft: gerar rascunhos para documentos em falta
             try:
