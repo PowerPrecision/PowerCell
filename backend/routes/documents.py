@@ -2225,21 +2225,24 @@ async def ai_analyze_documents(
     # Processar resultados da análise
     if results and isinstance(results, dict):
         # Ler auto_fill_suggestions (campos que o AI identificou como preenchíveis)
+        # Inclui tanto campos novos (empty_fields) como overrides (different fields)
         auto_fill = results.get("auto_fill_suggestions", {})
         for field, suggestion in auto_fill.items():
             value = suggestion.get("value")
             if value is not None and str(value).strip():
                 extracted_data[field] = value
                 
-                # Verificar se há conflito com dados existentes
-                existing_value = existing_data.get(field)
-                if existing_value and str(existing_value).strip() and str(existing_value).lower() != str(value).lower():
-                    conflicts.append({
-                        "field": field,
-                        "existing_value": existing_value,
-                        "new_value": value,
-                        "source": suggestion.get("source", "documento")
-                    })
+                # Se for override, adicionar como conflito para o utilizador decidir
+                if suggestion.get("type") == "override":
+                    current_val = suggestion.get("current_value")
+                    if current_val:
+                        conflicts.append({
+                            "field": field,
+                            "existing_value": current_val,
+                            "new_value": value,
+                            "source": suggestion.get("source", "documento"),
+                            "type": "override"
+                        })
         
         # Também adicionar dados da comparison (empty_fields = campos novos descobertos)
         comparison = results.get("comparison", {})
@@ -2250,13 +2253,23 @@ async def ai_analyze_documents(
                 extracted_data[field] = suggested
         
         # Extrair tipos de documentos processados
+        # Incluir source_path (S3 path) para permitir organização automática
         for doc_result in results.get("documents_analyzed", []):
             doc_type = doc_result.get("tipo_documento") or doc_result.get("type") or doc_result.get("document_type")
+            file_name = doc_result.get("file_name", "")
             if doc_type:
+                # Procurar o source_path do ficheiro original (já existe no S3)
+                source_path = None
+                for orig_doc in documents:
+                    if orig_doc.get("name") == file_name:
+                        source_path = orig_doc.get("source_path")
+                        break
+                
                 document_types.append({
-                    "file_name": doc_result.get("file_name", ""),
+                    "file_name": file_name,
                     "type": doc_type,
-                    "confidence": doc_result.get("confianca", 0.5)
+                    "confidence": doc_result.get("confianca", 0.5),
+                    "source_path": source_path
                 })
     
     # Finalizar log
@@ -2326,13 +2339,17 @@ async def apply_ai_suggestions(
         "rendimento_bruto": "financial_data.rendimento_bruto",
         "salario_bruto": "financial_data.rendimento_bruto",
         "empresa": "financial_data.empresa",
+        "entidade_empregadora": "financial_data.empresa",
         "tipo_contrato": "financial_data.tipo_contrato",
+        "categoria_profissional": "financial_data.categoria_profissional",
+        "subsidiario_alimentacao": "financial_data.subsidiario_alimentacao",
     }
     real_estate_fields = {
         "valor_imovel": "real_estate_data.valor_imovel",
         "localizacao": "real_estate_data.localizacao",
         "tipologia": "real_estate_data.tipologia",
         "area": "real_estate_data.area",
+        "artigo_matricial": "real_estate_data.artigo_matricial",
     }
     
     all_field_mappings = {**personal_fields, **financial_fields, **real_estate_fields}
@@ -2452,29 +2469,41 @@ async def organize_documents_after_analysis(
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     
     # Mapeamento de tipos de documento para pastas
+    # Unificado com DOCUMENT_CATEGORIES do ai_document_analyzer.py
+    from services.ai_document_analyzer import DOCUMENT_CATEGORIES
+    
+    # Mapeamento estendido para sub-pastas específicas
     document_type_folders = {
         "cc": "Identificação",
         "bi": "Identificação",
-        "passaporte": "Identificação",
+        "passport": "Identificação",
         "cartao_cidadao": "Identificação",
-        "recibo_vencimento": "Financeiros/Recibos",
-        "irs": "Financeiros/IRS",
-        "declaracao_irs": "Financeiros/IRS",
-        "nota_liquidacao": "Financeiros/IRS",
-        "extrato_bancario": "Financeiros/Extratos",
+        "nif": "Identificação",
         "comprovativo_morada": "Morada",
+        "irs": "Financeiros",
+        "declaracao_irs": "Financeiros",
+        "nota_liquidacao": "Financeiros",
+        "recibo_vencimento": "Financeiros",
+        "extrato_bancario": "Bancários",
+        "comprovativo_poupanca": "Bancários",
+        "mapa_responsabilidades": "Bancários",
         "caderneta_predial": "Imóvel",
+        "certidao_teor": "Imóvel",
         "certidao_permanente": "Imóvel",
+        "licenca_habitacao": "Imóvel",
+        "licenca_utilizacao": "Imóvel",
+        "plantas": "Imóvel",
+        "planta": "Imóvel",
+        "ficha_tecnica": "Imóvel",
+        "certificado_energetico": "Imóvel",
+        "contrato": "Outros",
+        "procuracao": "Outros",
         "cpcv": "CPCV",
         "contrato_promessa": "CPCV",
-        "licenca_utilizacao": "Imóvel",
-        "planta": "Imóvel/Plantas",
-        "ficha_tecnica": "Imóvel",
+        "escritura": "Escritura",
         "simulacao": "Simulações",
         "proposta": "Propostas",
         "minuta": "Minutas",
-        "escritura": "Escritura",
-        "certificado_energetico": "Imóvel/Certificados",
         "default": "Outros"
     }
     
@@ -2490,9 +2519,7 @@ async def organize_documents_after_analysis(
         standard_folders = [
             "Identificação",
             "Financeiros",
-            "Financeiros/Recibos",
-            "Financeiros/IRS",
-            "Financeiros/Extratos",
+            "Bancários",
             "Morada",
             "Imóvel",
             "CPCV",
@@ -2536,26 +2563,48 @@ async def organize_documents_after_analysis(
             except (IOError, OSError, ValueError, KeyError, TypeError) as e:
                 logger.warning(f"Erro ao criar pasta {folder}: {e}")
     
-    # Organizar documentos por tipo
-    for doc in documents:
-        try:
-            doc_type = doc.get("type", "").lower()
-            file_name = doc.get("file_name", "")
-            
-            if not file_name:
-                continue
-            
-            # Determinar pasta destino
-            target_folder = document_type_folders.get(doc_type, document_type_folders["default"])
-            
-            results["organized"].append({
-                "file": file_name,
-                "type": doc_type,
-                "folder": target_folder
-            })
-            
-        except (IOError, OSError, ValueError, KeyError, TypeError) as e:
-            results["errors"].append({"file": doc.get("file_name", "?"), "error": str(e)})
+    # Organizar documentos por tipo — MOVER ficheiros no S3
+    if s3_service.is_configured():
+        for doc in documents:
+            try:
+                doc_type = doc.get("type", "").lower()
+                file_name = doc.get("file_name", "")
+                source_path = doc.get("source_path")
+                
+                if not file_name:
+                    continue
+                
+                # Determinar pasta destino
+                target_folder = document_type_folders.get(doc_type, document_type_folders["default"])
+                
+                # Tentar mover o ficheiro no S3
+                moved = False
+                if source_path and base_path:
+                    target_path = f"{base_path}/{target_folder}/{file_name}"
+                    
+                    # Verificar se o ficheiro já está na pasta correta
+                    if source_path.endswith(f"/{target_folder}/{file_name}"):
+                        logger.info(f"Ficheiro já está na pasta correcta: {file_name}")
+                        moved = True
+                    else:
+                        # Mover usando rename_file (copy + delete)
+                        try:
+                            moved = s3_service.rename_file(source_path, target_path)
+                            if moved:
+                                logger.info(f"Ficheiro movido: {source_path} -> {target_path}")
+                        except Exception as move_err:
+                            logger.warning(f"Erro ao mover {file_name}: {move_err}")
+                
+                results["organized"].append({
+                    "file": file_name,
+                    "type": doc_type,
+                    "folder": target_folder,
+                    "moved": moved,
+                    "source_path": source_path
+                })
+                
+            except (IOError, OSError, ValueError, KeyError, TypeError) as e:
+                results["errors"].append({"file": doc.get("file_name", "?"), "error": str(e)})
     
     return {
         "success": True,

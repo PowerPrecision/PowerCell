@@ -798,7 +798,7 @@ class S3Service:
                 return False
             
             # Construir caminho destino
-            target_path = f"{client_folder}{target_folder}/{file_name}"
+            target_path = f"{client_folder}/{target_folder}/{file_name}"
             
             # Copiar ficheiro para novo destino
             copy_source = {'Bucket': self.bucket_name, 'Key': source_path}
