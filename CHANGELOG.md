@@ -8,8 +8,15 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 ## [2026-04-02] - Correções de Bugs
 
 ### Corrigido
-- **Erro 500 em PATCH /system-config/dsti_analysis**: A secção `dsti_analysis` estava definida em CONFIG_FIELDS mas não tinha handler na função `update_config_section()`. Adicionado handler para actualizar correctamente as configurações de análise DSTI (enabled, high_risk_threshold, critical_risk_threshold).
+- **Erro 500 em PATCH /system-config/dsti_analysis**: A secção `dsti_analysis` estava definida em CONFIG_FIELDS mas não tinha handler na função `update_config_section()`. Adicionado handler e import de `DSTIConfig` para actualizar correctamente as configurações de análise DSTI (enabled, high_risk_threshold, critical_risk_threshold).
 - **AWS Secret Key - Olho de revelação não funcionava**: O endpoint `/reveal-secrets` tinha a sua própria lista de `sensitive_fields` que não incluía `aws_secret_access_key`. Ao clicar no olho, a API não retornava o valor real. Adicionado `aws_secret_access_key` à lista de campos reveláveis.
+- **Auto-fill CC - 5 bugs corrigidos end-to-end**: O fluxo de extração de dados do Cartão de Cidadão por IA e preenchimento automático não funcionava correctamente:
+  - **cc_validity ignorado**: O campo `cc_validity` (validade do CC) era extraído pela IA mas fazia drop silencioso no `ProcessDetails.js`. Adicionado ao handler.
+  - **Campos divergentes não aplicáveis**: Quando um campo já tinha valor na BD mas o documento mostrava valor diferente (ex: CC renovado), os dados eram exibidos mas impossíveis de aplicar. Agora `comparison.different` é incluído em `auto_fill_suggestions` com `type="override"`.
+  - **Dados não persistiam no backend**: O callback `onAIDataExtracted` apenas actualizava React state, sem guardar na BD. Agora chama automaticamente `ai-apply-suggestions` quando não há conflitos.
+  - **Conflitos nunca detectados**: A lógica de conflitos verificava `auto_fill_suggestions` (que só tinha campos vazios). Agora usa `comparison.different` para gerar conflitos reais.
+  - **Campos em falta no endpoint apply**: Adicionados `entidade_empregadora`, `categoria_profissional`, `subsidiario_alimentacao` e `artigo_matricial` ao mapeamento do endpoint `apply_ai_suggestions`.
+  - **Novo**: Botão "Usar valor do documento" nos campos divergentes do dialog de análise IA.
 
 ## [2026-04-01] - Funcionalidades e Correções
 
