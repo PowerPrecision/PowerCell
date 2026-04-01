@@ -432,7 +432,7 @@ const ProcessDetails = () => {
   const [showAIReviewDialog, setShowAIReviewDialog] = useState(false);
 
   // Handler para dados extraídos pela IA dos documentos
-  const handleAIDataExtractedFromDocs = ({ extractedData, conflicts, documentsProcessed, suggestions }) => {
+  const handleAIDataExtractedFromDocs = async ({ extractedData, conflicts, documentsProcessed, suggestions }) => {
     console.log("Dados extraídos pela IA:", { extractedData, conflicts, documentsProcessed });
     
     // Guardar dados e conflitos
@@ -446,6 +446,7 @@ const ProcessDetails = () => {
       if (extractedData.nif) newPersonalData.nif = extractedData.nif;
       if (extractedData.documento_id || extractedData.cc_number) newPersonalData.documento_id = extractedData.documento_id || extractedData.cc_number;
       if (extractedData.data_nascimento || extractedData.birth_date) newPersonalData.data_nascimento = extractedData.data_nascimento || extractedData.birth_date;
+      if (extractedData.cc_validity) newPersonalData.cc_validity = extractedData.cc_validity;
       if (extractedData.naturalidade) newPersonalData.naturalidade = extractedData.naturalidade;
       if (extractedData.nacionalidade || extractedData.nationality) newPersonalData.nacionalidade = extractedData.nacionalidade || extractedData.nationality;
       if (extractedData.estado_civil) newPersonalData.estado_civil = extractedData.estado_civil;
@@ -460,6 +461,8 @@ const ProcessDetails = () => {
       if (extractedData.rendimento_bruto || extractedData.salario_bruto) newFinancialData.rendimento_bruto = extractedData.rendimento_bruto || extractedData.salario_bruto;
       if (extractedData.empresa) newFinancialData.empresa = extractedData.empresa;
       if (extractedData.tipo_contrato) newFinancialData.tipo_contrato = extractedData.tipo_contrato;
+      if (extractedData.categoria_profissional) newFinancialData.categoria_profissional = extractedData.categoria_profissional;
+      if (extractedData.subsidiario_alimentacao) newFinancialData.subsidiario_alimentacao = extractedData.subsidiario_alimentacao;
       setFinancialData(newFinancialData);
       
       // Dados do imóvel
@@ -468,6 +471,7 @@ const ProcessDetails = () => {
       if (extractedData.localizacao) newRealEstateData.localizacao = extractedData.localizacao;
       if (extractedData.tipologia) newRealEstateData.tipologia = extractedData.tipologia;
       if (extractedData.area) newRealEstateData.area = extractedData.area;
+      if (extractedData.artigo_matricial) newRealEstateData.artigo_matricial = extractedData.artigo_matricial;
       setRealEstateData(newRealEstateData);
       
       // Se há conflitos, mostrar dialog de revisão
@@ -475,7 +479,26 @@ const ProcessDetails = () => {
         setShowAIReviewDialog(true);
         toast.info(`${conflicts.length} conflito(s) detectado(s). Reveja os valores.`);
       } else {
-        toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s)`);
+        // Sem conflitos — aplicar directamente no backend
+        try {
+          const token = localStorage.getItem('token');
+          const applyRes = await fetch(`${API_URL}/api/documents/ai-apply-suggestions/${id}`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(extractedData)
+          });
+          if (applyRes.ok) {
+            toast.success(`Campos pré-preenchidos e guardados com dados de ${documentsProcessed} documento(s)`);
+          } else {
+            toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
+          }
+        } catch (applyErr) {
+          console.warn("Erro ao aplicar sugestões IA:", applyErr);
+          toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
+        }
       }
       
       // Mudar para tab pessoais para mostrar os dados

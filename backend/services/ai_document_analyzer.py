@@ -531,7 +531,22 @@ async def analyze_multiple_documents(
                     results["auto_fill_suggestions"][field] = {
                         "value": empty["suggested_value"],
                         "source": empty["source"],
-                        "confidence": analysis.get("confianca", 0.5)
+                        "confidence": analysis.get("confianca", 0.5),
+                        "type": "new"
+                    }
+
+            # Override suggestions (campos com valores diferentes)
+            # Permitem ao utilizador aprovar com um clique o valor do documento
+            for diff in comparison["different"]:
+                field = diff["field"]
+                # Não sobrescrever sugestões de maior confiança
+                if field not in results["auto_fill_suggestions"]:
+                    results["auto_fill_suggestions"][field] = {
+                        "value": diff["document_value"],
+                        "source": diff["source"],
+                        "confidence": analysis.get("confianca", 0.5),
+                        "type": "override",
+                        "current_value": diff["current_value"]
                     }
 
             # Auto-Draft: gerar rascunhos para documentos em falta

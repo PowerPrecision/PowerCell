@@ -5,6 +5,30 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 ## [Não publicado]
 
+## [2026-04-02] - Correções de Bugs
+
+### Corrigido
+- **Erro 500 em PATCH /system-config/dsti_analysis**: A secção `dsti_analysis` estava definida em CONFIG_FIELDS mas não tinha handler na função `update_config_section()`. Adicionado handler e import de `DSTIConfig` para actualizar correctamente as configurações de análise DSTI (enabled, high_risk_threshold, critical_risk_threshold).
+- **AWS Secret Key - Olho de revelação não funcionava**: O endpoint `/reveal-secrets` tinha a sua própria lista de `sensitive_fields` que não incluía `aws_secret_access_key`. Ao clicar no olho, a API não retornava o valor real. Adicionado `aws_secret_access_key` à lista de campos reveláveis.
+- **Auto-fill CC - 5 bugs corrigidos end-to-end**: O fluxo de extração de dados do Cartão de Cidadão por IA e preenchimento automático não funcionava correctamente:
+  - **cc_validity ignorado**: O campo `cc_validity` (validade do CC) era extraído pela IA mas fazia drop silencioso no `ProcessDetails.js`. Adicionado ao handler.
+  - **Campos divergentes não aplicáveis**: Quando um campo já tinha valor na BD mas o documento mostrava valor diferente (ex: CC renovado), os dados eram exibidos mas impossíveis de aplicar. Agora `comparison.different` é incluído em `auto_fill_suggestions` com `type="override"`.
+  - **Dados não persistiam no backend**: O callback `onAIDataExtracted` apenas actualizava React state, sem guardar na BD. Agora chama automaticamente `ai-apply-suggestions` quando não há conflitos.
+  - **Conflitos nunca detectados**: A lógica de conflitos verificava `auto_fill_suggestions` (que só tinha campos vazios). Agora usa `comparison.different` para gerar conflitos reais.
+  - **Campos em falta no endpoint apply**: Adicionados `entidade_empregadora`, `categoria_profissional`, `subsidiario_alimentacao` e `artigo_matricial` ao mapeamento do endpoint `apply_ai_suggestions`.
+  - **Novo**: Botão "Usar valor do documento" nos campos divergentes do dialog de análise IA.
+- **Mapeamento automático de pastas não movia ficheiros**: O endpoint `POST /organize/{processId}` apenas criava pastas no S3 e retornava contadores falsos, mas **nunca movia os ficheiros**. Corrigido para chamar `s3_service.rename_file()` e mover efectivamente cada ficheiro para a pasta correcta (IRS → Financeiros, CC → Identificação, Caderneta → Imóvel, etc.).
+  - **source_path perdido**: O frontend tinha o S3 path dos ficheiros mas não o enviava para o endpoint de organização. Corrigido para juntar `source_path` em ambas as funções (`handleAIAnalysis` e `handleQuickOrganize`).
+  - **Path sem `/` separador**: `s3_storage.py:move_file()` tinha bug `f"{client_folder}{target_folder}"` (sem `/`) — corrigido para `f"{client_folder}/{target_folder}"`.
+  - **Mapeamento de pastas desalinhado**: O endpoint de organização usava sub-pastas (`Financeiros/IRS`, `Financeiros/Recibos`) que não correspondiam às categorias do S3. Unificado com `DOCUMENT_CATEGORIES` do `ai_document_analyzer.py` (pastas flat: Financeiros, Bancários, Imóvel, etc.).
+
+## [2026-04-01] - Funcionalidades e Correções
+
+### Adicionado
+- **Auto-Rascunhos de E-mails por IA**: Sistema automático de geração de rascunhos de e-mails quando documentos em falta são detetados pela análise de IA. Inclui: toggle on/off via SystemConfig, 6 endpoints REST (CRUD de rascunhos + envio), tab "Rascunhos Pendentes" no StaffDashboard, integração com `analyze_multiple_documents()`, deduplicação por tipo de documento.
+- **Sistema de Anotações Contextuais em Documentos**: Sistema completo de anotações em PDFs com 5 tipos (Nota, Questão, Aviso, Financeiro, Aprovação). Inclui: backend (modelo, serviço, 7 endpoints REST, índices MongoDB), frontend (PDFAnnotationViewer com pdfjs-dist ~1540 linhas, zoom, navegação, sidebar, filtros), integração com botão 🗨️ no S3FileManager (lista e grelha).
+- **Trilhas de Auditoria (Audit Trails)**: Sistema completo de registo de auditoria que rastreia todas as alterações aos processos. Inclui: colecção MongoDB separada (`audit_trail`), IP tracking via headers, 4 origens (web, api, ai_automation, email), acompanhamento de aprovações/rejeições de IA, página admin com filtros avançados e exportação CSV, toggle on/off via SystemConfig, retenção configurável.
+
 ## [2026-04-01] - Correções e Melhorias
 
 ### Corrigido
