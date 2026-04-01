@@ -694,7 +694,11 @@ const ProcessDetails = () => {
       'seg_social_utilizador', 'seg_social_senha',
       // Situação profissional e rendimentos
       'monthly_income', 'employment_type', 'employment_duration', 'employer_name',
-      'employer_nif', 'trabalha_estrangeiro', 'bancos_simulacoes', 'tempo_restante_credito'
+      'employer_nif', 'trabalha_estrangeiro', 'bancos_simulacoes', 'tempo_restante_credito',
+      // Campos extraídos pela IA
+      'rendimento_mensal', 'rendimento_bruto', 'salario_liquido', 'salario_bruto',
+      'empresa', 'tipo_contrato', 'categoria_profissional', 'subsidiario_alimentacao',
+      'data_referencia',
     ];
     
     const cleaned = {};
