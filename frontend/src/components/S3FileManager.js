@@ -1057,19 +1057,30 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         
         // Se temos callback, passar os dados para pré-preencher a ficha
         if (onAIDataExtracted && result.extracted_data) {
-          // Organizar documentos em pastas (criar estrutura no backend)
+          // Organizar documentos em pastas (mover ficheiros no S3)
           try {
-            await fetch(`${API_URL}/api/documents/organize/${processId}`, {
-              method: 'POST',
-              headers: { 
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                documents: result.documents || [],
-                create_folders: true
-              })
-            });
+            // Juntar source_path (S3 path) dos ficheiros originais com os resultados da IA
+            const docsToOrganize = (result.documents || []).map(doc => {
+              const originalFile = filesToAnalyze.find(f => f.name === doc.file_name);
+              return {
+                ...doc,
+                source_path: originalFile?.path || null
+              };
+            }).filter(doc => doc.source_path);
+
+            if (docsToOrganize.length > 0) {
+              await fetch(`${API_URL}/api/documents/organize/${processId}`, {
+                method: 'POST',
+                headers: { 
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  documents: docsToOrganize,
+                  create_folders: true
+                })
+              });
+            }
           } catch (orgError) {
             console.warn("Erro ao organizar documentos:", orgError);
           }
@@ -1308,6 +1319,15 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       const analyzeResult = await analyzeResponse.json();
 
       // Passo 2: Organizar documentos nas pastas
+      // Juntar source_path dos ficheiros originais com resultados da IA
+      const docsToOrganize = (analyzeResult.documents || []).map(doc => {
+        const originalFile = allFiles.find(f => f.name === doc.file_name);
+        return {
+          ...doc,
+          source_path: originalFile?.path || null
+        };
+      }).filter(doc => doc.source_path);
+
       const organizeResponse = await fetch(
         `${API_URL}/api/documents/organize/${processId}`,
         {
@@ -1317,7 +1337,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            documents: analyzeResult.documents || [],
+            documents: docsToOrganize,
             create_folders: true
           })
         }
