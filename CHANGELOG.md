@@ -17,6 +17,10 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
   - **Conflitos nunca detectados**: A lógica de conflitos verificava `auto_fill_suggestions` (que só tinha campos vazios). Agora usa `comparison.different` para gerar conflitos reais.
   - **Campos em falta no endpoint apply**: Adicionados `entidade_empregadora`, `categoria_profissional`, `subsidiario_alimentacao` e `artigo_matricial` ao mapeamento do endpoint `apply_ai_suggestions`.
   - **Novo**: Botão "Usar valor do documento" nos campos divergentes do dialog de análise IA.
+- **Mapeamento automático de pastas não movia ficheiros**: O endpoint `POST /organize/{processId}` apenas criava pastas no S3 e retornava contadores falsos, mas **nunca movia os ficheiros**. Corrigido para chamar `s3_service.rename_file()` e mover efectivamente cada ficheiro para a pasta correcta (IRS → Financeiros, CC → Identificação, Caderneta → Imóvel, etc.).
+  - **source_path perdido**: O frontend tinha o S3 path dos ficheiros mas não o enviava para o endpoint de organização. Corrigido para juntar `source_path` em ambas as funções (`handleAIAnalysis` e `handleQuickOrganize`).
+  - **Path sem `/` separador**: `s3_storage.py:move_file()` tinha bug `f"{client_folder}{target_folder}"` (sem `/`) — corrigido para `f"{client_folder}/{target_folder}"`.
+  - **Mapeamento de pastas desalinhado**: O endpoint de organização usava sub-pastas (`Financeiros/IRS`, `Financeiros/Recibos`) que não correspondiam às categorias do S3. Unificado com `DOCUMENT_CATEGORIES` do `ai_document_analyzer.py` (pastas flat: Financeiros, Bancários, Imóvel, etc.).
 
 ## [2026-04-01] - Funcionalidades e Correções
 
