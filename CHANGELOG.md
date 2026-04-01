@@ -21,6 +21,12 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
   - **source_path perdido**: O frontend tinha o S3 path dos ficheiros mas não o enviava para o endpoint de organização. Corrigido para juntar `source_path` em ambas as funções (`handleAIAnalysis` e `handleQuickOrganize`).
   - **Path sem `/` separador**: `s3_storage.py:move_file()` tinha bug `f"{client_folder}{target_folder}"` (sem `/`) — corrigido para `f"{client_folder}/{target_folder}"`.
   - **Mapeamento de pastas desalinhado**: O endpoint de organização usava sub-pastas (`Financeiros/IRS`, `Financeiros/Recibos`) que não correspondiam às categorias do S3. Unificado com `DOCUMENT_CATEGORIES` do `ai_document_analyzer.py` (pastas flat: Financeiros, Bancários, Imóvel, etc.).
+- **Métrica de confiança da IA por campo**: Implementado sistema completo de confiança (0.0-1.0) por campo extraído:
+  - **Prompt IA actualizado**: Agora retorna `confianca_campos` (confiança individual por campo) em vez de apenas confiança geral do documento. Instruções detalhadas para níveis: 1.0 (claro), 0.9 (legível), 0.8 (parcial), 0.7 (difícil), ≤0.5 (muito ilegível).
+  - **Backend**: `analyze_multiple_documents` agora popula `field_confidence` mapando campos extraídos para campos do cliente, mantendo a maior confiança quando múltiplos documentos cobrem o mesmo campo.
+  - **Frontend — ProcessDetails**: Campos com confiança < 0.8 ficam com borda amarela/vermelha e badge "IA XX%" no formulário (NIF, Documento CC, Data Nascimento, Validade CC). Toast de aviso lista campos com baixa confiança.
+  - **Frontend — S3FileManager Dialog**: Campos no dialog de análise mostram badge de confiança (%). Campos < 0.8 ficam com fundo amarelo e aviso "⚠️ Baixa confiança — verifique manualmente".
+  - A IA assiste em vez de substituir: dados com baixa confiança são destacados para revisão humana obrigatória.
 
 ## [2026-04-01] - Funcionalidades e Correções
 

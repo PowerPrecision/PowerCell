@@ -1088,6 +1088,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           // Passar dados extraídos para o componente pai
           onAIDataExtracted({
             extractedData: result.extracted_data,
+            fieldConfidence: result.field_confidence || {},
             conflicts: result.conflicts || [],
             documentsProcessed: result.documents_count,
             suggestions: result.suggestions || []
@@ -2857,20 +2858,41 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       Campos a Preencher ({aiDialog.results.analysis.comparison.empty_fields.length})
                     </h4>
                     <div className="grid gap-2">
-                      {aiDialog.results.analysis.comparison.empty_fields.map((field, idx) => (
-                        <div key={idx} className="p-2 rounded border bg-green-50 dark:bg-green-950/30">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium">{field.field}</span>
-                            <Badge className="bg-green-100 text-green-700">Novo</Badge>
+                      {aiDialog.results.analysis.comparison.empty_fields.map((field, idx) => {
+                        // Obter confiança do campo via auto_fill_suggestions
+                        const suggestion = aiDialog.results.analysis.auto_fill_suggestions?.[field.field];
+                        const conf = suggestion?.confidence;
+                        const pct = Math.round((conf || 0) * 100);
+                        const confBadge = conf >= 0.8
+                          ? "bg-green-100 text-green-700"
+                          : conf >= 0.6
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-red-100 text-red-700";
+                        return (
+                          <div key={idx} className={`p-2 rounded border ${conf < 0.8 ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/30' : 'bg-green-50 dark:bg-green-950/30'}`}>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">{field.field}</span>
+                              <div className="flex gap-1">
+                                <Badge className="bg-green-100 text-green-700">Novo</Badge>
+                                {conf !== undefined && (
+                                  <Badge className={`text-[10px] ${confBadge}`}>
+                                    {pct}%
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <p className={`text-sm mt-1 ${conf < 0.8 ? 'text-amber-700 dark:text-amber-300' : 'text-green-700 dark:text-green-300'}`}>
+                              {field.suggested_value}
+                            </p>
+                            {conf < 0.8 && conf !== undefined && (
+                              <p className="text-[10px] text-amber-600 mt-1">⚠️ Baixa confiança — verifique manualmente</p>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                              Fonte: {field.source}
+                            </p>
                           </div>
-                          <p className="text-sm text-green-700 dark:text-green-300 mt-1">
-                            {field.suggested_value}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Fonte: {field.source}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
