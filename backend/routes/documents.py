@@ -2287,6 +2287,7 @@ async def ai_analyze_documents(
         "documents_count": len(documents),
         "log_id": log_id,
         "extracted_data": extracted_data,
+        "field_confidence": results.get("field_confidence", {}),
         "conflicts": conflicts,
         "documents": document_types,
         "suggestions": list(extracted_data.keys()),
