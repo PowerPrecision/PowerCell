@@ -2876,6 +2876,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               <p className="font-medium text-amber-700">{field.document_value}</p>
                             </div>
                           </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-2 text-xs bg-amber-100 hover:bg-amber-200 border-amber-300"
+                            onClick={() => handleApplyAISuggestions({ [field.field]: field.document_value })}
+                            disabled={applyingChanges}
+                          >
+                            {applyingChanges ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle className="h-3 w-3 mr-1" />}
+                            Usar valor do documento
+                          </Button>
                         </div>
                       ))}
                     </div>

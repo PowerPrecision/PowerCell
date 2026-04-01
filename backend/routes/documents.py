@@ -2225,21 +2225,24 @@ async def ai_analyze_documents(
     # Processar resultados da análise
     if results and isinstance(results, dict):
         # Ler auto_fill_suggestions (campos que o AI identificou como preenchíveis)
+        # Inclui tanto campos novos (empty_fields) como overrides (different fields)
         auto_fill = results.get("auto_fill_suggestions", {})
         for field, suggestion in auto_fill.items():
             value = suggestion.get("value")
             if value is not None and str(value).strip():
                 extracted_data[field] = value
                 
-                # Verificar se há conflito com dados existentes
-                existing_value = existing_data.get(field)
-                if existing_value and str(existing_value).strip() and str(existing_value).lower() != str(value).lower():
-                    conflicts.append({
-                        "field": field,
-                        "existing_value": existing_value,
-                        "new_value": value,
-                        "source": suggestion.get("source", "documento")
-                    })
+                # Se for override, adicionar como conflito para o utilizador decidir
+                if suggestion.get("type") == "override":
+                    current_val = suggestion.get("current_value")
+                    if current_val:
+                        conflicts.append({
+                            "field": field,
+                            "existing_value": current_val,
+                            "new_value": value,
+                            "source": suggestion.get("source", "documento"),
+                            "type": "override"
+                        })
         
         # Também adicionar dados da comparison (empty_fields = campos novos descobertos)
         comparison = results.get("comparison", {})
@@ -2326,13 +2329,17 @@ async def apply_ai_suggestions(
         "rendimento_bruto": "financial_data.rendimento_bruto",
         "salario_bruto": "financial_data.rendimento_bruto",
         "empresa": "financial_data.empresa",
+        "entidade_empregadora": "financial_data.empresa",
         "tipo_contrato": "financial_data.tipo_contrato",
+        "categoria_profissional": "financial_data.categoria_profissional",
+        "subsidiario_alimentacao": "financial_data.subsidiario_alimentacao",
     }
     real_estate_fields = {
         "valor_imovel": "real_estate_data.valor_imovel",
         "localizacao": "real_estate_data.localizacao",
         "tipologia": "real_estate_data.tipologia",
         "area": "real_estate_data.area",
+        "artigo_matricial": "real_estate_data.artigo_matricial",
     }
     
     all_field_mappings = {**personal_fields, **financial_fields, **real_estate_fields}
