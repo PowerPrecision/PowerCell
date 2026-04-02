@@ -433,8 +433,8 @@ async def get_processes(user: dict = Depends(get_current_user)):
         # Admin, CEO, Administrativo e Diretor vêem todos os processos
         pass
     elif role == UserRole.INDEXACAO:
-        # Indexação vê todos os processos (acesso total de leitura)
-        pass
+        # Indexação vê APENAS os processos que lhe estão atribuídos
+        query["assigned_indexacao_id"] = user["id"]
     elif role == UserRole.CONSULTOR:
         # Suporte a múltiplos consultores: verificar no array ou campo único
         query["$or"] = [
@@ -490,8 +490,8 @@ async def get_processes_paginated(
         # Admin, CEO, Administrativo e Diretor vêem todos os processos
         pass
     elif role == UserRole.INDEXACAO:
-        # Indexação vê todos os processos (acesso total de leitura)
-        pass
+        # Indexação vê APENAS os processos que lhe estão atribuídos
+        query["assigned_indexacao_id"] = user["id"]
     elif role == UserRole.CONSULTOR:
         # Suporte a múltiplos consultores
         query["$or"] = [
@@ -582,8 +582,8 @@ async def get_kanban_board(
             {"assigned_mediador_id": user_id}
         ]
     elif role == UserRole.INDEXACAO:
-        # Indexação vê todos os processos (acesso total de leitura)
-        pass
+        # Indexação vê APENAS os processos que lhe estão atribuídos
+        query["assigned_indexacao_id"] = user["id"]
     # Admin, CEO, Administrativo e Diretor see all (no base filter)
 
     # Apply additional filters (only for roles that can see all)
@@ -744,8 +744,8 @@ async def get_my_clients(user: dict = Depends(require_roles([
             ]
         }
     elif role == UserRole.INDEXACAO:
-        # Indexação vê todos os processos (acesso total de leitura)
-        query = {}
+        # Indexação vê APENAS os processos que lhe estão atribuídos
+        query = {"assigned_indexacao_id": user["id"]}
     else:
         # Admin/CEO/Diretor/Administrativo vêem todos
         query = {}
