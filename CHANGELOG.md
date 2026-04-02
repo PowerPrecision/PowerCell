@@ -12,6 +12,11 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 - **AWS Secret Key - Olho de revelação não funcionava**: O endpoint `/reveal-secrets` tinha a sua própria lista de `sensitive_fields` que não incluía `aws_secret_access_key`. Ao clicar no olho, a API não retornava o valor real. Adicionado `aws_secret_access_key` à lista de campos reveláveis.
 - **Auto-fill CC - 5 bugs corrigidos end-to-end**: O fluxo de extração de dados do Cartão de Cidadão por IA e preenchimento automático não funcionava correctamente:
   - **cc_validity ignorado**: O campo `cc_validity` (validade do CC) era extraído pela IA mas fazia drop silencioso no `ProcessDetails.js`. Adicionado ao handler.
+- **Perfil Indexação actualizado**: Permissões do role `indexacao` refinadas para corresponder à função real:
+  - **Backend**: Indexação agora vê APENAS os processos que lhe estão atribuídos (`assigned_indexacao_id`) em vez de todos os processos. Aplicado em `get_processes`, `get_processes_paginated`, `get_kanban_board` e `get_my_clients`.
+  - **Backend**: `can_view_process()` agora verifica se o processo está atribuído ao indexação antes de permitir acesso.
+  - **Frontend**: Sidebar simplificado: removidos Dashboard e Kanban, adicionado "Meus Clientes" como página principal.
+  - **Frontend**: Adicionadas labels e cores para os roles `indexacao`, `administrativo` e `diretor` que faltavam no badge do utilizador.
   - **Campos divergentes não aplicáveis**: Quando um campo já tinha valor na BD mas o documento mostrava valor diferente (ex: CC renovado), os dados eram exibidos mas impossíveis de aplicar. Agora `comparison.different` é incluído em `auto_fill_suggestions` com `type="override"`.
   - **Dados não persistiam no backend**: O callback `onAIDataExtracted` apenas actualizava React state, sem guardar na BD. Agora chama automaticamente `ai-apply-suggestions` quando não há conflitos.
   - **Conflitos nunca detectados**: A lógica de conflitos verificava `auto_fill_suggestions` (que só tinha campos vazios). Agora usa `comparison.different` para gerar conflitos reais.
