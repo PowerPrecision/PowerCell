@@ -99,9 +99,9 @@ def can_view_process(user: dict, process: dict) -> bool:
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    # INDEXACAO pode ver todos os processos (acesso total de leitura)
+    # INDEXACAO pode ver APENAS os processos que lhe estão atribuídos
     if user_role == "indexacao":
-        return True
+        return process.get("assigned_indexacao_id") == user_id
     
     # Outros staff podem ver todos os processos
     staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]
