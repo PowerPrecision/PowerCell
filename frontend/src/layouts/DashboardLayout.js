@@ -73,6 +73,9 @@ const roleLabels = {
   mediador: "Mediador",
   intermediario: "Intermediário de Crédito",
   consultor_intermediario: "Consultor/Intermediário",
+  indexacao: "Indexação",
+  administrativo: "Administrativo",
+  diretor: "Diretor",
   ceo: "CEO",
   admin: "Administrador",
 };
@@ -85,6 +88,9 @@ const roleColors = {
   intermediario: "bg-amber-500 text-white",               // PowerCell
   consultor_intermediario: "bg-gradient-to-r from-blue-900 to-amber-500 text-white",
   ceo: "bg-blue-800 text-white",                          // PowerCell
+  indexacao: "bg-indigo-500 text-white",
+  administrativo: "bg-slate-500 text-white",
+  diretor: "bg-purple-600 text-white",
   admin: "bg-slate-800 text-white",
 };
 
@@ -433,24 +439,14 @@ const DashboardLayout = ({ children, title }) => {
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
     const userRole = user?.role?.toLowerCase();
     if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(userRole)) {
-      // Menu para INDEXACAO - acesso a processos, kanban, documentos
+      // Menu para INDEXACAO - apenas processos atribuídos e documentos
       if (userRole === "indexacao") {
         return {
           main: [
             {
-              label: "Dashboard",
-              icon: Home,
-              href: "/staff",
-            },
-            {
-              label: "Processos",
-              icon: FileText,
-              href: "/processos",
-            },
-            {
-              label: "Kanban",
-              icon: LayoutGrid,
-              href: "/kanban",
+              label: "Meus Clientes",
+              icon: Users,
+              href: "/meus-clientes",
             },
             {
               label: "Clientes",
