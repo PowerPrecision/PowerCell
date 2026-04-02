@@ -206,7 +206,11 @@ const SendDocumentationModal = ({
         setCustomMessage("");
         setCcEmails("");
       } else {
-        toast.error(data.detail || "Erro ao enviar documentação");
+        if (response.status === 404) {
+          toast.error("Endpoint de envio não encontrado. É necessário fazer deploy da última versão do backend.", { duration: 6000 });
+        } else {
+          toast.error(data.detail || "Erro ao enviar documentação");
+        }
       }
     } catch (error) {
       console.error("Erro ao enviar:", error);
