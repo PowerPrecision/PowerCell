@@ -54,6 +54,7 @@ const ProfilePage = React.lazy(() => import("./pages/ProfilePage"));
 const ProfileSettingsPage = React.lazy(() => import("./pages/ProfileSettingsPage"));
 const FormManagementPage = React.lazy(() => import("./pages/FormManagementPage"));
 const AuditTrailPage = React.lazy(() => import("./pages/AuditTrailPage"));
+const FinanceDashboard = React.lazy(() => import("./pages/FinanceDashboard"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -196,6 +197,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
                 <StatisticsPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Finance Dashboard - Admin and CEO only */}
+          <Route
+            path="/financeiro"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <FinanceDashboard />
               </ProtectedRoute>
             }
           />
