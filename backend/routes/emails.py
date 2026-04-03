@@ -40,6 +40,7 @@ from services.email_draft_service import (
     create_missing_doc_draft,
     batch_create_missing_doc_drafts,
 )
+from utils.input_sanitization import sanitize_string, sanitize_name, sanitize_email, sanitize_html, sanitize_url, log_sanitization_rejection
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +144,9 @@ async def send_documentation_email(
     
     # Dados do request
     document_ids = data.get("document_ids", [])
-    bcc_recipients = data.get("bcc_recipients", [])
-    cc_emails = data.get("cc_emails", [])
+    # Sanitize email addresses from user input
+    bcc_recipients = [e for e in (sanitize_email(e) for e in data.get("bcc_recipients", [])) if e]
+    cc_emails = [e for e in (sanitize_email(e) for e in data.get("cc_emails", [])) if e]
     custom_message = data.get("custom_message")
     
     if not document_ids:
@@ -249,6 +251,7 @@ Com os melhores cumprimentos,
     
     # Se admin/CEO enviou mensagem personalizada, usar essa
     if custom_message and current_user["role"] in ["admin", "ceo"]:
+        custom_message = sanitize_string(custom_message, max_length=10000)
         email_body = custom_message.format(
             client_name=client_name,
             client_nif=client_nif,
@@ -277,6 +280,10 @@ Com os melhores cumprimentos,
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
     
+    # Sanitize before DB insert
+    subject = sanitize_string(subject, max_length=300)
+    email_body = sanitize_string(email_body, max_length=10000)
+
     # Registar envio no histórico
     email_record = {
         "id": str(uuid.uuid4()),
@@ -293,7 +300,7 @@ Com os melhores cumprimentos,
         "sent_at": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": current_user["id"],
-        "notes": f"Documentação enviada para {len(validated_bcc)} destinatário(s)",
+        "notes": sanitize_string(f"Documentação enviada para {len(validated_bcc)} destinatário(s)", max_length=1000),
         "is_important": False,
         "is_read": True,
         "is_starred": False,
@@ -402,6 +409,7 @@ async def add_email_label(
         raise HTTPException(status_code=404, detail="Email não encontrado")
     
     labels = email.get("labels", [])
+    label = sanitize_string(label, max_length=200)
     if label not in labels:
         labels.append(label)
         await db.emails.update_one(
@@ -692,9 +700,9 @@ async def create_email_template(
     
     template_doc = {
         "id": template_id,
-        "name": template.name,
-        "subject": template.subject,
-        "body": template.body,
+        "name": sanitize_string(template.name, max_length=200),
+        "subject": sanitize_string(template.subject, max_length=300),
+        "body": sanitize_string(template.body, max_length=10000),
         "category": template.category,
         "is_default": template.is_default,
         "created_by": current_user["id"],
@@ -726,9 +734,9 @@ async def update_email_template(
         raise HTTPException(status_code=404, detail="Template não encontrado")
     
     update_data = {
-        "name": template.name,
-        "subject": template.subject,
-        "body": template.body,
+        "name": sanitize_string(template.name, max_length=200),
+        "subject": sanitize_string(template.subject, max_length=300),
+        "body": sanitize_string(template.body, max_length=10000),
         "category": template.category,
         "is_default": template.is_default,
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -1112,6 +1120,16 @@ async def send_email_endpoint(
     current_user: dict = Depends(get_current_user)
 ):
     """Enviar email através de uma das contas configuradas."""
+    # Sanitize inputs before sending and DB insert
+    to_emails = [e for e in (sanitize_email(e) for e in to_emails) if e]
+    if cc_emails:
+        cc_emails = [e for e in (sanitize_email(e) for e in cc_emails) if e]
+    subject = sanitize_string(subject, max_length=300)
+    body = sanitize_string(body, max_length=10000)
+
+    if not to_emails:
+        raise HTTPException(status_code=400, detail="Pelo menos um email destinatário válido é necessário")
+
     result = await send_email(
         account_name=account,
         to_emails=to_emails,
@@ -1171,6 +1189,14 @@ async def edit_auto_draft(
     current_user: dict = Depends(get_current_user)
 ):
     """Editar um rascunho automático (subject, body, to_emails)."""
+    # Sanitize user inputs before passing to service
+    if "subject" in data and data["subject"]:
+        data["subject"] = sanitize_string(data["subject"], max_length=300)
+    if "body" in data and data["body"]:
+        data["body"] = sanitize_string(data["body"], max_length=10000)
+    if "to_emails" in data and data["to_emails"]:
+        data["to_emails"] = [e for e in (sanitize_email(e) for e in data["to_emails"]) if e]
+
     result = await update_draft(draft_id, data)
     if not result["success"]:
         raise HTTPException(status_code=404, detail=result.get("error", "Erro ao atualizar"))
@@ -1247,23 +1273,32 @@ async def create_email_record(
     email_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
+    # Sanitize inputs before DB insert
+    from_email = sanitize_email(email_data.from_email)
+    to_emails = [e for e in (sanitize_email(e) for e in email_data.to_emails) if e]
+    cc_emails = [e for e in (sanitize_email(e) for e in (email_data.cc_emails or [])) if e]
+    bcc_emails = [e for e in (sanitize_email(e) for e in (email_data.bcc_emails or [])) if e]
+    subject = sanitize_string(email_data.subject, max_length=300)
+    body = sanitize_string(email_data.body, max_length=10000)
+    notes = sanitize_string(email_data.notes, max_length=1000) if email_data.notes else None
+
     email = {
         "id": email_id,
         "process_id": email_data.process_id,
         "direction": email_data.direction.value,
-        "from_email": email_data.from_email,
-        "to_emails": email_data.to_emails,
-        "cc_emails": email_data.cc_emails or [],
-        "bcc_emails": email_data.bcc_emails or [],
-        "subject": email_data.subject,
-        "body": email_data.body,
+        "from_email": from_email,
+        "to_emails": to_emails,
+        "cc_emails": cc_emails,
+        "bcc_emails": bcc_emails,
+        "subject": subject,
+        "body": body,
         "body_html": email_data.body_html,
         "attachments": [a.dict() for a in (email_data.attachments or [])],
         "status": email_data.status.value,
         "sent_at": email_data.sent_at or now,
         "created_at": now,
         "created_by": current_user["id"],
-        "notes": email_data.notes,
+        "notes": notes,
         "is_important": False,
         "is_read": True,
         "is_starred": False,
@@ -1307,11 +1342,11 @@ async def update_email(
     
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if email_data.subject is not None:
-        update_data["subject"] = email_data.subject
+        update_data["subject"] = sanitize_string(email_data.subject, max_length=300)
     if email_data.body is not None:
-        update_data["body"] = email_data.body
+        update_data["body"] = sanitize_string(email_data.body, max_length=10000)
     if email_data.notes is not None:
-        update_data["notes"] = email_data.notes
+        update_data["notes"] = sanitize_string(email_data.notes, max_length=1000)
     if email_data.status is not None:
         update_data["status"] = email_data.status.value
     if email_data.is_important is not None:
@@ -1379,8 +1414,8 @@ async def add_monitored_email(
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
     
-    email = email.lower().strip()
-    if not email or "@" not in email:
+    email = sanitize_email(email)
+    if not email:
         raise HTTPException(status_code=400, detail="Email inválido")
     
     monitored = process.get("monitored_emails", [])

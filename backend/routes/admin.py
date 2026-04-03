@@ -8,6 +8,10 @@ from database import db
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from services.auth import hash_password, require_roles
+from utils.input_sanitization import (
+    sanitize_email, sanitize_name, sanitize_phone,
+    log_sanitization_rejection
+)
 from services.permissions import (
     get_default_permissions_for_role, 
     get_all_available_permissions,
@@ -444,7 +448,20 @@ async def get_users(role: Optional[str] = None, user: dict = Depends(require_rol
 
 @router.post("/users", response_model=UserResponse)
 async def create_user(data: UserCreate, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
-    existing = await db.users.find_one({"email": data.email})
+    # Sanitizar inputs
+    clean_email = sanitize_email(data.email)
+    if not clean_email:
+        log_sanitization_rejection("email", data.email, "email inválido ao criar utilizador")
+        raise HTTPException(status_code=400, detail="Email inválido")
+    
+    clean_name = sanitize_name(data.name)
+    if not clean_name:
+        log_sanitization_rejection("name", data.name, "nome inválido ao criar utilizador")
+        raise HTTPException(status_code=400, detail="Nome inválido")
+    
+    clean_phone = sanitize_phone(data.phone) if data.phone else None
+    
+    existing = await db.users.find_one({"email": clean_email})
     if existing:
         raise HTTPException(status_code=400, detail="Email já registado")
     
@@ -466,18 +483,18 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     
     user_doc = {
         "id": user_id,
-        "email": data.email,
+        "email": clean_email,
         "password": hash_password(data.password),
-        "name": data.name,
-        "phone": data.phone,
+        "name": clean_name,
+        "phone": clean_phone,
         "role": data.role,
         "is_active": True,
-        "onedrive_folder": data.onedrive_folder or data.name,
+        "onedrive_folder": data.onedrive_folder or clean_name,
         "created_at": now
     }
     
     await db.users.insert_one(user_doc)
-    await _audit_log("user_created", "user", user_id, user, {"email": data.email, "role": data.role, "name": data.name})
+    await _audit_log("user_created", "user", user_id, user, {"email": clean_email, "role": data.role, "name": clean_name})
     
     # Enviar email de boas-vindas com dados de acesso
     try:
@@ -497,13 +514,13 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
         role_name = role_names.get(data.role, data.role)
         
         # Criar corpo do email
-        email_body = f"""Olá {data.name},
+        email_body = f"""Olá {clean_name},
 
 Bem-vindo(a) ao PowerCell!
 
 A sua conta foi criada com sucesso. Seguem os dados de acesso:
 
-📧 Email: {data.email}
+📧 Email: {clean_email}
 🔑 Password: {data.password}
 
 Perfil: {role_name}
@@ -557,7 +574,7 @@ Equipa PowerCell
         # Enviar email (usar conta power ou precision)
         email_result = await send_email(
             account_name="power",  # Usar conta Power Real Estate
-            to_emails=[data.email],
+            to_emails=[clean_email],
             subject="Bem-vindo ao PowerCell - Dados de Acesso",
             body=email_body,
             body_html=email_html
@@ -574,7 +591,7 @@ Equipa PowerCell
     
     # Associar automaticamente processos do Trello que têm este utilizador atribuído
     # Verifica se o nome do utilizador corresponde a algum membro atribuído no Trello
-    name_lower = data.name.lower()
+    name_lower = clean_name.lower()
     name_parts = [p for p in name_lower.split() if len(p) >= 3]
     
     # Procurar processos com trello_members que corresponda ao nome
@@ -609,12 +626,12 @@ Equipa PowerCell
     
     return UserResponse(
         id=user_id,
-        email=data.email,
-        name=data.name,
-        phone=data.phone,
+        email=clean_email,
+        name=clean_name,
+        phone=clean_phone,
         role=data.role,
         created_at=now,
-        onedrive_folder=data.onedrive_folder or data.name
+        onedrive_folder=data.onedrive_folder or clean_name
     )
 
 
@@ -653,9 +670,17 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
     old_role = target_user.get("role")
     
     if data.name is not None:
-        update_data["name"] = data.name
+        clean_name = sanitize_name(data.name)
+        if not clean_name:
+            log_sanitization_rejection("name", data.name, "nome inválido ao actualizar utilizador")
+            raise HTTPException(status_code=400, detail="Nome inválido")
+        update_data["name"] = clean_name
     if data.phone is not None:
-        update_data["phone"] = data.phone
+        clean_phone = sanitize_phone(data.phone)
+        if not clean_phone:
+            log_sanitization_rejection("phone", data.phone, "telefone inválido ao actualizar utilizador")
+            raise HTTPException(status_code=400, detail="Telefone inválido")
+        update_data["phone"] = clean_phone
     if data.role is not None:
         if data.role not in [UserRole.CLIENTE, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.ADMIN]:
             raise HTTPException(status_code=400, detail="Role inválido")

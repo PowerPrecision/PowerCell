@@ -50,7 +50,6 @@ from services.trello import trello_service, status_to_trello_list, build_card_de
 
 # Importar serviços refatorados
 from services.process_service import (
-    sanitize_email,
     get_next_process_number,
     can_view_process,
     build_query_filter,
@@ -75,8 +74,31 @@ from services.process_kanban import (
     KANBAN_COLUMNS,
     is_valid_status
 )
+from utils.input_sanitization import (
+    sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
+    sanitize_string, sanitize_url, log_sanitization_rejection
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_dict_names(d: dict):
+    """Sanitiza campos de nome/email/telefone num dicionário genérico (vendedor, mediador, etc.)."""
+    name_fields = ["nome", "name", "nome_completo", "full_name"]
+    email_fields = ["email", "e_mail"]
+    phone_fields = ["telefone", "phone", "telemovel", "mobile"]
+    url_fields = ["url", "website", "link"]
+    for key in list(d.keys()):
+        if key in name_fields and d[key] is not None:
+            d[key] = sanitize_name(str(d[key]))
+        elif key in email_fields and d[key] is not None:
+            d[key] = sanitize_email(str(d[key]))
+        elif key in phone_fields and d[key] is not None:
+            d[key] = sanitize_phone(str(d[key]))
+        elif key in url_fields and d[key] is not None:
+            d[key] = sanitize_url(str(d[key]))
+        elif isinstance(d[key], str) and d[key]:
+            d[key] = sanitize_string(d[key], max_length=500)
 
 
 def create_accent_insensitive_regex(search_term: str) -> dict:
@@ -182,19 +204,23 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     # Processar personal_data e garantir que email está incluído
     personal_data = data.personal_data.model_dump() if data.personal_data else {}
     if user.get("email") and not personal_data.get("email"):
-        personal_data["email"] = user["email"]
+        personal_data["email"] = sanitize_email(user["email"])
     if user.get("name") and not personal_data.get("nome"):
-        personal_data["nome"] = user["name"]
+        personal_data["nome"] = sanitize_name(user["name"])
     if user.get("phone") and not personal_data.get("telefone"):
-        personal_data["telefone"] = user.get("phone")
+        sanitized_phone = sanitize_phone(user.get("phone"))
+        if sanitized_phone:
+            personal_data["telefone"] = sanitized_phone
     
     # Construir documento do processo
+    sanitized_client_name = sanitize_name(user["name"])
+    sanitized_client_email = sanitize_email(user["email"])
     process_doc = {
         "id": process_id,
         "process_number": process_number,
         "client_id": user["id"],
-        "client_name": user["name"],
-        "client_email": user["email"],
+        "client_name": sanitized_client_name,
+        "client_email": sanitized_client_email,
         "process_type": data.process_type,
         "status": initial_status,
         "is_active": True,  # Novos processos são ativos por defeito
@@ -274,7 +300,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # Extrair nome e email dos dados pessoais - garantir que o nome é sempre preenchido
     personal = data.personal_data.model_dump() if data.personal_data else {}
     # Tentar várias fontes para o nome do cliente
-    client_name = (
+    raw_client_name = (
         personal.get("nome_completo") or 
         personal.get("nome") or 
         data.client_name or 
@@ -283,6 +309,9 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     )
     # Se ainda não temos nome, extrair do email (parte antes do @)
     client_email = sanitize_email(personal.get("email") or data.client_email or "")
+    client_name = None
+    if raw_client_name:
+        client_name = sanitize_name(raw_client_name)
     if not client_name and client_email:
         # Extrair nome do email: "joao.silva@example.com" -> "Joao Silva"
         email_name = client_email.split("@")[0]
@@ -292,8 +321,10 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         # Último recurso: usar "Cliente" com timestamp para evitar duplicados
         client_name = f"Cliente {datetime.now().strftime('%Y%m%d%H%M%S')}"
     
-    client_phone = personal.get("telefone") or personal.get("phone") or ""
-    client_nif = personal.get("nif")
+    raw_phone = personal.get("telefone") or personal.get("phone") or ""
+    client_phone = sanitize_phone(raw_phone)
+    raw_nif = personal.get("nif")
+    client_nif = sanitize_nif(raw_nif)
     
     # ============================================================
     # VERIFICAR/CRIAR CLIENTE NA TABELA CLIENTS
@@ -329,6 +360,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
             },
             "dados_pessoais": {
                 "nif": client_nif,
+                "nome_completo": sanitize_name(client_name),
                 **{k: v for k, v in personal.items() if k not in ["nif", "email", "telefone", "phone"]}
             },
             "process_ids": [],  # Será atualizado após criar o processo
@@ -1213,7 +1245,10 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             personal_dict = data.personal_data.model_dump()
             new_name = personal_dict.get("nome_completo") or personal_dict.get("nome")
             if new_name:
-                update_data["client_name"] = new_name
+                sanitized_name = sanitize_name(new_name)
+                if not sanitized_name:
+                    raise HTTPException(status_code=400, detail="Nome do cliente inválido após sanitização")
+                update_data["client_name"] = sanitized_name
         
         if data.financial_data and can_update_financial:
             await log_data_changes(process_id, user, process.get("financial_data"), data.financial_data.model_dump(), "dados financeiros")
@@ -1234,7 +1269,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         if data.client_email is not None:
             update_data["client_email"] = sanitize_email(data.client_email)
         if data.client_phone is not None:
-            update_data["client_phone"] = data.client_phone
+            update_data["client_phone"] = sanitize_phone(data.client_phone)
         
         # Campos adicionais do CPCV
         if data.co_buyers is not None:
@@ -1242,8 +1277,10 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         if data.co_applicants is not None:
             update_data["co_applicants"] = data.co_applicants
         if data.vendedor is not None:
+            _sanitize_dict_names(data.vendedor)
             update_data["vendedor"] = data.vendedor
         if data.mediador is not None:
+            _sanitize_dict_names(data.mediador)
             update_data["mediador"] = data.mediador
         
         if data.status and can_update_status and (data.status in valid_statuses or not valid_statuses):
@@ -1651,6 +1688,24 @@ async def resolve_data_conflict(
         # Aceitar valor sugerido pela IA
         suggested_value = suggestion.get("suggested")
         field_path = suggestion.get("field_path", field)
+        
+        # Sanitizar o valor sugerido antes de guardar
+        if suggested_value is not None and isinstance(suggested_value, str):
+            if field in ["nif", "documento_id"]:
+                sanitized_val = sanitize_nif(suggested_value)
+                if sanitized_val is None and suggested_value:
+                    log_sanitization_rejection(field, str(suggested_value), "NIF inválido")
+                suggested_value = sanitized_val
+            elif field in ["email", "client_email"]:
+                suggested_value = sanitize_email(suggested_value)
+            elif field in ["telefone", "phone", "client_phone"]:
+                suggested_value = sanitize_phone(suggested_value)
+            elif field in ["nome_completo", "nome", "name", "nome_pai", "nome_mae"]:
+                suggested_value = sanitize_name(suggested_value)
+            elif field in ["morada_fiscal"]:
+                suggested_value = sanitize_string(suggested_value, max_length=500)
+            else:
+                suggested_value = sanitize_string(suggested_value, max_length=500)
         
         # Determinar onde actualizar (personal_data, financial_data, etc.)
         if "." in field_path:

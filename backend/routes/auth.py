@@ -12,6 +12,10 @@ from services.auth import (
     hash_password, verify_password, create_token, get_current_user,
     validate_password_strength
 )
+from utils.input_sanitization import (
+    sanitize_email, sanitize_name, sanitize_phone,
+    sanitize_string, log_sanitization_rejection
+)
 from middleware.rate_limit import limiter
 from services.refresh_token_service import (
     create_access_token,
@@ -30,15 +34,26 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 @router.post("/register", response_model=TokenResponse)
 @limiter.limit("3/hour")
 async def register(request: Request, response: Response, data: UserRegister):
-    existing = await db.users.find_one({"email": data.email})
+    # Sanitizar inputs
+    clean_email = sanitize_email(data.email)
+    if not clean_email:
+        log_sanitization_rejection("email", data.email, "email inválido")
+        raise HTTPException(status_code=400, detail="Email inválido")
+    
+    clean_name = sanitize_name(data.name)
+    if not clean_name:
+        log_sanitization_rejection("name", data.name, "nome inválido")
+        raise HTTPException(status_code=400, detail="Nome inválido")
+    
+    clean_phone = sanitize_phone(data.phone) if data.phone else None
+    
+    existing = await db.users.find_one({"email": clean_email})
     if existing:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Email já registado")
     
     # Validar força da password
     is_valid, error_msg = validate_password_strength(data.password)
     if not is_valid:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=error_msg)
     
     user_id = str(uuid.uuid4())
@@ -46,29 +61,29 @@ async def register(request: Request, response: Response, data: UserRegister):
     
     user_doc = {
         "id": user_id,
-        "email": data.email,
+        "email": clean_email,
         "password": hash_password(data.password),
-        "name": data.name,
-        "phone": data.phone,
+        "name": clean_name,
+        "phone": clean_phone,
         "role": UserRole.CLIENTE,
         "is_active": True,
-        "onedrive_folder": data.name,
+        "onedrive_folder": clean_name,
         "created_at": now
     }
     
     await db.users.insert_one(user_doc)
-    token = create_token(user_id, data.email, UserRole.CLIENTE)
+    token = create_token(user_id, clean_email, UserRole.CLIENTE)
     
     return TokenResponse(
         access_token=token,
         user=UserResponse(
             id=user_id,
-            email=data.email,
-            name=data.name,
-            phone=data.phone,
+            email=clean_email,
+            name=clean_name,
+            phone=clean_phone,
             role=UserRole.CLIENTE,
             created_at=now,
-            onedrive_folder=data.name
+            onedrive_folder=clean_name
         )
     )
 
@@ -82,7 +97,6 @@ async def login(request: Request, data: UserLogin, response: Response):
     
     Esta rota será removida em futuras versões.
     """
-    from fastapi import HTTPException
     raise HTTPException(
         status_code=410, 
         detail="Esta rota de login foi descontinuada. Utilize /auth/login-v2 para autenticação segura com refresh tokens."
@@ -120,14 +134,40 @@ async def update_preferences(
 ):
     """
     Atualiza as preferências de notificação do utilizador.
+    Sanitiza todas as chaves e valores string para prevenir stored XSS.
     """
     user_id = user["id"]
     
     # Extrair preferências de notificação
     notifications = data.get("notifications", {})
     
+    # Sanitizar: apenas permitir chaves esperadas e limpar valores
+    ALLOWED_NOTIFICATION_KEYS = {
+        "email_new_process", "email_status_change", "email_document_upload",
+        "email_task_assigned", "email_deadline_reminder", "email_urgent_only",
+        "email_daily_summary", "email_weekly_report",
+        "inapp_new_process", "inapp_status_change", "inapp_document_upload",
+        "inapp_task_assigned", "inapp_comments",
+        "is_test_user"
+    }
+    
+    sanitized_notifications = {}
+    for key, value in notifications.items():
+        # Rejeitar chaves não esperadas (previne injection de campos arbitrários)
+        if key not in ALLOWED_NOTIFICATION_KEYS:
+            log_sanitization_rejection(f"preferences.{key}", str(key), "chave de notificação não permitida")
+            continue
+        # Valores devem ser booleanos
+        if isinstance(value, bool):
+            sanitized_notifications[key] = value
+        elif isinstance(value, str):
+            # Strings: aceitar apenas "true"/"false"
+            sanitized_notifications[key] = value.lower() in ("true", "1", "yes")
+        else:
+            sanitized_notifications[key] = bool(value)
+    
     update_data = {
-        "notification_preferences": notifications,
+        "notification_preferences": sanitized_notifications,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -137,7 +177,6 @@ async def update_preferences(
     )
     
     if result.modified_count == 0:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
     
     return {"success": True, "message": "Preferências atualizadas"}
@@ -163,8 +202,6 @@ async def update_profile(
     """
     Permite ao utilizador atualizar o seu próprio perfil (nome e telefone).
     """
-    from fastapi import HTTPException
-    
     user_id = user["id"]
     
     # Campos permitidos para atualização pelo próprio utilizador
@@ -173,7 +210,18 @@ async def update_profile(
     
     for field in allowed_fields:
         if field in data and data[field] is not None:
-            update_data[field] = data[field]
+            if field == "name":
+                clean_val = sanitize_name(data[field])
+                if not clean_val:
+                    raise HTTPException(status_code=400, detail="Nome inválido")
+                update_data[field] = clean_val
+            elif field == "phone":
+                clean_val = sanitize_phone(data[field])
+                if not clean_val:
+                    raise HTTPException(status_code=400, detail="Telefone inválido")
+                update_data[field] = clean_val
+            else:
+                update_data[field] = data[field]
     
     if not update_data:
         raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
@@ -206,8 +254,6 @@ async def change_password(
     """
     Permite ao utilizador alterar a sua própria password.
     """
-    from fastapi import HTTPException
-    
     current_password = data.get("current_password")
     new_password = data.get("new_password")
     
@@ -253,7 +299,13 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
     Login com suporte a refresh tokens.
     Retorna access_token (15 min) + refresh_token (7 dias).
     """
-    user = await db.users.find_one({"email": data.email}, {"_id": 0})
+    # Sanitizar email antes de consultar BD
+    clean_email = sanitize_email(data.email)
+    if not clean_email:
+        log_sanitization_rejection("email", data.email, "email inválido no login")
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+    
+    user = await db.users.find_one({"email": clean_email}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     
@@ -271,9 +323,9 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
         user["role"]
     )
     
-    # Criar refresh token (longo)
-    device_info = request.headers.get("User-Agent", "")[:200]
-    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "")
+    # Criar refresh token (longo) - sanitizar headers para prevenir stored XSS
+    device_info = sanitize_string(request.headers.get("User-Agent", ""), max_length=200)
+    ip_address = sanitize_string(request.headers.get("X-Forwarded-For", request.client.host if request.client else ""), max_length=45)
     
     _, refresh_token = await create_refresh_token_db(
         user["id"],
@@ -312,8 +364,8 @@ async def refresh_tokens(request: Request, data: dict):
     if not refresh_token:
         raise HTTPException(status_code=400, detail="refresh_token é obrigatório")
     
-    device_info = request.headers.get("User-Agent", "")[:200]
-    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "")
+    device_info = sanitize_string(request.headers.get("User-Agent", ""), max_length=200)
+    ip_address = sanitize_string(request.headers.get("X-Forwarded-For", request.client.host if request.client else ""), max_length=45)
     
     result = await rotate_refresh_token(
         refresh_token,

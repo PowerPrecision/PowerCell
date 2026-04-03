@@ -17,6 +17,7 @@ from models.lead import (
 from services.scraper import scrape_property_url
 from services.auth import get_current_user, require_roles
 from models.auth import UserRole
+from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_url, log_sanitization_rejection)
 
 router = APIRouter(prefix="/leads", tags=["Property Leads"])
 logger = logging.getLogger(__name__)
@@ -192,9 +193,10 @@ async def extract_url_data(
         # Tentar ler da query string se falhar no body (compatibilidade)
         raise HTTPException(status_code=400, detail="URL é obrigatório")
     
-    # Adicionar https se faltar
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
+    # Sanitize URL before use
+    url = sanitize_url(url)
+    if not url:
+        raise HTTPException(status_code=400, detail="URL inválido")
     
     logger.info(f"A iniciar Deep Scraping de: {url}")
     
@@ -230,10 +232,10 @@ async def extract_url_data(
         consultant_data = None
         if raw_data.get("agente_nome") or raw_data.get("agente_telefone") or raw_data.get("agente_email"):
             consultant_data = {
-                "name": raw_data.get("agente_nome"),
-                "phone": raw_data.get("agente_telefone"),
-                "email": raw_data.get("agente_email"),
-                "agency_name": raw_data.get("agencia_nome"),
+                "name": sanitize_name(raw_data.get("agente_nome", "")),
+                "phone": sanitize_phone(raw_data.get("agente_telefone", "")),
+                "email": sanitize_email(raw_data.get("agente_email", "")),
+                "agency_name": sanitize_string(raw_data.get("agencia_nome", ""), max_length=200),
                 "source_url": raw_data.get("url")
             }
         
@@ -241,10 +243,10 @@ async def extract_url_data(
         if not consultant_data and raw_data.get("consultor"):
             raw_consultor = raw_data.get("consultor")
             consultant_data = {
-                "name": raw_consultor.get("nome"),
-                "phone": raw_consultor.get("telefone"),
-                "email": raw_consultor.get("email"),
-                "agency_name": raw_consultor.get("agencia"),
+                "name": sanitize_name(raw_consultor.get("nome", "")),
+                "phone": sanitize_phone(raw_consultor.get("telefone", "")),
+                "email": sanitize_email(raw_consultor.get("email", "")),
+                "agency_name": sanitize_string(raw_consultor.get("agencia", ""), max_length=200),
                 "source_url": raw_consultor.get("url_origem")
             }
 
@@ -456,6 +458,10 @@ async def extract_html_data(
     html_content = payload.get("html", "")
     source_url = payload.get("url") or payload.get("source_url", "")
     
+    # Sanitize source URL if provided
+    if source_url:
+        source_url = sanitize_url(source_url)
+    
     if not html_content:
         raise HTTPException(status_code=400, detail="HTML é obrigatório")
     
@@ -597,9 +603,10 @@ async def create_lead_from_url(
     if not url:
         raise HTTPException(status_code=400, detail="URL é obrigatório")
     
-    # Adicionar https se faltar
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
+    # Sanitize URL before use
+    url = sanitize_url(url)
+    if not url:
+        raise HTTPException(status_code=400, detail="URL inválido")
     
     # Verificar duplicados
     existing = await db.property_leads.find_one({"url": url})
@@ -635,10 +642,10 @@ async def create_lead_from_url(
         consultant_data = None
         if raw_data.get("agente_nome") or raw_data.get("agente_telefone") or raw_data.get("agente_email"):
             consultant_data = {
-                "name": raw_data.get("agente_nome"),
-                "phone": raw_data.get("agente_telefone"),
-                "email": raw_data.get("agente_email"),
-                "agency_name": raw_data.get("agencia_nome"),
+                "name": sanitize_name(raw_data.get("agente_nome", "")),
+                "phone": sanitize_phone(raw_data.get("agente_telefone", "")),
+                "email": sanitize_email(raw_data.get("agente_email", "")),
+                "agency_name": sanitize_string(raw_data.get("agencia_nome", ""), max_length=200),
                 "source_url": raw_data.get("url")
             }
         
@@ -646,27 +653,27 @@ async def create_lead_from_url(
         if not consultant_data and raw_data.get("consultor"):
             raw_consultor = raw_data.get("consultor")
             consultant_data = {
-                "name": raw_consultor.get("nome"),
-                "phone": raw_consultor.get("telefone"),
-                "email": raw_consultor.get("email"),
-                "agency_name": raw_consultor.get("agencia"),
+                "name": sanitize_name(raw_consultor.get("nome", "")),
+                "phone": sanitize_phone(raw_consultor.get("telefone", "")),
+                "email": sanitize_email(raw_consultor.get("email", "")),
+                "agency_name": sanitize_string(raw_consultor.get("agencia", ""), max_length=200),
                 "source_url": raw_consultor.get("url_origem")
             }
         
         now = datetime.now(timezone.utc).isoformat()
         
-        # Criar o lead com os dados extraídos
+        # Criar o lead com os dados extraídos (sanitized)
         lead_dict = {
             "id": str(uuid.uuid4()),
             "url": url,
-            "title": raw_data.get("titulo"),
+            "title": sanitize_string(raw_data.get("titulo", ""), max_length=300),
             "price": raw_data.get("preco"),
-            "location": raw_data.get("localizacao"),
+            "location": sanitize_string(raw_data.get("localizacao", ""), max_length=200),
             "typology": raw_data.get("tipologia"),
             "area": raw_data.get("area"),
             "bedrooms": raw_data.get("quartos"),
             "bathrooms": raw_data.get("casas_banho"),
-            "description": raw_data.get("descricao"),
+            "description": sanitize_string(raw_data.get("descricao", ""), max_length=2000),
             "photo_url": raw_data.get("foto_principal"),
             "consultant": consultant_data,
             "source": raw_data.get("fonte", raw_data.get("_parser", "auto")),
@@ -741,6 +748,27 @@ async def create_lead(
         "event": "Lead criado",
         "user": user.get("email")
     }]
+    
+    # Sanitize user-provided string fields before DB insert
+    if lead_dict.get("title"):
+        lead_dict["title"] = sanitize_string(lead_dict["title"], max_length=300)
+    if lead_dict.get("description"):
+        lead_dict["description"] = sanitize_string(lead_dict["description"], max_length=2000)
+    if lead_dict.get("location"):
+        lead_dict["location"] = sanitize_string(lead_dict["location"], max_length=200)
+    if lead_dict.get("notes"):
+        lead_dict["notes"] = sanitize_string(lead_dict["notes"], max_length=1000)
+    if lead_dict.get("url"):
+        lead_dict["url"] = sanitize_url(lead_dict["url"])
+    # Sanitize consultant fields if present
+    consultant = lead_dict.get("consultant")
+    if consultant:
+        if consultant.get("name"):
+            consultant["name"] = sanitize_name(consultant["name"])
+        if consultant.get("phone"):
+            consultant["phone"] = sanitize_phone(consultant["phone"])
+        if consultant.get("email"):
+            consultant["email"] = sanitize_email(consultant["email"])
     
     await db.property_leads.insert_one(lead_dict)
     return lead_dict
