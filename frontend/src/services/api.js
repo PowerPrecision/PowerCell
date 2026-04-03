@@ -505,6 +505,8 @@ export const getFinanceSummary = (params = {}) => api.get("/finance/summary", { 
 export const getFinanceMonthly = (params = {}) => api.get("/finance/monthly", { params });
 export const getFinanceCommissions = (params = {}) => api.get("/finance/commissions", { params });
 export const getFinancePerformance = (params = {}) => api.get("/finance/performance", { params });
+export const getFinanceConfig = () => api.get("/finance/config");
+export const updateFinanceConfig = (config) => api.put("/finance/config", config);
 
 // ===== RGPD TEMPLATE =====
 export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
