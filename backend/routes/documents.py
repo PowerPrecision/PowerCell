@@ -37,6 +37,7 @@ from services.document_processor import convert_image_to_pdf, IMG2PDF_AVAILABLE
 # Importar serviço de validação de ficheiros (MIME type validation)
 from services.file_validation import validate_file_content, validate_and_extract_file
 from services.history import log_history
+from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_url, sanitize_html, log_sanitization_rejection)
 
 router = APIRouter(prefix="/documents", tags=["Document Management"])
 logger = logging.getLogger(__name__)
@@ -1248,13 +1249,17 @@ async def create_document_expiry(
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
+    # Sanitizar inputs do utilizador antes de guardar
+    sanitized_document_name = sanitize_string(data.document_name, max_length=300) if data.document_name else data.document_name
+    sanitized_notes = sanitize_string(data.notes, max_length=1000) if data.notes else data.notes
+    
     doc = {
         "id": doc_id,
         "process_id": data.process_id,
         "document_type": data.document_type,
-        "document_name": data.document_name,
+        "document_name": sanitized_document_name,
         "expiry_date": data.expiry_date,
-        "notes": data.notes,
+        "notes": sanitized_notes,
         "created_at": now,
         "created_by": user["id"]
     }

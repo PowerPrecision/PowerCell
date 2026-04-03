@@ -26,6 +26,7 @@ from models.annotation import (
 )
 from services.auth import get_current_user
 from services import annotation_service
+from utils.input_sanitization import sanitize_string, sanitize_name, sanitize_email, sanitize_html, sanitize_url, log_sanitization_rejection
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 logger = logging.getLogger(__name__)
@@ -46,8 +47,15 @@ async def create_annotation(
     Requer autenticação. A anotação fica associada ao utilizador atual.
     """
     try:
+        # Sanitize user inputs before saving
+        dump = data.model_dump()
+        if dump.get("comment"):
+            dump["comment"] = sanitize_string(dump["comment"], max_length=5000)
+        if dump.get("document_name"):
+            dump["document_name"] = sanitize_string(dump["document_name"], max_length=1000)
+
         annotation = await annotation_service.create_annotation(
-            data=data.model_dump(),
+            data=dump,
             author_id=user["id"],
             author_name=user.get("name", user.get("email", "Utilizador")),
         )
@@ -130,9 +138,14 @@ async def update_annotation(
     Campos atualizáveis: comment, annotation_type, color, resolved.
     """
     try:
+        # Sanitize user inputs before updating
+        update_data = data.model_dump(exclude_none=True)
+        if update_data.get("comment"):
+            update_data["comment"] = sanitize_string(update_data["comment"], max_length=5000)
+
         updated = await annotation_service.update_annotation(
             annotation_id=annotation_id,
-            data=data.model_dump(exclude_none=True),
+            data=update_data,
             user_id=user["id"],
         )
 

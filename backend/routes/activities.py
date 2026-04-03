@@ -8,6 +8,7 @@ from models.auth import UserRole
 from models.activity import ActivityCreate, ActivityResponse, HistoryResponse
 from services.auth import get_current_user
 from services.history import log_history
+from utils.input_sanitization import sanitize_string, sanitize_name, sanitize_email, sanitize_html, sanitize_url, log_sanitization_rejection
 
 
 router = APIRouter(tags=["Activities"])
@@ -34,7 +35,7 @@ async def create_activity(data: ActivityCreate, user: dict = Depends(get_current
         "user_id": user["id"],
         "user_name": user["name"],
         "user_role": user["role"],
-        "comment": data.comment,
+        "comment": sanitize_string(data.comment, max_length=1000),
         "created_at": now
     }
     

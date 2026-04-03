@@ -33,6 +33,10 @@ from models.auth import UserRole
 from services.encryption import encryption_service
 from services.process_service import get_next_process_number
 from services.s3_storage import s3_service
+from utils.input_sanitization import (
+    sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
+    sanitize_string, sanitize_url, log_sanitization_rejection
+)
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
@@ -180,6 +184,11 @@ async def list_registered_clients(
     """
     user_role = user.get("role", "")
     user_id = user.get("id", "")
+    
+    # Sanitize search params used in MongoDB queries
+    if search:
+        search = sanitize_string(search, max_length=200)
+    sort_field = sanitize_string(sort_field, max_length=50)
     
     # Construir query
     query = {"registration_completed": True}
@@ -504,6 +513,14 @@ async def list_clients(
     user_id = user.get("id", "")
     user_email = user.get("email", "")
     
+    # Sanitize search params used in MongoDB queries
+    if search:
+        search = sanitize_string(search, max_length=200)
+    if status_filter:
+        status_filter = sanitize_string(status_filter, max_length=50)
+    if assignment_filter:
+        assignment_filter = sanitize_string(assignment_filter, max_length=50)
+    
     # Buscar workflow statuses para labels
     workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     status_map = {s["name"]: s for s in workflow_statuses}
@@ -776,12 +793,33 @@ async def create_client(
 ):
     """Criar um novo cliente."""
     
+    # Sanitizar inputs do utilizador
+    sanitized_nome = sanitize_name(client_data.nome)
+    if not sanitized_nome:
+        log_sanitization_rejection("nome", client_data.nome or "", "Nome vazio ou inválido após sanitização")
+        raise HTTPException(status_code=400, detail="Nome inválido. Use apenas letras e espaços.")
+    
+    sanitized_email = sanitize_email(client_data.email) if client_data.email else None
+    if client_data.email and not sanitized_email:
+        log_sanitization_rejection("email", client_data.email, "Email inválido após sanitização")
+        raise HTTPException(status_code=400, detail="Formato de email inválido.")
+    
+    sanitized_telefone = sanitize_phone(client_data.telefone) if client_data.telefone else None
+    
+    sanitized_nif = sanitize_nif(client_data.nif) if client_data.nif else None
+    if client_data.nif and not sanitized_nif:
+        log_sanitization_rejection("nif", client_data.nif, "NIF inválido após sanitização")
+        raise HTTPException(status_code=400, detail="NIF inválido. Deve ter 9 dígitos.")
+    
+    sanitized_fonte = sanitize_string(client_data.fonte, max_length=100) if client_data.fonte else None
+    sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas else None
+    
     # Verificar se já existe cliente com mesmo NIF ou email
     existing_query = []
-    if client_data.nif:
-        existing_query.append({"dados_pessoais.nif": client_data.nif})
-    if client_data.email:
-        existing_query.append({"contacto.email": client_data.email.lower()})
+    if sanitized_nif:
+        existing_query.append({"dados_pessoais.nif": sanitized_nif})
+    if sanitized_email:
+        existing_query.append({"contacto.email": sanitized_email})
     
     if existing_query:
         existing = await db.clients.find_one({"$or": existing_query})
@@ -795,16 +833,16 @@ async def create_client(
     
     client = Client(
         id=str(uuid.uuid4()),
-        nome=client_data.nome,
+        nome=sanitized_nome,
         contacto=ClientContact(
-            email=client_data.email.lower() if client_data.email else None,
-            telefone=client_data.telefone
+            email=sanitized_email,
+            telefone=sanitized_telefone
         ),
         dados_pessoais=ClientPersonalData(
-            nif=client_data.nif
+            nif=sanitized_nif
         ),
-        fonte=client_data.fonte,
-        notas=client_data.notas,
+        fonte=sanitized_fonte,
+        notas=sanitized_notas,
         created_at=now,
         updated_at=now,
         created_by=user.get("email")
@@ -835,20 +873,59 @@ async def update_client(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
     
+    # Sanitizar inputs
+    sanitized_nome = None
+    if client_data.nome:
+        sanitized_nome = sanitize_name(client_data.nome)
+        if not sanitized_nome:
+            log_sanitization_rejection("nome", client_data.nome, "Nome vazio ou inválido após sanitização")
+            raise HTTPException(status_code=400, detail="Nome inválido. Use apenas letras e espaços.")
+    
+    sanitized_contacto = None
+    if client_data.contacto:
+        contact_dump = client_data.contacto.model_dump(exclude_unset=True)
+        if "email" in contact_dump and contact_dump["email"]:
+            s_email = sanitize_email(contact_dump["email"])
+            if not s_email:
+                log_sanitization_rejection("contacto.email", contact_dump["email"], "Email inválido após sanitização")
+                raise HTTPException(status_code=400, detail="Formato de email inválido.")
+            contact_dump["email"] = s_email
+        if "telefone" in contact_dump and contact_dump["telefone"]:
+            contact_dump["telefone"] = sanitize_phone(contact_dump["telefone"]) or contact_dump["telefone"]
+        if "telefone_secundario" in contact_dump and contact_dump["telefone_secundario"]:
+            contact_dump["telefone_secundario"] = sanitize_phone(contact_dump["telefone_secundario"]) or contact_dump["telefone_secundario"]
+        sanitized_contacto = contact_dump
+    
+    sanitized_dados_pessoais = None
+    if client_data.dados_pessoais:
+        pessoais_dump = client_data.dados_pessoais.model_dump(exclude_unset=True)
+        if "nif" in pessoais_dump and pessoais_dump["nif"]:
+            s_nif = sanitize_nif(pessoais_dump["nif"])
+            if not s_nif:
+                log_sanitization_rejection("dados_pessoais.nif", pessoais_dump["nif"], "NIF inválido após sanitização")
+                raise HTTPException(status_code=400, detail="NIF inválido. Deve ter 9 dígitos.")
+            pessoais_dump["nif"] = s_nif
+        for str_field in ["nome", "documento_id", "morada_fiscal", "phone", "telefone", "nacionalidade", "profissao"]:
+            if str_field in pessoais_dump and pessoais_dump[str_field]:
+                pessoais_dump[str_field] = sanitize_string(str(pessoais_dump[str_field]), max_length=200)
+        sanitized_dados_pessoais = pessoais_dump
+    
+    sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas is not None else None
+    
     update_dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
     
-    if client_data.nome:
-        update_dict["nome"] = client_data.nome
-    if client_data.contacto:
-        update_dict["contacto"] = client_data.contacto.model_dump(exclude_unset=True)
-    if client_data.dados_pessoais:
-        update_dict["dados_pessoais"] = client_data.dados_pessoais.model_dump(exclude_unset=True)
+    if sanitized_nome:
+        update_dict["nome"] = sanitized_nome
+    if sanitized_contacto:
+        update_dict["contacto"] = sanitized_contacto
+    if sanitized_dados_pessoais:
+        update_dict["dados_pessoais"] = sanitized_dados_pessoais
     if client_data.dados_financeiros:
         update_dict["dados_financeiros"] = client_data.dados_financeiros.model_dump(exclude_unset=True)
     if client_data.tags is not None:
         update_dict["tags"] = client_data.tags
-    if client_data.notas is not None:
-        update_dict["notas"] = client_data.notas
+    if sanitized_notas is not None:
+        update_dict["notas"] = sanitized_notas
     
     await db.clients.update_one(
         {"id": client_id},
@@ -966,6 +1043,13 @@ async def create_process_for_client(
     - Um ID real de cliente na colecção clients
     - Um ID de processo (quando o cliente é virtual/agregado de processos)
     """
+    
+    # Sanitizar inputs
+    if description:
+        description = sanitize_string(description, max_length=500)
+    process_type = sanitize_string(process_type, max_length=100)
+    if not process_type:
+        raise HTTPException(status_code=400, detail="Tipo de processo inválido.")
     
     client = None
     source_process = None
@@ -1122,9 +1206,27 @@ async def find_or_create_client(
     Procura por NIF, email ou nome similar.
     Se não encontrar, cria um novo cliente.
     """
+    # Sanitizar inputs
+    sanitized_nome = sanitize_name(nome)
+    if not sanitized_nome:
+        log_sanitization_rejection("nome", nome or "", "Nome vazio ou inválido após sanitização")
+        raise HTTPException(status_code=400, detail="Nome inválido. Use apenas letras e espaços.")
+    
+    sanitized_email = sanitize_email(email) if email else None
+    if email and not sanitized_email:
+        log_sanitization_rejection("email", email, "Email inválido após sanitização")
+        raise HTTPException(status_code=400, detail="Formato de email inválido.")
+    
+    sanitized_nif = sanitize_nif(nif) if nif else None
+    if nif and not sanitized_nif:
+        log_sanitization_rejection("nif", nif, "NIF inválido após sanitização")
+        raise HTTPException(status_code=400, detail="NIF inválido. Deve ter 9 dígitos.")
+    
+    sanitized_telefone = sanitize_phone(telefone) if telefone else None
+    
     # Tentar encontrar por NIF
-    if nif:
-        existing = await db.clients.find_one({"dados_pessoais.nif": nif})
+    if sanitized_nif:
+        existing = await db.clients.find_one({"dados_pessoais.nif": sanitized_nif})
         if existing:
             return {
                 "found": True,
@@ -1133,8 +1235,8 @@ async def find_or_create_client(
             }
     
     # Tentar encontrar por email
-    if email:
-        existing = await db.clients.find_one({"contacto.email": email.lower()})
+    if sanitized_email:
+        existing = await db.clients.find_one({"contacto.email": sanitized_email})
         if existing:
             return {
                 "found": True,
@@ -1143,10 +1245,10 @@ async def find_or_create_client(
             }
     
     # Tentar encontrar por nome similar
-    if nome:
+    if sanitized_nome:
         # Pesquisa fuzzy pelo nome
         from routes.ai_bulk import normalize_text_for_matching
-        nome_norm = normalize_text_for_matching(nome)
+        nome_norm = normalize_text_for_matching(sanitized_nome)
         
         # Buscar candidatos
         candidates = await db.clients.find(
@@ -1167,10 +1269,10 @@ async def find_or_create_client(
     
     # Não encontrou - criar novo cliente
     client_data = ClientCreate(
-        nome=nome,
-        email=email,
-        telefone=telefone,
-        nif=nif,
+        nome=sanitized_nome,
+        email=sanitized_email,
+        telefone=sanitized_telefone,
+        nif=sanitized_nif,
         fonte="auto_created"
     )
     

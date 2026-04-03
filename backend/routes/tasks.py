@@ -17,6 +17,7 @@ from database import db
 from models.task import TaskCreate, TaskUpdate, TaskResponse
 from services.auth import get_current_user
 from services.realtime_notifications import send_realtime_notification
+from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_url, sanitize_html, log_sanitization_rejection)
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +84,12 @@ async def create_task(
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
+    # Sanitizar inputs do utilizador antes de guardar
+    sanitized_title = sanitize_string(task_data.title, max_length=300) if task_data.title else task_data.title
+    sanitized_description = sanitize_string(task_data.description, max_length=2000) if task_data.description else task_data.description
+    
     # Construir título com nome do processo se aplicável
-    title = task_data.title
+    title = sanitized_title or task_data.title
     process_name = None
     
     if task_data.process_id:
@@ -101,7 +106,7 @@ async def create_task(
     task = {
         "id": task_id,
         "title": title,
-        "description": task_data.description,
+        "description": sanitized_description,
         "assigned_to": task_data.assigned_to,
         "process_id": task_data.process_id,
         "due_date": task_data.due_date,  # Data de vencimento (opcional)
@@ -270,9 +275,9 @@ async def update_task(
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     
     if task_data.title is not None:
-        update_data["title"] = task_data.title
+        update_data["title"] = sanitize_string(task_data.title, max_length=300) if task_data.title else task_data.title
     if task_data.description is not None:
-        update_data["description"] = task_data.description
+        update_data["description"] = sanitize_string(task_data.description, max_length=2000) if task_data.description else task_data.description
     if task_data.assigned_to is not None:
         update_data["assigned_to"] = task_data.assigned_to
         # Notificar novos utilizadores

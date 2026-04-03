@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from database import db
 from models.auth import UserRole
 from services.auth import get_current_user, require_roles
+from utils.input_sanitization import sanitize_string, sanitize_name, sanitize_email, sanitize_html, sanitize_url, log_sanitization_rejection
 
 logger = logging.getLogger(__name__)
 
@@ -106,10 +107,10 @@ async def create_minuta(
     """
     minuta = {
         "id": str(uuid.uuid4()),
-        "titulo": data.titulo.strip(),
+        "titulo": sanitize_string(data.titulo.strip(), max_length=300),
         "categoria": data.categoria,
-        "descricao": data.descricao.strip() if data.descricao else None,
-        "conteudo": data.conteudo,
+        "descricao": sanitize_string(data.descricao.strip(), max_length=2000) if data.descricao else None,
+        "conteudo": sanitize_html(data.conteudo, allow_basic_formatting=True),
         "tags": [t.lower().strip() for t in (data.tags or []) if t.strip()],
         "created_by": user.get("id"),
         "created_by_name": user.get("name", user.get("email", "")).split("@")[0],
@@ -182,13 +183,13 @@ async def update_minuta(
     updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
     
     if data.titulo is not None:
-        updates["titulo"] = data.titulo.strip()
+        updates["titulo"] = sanitize_string(data.titulo.strip(), max_length=300)
     if data.categoria is not None:
         updates["categoria"] = data.categoria
     if data.descricao is not None:
-        updates["descricao"] = data.descricao.strip() if data.descricao else None
+        updates["descricao"] = sanitize_string(data.descricao.strip(), max_length=2000) if data.descricao else None
     if data.conteudo is not None:
-        updates["conteudo"] = data.conteudo
+        updates["conteudo"] = sanitize_html(data.conteudo, allow_basic_formatting=True)
     if data.tags is not None:
         updates["tags"] = [t.lower().strip() for t in data.tags if t.strip()]
     
@@ -348,10 +349,10 @@ async def import_minuta(
         
         minuta_doc = {
             "id": str(uuid.uuid4()),
-            "titulo": titulo,
+            "titulo": sanitize_string(titulo, max_length=300),
             "categoria": categoria,
-            "descricao": f"Importado de: {filename}",
-            "conteudo": text_content,
+            "descricao": sanitize_string(f"Importado de: {filename}", max_length=2000),
+            "conteudo": sanitize_html(text_content, allow_basic_formatting=True),
             "tags": [],
             "created_by": user.get("id"),
             "created_by_name": user.get("name") or user.get("email"),
