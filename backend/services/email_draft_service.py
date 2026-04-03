@@ -184,27 +184,22 @@ async def create_missing_doc_draft(
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "És um especialista em comunicação com clientes de crédito habitação. Gera e-mails profissionais e personalizados."},
+                {"role": "system", "content": "És um especialista em comunicação com clientes de crédito habitação. Gera e-mails profissionais e personalizados. Retorna APENAS JSON válido, sem texto adicional."},
                 {"role": "user", "content": prompt_filled},
             ],
             max_tokens=1000,
             temperature=0.7,
+            response_format={"type": "json_object"}
         )
 
         response_text = response.choices[0].message.content
 
-        # Extrair JSON da resposta
-        import re
-        json_match = re.search(r'\{[\s\S]*\}', response_text)
-        if not json_match:
+        # Parse robusto da resposta JSON
+        from services.ai_document_analyzer import _parse_json_response
+        draft_content = _parse_json_response(response_text)
+        if not draft_content:
             logger.error(f"Resposta da IA não contém JSON válido: {response_text[:200]}")
             return {"success": False, "reason": "invalid_ai_response"}
-
-        try:
-            draft_content = json.loads(json_match.group())
-        except json.JSONDecodeError:
-            logger.error("Erro ao fazer parse do JSON da resposta da IA")
-            return {"success": False, "reason": "json_parse_error"}
 
         subject = draft_content.get("subject", f"Documento necessário: {doc_label}")
         body = draft_content.get("body", f"Caro(a) {client_name},\n\nPrecisamos do documento: {doc_label}.")
