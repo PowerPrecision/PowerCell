@@ -195,7 +195,7 @@ Responde APENAS em formato JSON válido:
 
 
 def parse_categorization_response(response: str) -> Dict[str, Any]:
-    """Parse da resposta JSON da IA."""
+    """Parse da resposta JSON da IA com validação robusta."""
     try:
         response = response.strip()
         
@@ -210,6 +210,18 @@ def parse_categorization_response(response: str) -> Dict[str, Any]:
         response = response.strip()
         
         data = json.loads(response)
+        
+        # Validar que é um dict
+        if not isinstance(data, dict):
+            logger.warning(f"Resposta não é um dict: {type(data)}")
+            return {
+                "category": None,
+                "subcategory": None,
+                "tags": [],
+                "summary": "",
+                "confidence": 0.0,
+                "expiry_date": None
+            }
         
         # Processar expiry_date
         expiry_date = data.get("expiry_date")
