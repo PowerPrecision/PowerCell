@@ -224,7 +224,7 @@ const PendingItemsList = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background p-6">
+      <div className="min-h-screen bg-background p-4 md:p-6">
         <div className="max-w-4xl mx-auto space-y-6">
           <div className="h-7 w-48 bg-muted animate-pulse rounded" />
           <div className="space-y-3">
@@ -262,7 +262,7 @@ const PendingItemsList = () => {
       {/* Content */}
       <main className="container mx-auto px-4 py-6">
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
           <Card 
             className={`cursor-pointer transition-colors ${activeTab === 'all' ? 'border-blue-500 bg-blue-50' : ''}`}
             onClick={() => setActiveTab('all')}

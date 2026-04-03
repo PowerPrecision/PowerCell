@@ -683,7 +683,7 @@ const MinutasPage = () => {
 
         {/* Dialog de Preview */}
         <Dialog open={previewDialog} onOpenChange={setPreviewDialog}>
-          <DialogContent className="max-w-4xl max-h-[90vh]">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{selectedMinuta?.titulo}</DialogTitle>
               <DialogDescription>

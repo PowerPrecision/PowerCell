@@ -667,45 +667,48 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     """
     Sincronizar emails para um processo específico.
     
-    NOVAS REGRAS DE FILTRAGEM (P0):
-    ================================
+    REGRAS DE FILTRAGEM ESTRITAS:
+    =============================
+    O sistema APENAS guarda emails que cumpram UMA destas 5 condições:
     
-    1. Emails envolvendo o utilizador logado (consultor/mediador):
-       - To/CC o cliente
-       - To/CC o proprietário do imóvel
-       - Onde o nome do cliente aparece no assunto ou corpo
+    1. Emails trocados entre o Utilizador Logado e o Comercial (owner_email).
+    2. Emails trocados entre o Utilizador Logado e o Cliente (client_email).
+    3. Emails trocados entre o Comercial (owner_email) e geral@powerealestate.pt.
+    4. Emails trocados entre o Comercial (owner_email) e geral@precisioncredito.pt.
+    5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
     
-    2. Emails envolvendo o email geral da empresa (geral@...):
-       - To/CC o cliente
-       - To/CC o proprietário do imóvel
-       - To/CC o utilizador logado, MAS APENAS se o nome do cliente 
-         aparecer no assunto ou corpo do email
+    CONTEXTO DE NEGÓCIO:
+    - Comercial (owner_email): Agente imobiliário que fez a angariação.
+    - Utilizador Logado (user_email): Consultor/funcionário a usar o sistema.
+    - Cliente (client_email): Cliente do processo.
     
     Args:
         process_id: ID do processo
         days: Número de dias para sincronizar (default 30)
-        user_email: Email do utilizador logado (consultor/mediador)
+        user_email: Email do utilizador logado (consultor/funcionário)
     """
     # Obter processo
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         return {"success": False, "error": "Processo não encontrado"}
     
-    # Nome do cliente para busca por assunto/corpo
+    # Nome do cliente para busca por assunto/corpo (regra 5)
     client_name = process.get("client_name", "")
     client_name_parts = [p.lower() for p in client_name.split() if len(p) >= 3] if client_name else []
     
-    # Emails geral da empresa
+    # Emails gerais da empresa (usados nas regras 3 e 4)
     company_emails = [
         "geral@powerealestate.pt",
         "geral@precisioncredito.pt"
     ]
     
-    # Email do cliente
+    # ===== EXTRAÇÃO DE VARIÁVEIS DO PROCESSO =====
+    
+    # Email do Cliente
     personal_data = process.get("personal_data", {}) or {}
     client_email = personal_data.get("email") or process.get("client_email")
     if client_email:
-        # Limpar emails com formatação markdown do Trello
+        # Limpar emails com formatação markdown do Trello (ex: [text](mailto:email))
         clean_email = client_email
         if "[" in clean_email and "]" in clean_email:
             match = re.search(r'[\w\.-]+@[\w\.-]+', clean_email)
@@ -713,25 +716,25 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
                 clean_email = match.group()
         client_email = clean_email.lower().strip()
     
-    # Email do proprietário do imóvel
+    # Email do Comercial (owner_email) — agente imobiliário que fez a angariação
     real_estate_data = process.get("real_estate_data", {}) or {}
     owner_email = real_estate_data.get("owner_email")
     if owner_email:
         owner_email = owner_email.lower().strip()
     
-    # Emails adicionais monitorizados (adicionados manualmente pelo utilizador)
+    # Email do Utilizador Logado — consultor/funcionário a usar o sistema
+    user_email_lower = user_email.lower().strip() if user_email else None
+    
+    # Emails monitorizados adicionados manualmente (apenas para busca IMAP, não para filtragem)
     monitored_emails = process.get("monitored_emails", [])
     monitored_emails = [e.lower().strip() for e in (monitored_emails or []) if e and "@" in e]
-    
-    # Email do utilizador logado
-    user_email_lower = user_email.lower().strip() if user_email else None
     
     logger.info(f"Sincronizando emails para processo {process_id}")
     logger.info(f"  - Cliente: {client_name}")
     logger.info(f"  - Email cliente: {client_email}")
-    logger.info(f"  - Email proprietário: {owner_email}")
-    logger.info(f"  - Email utilizador: {user_email_lower}")
-    logger.info(f"  - Emails monitorizados: {monitored_emails}")
+    logger.info(f"  - Email comercial (owner): {owner_email}")
+    logger.info(f"  - Email utilizador logado: {user_email_lower}")
+    logger.info(f"  - Emails monitorizados (IMAP only): {monitored_emails}")
     
     # Usar versão async para buscar contas (inclui DB)
     accounts = await get_email_accounts_async()
@@ -742,7 +745,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     
     # Buscar emails de todas as contas
     for account in accounts:
-        # 1. Buscar por NOME DO CLIENTE no assunto/corpo (principal)
+        # 1. Buscar por NOME DO CLIENTE no assunto/corpo (regra 5)
         if client_name:
             inbox_by_name = await fetch_emails_by_name(account, client_name, days, "INBOX")
             all_emails.extend(inbox_by_name)
@@ -756,14 +759,18 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
                 except:
                     continue
         
-        # 2. Buscar por endereços de email relevantes
+        # 2. Buscar por endereços de email relevantes (para regras 1-4)
+        # Montar lista de emails para busca IMAP: todos os participantes possíveis
         emails_to_search = []
+        if user_email_lower:
+            emails_to_search.append(user_email_lower)
         if client_email:
             emails_to_search.append(client_email)
         if owner_email:
             emails_to_search.append(owner_email)
-        if user_email_lower:
-            emails_to_search.append(user_email_lower)
+        # Incluir emails gerais da empresa para capturar regras 3 e 4
+        emails_to_search.extend(company_emails)
+        # Incluir monitorizados para busca (a filtragem rigorosa decide o que entra)
         emails_to_search.extend(monitored_emails)
         
         if emails_to_search:
@@ -783,75 +790,82 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
                     continue
     
     # ====================================================================
-    # APLICAR NOVAS REGRAS DE FILTRAGEM
+    # REGRAS DE FILTRAGEM ESTRITAS (5 regras de negócio)
     # ====================================================================
+    
     def client_name_in_email(em: Dict) -> bool:
-        """Verifica se o nome do cliente aparece no assunto ou corpo."""
+        """
+        Verifica se o NOME DO CLIENTE aparece explicitamente no assunto ou corpo.
+        Usa partes >= 3 caracteres para evitar falsos positivos.
+        """
         if not client_name_parts:
             return False
         subject = (em.get("subject") or "").lower()
         body = (em.get("body") or "").lower()
-        content = subject + " " + body
+        body_html = (em.get("body_html") or "").lower()
+        content = subject + " " + body + " " + body_html
         return any(part in content for part in client_name_parts)
     
-    def email_matches_rules(em: Dict) -> bool:
+    def exchanged_between(email_a: str, email_b: str, em: Dict) -> bool:
         """
-        Aplica as novas regras de filtragem.
-        
-        Returns:
-            True se o email deve ser incluído, False caso contrário.
+        Verifica se houve troca de emails ENTRE email_a e email_b.
+        "Troca" significa: um é remetente E o outro está em To/CC.
+        Não basta ambos aparecerem — um deve ter enviado e o outro recebido.
         """
+        if not email_a or not email_b:
+            return False
         from_email = (em.get("from_email") or "").lower()
         to_emails = [e.lower() for e in (em.get("to_emails") or [])]
         cc_emails = [e.lower() for e in (em.get("cc_emails") or [])]
         all_recipients = to_emails + cc_emails
         
-        # Helper para verificar participação
-        def involves_client():
-            return client_email and (client_email in all_recipients or from_email == client_email)
-        
-        def involves_owner():
-            return owner_email and (owner_email in all_recipients or from_email == owner_email)
-        
-        def involves_user():
-            return user_email_lower and (user_email_lower in all_recipients or from_email == user_email_lower)
-        
-        def involves_company():
-            return any(ce in all_recipients or from_email == ce for ce in company_emails)
-        
-        def involves_monitored():
-            return any(me in all_recipients or from_email == me for me in monitored_emails)
-        
-        # REGRA 1: Emails envolvendo o utilizador logado
-        if involves_user():
-            # To/CC cliente OU To/CC proprietário OU nome cliente no assunto/corpo
-            if involves_client() or involves_owner() or client_name_in_email(em):
-                return True
-        
-        # REGRA 2: Emails envolvendo o email geral da empresa
-        if involves_company():
-            # To/CC cliente OU To/CC proprietário
-            if involves_client() or involves_owner():
-                return True
-            # To/CC utilizador logado, MAS APENAS se nome cliente no assunto/corpo
-            if involves_user() and client_name_in_email(em):
-                return True
-        
-        # REGRA 3: Emails monitorizados adicionais
-        if involves_monitored():
+        # email_a enviou para email_b
+        if from_email == email_a and email_b in all_recipients:
             return True
-        
-        # REGRA 4: Email de/para o cliente directamente
-        if involves_client():
+        # email_b enviou para email_a
+        if from_email == email_b and email_a in all_recipients:
             return True
-        
-        # REGRA 5: Email de/para o proprietário directamente
-        if involves_owner():
-            return True
-        
         return False
     
-    # Filtrar emails pelas novas regras
+    def email_matches_rules(em: Dict) -> bool:
+        """
+        Aplica as 5 regras de filtragem ESTRITAS de negócio.
+        O email é incluído APENAS se cumprir pelo menos UMA destas regras:
+        
+        1. Emails trocados entre Utilizador Logado e Comercial (owner_email).
+        2. Emails trocados entre Utilizador Logado e Cliente (client_email).
+        3. Emails trocados entre Comercial (owner_email) e geral@powerealestate.pt.
+        4. Emails trocados entre Comercial (owner_email) e geral@precisioncredito.pt.
+        5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
+        
+        Returns:
+            True se o email deve ser incluído, False caso contrário.
+        """
+        # REGRA 5 (primeiro — sem dependência de variáveis de email):
+        # Qualquer email onde o nome do cliente apareça no assunto ou corpo
+        if client_name_in_email(em):
+            return True
+        
+        # REGRA 1: Emails trocados entre Utilizador Logado e Comercial
+        if exchanged_between(user_email_lower, owner_email, em):
+            return True
+        
+        # REGRA 2: Emails trocados entre Utilizador Logado e Cliente
+        if exchanged_between(user_email_lower, client_email, em):
+            return True
+        
+        # REGRA 3: Emails trocados entre Comercial e geral@powerealestate.pt
+        if exchanged_between(owner_email, "geral@powerealestate.pt", em):
+            return True
+        
+        # REGRA 4: Emails trocados entre Comercial e geral@precisioncredito.pt
+        if exchanged_between(owner_email, "geral@precisioncredito.pt", em):
+            return True
+        
+        # Nenhuma regra satisfeita → excluir
+        return False
+    
+    # Filtrar emails pelas 5 regras estritas
     filtered_emails = [em for em in all_emails if email_matches_rules(em)]
     
     # Remover duplicados por Message-ID
