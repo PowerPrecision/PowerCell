@@ -21,7 +21,7 @@ import asyncio
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 import uuid
-import re
+# import re  # Removido: não mais necessário após eliminar regex fallback
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -181,10 +181,9 @@ def _parse_json_response(response_text: str) -> Optional[Dict[str, Any]]:
     """
     Parse robusto de JSON da resposta do LLM.
     
-    Estratégia (defesa em profundidade):
+    Estratégia:
     1. json.loads() direto — quando response_format={"type": "json_object"} garante JSON puro
     2. Strip de markdown (```json ... ```) — LLMs podem envolver em code blocks
-    3. re.search como ÚLTIMO recurso — frágil, mas evita perda total de dados
     
     Args:
         response_text: Texto da resposta do LLM
@@ -216,14 +215,10 @@ def _parse_json_response(response_text: str) -> Optional[Dict[str, Any]]:
             except (json.JSONDecodeError, ValueError):
                 pass
     
-    # 3. Último recurso: regex (frágil, mas melhor que nada)
-    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group())
-        except (json.JSONDecodeError, ValueError):
-            pass
-    
+    # 3. Tentar encontrar JSON em qualquer parte do texto (backup)
+    # Removido: regex frágil re.search(r'\{...\}')
+    # Se chegou aqui, o JSON é inválido — retornar None para sinalizar erro
+    logger.warning(f"Não foi possível parsear resposta como JSON: {response_text[:200]}...")
     return None
 
 
