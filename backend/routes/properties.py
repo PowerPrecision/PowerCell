@@ -18,6 +18,7 @@ from services.auth import get_current_user, require_roles
 from services.alerts import check_and_notify_matches_for_new_property
 from services.background_jobs import background_jobs, JobType, JobStatus
 from models.auth import UserRole
+from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_url, sanitize_html, log_sanitization_rejection)
 
 router = APIRouter(prefix="/properties", tags=["Properties"])
 logger = logging.getLogger(__name__)
@@ -140,6 +141,24 @@ async def create_property(
     # Gerar referência se não fornecida
     internal_ref = data.internal_reference or await get_next_reference()
     
+    # Sanitizar inputs do utilizador antes de guardar
+    sanitized_title = sanitize_string(data.title, max_length=300) if data.title else data.title
+    sanitized_description = sanitize_html(data.description) if data.description else data.description
+    sanitized_notes = sanitize_string(data.notes, max_length=1000) if data.notes else data.notes
+    sanitized_private_notes = sanitize_string(data.private_notes, max_length=1000) if data.private_notes else data.private_notes
+    sanitized_video_url = sanitize_url(data.video_url) if data.video_url else data.video_url
+    sanitized_virtual_tour_url = sanitize_url(data.virtual_tour_url) if data.virtual_tour_url else data.virtual_tour_url
+    
+    # Sanitizar owner fields
+    sanitized_owner = data.owner
+    if sanitized_owner:
+        if hasattr(sanitized_owner, 'name') and sanitized_owner.name:
+            sanitized_owner = sanitized_owner.model_copy(update={"name": sanitize_name(sanitized_owner.name)})
+        if hasattr(sanitized_owner, 'phone') and sanitized_owner.phone:
+            sanitized_owner = sanitized_owner.model_copy(update={"phone": sanitize_phone(sanitized_owner.phone)})
+        if hasattr(sanitized_owner, 'email') and sanitized_owner.email:
+            sanitized_owner = sanitized_owner.model_copy(update={"email": sanitize_email(sanitized_owner.email)})
+    
     # Obter nome do agente se atribuído
     agent_name = None
     if data.assigned_agent_id:
@@ -151,22 +170,22 @@ async def create_property(
         id=str(uuid.uuid4()),
         internal_reference=internal_ref,
         property_type=data.property_type,
-        title=data.title,
-        description=data.description,
+        title=sanitized_title,
+        description=sanitized_description,
         address=data.address,
         features=data.features,
         condition=data.condition,
         financials=data.financials,
-        owner=data.owner,
+        owner=sanitized_owner,
         photos=data.photos,
-        video_url=data.video_url,
-        virtual_tour_url=data.virtual_tour_url,
+        video_url=sanitized_video_url,
+        virtual_tour_url=sanitized_virtual_tour_url,
         documents=data.documents,
         status=data.status,
         assigned_agent_id=data.assigned_agent_id,
         assigned_agent_name=agent_name,
-        notes=data.notes,
-        private_notes=data.private_notes,
+        notes=sanitized_notes,
+        private_notes=sanitized_private_notes,
         history=[
             PropertyHistory(
                 timestamp=now,
@@ -225,6 +244,33 @@ async def update_property(
     
     # Preparar actualização
     update_dict = data.model_dump(exclude_none=True)
+    
+    # Sanitizar campos de texto antes de guardar
+    if "title" in update_dict and update_dict["title"]:
+        update_dict["title"] = sanitize_string(update_dict["title"], max_length=300)
+    if "description" in update_dict and update_dict["description"]:
+        update_dict["description"] = sanitize_html(update_dict["description"])
+    if "notes" in update_dict and update_dict["notes"]:
+        update_dict["notes"] = sanitize_string(update_dict["notes"], max_length=1000)
+    if "private_notes" in update_dict and update_dict["private_notes"]:
+        update_dict["private_notes"] = sanitize_string(update_dict["private_notes"], max_length=1000)
+    if "video_url" in update_dict and update_dict["video_url"]:
+        update_dict["video_url"] = sanitize_url(update_dict["video_url"])
+    if "virtual_tour_url" in update_dict and update_dict["virtual_tour_url"]:
+        update_dict["virtual_tour_url"] = sanitize_url(update_dict["virtual_tour_url"])
+    
+    # Sanitizar owner fields if present
+    if "owner" in update_dict and update_dict["owner"]:
+        owner = update_dict["owner"]
+        if isinstance(owner, dict):
+            if owner.get("name"):
+                owner["name"] = sanitize_name(owner["name"])
+            if owner.get("phone"):
+                owner["phone"] = sanitize_phone(owner["phone"])
+            if owner.get("email"):
+                owner["email"] = sanitize_email(owner["email"])
+            update_dict["owner"] = owner
+    
     update_dict["updated_at"] = now
     
     # Actualizar nome do agente se mudou
@@ -785,8 +831,8 @@ async def _process_excel_import(job_id: str, df, filename: str, user: dict):
                     "internal_reference": internal_ref,
                     "external_reference": get_value(['referencia_externa']) or None,
                     "property_type": tipo,
-                    "title": titulo,
-                    "description": get_value(['descricao']) or None,
+                    "title": sanitize_string(titulo, max_length=300),
+                    "description": sanitize_html(get_value(['descricao'])) if get_value(['descricao']) else None,
                     "address": {
                         "street": get_value(['morada', 'rua']) or None,
                         "postal_code": get_value(['codigo_postal']) or None,
@@ -809,15 +855,15 @@ async def _process_excel_import(job_id: str, df, filename: str, user: dict):
                         "asking_price": preco
                     },
                     "owner": {
-                        "name": proprietario_nome,
-                        "phone": get_value(['proprietario_telefone']) or None,
-                        "email": get_value(['proprietario_email']) or None
+                        "name": sanitize_name(proprietario_nome),
+                        "phone": sanitize_phone(get_value(['proprietario_telefone'])) or None,
+                        "email": sanitize_email(get_value(['proprietario_email'])) or None
                     },
                     "agency": get_value(['agencia']) or None,
                     "photos": [],
                     "documents": [],
                     "status": "em_analise",
-                    "notes": get_value(['notas', 'observações']) or None,
+                    "notes": sanitize_string(get_value(['notas', 'observações']), max_length=1000) if get_value(['notas', 'observações']) else None,
                     "history": [{
                         "timestamp": now,
                         "event": "Importado via Excel",

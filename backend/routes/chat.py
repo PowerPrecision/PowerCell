@@ -35,6 +35,7 @@ from models.chat import (
     ChatGroupCreate, ChatGroupUpdate, ChatSearchQuery, TypingIndicator
 )
 from services.websocket_manager import manager, WSEventType, create_ws_message
+from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_url, sanitize_html, log_sanitization_rejection)
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +272,9 @@ async def send_message(
     """
     user_id = user["id"]
 
+    # Sanitizar conteúdo da mensagem antes de guardar
+    sanitized_content = sanitize_string(message.content, max_length=5000) if message.content else message.content
+
     if message.group_id:
         # Mensagem para grupo
         group = await db.chat_groups.find_one(
@@ -286,7 +290,7 @@ async def send_message(
             "sender_name": user.get("name", ""),
             "group_id": message.group_id,
             "group_name": group["name"],
-            "content": message.content.strip(),
+            "content": sanitized_content,
             "reply_to": message.reply_to,
             "reactions": [],
             "attachments": [],
@@ -326,7 +330,7 @@ async def send_message(
             "sender_name": user.get("name", ""),
             "receiver_id": message.receiver_id,
             "receiver_name": receiver.get("name", ""),
-            "content": message.content.strip(),
+            "content": sanitized_content,
             "process_id": message.process_id,
             "reply_to": message.reply_to,
             "reactions": [],
@@ -391,6 +395,9 @@ async def upload_message_with_attachment(
         "data": file_base64
     }
 
+    # Sanitizar conteúdo da mensagem antes de guardar
+    sanitized_content = sanitize_string(content, max_length=5000) if content else content
+
     if group_id:
         group = await db.chat_groups.find_one(
             {"id": group_id, "members.user_id": user_id},
@@ -405,7 +412,7 @@ async def upload_message_with_attachment(
             "sender_name": user.get("name", ""),
             "group_id": group_id,
             "group_name": group["name"],
-            "content": content.strip(),
+            "content": sanitized_content,
             "attachments": [attachment],
             "reactions": [],
             "edited": False,
@@ -426,7 +433,7 @@ async def upload_message_with_attachment(
                         "sender_name": user.get("name", ""),
                         "group_id": group_id,
                         "has_attachment": True,
-                        "content": content[:100] if content else f"📎 {file.filename}",
+                        "content": sanitized_content[:100] if sanitized_content else f"📎 {file.filename}",
                         "created_at": msg_doc["created_at"]
                     }),
                     member_id
@@ -443,7 +450,7 @@ async def upload_message_with_attachment(
             "sender_name": user.get("name", ""),
             "receiver_id": receiver_id,
             "receiver_name": receiver.get("name", ""),
-            "content": content.strip(),
+            "content": sanitized_content,
             "attachments": [attachment],
             "reactions": [],
             "edited": False,
@@ -460,7 +467,7 @@ async def upload_message_with_attachment(
                 "sender_name": user.get("name", ""),
                 "receiver_id": receiver_id,
                 "has_attachment": True,
-                "content": content[:100] if content else f"📎 {file.filename}",
+                "content": sanitized_content[:100] if sanitized_content else f"📎 {file.filename}",
                 "created_at": msg_doc["created_at"]
             }),
             receiver_id
@@ -558,11 +565,14 @@ async def edit_message(
     if msg.get("sender_id") != user_id:
         raise HTTPException(status_code=403, detail="Só pode editar as suas próprias mensagens")
 
+    # Sanitizar conteúdo editado antes de guardar
+    sanitized_edit_content = sanitize_string(edit_data.content, max_length=5000) if edit_data.content else edit_data.content
+
     await db.chat_messages.update_one(
         {"id": edit_data.message_id},
         {
             "$set": {
-                "content": edit_data.content.strip(),
+                "content": sanitized_edit_content,
                 "edited": True,
                 "edited_at": datetime.now(timezone.utc).isoformat()
             }
@@ -578,7 +588,7 @@ async def edit_message(
                 await manager.send_personal_message(
                     create_ws_message("chat_message_edited", {
                         "message_id": edit_data.message_id,
-                        "content": edit_data.content,
+                        "content": sanitized_edit_content,
                         "edited": True
                     }),
                     member_id
@@ -587,7 +597,7 @@ async def edit_message(
         await manager.send_personal_message(
             create_ws_message("chat_message_edited", {
                 "message_id": edit_data.message_id,
-                "content": edit_data.content,
+                "content": sanitized_edit_content,
                 "edited": True
             }),
             msg["receiver_id"]
@@ -672,10 +682,14 @@ async def create_group(
                 "last_read": None
             })
 
+    # Sanitizar nome e descrição do grupo antes de guardar
+    sanitized_group_name = sanitize_string(group_data.name.strip(), max_length=200) if group_data.name else group_data.name
+    sanitized_group_desc = sanitize_string(group_data.description, max_length=500) if group_data.description else group_data.description
+
     group_doc = {
         "id": str(uuid4()),
-        "name": group_data.name.strip(),
-        "description": group_data.description,
+        "name": sanitized_group_name,
+        "description": sanitized_group_desc,
         "created_by": user_id,
         "created_by_name": user.get("name", ""),
         "members": members,
@@ -760,10 +774,10 @@ async def update_group(
     update_fields = {}
 
     if update_data.name:
-        update_fields["name"] = update_data.name.strip()
+        update_fields["name"] = sanitize_string(update_data.name.strip(), max_length=200)
 
     if update_data.description is not None:
-        update_fields["description"] = update_data.description
+        update_fields["description"] = sanitize_string(update_data.description, max_length=500) if update_data.description else update_data.description
 
     if update_fields:
         await db.chat_groups.update_one(
