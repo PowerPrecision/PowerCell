@@ -85,6 +85,7 @@ from routes.form_config import router as form_config_router
 from routes.async_jobs import router as async_jobs_router
 from routes.audit import router as audit_router
 from routes.annotations import router as annotations_router
+from routes.finance import router as finance_router
 
 # Configuração Sentry
 if SENTRY_DSN:
@@ -436,6 +437,7 @@ app.include_router(restore_router, prefix="/api")
 app.include_router(async_jobs_router, prefix="/api")
 app.include_router(audit_router, prefix="/api")
 app.include_router(annotations_router, prefix="/api")
+app.include_router(finance_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():

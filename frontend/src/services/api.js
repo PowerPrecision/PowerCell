@@ -500,5 +500,11 @@ export const resolveAnnotation = (annotationId, resolved) =>
   api.put(`/annotations/${annotationId}/resolve`, { resolved });
 export const getAnnotationStats = (processId) => api.get(`/annotations/process/${processId}/stats`);
 
+// ===== FINANCEIRO =====
+export const getFinanceSummary = (params = {}) => api.get("/finance/summary", { params });
+export const getFinanceMonthly = (params = {}) => api.get("/finance/monthly", { params });
+export const getFinanceCommissions = (params = {}) => api.get("/finance/commissions", { params });
+export const getFinancePerformance = (params = {}) => api.get("/finance/performance", { params });
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
