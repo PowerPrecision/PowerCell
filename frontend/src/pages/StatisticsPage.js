@@ -132,12 +132,12 @@ const StatisticsPage = () => {
 
   return (
     <DashboardLayout title="Estatísticas e Análise">
-      <div className="space-y-6 p-6">
+      <div className="space-y-4 md:space-y-6 p-4 md:p-6">
         {/* Filtros */}
         <div className="flex flex-wrap gap-4">
           {canViewAllStats && (
             <Select value={selectedUser} onValueChange={setSelectedUser}>
-              <SelectTrigger className="w-64">
+              <SelectTrigger className="w-full sm:w-64">
                 <SelectValue placeholder="Selecionar utilizador" />
               </SelectTrigger>
               <SelectContent>
@@ -150,7 +150,7 @@ const StatisticsPage = () => {
           )}
           
           <Select value={timeRange} onValueChange={setTimeRange}>
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="Período" />
             </SelectTrigger>
             <SelectContent>

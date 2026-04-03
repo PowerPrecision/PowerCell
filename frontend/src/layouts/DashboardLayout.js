@@ -589,7 +589,7 @@ const DashboardLayout = ({ children, title }) => {
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 bg-black/50 z-[45] lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -721,7 +721,7 @@ const DashboardLayout = ({ children, title }) => {
       <div className="lg:pl-64">
         {/* Top bar - Fixed height to prevent layout shift */}
         <header 
-          className={`border-b border-border bg-card sticky ${impersonateOffset} z-30 h-14`}
+          className={`border-b border-border bg-card sticky ${impersonateOffset} z-50 h-14`}
         >
           <div className={`flex items-center justify-between h-full px-2 lg:px-6 gap-1 sm:gap-2`}>
             <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">
@@ -822,7 +822,7 @@ const DashboardLayout = ({ children, title }) => {
                     <User className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuContent align="end" className="w-56 max-w-[calc(100vw-2rem)]">
                   <div className="px-2 py-1.5">
                     <p className="text-sm font-medium">{user?.name}</p>
                     <p className="text-xs text-muted-foreground">{user?.email}</p>
@@ -844,7 +844,7 @@ const DashboardLayout = ({ children, title }) => {
         </header>
 
         {/* Page content */}
-        <main className="p-4 lg:p-6 pb-20 md:pb-6">{children}</main>
+        <main className="p-4 lg:p-6 pb-24 md:pb-6 overflow-hidden">{children}</main>
       </div>
       
       {/* Mobile Bottom Navigation */}
