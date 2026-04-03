@@ -31,43 +31,14 @@ from models.process import PublicClientRegistration
 from services.email import send_registration_confirmation, send_new_client_notification
 from services.alerts import notify_new_client_registration
 from services.process_service import get_next_process_number
+from utils.input_sanitization import (
+    sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
+    sanitize_string, log_sanitization_rejection
+)
 
 limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/public", tags=["Public"])
-
-
-def sanitize_email(email: str) -> str:
-    """
-    Limpa emails com formatação markdown ou outros artefactos.
-    Extrai o email puro de strings como '[email](mailto:email)' ou 'mailto:email'.
-    """
-    if not email:
-        return ""
-    
-    email = email.strip()
-    
-    # Padrão: [texto](mailto:email) ou [email](mailto:email)
-    markdown_link = re.search(r'\[.*?\]\(mailto:([^)]+)\)', email)
-    if markdown_link:
-        email = markdown_link.group(1)
-    
-    # Padrão: mailto:email
-    if email.startswith('mailto:'):
-        email = email.replace('mailto:', '')
-    
-    # Padrão: <email>
-    angle_brackets = re.search(r'<([^>]+@[^>]+)>', email)
-    if angle_brackets:
-        email = angle_brackets.group(1)
-    
-    # Remover quaisquer caracteres markdown restantes
-    email = re.sub(r'[\[\]\(\)]', '', email)
-    
-    # Limpar e normalizar
-    email = email.strip().lower()
-    
-    return email
 
 
 @router.post("/client-registration")
@@ -86,8 +57,14 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     O processo é criado quando o cliente é atribuído a um utilizador.
     """
     
-    # Sanitizar email logo no início
+    # Sanitizar inputs
     clean_email = sanitize_email(data.email)
+    if not clean_email:
+        log_sanitization_rejection("email", data.email, "email inválido no registo público")
+        return JSONResponse(status_code=400, content={"success": False, "detail": "Email inválido"})
+    
+    clean_name = sanitize_name(data.name) if data.name else ""
+    clean_phone = sanitize_phone(data.phone) if data.phone else None
     
     # =========================================
     # VERIFICAR DUPLICADOS (EMAIL E NIF)
@@ -107,12 +84,9 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         )
     
     # Verificar se já existe cliente com o mesmo NIF
-    nif = None
-    if data.personal_data:
-        nif = data.personal_data.nif
-    
-    if nif:
-        existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": nif})
+    clean_nif = sanitize_nif(nif) if nif else None
+    if clean_nif:
+        existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": clean_nif})
         if existing_by_nif:
             return JSONResponse(
                 status_code=200,
@@ -136,10 +110,15 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # Garantir que campos críticos ficam também em personal_data para consistência
     if clean_email and not personal_data.get("email"):
         personal_data["email"] = clean_email
-    if data.name and not personal_data.get("nome"):
-        personal_data["nome"] = data.name
-    if data.phone and not personal_data.get("telefone"):
-        personal_data["telefone"] = data.phone
+    if clean_name and not personal_data.get("nome"):
+        personal_data["nome"] = clean_name
+    if clean_phone and not personal_data.get("telefone"):
+        personal_data["telefone"] = clean_phone
+    
+    # Sanitizar campos de texto no personal_data
+    for text_field in ["nome", "naturalidade", "nacionalidade", "profissao", "empresa"]:
+        if personal_data.get(text_field):
+            personal_data[text_field] = sanitize_string(personal_data[text_field], max_length=200)
     
     birth_date = personal_data.get("birth_date")
     idade_menos_35 = False
@@ -161,16 +140,19 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     second_client_name = None
     if titular2_data_dict:
         second_client_name = titular2_data_dict.get("nome") or titular2_data_dict.get("name")
+        # Sanitizar nome do segundo titular
+        if second_client_name:
+            second_client_name = sanitize_name(second_client_name)
     
     # =========================================
     # CRIAR FICHA DE CLIENTE (tabela clients)
     # =========================================
     client_doc = {
         "id": client_id,
-        "nome": data.name,
+        "nome": clean_name,
         "contacto": {
             "email": clean_email.lower(),
-            "telefone": data.phone
+            "telefone": clean_phone
         },
         "dados_pessoais": personal_data,
         "dados_financeiros": data.financial_data.model_dump() if data.financial_data else {},
@@ -208,7 +190,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         result = await asyncio.to_thread(
             s3_service.initialize_client_folders,
             client_id,
-            data.name,
+            clean_name,
             second_client_name
         )
         # initialize_client_folders retorna (success, folder_path)
@@ -232,7 +214,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # Tentar enfileirar (se Redis disponível)
     job_id = await task_queue.send_registration_email(
         client_email=clean_email,
-        client_name=data.name
+        client_name=clean_name
     )
     
     # Se Task Queue não disponível, enviar directamente
@@ -240,7 +222,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         logger.info("Task Queue não disponível, enviando email directamente")
         await send_registration_confirmation(
             client_email=clean_email,
-            client_name=data.name
+            client_name=clean_name
         )
     
     # =========================================
@@ -266,13 +248,13 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             await send_push_notification(
                 user_id=staff_member["id"],
                 title="Novo Cliente Registado",
-                body=f"{data.name} registou-se via formulário",
+                body=f"{clean_name} registou-se via formulário",
                 tag="new_client",
                 url="/clientes",  # Link para página de registos
                 data={
                     "type": "new_client",
                     "client_id": client_id,
-                    "client_name": data.name
+                    "client_name": clean_name
                 }
             )
         
@@ -293,16 +275,16 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         first_admin = staff[0]
         staff_job = await task_queue.send_email(
             to=first_admin["email"],
-            subject=f"Novo Cliente Registado: {data.name}",
-            body=f"Foi registado um novo cliente via formulário público:\n\nNome: {data.name}\nEmail: {clean_email}\nTelefone: {data.phone}\n\nO cliente aguarda atribuição."
+            subject=f"Novo Cliente Registado: {clean_name}",
+            body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\n\nO cliente aguarda atribuição."
         )
         
         # Fallback se Task Queue não disponível
         if not staff_job:
             await send_new_client_notification(
-                client_name=data.name,
+                client_name=clean_name,
                 client_email=clean_email,
-                client_phone=data.phone,
+                client_phone=clean_phone or "N/A",
                 process_type=data.process_type,
                 staff_email=first_admin["email"],
                 staff_name=first_admin["name"]

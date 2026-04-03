@@ -10,6 +10,7 @@ from services.auth import require_roles
 from models.auth import UserRole
 from datetime import datetime, timezone
 import uuid
+from utils.input_sanitization import sanitize_string
 
 router = APIRouter(prefix="/admin/form-config", tags=["form-config"])
 
@@ -100,6 +101,17 @@ async def update_form_config(
     """Atualizar configuração do formulário."""
     now = datetime.now(timezone.utc).isoformat()
     
+    # Sanitize field labels and options in incoming data
+    for field in data.fields:
+        if field.get("label"):
+            field["label"] = sanitize_string(field["label"], max_length=200)
+        if field.get("placeholder"):
+            field["placeholder"] = sanitize_string(field["placeholder"], max_length=200)
+        if field.get("hint"):
+            field["hint"] = sanitize_string(field["hint"], max_length=200)
+        if field.get("options") and isinstance(field["options"], list):
+            field["options"] = [sanitize_string(opt, max_length=200) if isinstance(opt, str) else opt for opt in field["options"]]
+    
     await db.form_config.update_one(
         {"type": "public_form"},
         {"$set": {
@@ -129,6 +141,12 @@ async def create_custom_field(
     if data.field_type in ("select", "checkbox", "radio") and not data.options:
         raise HTTPException(status_code=400, detail="Campos de seleção requerem opções")
     
+    # Sanitize user-provided text fields
+    safe_label = sanitize_string(data.label, max_length=200)
+    safe_placeholder = sanitize_string(data.placeholder, max_length=200) if data.placeholder else None
+    safe_hint = sanitize_string(data.hint, max_length=200) if data.hint else None
+    safe_options = [sanitize_string(opt, max_length=200) if isinstance(opt, str) else opt for opt in (data.options or [])]
+    
     # Gerar key único a partir do label
     field_key = f"custom_{uuid.uuid4().hex[:8]}"
     
@@ -142,16 +160,16 @@ async def create_custom_field(
     
     new_field = {
         "field_key": field_key,
-        "label": data.label,
+        "label": safe_label,
         "step": data.step,
         "is_visible": True,
         "is_required": data.is_required,
         "field_type": data.field_type,
-        "options": data.options,
+        "options": safe_options,
         "order": max_order + 1,
         "is_custom": True,
-        "placeholder": data.placeholder,
-        "hint": data.hint,
+        "placeholder": safe_placeholder,
+        "hint": safe_hint,
     }
     
     fields.append(new_field)
@@ -352,6 +370,10 @@ async def save_as_template(
     if not data.name.strip():
         raise HTTPException(status_code=400, detail="Nome do template é obrigatório")
     
+    # Sanitize user-provided text fields
+    safe_name = sanitize_string(data.name, max_length=200)
+    safe_description = sanitize_string(data.description, max_length=500) if data.description else ""
+    
     # Obter config atual
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
     fields = config.get("fields", DEFAULT_FORM_CONFIG) if config else DEFAULT_FORM_CONFIG
@@ -361,8 +383,8 @@ async def save_as_template(
     
     template_doc = {
         "id": template_id,
-        "name": data.name.strip(),
-        "description": (data.description or "").strip(),
+        "name": safe_name,
+        "description": safe_description,
         "fields": fields,
         "created_at": now,
         "created_by": user.get("id"),
@@ -374,8 +396,8 @@ async def save_as_template(
         "message": "Template guardado com sucesso",
         "template": {
             "id": template_id,
-            "name": data.name.strip(),
-            "description": (data.description or "").strip(),
+            "name": safe_name,
+            "description": safe_description,
             "field_count": len(fields),
             "created_at": now,
         }

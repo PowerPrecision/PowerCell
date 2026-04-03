@@ -10,6 +10,7 @@ import re
 
 from database import db
 from services.auth import get_current_user
+from utils.input_sanitization import (sanitize_string, sanitize_email, sanitize_phone, sanitize_url, log_sanitization_rejection)
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,14 @@ async def global_search(
             "tasks": [...]
         }
     """
-    search_term = q.strip()
+    # Sanitize search term to prevent ReDoS / regex injection
+    search_term = sanitize_string(q, max_length=200)
+    if not search_term:
+        return {
+            "processes": [],
+            "clients": [],
+            "tasks": []
+        }
     
     # Se o termo for muito curto, retornar resultados vazios (não erro)
     if len(search_term) < 2:
@@ -253,7 +261,11 @@ async def search_processes(
         process_type: Filtrar por tipo de processo
         limit: Limite de resultados
     """
-    search_term = q.strip()
+    # Sanitize search term to prevent ReDoS / regex injection
+    search_term = sanitize_string(q, max_length=200)
+    if not search_term:
+        return []
+    
     regex_pattern = create_accent_insensitive_regex(search_term)
     simple_regex = {"$regex": re.escape(search_term), "$options": "i"}
     
@@ -288,7 +300,11 @@ async def get_search_suggestions(
     """
     Obter sugestões de pesquisa baseadas no histórico e dados existentes.
     """
-    search_term = q.strip().lower()
+    # Sanitize search term to prevent ReDoS / regex injection
+    search_term = sanitize_string(q, max_length=200)
+    if not search_term:
+        return []
+    search_term = search_term.lower()
     suggestions = set()
     
     # Regex que ignora acentos para sugestões

@@ -9,6 +9,7 @@ from models.deadline import DeadlineCreate, DeadlineUpdate, DeadlineResponse
 from services.auth import get_current_user, require_roles
 from services.notification_service import send_notification_with_preference_check, send_deadline_reminder
 from services.history import log_history
+from utils.input_sanitization import sanitize_string
 
 
 router = APIRouter(prefix="/deadlines", tags=["Deadlines"])
@@ -35,6 +36,10 @@ async def create_deadline(data: DeadlineCreate, user: dict = Depends(get_current
     deadline_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
+    # Sanitize user-provided text fields
+    safe_title = sanitize_string(data.title, max_length=300)
+    safe_description = sanitize_string(data.description or "", max_length=1000)
+    
     # Lista de utilizadores atribuídos - inclui sempre o criador
     assigned_users = data.assigned_user_ids or []
     if user["id"] not in assigned_users:
@@ -43,8 +48,8 @@ async def create_deadline(data: DeadlineCreate, user: dict = Depends(get_current
     deadline_doc = {
         "id": deadline_id,
         "process_id": data.process_id,
-        "title": data.title,
-        "description": data.description,
+        "title": safe_title,
+        "description": safe_description,
         "due_date": data.due_date,
         "priority": data.priority,
         "completed": False,
@@ -59,7 +64,7 @@ async def create_deadline(data: DeadlineCreate, user: dict = Depends(get_current
     await db.deadlines.insert_one(deadline_doc)
     
     if data.process_id:
-        await log_history(data.process_id, user, "Criou prazo", "deadline", None, data.title)
+        await log_history(data.process_id, user, "Criou prazo", "deadline", None, safe_title)
     
     # Notificar todos os utilizadores atribuídos (exceto o criador) - com verificação de preferências
     for assigned_id in assigned_users:
@@ -68,9 +73,9 @@ async def create_deadline(data: DeadlineCreate, user: dict = Depends(get_current
             if assigned_user:
                 await send_notification_with_preference_check(
                     assigned_user["email"],
-                    f"Novo Prazo Atribuído: {data.title}",
+                    f"Novo Prazo Atribuído: {safe_title}",
                     f"Foi-lhe atribuído um novo prazo por {user['name']}:\n\n"
-                    f"Título: {data.title}\n"
+                    f"Título: {safe_title}\n"
                     f"Data limite: {data.due_date}\n"
                     f"Prioridade: {data.priority}",
                     notification_type="task_assigned"
@@ -310,9 +315,9 @@ async def update_deadline(deadline_id: str, data: DeadlineUpdate, user: dict = D
     
     update_data = {}
     if data.title is not None:
-        update_data["title"] = data.title
+        update_data["title"] = sanitize_string(data.title, max_length=300)
     if data.description is not None:
-        update_data["description"] = data.description
+        update_data["description"] = sanitize_string(data.description, max_length=1000)
     if data.due_date is not None:
         update_data["due_date"] = data.due_date
     if data.priority is not None:
