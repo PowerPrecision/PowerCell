@@ -60,6 +60,7 @@ import {
   Zap,
   Shield,
   ClipboardList,
+  DollarSign,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import MobileBottomNav from "../components/layout/MobileBottomNav";
@@ -240,6 +241,11 @@ const DashboardLayout = ({ children, title }) => {
                 icon: AlertCircle,
                 href: "/validades",
               },
+              {
+                label: "Financeiro",
+                icon: DollarSign,
+                href: "/financeiro",
+              },
             ],
           },
           {
@@ -330,6 +336,11 @@ const DashboardLayout = ({ children, title }) => {
                 label: "Minutas",
                 icon: FileArchive,
                 href: "/minutas",
+              },
+              {
+                label: "Financeiro",
+                icon: DollarSign,
+                href: "/financeiro",
               },
             ],
           },
