@@ -37,7 +37,7 @@ async def get_my_clients(user: dict = Depends(require_roles([
     Permissões:
     - Consultor: Apenas os seus clientes (assigned_consultor_id)
     - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_id ou criados por eles)
-    - Indexacao: Apenas os processos atribuídos (assigned_indexacao_id)
+    - Indexacao: Todos os processos (para poder atribuir a consultores/intermediários)
     - Admin/CEO/Diretor: Todos os clientes (para supervisão)
     """
     user_id = user["id"]
@@ -55,11 +55,9 @@ async def get_my_clients(user: dict = Depends(require_roles([
                 {"created_by": user_email}
             ]
         }
-    elif role == UserRole.INDEXACAO:
-        # Indexacao vê apenas processos atribuídos a ele
-        query = {"assigned_indexacao_id": user_id}
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
-        # Admin/CEO/Diretor vêem todos
+    elif role in [UserRole.INDEXACAO, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+        # Indexacao, Admin, CEO, Diretor e Administrativo veem todos
+        # Indexacao precisa de ver todos para poder atribuir processos
         query = {}
     else:
         # Outros roles não têm acesso
@@ -131,9 +129,8 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
                 {"created_by": user_email}
             ]
         }
-    elif role == UserRole.INDEXACAO:
-        query = {"assigned_indexacao_id": user_id}
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+    elif role in [UserRole.INDEXACAO, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+        # Indexacao, Admin, CEO, Diretor e Administrativo veem todos
         query = {}
     else:
         query = {"_id": None}
