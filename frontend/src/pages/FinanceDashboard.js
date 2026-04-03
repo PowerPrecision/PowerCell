@@ -227,7 +227,7 @@ const FinanceDashboard = () => {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="p-6 space-y-6">
+        <div className="p-4 md:p-6 space-y-4 md:space-y-6">
           <div className="flex items-center gap-3">
             <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
             <span className="text-muted-foreground">
@@ -241,7 +241,7 @@ const FinanceDashboard = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -347,7 +347,7 @@ const FinanceDashboard = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[300px]">
+                  <div className="h-[200px] sm:h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={monthlyChartData}>
                         <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
@@ -392,7 +392,7 @@ const FinanceDashboard = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[300px]">
+                  <div className="h-[200px] sm:h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={imoveisChartData}>
                         <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
@@ -692,7 +692,7 @@ const FinanceDashboard = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-[350px]">
+                    <div className="h-[200px] sm:h-[300px] lg:h-[350px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={monthlyChartData}>
                           <CartesianGrid strokeDasharray="3 3" className="opacity-30" />

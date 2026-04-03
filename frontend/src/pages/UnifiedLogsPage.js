@@ -565,7 +565,7 @@ const SystemLogsTab = ({ token }) => {
 
       {/* Tabela */}
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="p-0 overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -1199,7 +1199,7 @@ const ImportLogsTab = ({ token }) => {
                 </div>
                 
                 {expandedClients.has(group.client_name) && (
-                  <div className="border-t">
+                  <div className="border-t overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -1266,7 +1266,7 @@ const ImportLogsTab = ({ token }) => {
       {/* Tabela (apenas em modo lista) */}
       {viewMode === "list" && (
         <Card>
-          <CardContent className="p-0">
+          <CardContent className="p-0 overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>

@@ -503,7 +503,7 @@ const AIDataReviewPage = () => {
                     </p>
                   </div>
                 ) : (
-                  <ScrollArea className="h-[400px]">
+                  <ScrollArea className="h-[400px] overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -775,7 +775,7 @@ const AIDataReviewPage = () => {
                           Nenhum campo extraído neste período
                         </p>
                       ) : (
-                        <ScrollArea className="h-[250px]">
+                        <ScrollArea className="h-[250px] overflow-x-auto">
                           <Table>
                             <TableHeader>
                               <TableRow>
@@ -823,7 +823,7 @@ const AIDataReviewPage = () => {
 
         {/* Dialog de Detalhes */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh]">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileSearch className="h-5 w-5 text-amber-500" />
@@ -868,7 +868,7 @@ const AIDataReviewPage = () => {
                                 )}
                               </div>
                               
-                              <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                                 {/* Valor Actual */}
                                 <div className="p-3 bg-muted rounded-lg">
                                   <p className="text-xs text-muted-foreground mb-1">Valor Actual</p>
@@ -947,7 +947,7 @@ const AIDataReviewPage = () => {
                 </TabsContent>
 
                 <TabsContent value="all" className="mt-4">
-                  <ScrollArea className="h-[400px]">
+                  <ScrollArea className="h-[400px] overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
