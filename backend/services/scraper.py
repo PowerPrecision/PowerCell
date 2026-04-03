@@ -137,6 +137,34 @@ AGENCY_PHONE_SELECTORS = {
     "easygest": ['.phone', '.tel', 'a[href^="tel:"]', '.contact-phone', '.agent-phone'],
 }
 
+# URLs base de agências para pesquisa por referência (Cenário 2)
+AGENCY_BASE_URLS = {
+    "zome": {"domain": "zome.pt", "base": "https://www.zome.pt", "search_url": "https://www.zome.pt/imoveis/?q={ref}"},
+    "remax": {"domain": "remax.pt", "base": "https://www.remax.pt", "search_url": "https://www.remax.pt/imoveis/?q={ref}"},
+    "era": {"domain": "era.pt", "base": "https://www.era.pt", "search_url": "https://www.era.pt/imoveis/?q={ref}"},
+    "century21": {"domain": "century21.pt", "base": "https://www.century21.pt", "search_url": "https://www.century21.pt/imoveis/?q={ref}"},
+    "quatru": {"domain": "quatru.pt", "base": "https://www.quatru.pt", "search_url": None},
+    "kw": {"domain": "kw.com", "base": "https://www.kw.com/pt", "search_url": None},
+    "iad": {"domain": "iad.pt", "base": "https://www.iad.pt", "search_url": None},
+    "easygest": {"domain": "easygest.com.pt", "base": None, "search_url": None},
+}
+
+# Mapeamento de nomes de agências (display name) para keys do AGENCY_BASE_URLS
+AGENCY_NAME_MAPPING = {
+    "zome": "zome",
+    "remax": "remax",
+    "re/max": "remax",
+    "era": "era",
+    "century 21": "century21",
+    "quatru": "quatru",
+    "keller williams": "kw",
+    "kw": "kw",
+    "iad": "iad",
+    "easygest": "easygest",
+    "safti": "safti",
+    "mais consultores": "maisconsultores",
+}
+
 EMAIL_PATTERN = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
 
 # Cache settings
@@ -747,6 +775,578 @@ class PropertyScraper:
             result["_deep_agency"] = deep_data.get("source_agency")
         
         return result
+    
+    # ================================================================
+    # CENÁRIOS 2 & 3 - DETECÇÃO DE AGÊNCIAS E PESQUISA POR REFERÊNCIA
+    # ================================================================
+    
+    def _is_agency_site(self, url: str) -> Optional[str]:
+        """
+        Verifica se a URL é directamente de um site de agência (não agregador).
+        
+        Returns:
+            Agency key (remax, zome, era, etc.) se for agência, None caso contrário.
+        """
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        
+        # Verificar contra AGENCY_BASE_URLS primeiro (mais preciso)
+        for agency_key, info in AGENCY_BASE_URLS.items():
+            if info["domain"] in domain:
+                return agency_key
+        
+        # Verificar contra AGENCY_DOMAINS (mais abrangente)
+        for pattern in AGENCY_DOMAINS:
+            if pattern in domain:
+                # Normalizar o pattern para usar como key
+                return pattern.replace(".", "").replace("-", "")
+        
+        return None
+    
+    def _extract_reference_from_page(self, soup: BeautifulSoup, html: str) -> Optional[str]:
+        """
+        Extrai referência de propriedade da página, priorizando códigos no formato de agência.
+        
+        Procura em ordem:
+        1. Elementos com classe .reference, .ref, .property-ref
+        2. Atributos data-reference, data-ref, data-property-ref, data-ad-ref
+        3. Padrões de texto: Ref., Referência, códigos standalone (ZMPT587270, RM123456)
+        
+        Returns:
+            Código de referência ou None
+        """
+        # 1. Tentar elementos com classes específicas
+        for class_name in ['reference', 'ref', 'property-ref', 'property_reference']:
+            ref_elem = soup.find(class_=class_name)
+            if ref_elem:
+                text = ref_elem.get_text(strip=True)
+                # Aceitar referências no formato agência (2-4 letras + 4-10 dígitos)
+                if re.match(r'^[A-Z]{2,4}\d{4,10}$', text, re.IGNORECASE):
+                    return text.upper()
+                # Aceitar referências genéricas (alphanumeric)
+                if re.match(r'^[A-Z0-9-]{4,20}$', text, re.IGNORECASE) and not text.isdigit():
+                    return text
+        
+        # 2. Tentar atributos data-*
+        for attr in ['data-reference', 'data-ref', 'data-property-ref', 'data-ad-ref', 'data-ad-id']:
+            ref_elem = soup.find(attrs={attr: True})
+            if ref_elem:
+                val = ref_elem.get(attr, '').strip()
+                if val and len(val) >= 4:
+                    return val
+        
+        # 3. Procurar no texto - padrões de referência com prefixo de agência
+        clean = self._clean_text(html) if html else ""
+        ref_patterns = [
+            r'Ref[.:]?\s*([A-Z]{2,4}\d{4,10})',          # ZMPT587270, RM123456
+            r'Referência[.:]?\s*([A-Z]{2,4}\d{4,10})',    # Referência ZMPT587270
+            r'Ref[.:]?\s*([A-Z0-9-]{5,20})',              # Ref genérica
+            r'Referência[.:]?\s*([A-Z0-9-]{5,20})',        # Referência genérica
+            r'ID[:\s]*([A-Z]{2,6}\d{4,10})',               # ID: RM123456
+        ]
+        for pattern in ref_patterns:
+            m = re.search(pattern, clean, re.IGNORECASE)
+            if m:
+                return m.group(1).upper()
+        
+        # 4. Procurar códigos standalone (2-6 letras + 4-10 dígitos) - apenas se parecer referência
+        standalone_pattern = r'\b([A-Z]{2,6}\d{4,10})\b'
+        m = re.search(standalone_pattern, clean)
+        if m:
+            ref = m.group(1)
+            # Validar que não é uma palavra comum do idioma
+            common_words = {'THE', 'THIS', 'THAT', 'WITH', 'FROM', 'HAVE', 'BEEN', 'WERE', 'SALE', 'HOME'}
+            letters_part = re.match(r'^([A-Z]+)', ref)
+            if letters_part and letters_part.group(1) not in common_words:
+                return ref
+        
+        return None
+    
+    def _extract_agency_name_from_page(self, soup: BeautifulSoup, html: str) -> Optional[str]:
+        """
+        Extrai nome da agência de uma página de agregador para pesquisa por referência.
+        
+        Returns:
+            Nome display da agência (e.g. "RE/MAX", "Zome") ou None
+        """
+        # 1. Tentar selectores conhecidos de agregadores
+        selectors = [
+            '.advertiser-name', '.agency-name', '.professional-agency',
+            '.advertiser-data .name', 'span[class*="agency"]',
+            '[data-testid="advertiser-name"]',
+            '.professional-name', '.advertiser-data-name',
+        ]
+        for sel in selectors:
+            try:
+                elem = soup.select_one(sel)
+                if elem:
+                    name = elem.get_text(strip=True)
+                    if name and 2 < len(name) < 80:
+                        return name.strip()
+            except Exception:
+                continue
+        
+        # 2. Procurar nos dados estruturados JSON-LD
+        for script in soup.find_all('script', type='application/ld+json'):
+            try:
+                json_data = json.loads(script.string)
+                if isinstance(json_data, dict):
+                    # Verificar se tem informação do vendedor/agência
+                    for key in ['seller', 'agent', 'realEstateAgent']:
+                        if key in json_data:
+                            agent = json_data[key]
+                            if isinstance(agent, dict) and agent.get('name'):
+                                return agent['name']
+            except (json.JSONDecodeError, TypeError):
+                continue
+        
+        # 3. Tentar mapear contra nomes conhecidos no texto
+        clean = self._clean_text(html) if html else ""
+        known_agencies = {
+            'zome': 'Zome',
+            'remax': 'RE/MAX',
+            're/max': 'RE/MAX',
+            'era': 'ERA',
+            'era portugal': 'ERA',
+            'century 21': 'Century 21',
+            'quatru': 'Quatru',
+            'keller williams': 'Keller Williams',
+            'kw ': 'Keller Williams',
+            'iad': 'IAD',
+            'easygest': 'EasyGest',
+            'safti': 'SAFTI',
+            'mais consultores': 'Mais Consultores',
+        }
+        
+        clean_lower = clean.lower()
+        # Ordenar por comprimento do key (mais específicos primeiro)
+        for key in sorted(known_agencies.keys(), key=len, reverse=True):
+            if key in clean_lower:
+                return known_agencies[key]
+        
+        return None
+    
+    def _normalize_agency_name(self, agency_name: str) -> Optional[str]:
+        """
+        Normaliza o nome da agência para um key do AGENCY_BASE_URLS.
+        
+        Args:
+            agency_name: Nome da agência (e.g. "RE/MAX", "Zome", "Century 21")
+            
+        Returns:
+            Key normalizado (e.g. "remax", "zome", "century21") ou None
+        """
+        if not agency_name:
+            return None
+        return AGENCY_NAME_MAPPING.get(agency_name.lower().strip())
+    
+    async def _search_agency_by_reference(self, agency_name: str, reference: str) -> Dict[str, Any]:
+        """
+        CENÁRIO 2: Pesquisa a propriedade por referência no site da agência.
+        
+        Quando um agregador NÃO tem link externo mas TEM nome da agência + referência,
+        este método:
+        1. Mapeia o nome da agência para o seu domínio
+        2. Usa Google como intermediário: site:{domain}+{reference}
+        3. Extrai o primeiro resultado orgânico que aponta para o domínio da agência
+        4. Navega para essa página e extrai contactos via _deep_scrape_agency()
+        
+        Args:
+            agency_name: Nome display da agência (e.g. "RE/MAX", "Zome")
+            reference: Código de referência (e.g. "ZMPT587270", "RM123456")
+            
+        Returns:
+            Dict com dados extraídos (telefone, email, nome, etc.)
+        """
+        result = {
+            "deep_scraped": True,
+            "source_type": "reference_search",
+            "source_agency": agency_name,
+            "source_reference": reference,
+        }
+        
+        # Normalizar nome da agência para key
+        agency_key = self._normalize_agency_name(agency_name)
+        if not agency_key or agency_key not in AGENCY_BASE_URLS:
+            logger.warning(f"[CENÁRIO 2] Agência '{agency_name}' não mapeada para URL base")
+            return result
+        
+        agency_info = AGENCY_BASE_URLS[agency_key]
+        domain = agency_info["domain"]
+        
+        logger.info(f"[CENÁRIO 2] Pesquisando ref {reference} na agência {agency_name} ({domain})...")
+        
+        try:
+            # Estratégia 1: Se a agência tem search_url própria, usar diretamente
+            property_url = None
+            
+            if agency_info.get("search_url"):
+                search_url = agency_info["search_url"].format(ref=quote_plus(reference))
+                logger.info(f"[CENÁRIO 2] Tentando URL directa: {search_url}")
+                search_html = await self._fetch_url(search_url)
+                if search_html:
+                    # Verificar se a página tem resultados - extrair primeiro link de propriedade
+                    search_soup = BeautifulSoup(search_html, 'html.parser')
+                    # Procurar links para propriedades
+                    for a_tag in search_soup.find_all('a', href=True):
+                        href = a_tag.get('href', '')
+                        if reference.upper() in href.upper() or re.search(r'/\d{6,}', href):
+                            if href.startswith('http'):
+                                property_url = href
+                            else:
+                                property_url = urljoin(agency_info["base"], href)
+                            break
+            
+            # Estratégia 2: Google search como intermediário
+            if not property_url:
+                google_query = f"site:{domain}+{reference}"
+                google_url = f"https://www.google.com/search?q={quote_plus(google_query)}"
+                logger.info(f"[CENÁRIO 2] Tentando Google search: {google_url}")
+                
+                google_html = await self._fetch_url(google_url)
+                if google_html:
+                    # Parse Google results - procurar links para o domínio da agência
+                    google_soup = BeautifulSoup(google_html, 'html.parser')
+                    
+                    for a_tag in google_soup.find_all('a', href=True):
+                        href = a_tag.get('href', '')
+                        # Google results podem ter URLs como /url?q=https://...
+                        if '/url?q=' in href:
+                            # Extrair URL real do parâmetro q
+                            url_match = re.search(r'[?&]q=(https?://[^&]+)', href)
+                            if url_match:
+                                href = url_match.group(1)
+                        
+                        if domain in href.lower():
+                            property_url = href
+                            logger.info(f"[CENÁRIO 2] Encontrado via Google: {property_url[:80]}...")
+                            break
+            
+            if not property_url:
+                logger.warning(f"[CENÁRIO 2] Nenhum resultado encontrado para ref {reference}")
+                return result
+            
+            # Navegar para a página da propriedade e extrair contactos
+            agency_key_for_scrape = agency_key
+            deep_result = await self._deep_scrape_agency(property_url, agency_key_for_scrape)
+            
+            # Merge resultados
+            if deep_result.get("agente_telefone"):
+                result["agente_telefone"] = deep_result["agente_telefone"]
+            if deep_result.get("agente_email"):
+                result["agente_email"] = deep_result["agente_email"]
+            if deep_result.get("agente_nome"):
+                result["agente_nome"] = deep_result["agente_nome"]
+            if deep_result.get("source_url"):
+                result["source_url"] = deep_result["source_url"]
+            
+            logger.info(f"[CENÁRIO 2] Resultado: tel={result.get('agente_telefone')}, nome={result.get('agente_nome')}")
+            
+        except Exception as e:
+            logger.error(f"[CENÁRIO 2] Erro: {e}")
+        
+        return result
+    
+    async def _scrape_agency_direct(self, soup: BeautifulSoup, html_content: str, url: str, agency_key: str) -> Dict[str, Any]:
+        """
+        CENÁRIO 3: Extração avançada de contactos directamente de um site de agência.
+        
+        Quando a URL já é de um site de agência, usa extração avançada:
+        - Selectores específicos da agência
+        - Dados estruturados (JSON-LD, microdata itemprop)
+        - Contactos em sidebar/cards de agente
+        - Regex de telefone português
+        - Contexto próximo a telefones para extrair nome do agente
+        
+        Args:
+            soup: BeautifulSoup object da página
+            html_content: HTML bruto da página
+            url: URL da página
+            agency_key: Key da agência (remax, zome, era, etc.)
+            
+        Returns:
+            Dict com dados extraídos
+        """
+        result = {
+            "deep_scraped": True,
+            "source_type": "agency_direct",
+            "source_agency": agency_key,
+            "source_url": url,
+        }
+        
+        # 1. Extrair de dados estruturados JSON-LD (prioridade máxima)
+        for script in soup.find_all('script', type='application/ld+json'):
+            try:
+                json_data = json.loads(script.string)
+                if isinstance(json_data, dict):
+                    self._extract_from_jsonld(json_data, result)
+                elif isinstance(json_data, list):
+                    for item in json_data:
+                        if isinstance(item, dict):
+                            self._extract_from_jsonld(item, result)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        
+        # 2. Extrair de microdata (itemprop)
+        # Telefone
+        tel_prop = soup.find(attrs={'itemprop': 'telephone'})
+        if tel_prop and not result.get("agente_telefone"):
+            phone = self._extract_phone_from_text(tel_prop.get_text(strip=True))
+            if phone:
+                result["agente_telefone"] = phone
+            elif tel_prop.get('content'):
+                phone = self._extract_phone_from_text(tel_prop['content'])
+                if phone:
+                    result["agente_telefone"] = phone
+        
+        # Nome do agente
+        name_prop = soup.find(attrs={'itemprop': 'name'})
+        if name_prop and not result.get("agente_nome"):
+            # Ter cuidado para não apanhar o nome da propriedade
+            # Verificar se está num contexto de agente/contacto
+            parent = name_prop.parent
+            context_ok = False
+            for _ in range(5):  # Subir até 5 níveis
+                if parent and parent.get('itemtype'):
+                    itemtype = parent.get('itemtype', '').lower()
+                    if 'realestateagent' in itemtype or 'person' in itemtype or 'agent' in itemtype:
+                        context_ok = True
+                        break
+                parent = parent.parent if parent else None
+            
+            if context_ok or not result.get("titulo"):
+                name = name_prop.get_text(strip=True)
+                if name and self._is_valid_name(name):
+                    result["agente_nome"] = name
+        
+        # Email
+        email_prop = soup.find(attrs={'itemprop': 'email'})
+        if email_prop and not result.get("agente_email"):
+            href = email_prop.get('href', '')
+            if href.startswith('mailto:'):
+                email = href.replace('mailto:', '').strip().lower()
+            elif email_prop.get('content'):
+                email = email_prop['content'].strip().lower()
+            else:
+                email = email_prop.get_text(strip=True).strip().lower()
+            if '@' in email and '.' in email:
+                result["agente_email"] = email
+        
+        # 3. Usar selectores específicos da agência
+        if not result.get("agente_telefone") and agency_key in AGENCY_PHONE_SELECTORS:
+            for selector in AGENCY_PHONE_SELECTORS[agency_key]:
+                try:
+                    elements = soup.select(selector)
+                    for el in elements:
+                        href = el.get('href', '')
+                        if href.startswith('tel:'):
+                            phone = href.replace('tel:', '').replace('+351', '').replace(' ', '')
+                            phone = re.sub(r'[^\d]', '', phone)
+                            if len(phone) == 9 and phone.isdigit():
+                                result["agente_telefone"] = phone
+                                break
+                        else:
+                            text = el.get_text(strip=True)
+                            phone = self._extract_phone_from_text(text)
+                            if phone:
+                                result["agente_telefone"] = phone
+                                break
+                    if result.get("agente_telefone"):
+                        break
+                except Exception:
+                    continue
+        
+        # 4. Selectores genéricos de telefone
+        if not result.get("agente_telefone"):
+            for selector in ['a[href^="tel:"]', '[itemprop="telephone"]', '.phone', '.tel', '.telefone']:
+                try:
+                    elements = soup.select(selector)
+                    for el in elements:
+                        href = el.get('href', '')
+                        if href.startswith('tel:'):
+                            phone = href.replace('tel:', '').replace('+351', '').replace(' ', '')
+                            phone = re.sub(r'[^\d]', '', phone)
+                            if len(phone) == 9 and phone.isdigit():
+                                result["agente_telefone"] = phone
+                                break
+                        else:
+                            text = el.get_text(strip=True)
+                            phone = self._extract_phone_from_text(text)
+                            if phone:
+                                result["agente_telefone"] = phone
+                                break
+                    if result.get("agente_telefone"):
+                        break
+                except Exception:
+                    continue
+        
+        # 5. Extrair do texto limpo (regex)
+        if not result.get("agente_telefone"):
+            clean_text = self._clean_text(html_content) if html_content else ""
+            contacts = self._extract_contacts_from_text(clean_text)
+            if contacts.get("telefones"):
+                phones = contacts["telefones"]
+                mobile = next((p for p in phones if p.startswith("9")), None)
+                result["agente_telefone"] = mobile or phones[0]
+        
+        # 6. Extrair emails se ainda não temos
+        if not result.get("agente_email"):
+            clean_text = self._clean_text(html_content) if html_content else ""
+            contacts = self._extract_contacts_from_text(clean_text)
+            if contacts.get("emails"):
+                valid_emails = [e for e in contacts["emails"]
+                              if not any(x in e.lower() for x in ["noreply", "info@", "geral@", "admin@"])]
+                if valid_emails:
+                    result["agente_email"] = valid_emails[0]
+        
+        # 7. Extrair nome do agente - selectores avançados
+        if not result.get("agente_nome"):
+            agent_name_selectors = [
+                '.agent-name', '.consultant-name', '.broker-name',
+                '.contact-name', 'h1.name', 'h2.name', '.profile-name',
+                '[class*="agent"] [class*="name"]', '[class*="consultant"] [class*="name"]',
+                '.realtor-name', '.team-member-name', '.employee-name',
+                '[data-agent-name]', '.agent-card .name', '.consultant-card .name',
+                '.sidebar-agent .name', '.widget-agent .name',
+                '.agent-details h3', '.agent-details h4',
+            ]
+            for selector in agent_name_selectors:
+                try:
+                    el = soup.select_one(selector)
+                    if el:
+                        name = el.get_text(strip=True)
+                        if name and self._is_valid_name(name):
+                            result["agente_nome"] = name
+                            break
+                except Exception:
+                    continue
+        
+        # 8. Extrair nome do agente a partir do contexto próximo ao telefone
+        if not result.get("agente_nome") and result.get("agente_telefone"):
+            result["agente_nome"] = self._extract_name_near_phone(
+                soup, html_content, result["agente_telefone"]
+            )
+        
+        # 9. Extrair nome do agente via padrões de texto
+        if not result.get("agente_nome") and html_content:
+            clean_text = self._clean_text(html_content)
+            result["agente_nome"] = self._extract_agent_name(soup, clean_text)
+        
+        logger.info(f"[CENÁRIO 3] Direct scrape: tel={result.get('agente_telefone')}, "
+                    f"email={result.get('agente_email')}, nome={result.get('agente_nome')}")
+        
+        return result
+    
+    def _extract_from_jsonld(self, json_data: Dict[str, Any], result: Dict[str, Any]) -> None:
+        """
+        Extrai informação de contacto de dados estruturados JSON-LD.
+        
+        Modifica `result` in-place.
+        """
+        if not isinstance(json_data, dict):
+            return
+        
+        # Tipos relevantes: RealEstateAgent, Person, Organization
+        json_type = json_data.get('@type', '')
+        if isinstance(json_type, list):
+            json_type = ' '.join(json_type)
+        
+        is_agent = any(t in json_type.lower() for t in [
+            'realestateagent', 'person', 'realestatelisting', 'offer', 'product'
+        ])
+        
+        if not is_agent:
+            # Verificar se tem seller/agent aninhado
+            for nested_key in ['seller', 'agent', 'realEstateAgent', 'author']:
+                if nested_key in json_data:
+                    nested = json_data[nested_key]
+                    if isinstance(nested, dict):
+                        self._extract_from_jsonld(nested, result)
+                    elif isinstance(nested, list):
+                        for item in nested:
+                            if isinstance(item, dict):
+                                self._extract_from_jsonld(item, result)
+            return
+        
+        # Extrair telefone
+        if not result.get("agente_telefone"):
+            phone = json_data.get('telephone') or json_data.get('phone')
+            if phone:
+                clean_phone = self._extract_phone_from_text(str(phone))
+                if clean_phone:
+                    result["agente_telefone"] = clean_phone
+        
+        # Extrair email
+        if not result.get("agente_email"):
+            email = json_data.get('email')
+            if email:
+                email_str = str(email).lower().strip()
+                if '@' in email_str and not any(x in email_str for x in ['noreply', 'info@', 'geral@']):
+                    result["agente_email"] = email_str
+        
+        # Extrair nome
+        if not result.get("agente_nome"):
+            name = json_data.get('name') or json_data.get('givenName')
+            if name:
+                name_str = str(name).strip()
+                if self._is_valid_name(name_str):
+                    result["agente_nome"] = name_str
+    
+    def _extract_name_near_phone(self, soup: BeautifulSoup, html: str, phone: str) -> Optional[str]:
+        """
+        Extrai nome do agente a partir do contexto próximo a um número de telefone.
+        
+        Procura o telefone no HTML e depois analisa o texto circundante
+        para encontrar um nome próprio.
+        
+        Args:
+            soup: BeautifulSoup object
+            html: HTML bruto
+            phone: Número de telefone normalizado (9 dígitos)
+            
+        Returns:
+            Nome do agente ou None
+        """
+        if not html or not phone:
+            return None
+        
+        # Procurar o telefone no HTML e extrair contexto
+        # Formatos possíveis: +351 912 345 678, 912345678, 912 345 678
+        phone_patterns_variants = [
+            rf'\+?351[\s.-]?{phone[:3]}[\s.-]?{phone[3:]}',
+            rf'{phone[:3]}[\s.-]?{phone[3:]}',
+            phone,
+        ]
+        
+        for pattern in phone_patterns_variants:
+            # Procurar num raio de ~500 caracteres à volta do telefone
+            matches = list(re.finditer(pattern, html))
+            for match in matches:
+                start = max(0, match.start() - 300)
+                end = min(len(html), match.end() + 300)
+                context = html[start:end]
+                
+                # Limpar HTML do contexto
+                clean_context = self._clean_text(context)
+                
+                # Procurar nomes próprios no contexto
+                name_patterns = [
+                    r'([A-ZÁÀÃÂÉÊÍÓÔÕÚÇ][a-záàãâéêíóôõúç]+(?:\s+[A-ZÁÀÃÂÉÊÍÓÔÕÚÇ][a-záàãâéêíóôõúç]+){1,3})',
+                ]
+                for name_pat in name_patterns:
+                    name_matches = re.findall(name_pat, clean_context)
+                    for name in name_matches:
+                        # Filtrar palavras comuns que não são nomes
+                        skip_words = {
+                            'A Solicitar', 'Sob Consulta', 'Preço Negociável',
+                            'Zona', 'Localização', 'Consultar', 'Telefone',
+                            'Telemóvel', 'Contacto', 'Enviar', 'Mensagem',
+                            'Partilhar', 'Favorito', 'Imóvel', 'Tipo', 'Área',
+                        }
+                        if name not in skip_words and self._is_valid_name(name):
+                            return name
+        
+        return None
     
     def _extract_contacts_from_text(self, text: str) -> Dict[str, Any]:
         """
@@ -1538,7 +2138,7 @@ Conteúdo:
             result = self._parse_imovirtual(soup)
             parser_used = "imovirtual"
         elif "supercasa" in url_lower:
-            result = self._parse_supercasa(soup)
+            result = self._parse_supercasa(soup, html_content)
             parser_used = "supercasa"
         elif "casasapo" in url_lower or "casa.sapo" in url_lower:
             result = self._parse_casasapo(soup)
@@ -1588,15 +2188,35 @@ Conteúdo:
             result["_extracted_by"] = parser_used
         
         # ============================================================
-        # DEEP SCRAPING: Se for agregador, procurar dados na agência
+        # 3-CENÁRIO DEEP SCRAPING: Detecção inteligente de contactos
         # ============================================================
-        if is_aggregator:
-            logger.info("[DEEP SCRAPING] Site agregador detectado, procurando links de agências...")
+        # Determinar cenário de extração de contactos
+        agency_key = self._is_agency_site(url)
+        
+        if agency_key:
+            # CENÁRIO 3: Link directo de agência - extração avançada
+            logger.info(f"[CENÁRIO 3] Link directo de agência detectado: {agency_key}")
+            agency_result = await self._scrape_agency_direct(soup, html_content, url, agency_key)
+            result = self._merge_deep_scrape_data(result, agency_result)
+            
+        elif is_aggregator:
+            # CENÁRIO 1 & 2: Agregador - procurar dados na agência
+            logger.info("[DEEP SCRAPING] Site agregador detectado, analisando cenários 1 & 2...")
             
             agency_links = self._find_agency_links(soup, current_domain)
             
+            # Extrair nome da agência e referência para Cenário 2 (fallback)
+            extracted_agency = result.get("agencia_nome")
+            if not extracted_agency:
+                extracted_agency = self._extract_agency_name_from_page(soup, html_content)
+            
+            extracted_ref = result.get("referencia")
+            if not extracted_ref:
+                extracted_ref = self._extract_reference_from_page(soup, html_content)
+            
             if agency_links:
-                logger.info(f"[DEEP SCRAPING] Encontrados {len(agency_links)} links de agências: {[link['agency'] for link in agency_links]}")
+                # CENÁRIO 1: Link externo encontrado - deep scraping directo
+                logger.info(f"[CENÁRIO 1] Encontrados {len(agency_links)} links de agências: {[link['agency'] for link in agency_links]}")
                 
                 # Tentar o primeiro link de agência
                 for link_info in agency_links:
@@ -1608,12 +2228,23 @@ Conteúdo:
                     # Se obtivemos dados úteis, fazer merge e parar
                     if deep_data.get("agente_telefone") or deep_data.get("agente_email"):
                         result = self._merge_deep_scrape_data(result, deep_data)
-                        logger.info(f"[DEEP SCRAPING] Dados da agência {link_info['agency']} incorporados com sucesso")
+                        logger.info(f"[CENÁRIO 1] Dados da agência {link_info['agency']} incorporados com sucesso")
                         break
+                    
+            elif extracted_agency and extracted_ref:
+                # CENÁRIO 2: Sem link, mas com referência - pesquisar na agência
+                logger.info(f"[CENÁRIO 2] Referência '{extracted_ref}' da '{extracted_agency}' encontrada, pesquisando...")
+                ref_result = await self._search_agency_by_reference(extracted_agency, extracted_ref)
+                if ref_result.get("agente_telefone") or ref_result.get("agente_nome"):
+                    result = self._merge_deep_scrape_data(result, ref_result)
+                    logger.info(f"[CENÁRIO 2] Dados encontrados via referência")
+                else:
+                    logger.info("[CENÁRIO 2] Nenhum dado encontrado via referência")
+                    
             else:
-                logger.info("[DEEP SCRAPING] Nenhum link de agência encontrado")
+                logger.info("[DEEP SCRAPING] Nenhum link nem referência encontrados")
         
-        # Se ainda não temos contacto, extrair do texto da página original
+        # Fallback: se ainda não temos contacto, extrair do texto da página original
         if not result.get("agente_telefone") and not result.get("agente_email"):
             clean_text = self._clean_text(html_content)
             contacts = self._extract_contacts_from_text(clean_text)
@@ -1628,6 +2259,13 @@ Conteúdo:
                               if not any(x in e.lower() for x in ["noreply", "info@", "geral@"])]
                 if valid_emails:
                     result["agente_email"] = valid_emails[0]
+        
+        # Se ainda não temos nome do agente, tentar extract_agent_name
+        if not result.get("agente_nome") and html_content:
+            clean_text = self._clean_text(html_content)
+            agent_name = self._extract_agent_name(soup, clean_text)
+            if agent_name:
+                result["agente_nome"] = agent_name
         
         # ============================================================
         # GUARDAR EM CACHE E RETORNAR
@@ -1677,11 +2315,14 @@ Conteúdo:
             data["localizacao"] = location.get_text(strip=True)
         
         # === Referência do anúncio ===
-        # Procurar em múltiplos locais possíveis
+        # Procurar em múltiplos locais possíveis - inclui formatos de agência
         ref_patterns = [
-            r'Ref[.:]?\s*(\w+)',
-            r'Referência[.:]?\s*(\w+)',
-            r'reference[.:]?\s*(\w+)',
+            r'Ref[.:]?\s*([A-Z]{2,4}\d{4,10})',          # ZMPT587270, RM123456 (agência)
+            r'Referência[.:]?\s*([A-Z]{2,4}\d{4,10})',    # Referência ZMPT587270
+            r'Ref[.:]?\s*(\w+)',                            # Ref genérica
+            r'Referência[.:]?\s*(\w+)',                      # Referência genérica
+            r'reference[.:]?\s*(\w+)',                       # reference genérica
+            r'ID[:\s]*([A-Z0-9-]{5,20})',                    # ID: RM123456
         ]
         
         # Procurar na classe .reference
@@ -1694,13 +2335,8 @@ Conteúdo:
             if ref_attr:
                 data["referencia"] = ref_attr.get('data-reference')
             else:
-                # Procurar no texto via regex
-                text_content = soup.get_text()
-                for pattern in ref_patterns:
-                    match = re.search(pattern, text_content, re.IGNORECASE)
-                    if match:
-                        data["referencia"] = match.group(1)
-                        break
+                # Usar método dedicado para referências (inclui formatos de agência)
+                data["referencia"] = self._extract_reference_from_page(soup, raw_html)
         
         # === Link da agência (MELHORADO para EasyGest e outros) ===
         # 1. Procurar links directos em botões/links de agência
@@ -2255,8 +2891,8 @@ Conteúdo:
         
         return data
     
-    def _parse_supercasa(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Parser para SuperCasa.pt"""
+    def _parse_supercasa(self, soup: BeautifulSoup, raw_html: str = "") -> Dict[str, Any]:
+        """Parser para SuperCasa.pt - com extração de referência e agência."""
         data = {}
         
         title = soup.find('h1')
@@ -2268,6 +2904,12 @@ Conteúdo:
             price_text = re.sub(r'[^\d]', '', price.get_text())
             if price_text:
                 data["preco"] = int(price_text)
+        
+        # === Referência do anúncio ===
+        data["referencia"] = self._extract_reference_from_page(soup, raw_html)
+        
+        # === Nome da agência ===
+        data["agencia_nome"] = self._extract_agency_name_from_page(soup, raw_html)
         
         return data
     

@@ -237,7 +237,7 @@ const EditModal = ({ open, onClose, registration, onSave }) => {
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
             <TabsTrigger value="personal" className="gap-2">
               <User className="h-4 w-4" />
               <span className="hidden sm:inline">Dados Pessoais</span>

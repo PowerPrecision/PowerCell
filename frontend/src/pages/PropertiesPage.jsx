@@ -405,7 +405,7 @@ const PropertyForm = ({ property, onSave, onCancel, users }) => {
       <div className="space-y-4">
         <h4 className="font-semibold text-sm text-gray-700 border-b pb-2">Características</h4>
         
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           <div>
             <Label>Quartos (T)</Label>
             <Input
@@ -992,7 +992,7 @@ const PropertiesPage = () => {
 
           {/* Stats Cards */}
           {stats && (
-            <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
               <Card>
                 <CardContent className="pt-4">
                   <div className="text-2xl font-bold">{stats.total}</div>
@@ -1101,7 +1101,7 @@ const PropertiesPage = () => {
             
             {importResults && (
               <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-center">
                   <div className="p-3 bg-gray-50 rounded-lg">
                     <div className="text-2xl font-bold">{importResults.total}</div>
                     <div className="text-sm text-gray-600">Total linhas</div>

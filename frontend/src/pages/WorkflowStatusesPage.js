@@ -35,7 +35,7 @@ const WorkflowStatusesPage = () => {
 
   return (
     <DashboardLayout title="Estados do Workflow">
-      <div className="space-y-6 p-6">
+      <div className="space-y-4 md:space-y-6 p-4 md:p-6">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

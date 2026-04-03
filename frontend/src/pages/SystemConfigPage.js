@@ -963,7 +963,7 @@ const SystemConfigPage = () => {
                 {s3MappingData.s3_configured && (
                   <>
                     {/* Estatísticas */}
-                    <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
                       <div className="bg-white dark:bg-gray-900 rounded p-3 border text-center">
                         <p className="text-2xl font-bold text-purple-600">{s3MappingData.stats?.total || 0}</p>
                         <p className="text-xs text-muted-foreground">Total de Clientes</p>
@@ -1028,7 +1028,7 @@ const SystemConfigPage = () => {
                     <div className="max-h-80 overflow-y-auto space-y-2">
                       {filteredS3Clients?.map((p) => (
                         <div key={p.id} className="flex items-center gap-3 p-2 bg-white dark:bg-gray-900 rounded border">
-                          <div className="flex items-center gap-2 min-w-[250px]">
+                          <div className="flex items-center gap-2 min-w-0 sm:min-w-[250px]">
                             <Users className="h-4 w-4 text-muted-foreground" />
                             <div className="text-sm">
                               <span className="font-medium block">{p.client_name || "Sem nome"}</span>
@@ -1118,7 +1118,7 @@ const SystemConfigPage = () => {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 lg:grid-cols-7">
             {sections.map((key) => {
               const Icon = SECTION_ICONS[key] || Settings;
               return (

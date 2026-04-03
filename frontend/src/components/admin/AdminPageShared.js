@@ -162,7 +162,7 @@ export const AdminSearchFilter = ({
   <Card>
     <CardContent className="p-4">
       <div className="flex flex-wrap gap-4">
-        <div className="flex-1 min-w-[200px]">
+        <div className="flex-1 min-w-0 sm:min-w-[200px]">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input placeholder={searchPlaceholder} value={search} onChange={(e) => onSearchChange(e.target.value)} className="pl-9" />
@@ -170,7 +170,7 @@ export const AdminSearchFilter = ({
         </div>
         {statusOptions.length > 0 && (
           <Select value={statusFilter || "all"} onValueChange={(v) => onStatusChange(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[180px]"><SelectValue placeholder="Todos os estados" /></SelectTrigger>
+            <SelectTrigger className="w-full sm:w-[180px]"><SelectValue placeholder="Todos os estados" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
               {statusOptions.map((opt) => (

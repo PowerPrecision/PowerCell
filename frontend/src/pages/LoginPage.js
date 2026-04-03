@@ -75,7 +75,7 @@ const LoginPage = () => {
       </div>
 
       {/* Right side - Form */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-background">
+      <div className="flex-1 flex items-center justify-center p-4 md:p-8 bg-background">
         <Card className="w-full max-w-md border-border shadow-sm">
           <CardHeader className="space-y-1 text-center">
             <div className="flex justify-center mb-4 lg:hidden">

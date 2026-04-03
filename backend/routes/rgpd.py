@@ -11,6 +11,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from typing import Optional
 
 from database import db
@@ -18,7 +19,8 @@ from models.rgpd import (
     RGPDCreate, RGPDResponse, RGPDStatusResponse,
     RGPDConsentData, RGPDPublicView, RGPDStatusEnum
 )
-from services.auth import get_current_user, require_staff
+from services.auth import get_current_user, require_staff, require_roles
+from models.auth import UserRole
 from services.rgpd_service import (
     create_rgpd_request,
     validate_token,
@@ -370,6 +372,160 @@ async def list_all_rgpd(
             "limit": limit,
             "pages": 0
         }
+
+
+# ============ ENDPOINTS DE TEMPLATE RGPD ============
+
+class RGPDTemplateUpdate(BaseModel):
+    """Modelo para atualização do template RGPD."""
+    content: str
+
+
+# Template padrão RGPD
+RGPD_DEFAULT_TEMPLATE = """AUTORIZAÇÃO PARA TRATAMENTO DE DADOS PESSOAIS – RGPD
+
+Nos termos do Regulamento (UE) 2016/679 do Parlamento Europeu e do Conselho (Regulamento Geral sobre a Proteção de Dados – "RGPD"), o titular dos dados abaixo identificado autoriza expressamente o tratamento dos seus dados pessoais pela entidade responsável pelo tratamento, nos seguintes termos:
+
+1. RESPONSÁVEL PELO TRATAMENTO
+Empresa: Power Real Estate, Lda.
+NIF: 516 123 456
+Morada: [Morada da Empresa]
+Contacto: [Email/Tel da Empresa]
+
+2. TITULAR DOS DADOS
+Nome Completo: {{NOME}}
+NIF/Contribuinte: {{CONTRIBUINTE}}
+Morada: {{MORADA}}
+Código Postal: {{CODIGO_POSTAL}}
+
+3. TIPO DE DOCUMENTO DE IDENTIFICAÇÃO
+Tipo: {{TIPO_DOCUMENTO}}
+Número: {{NUMERO_DOCUMENTO}}
+Validade: {{VALIDADE_DOCUMENTO}}
+
+4. FINALIDADE DO TRATAMENTO
+Os dados pessoais recolhidos são tratados para as seguintes finalidades:
+a) Gestão do processo de mediação imobiliária;
+b) Cumprimento de obrigações legais e regulatórias;
+c) Comunicação relacionada com o processo em curso;
+d) Elaboração de documentação contratual e fiscal.
+
+5. CATEGORIAS DE DADOS PESSOAIS TRATADOS
+- Dados de identificação (nome, NIF, documento de identificação);
+- Dados de contacto (morada, código postal, telefone, email);
+- Dados financeiros (relacionados com o processo imobiliário);
+- Dados profissionais (profissão, entidade empregadora).
+
+6. BASE LEGAL PARA O TRATAMENTO
+O tratamento dos dados pessoais é realizado com base no consentimento do titular (Art. 6.º, n.º 1, alínea a) do RGPD) e na execução de contrato (Art. 6.º, n.º 1, alínea b) do RGPD).
+
+7. CONSERVAÇÃO DOS DADOS
+Os dados pessoais serão conservados durante o período necessário para a execução do processo e durante o prazo legalmente exigido para efeitos de responsabilização, não excedendo o prazo máximo de 10 (dez) anos após a conclusão do processo.
+
+8. DIREITOS DO TITULAR
+O titular dos dados tem o direito de:
+- Aceder aos seus dados pessoais;
+- Retificar dados incorretos ou incompletos;
+- Solicitar a eliminação dos dados ("direito ao esquecimento");
+- Limitar o tratamento dos dados;
+- Solicitar a portabilidade dos dados;
+- Opor-se ao tratamento dos dados;
+- Retirar o consentimento a qualquer momento, sem comprometer a licitude do tratamento efetuado até essa data.
+
+Para exercer os seus direitos, o titular pode contactar o responsável pelo tratamento através do endereço de email: [Email DPO] ou por escrito para a morada indicada no ponto 1.
+
+9. PARTILHA DE DADOS
+Os dados pessoais poderão ser partilhados com:
+- Entidades bancárias, no âmbito da solicitação de financiamento;
+- Notários e Conservatórias, para efeitos de escritura pública;
+- Autoridades fiscais e tributárias;
+- Outras entidades legalmente autorizadas.
+
+10. COOKIES E TECNOLOGIAS DE RASTREAMENTO
+Informamos que poderão ser utilizadas tecnologias de rastreamento no âmbito do processo, sempre com o conhecimento e consentimento do titular.
+
+11. DECISÕES AUTOMATIZADAS
+Informamos que não são tomadas decisões baseadas exclusivamente no tratamento automatizado, incluindo a definição de perfis, que produzam efeitos jurídicos ou de forma similar.
+
+DECLARAÇÃO FINAL:
+O titular dos dados declara ter sido informado de forma clara e completa sobre o tratamento dos seus dados pessoais, nos termos do disposto no Regulamento Geral sobre a Proteção de Dados (RGPD), e consente expressamente com o tratamento acima descrito.
+
+Data: {{DATA_ASSINATURA}}
+Assinatura: _________________________________"""
+
+
+@router.get("/admin/template")
+async def get_rgpd_template(
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Obter o template de texto RGPD.
+
+    Permissões: Apenas admin e CEO.
+    Retorna o conteúdo atual do template RGPD guardado na base de dados.
+    Se não existir um template personalizado, retorna o template padrão.
+    """
+    try:
+        doc = await db.system_config.find_one({"_id": "rgpd_template"}, {"_id": 0})
+
+        if doc and doc.get("content"):
+            return {
+                "content": doc["content"],
+                "updated_at": doc.get("updated_at"),
+                "updated_by": doc.get("updated_by"),
+                "is_default": False
+            }
+
+        return {
+            "content": RGPD_DEFAULT_TEMPLATE,
+            "updated_at": None,
+            "updated_by": None,
+            "is_default": True
+        }
+    except Exception as e:
+        logger.error(f"Erro ao obter template RGPD: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Erro ao obter template RGPD")
+
+
+@router.put("/admin/template")
+async def update_rgpd_template(
+    template_data: RGPDTemplateUpdate,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Atualizar o template de texto RGPD.
+
+    Permissões: Apenas admin e CEO.
+    Guarda o novo conteúdo do template na coleção system_config.
+    """
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+
+        await db.system_config.update_one(
+            {"_id": "rgpd_template"},
+            {
+                "$set": {
+                    "content": template_data.content,
+                    "updated_at": now,
+                    "updated_by": user.get("name", user.get("email", "unknown"))
+                },
+                "$setOnInsert": {
+                    "created_at": now
+                }
+            },
+            upsert=True
+        )
+
+        logger.info(f"Template RGPD atualizado por {user.get('name', 'unknown')}")
+
+        return {
+            "success": True,
+            "message": "Template RGPD atualizado com sucesso",
+            "updated_at": now
+        }
+    except Exception as e:
+        logger.error(f"Erro ao atualizar template RGPD: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Erro ao atualizar template RGPD")
 
 
 @router.get("/admin/{request_id}")

@@ -218,7 +218,7 @@ const EmailSearchPage = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <ScrollArea className="h-[500px]">
+            <ScrollArea className="h-[500px] overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>

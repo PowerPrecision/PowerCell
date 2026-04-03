@@ -318,7 +318,7 @@ export default function ClientsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6" data-testid="clients-page">
+      <div className="space-y-4 md:space-y-6" data-testid="clients-page">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
