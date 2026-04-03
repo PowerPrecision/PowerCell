@@ -39,7 +39,7 @@ const ClientSearchTab = ({ processes, workflowStatuses }) => {
           </div>
 
           {searchTerm.length >= 2 ? (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>

@@ -237,7 +237,7 @@ const CalendarTab = ({
               </Button>
             </div>
           ) : (
-            <ScrollArea className="h-[500px]">
+            <ScrollArea className="h-[300px] sm:h-[500px]">
               <div className="space-y-3 pr-4">
                 {upcomingDeadlines.map((deadline) => {
                   const deadlineDate = new Date(deadline.due_date);

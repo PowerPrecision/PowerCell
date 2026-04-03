@@ -524,7 +524,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
       {/* O7 - Kanban Filters */}
       <div className="flex flex-wrap items-center gap-2" data-testid="kanban-filters">
         <Select value={dateFilter} onValueChange={setDateFilter}>
-          <SelectTrigger className="h-8 w-[130px] text-xs" data-testid="kanban-date-filter">
+          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-date-filter">
             <Calendar className="h-3 w-3 mr-1" />
             <SelectValue placeholder="Data" />
           </SelectTrigger>
@@ -536,7 +536,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
           </SelectContent>
         </Select>
         <Select value={urgencyFilter} onValueChange={setUrgencyFilter}>
-          <SelectTrigger className="h-8 w-[130px] text-xs" data-testid="kanban-urgency-filter">
+          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-urgency-filter">
             <AlertCircle className="h-3 w-3 mr-1" />
             <SelectValue placeholder="Urgência" />
           </SelectTrigger>
@@ -574,7 +574,8 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <ScrollArea className="h-[500px]">
+            <ScrollArea className="h-[300px] sm:h-[500px]">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -661,6 +662,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
                   )}
                 </TableBody>
               </Table>
+              </div>
             </ScrollArea>
           </CardContent>
         </Card>

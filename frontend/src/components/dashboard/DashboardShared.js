@@ -131,18 +131,18 @@ export const StatusBadge = ({ status, workflowStatuses }) => {
  * Filtros de pesquisa e estado
  */
 export const SearchFilters = ({ searchTerm, setSearchTerm, statusFilter, setStatusFilter, workflowStatuses }) => (
-  <div className="flex gap-2">
+  <div className="flex flex-col sm:flex-row gap-2">
     <div className="relative">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
       <Input
         placeholder="Pesquisar..."
-        className="pl-10 w-64"
+        className="pl-10 w-full sm:w-64"
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}
       />
     </div>
     <Select value={statusFilter} onValueChange={setStatusFilter}>
-      <SelectTrigger className="w-40">
+      <SelectTrigger className="w-full sm:w-40">
         <SelectValue placeholder="Estado" />
       </SelectTrigger>
       <SelectContent>
@@ -159,7 +159,7 @@ export const SearchFilters = ({ searchTerm, setSearchTerm, statusFilter, setStat
  * Tabela de processos/clientes
  */
 export const ProcessTable = ({ processes, columns, renderRow, emptyMessage = "Nenhum processo encontrado" }) => (
-  <div className="rounded-md border">
+  <div className="rounded-md border overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>

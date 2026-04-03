@@ -227,7 +227,7 @@ const EmailViewerModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-6xl h-[85vh] p-0 gap-0 overflow-hidden">
+      <DialogContent className="max-w-6xl h-[100vh] sm:h-[85vh] sm:max-w-6xl sm:rounded-lg p-0 gap-0 overflow-hidden">
         <VisuallyHidden>
           <DialogTitle>Visualização de Email</DialogTitle>
           <DialogDescription>{currentEmail?.subject || "Email"}</DialogDescription>
