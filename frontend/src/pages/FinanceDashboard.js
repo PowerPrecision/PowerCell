@@ -14,6 +14,13 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Settings,
+  CreditCard,
+  Percent,
+  Landmark,
+  Save,
+  Check,
+  AlertTriangle,
 } from "lucide-react";
 import {
   Card,
@@ -24,7 +31,19 @@ import {
 } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+  DialogClose,
+} from "../components/ui/dialog";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -32,6 +51,8 @@ import {
   getFinanceMonthly,
   getFinanceCommissions,
   getFinancePerformance,
+  getFinanceConfig,
+  updateFinanceConfig,
 } from "../services/api";
 import {
   BarChart,
@@ -62,6 +83,11 @@ const formatCurrency = (value) => {
 const formatNumber = (value) => {
   if (value == null || isNaN(value)) return "0";
   return new Intl.NumberFormat("pt-PT").format(value);
+};
+
+const formatPct = (value) => {
+  if (value == null || isNaN(value)) return "0%";
+  return `${Number(value).toFixed(1)}%`;
 };
 
 const VariationIndicator = ({ value }) => {
@@ -98,7 +124,7 @@ const VariationIndicator = ({ value }) => {
 };
 
 // ====================================================================
-// CUSTOM TOOLTIP PARA CHARTS
+// CUSTOM TOOLTIP
 // ====================================================================
 
 const FinanceTooltip = ({ active, payload, label }) => {
@@ -121,34 +147,395 @@ const FinanceTooltip = ({ active, payload, label }) => {
 };
 
 // ====================================================================
-// STAT CARD (inline para reaproveitar padrão AdminPageShared)
+// STAT CARD
 // ====================================================================
 
-const FinanceStatCard = ({ title, value, subtitle, icon: Icon, color, variation }) => (
+const FinanceStatCard = ({ title, value, subtitle, icon: Icon, color, variation, iconBg }) => (
   <Card>
     <CardContent className="p-5">
       <div className="flex items-center justify-between">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <p className="text-sm text-muted-foreground">{title}</p>
           <p className={`text-2xl font-bold mt-1 ${color || ""}`}>{value}</p>
           <div className="mt-1">
             {subtitle && (
-              <p className="text-xs text-muted-foreground">{subtitle}</p>
+              <p className="text-xs text-muted-foreground truncate">{subtitle}</p>
             )}
             {variation !== undefined && <VariationIndicator value={variation} />}
           </div>
         </div>
-        <div
-          className={`p-3 rounded-xl ${color === "text-green-600" ? "bg-green-50" : color === "text-red-600" ? "bg-red-50" : color === "text-blue-600" ? "bg-blue-50" : "bg-purple-50"}`}
-        >
-          <Icon
-            className={`h-6 w-6 ${color === "text-green-600" ? "text-green-600" : color === "text-red-600" ? "text-red-600" : color === "text-blue-600" ? "text-blue-600" : "text-purple-600"}`}
-          />
+        <div className={iconBg || "bg-purple-50"}>
+          <Icon className={`h-6 w-6 ${color || "text-purple-600"}`} />
         </div>
       </div>
     </CardContent>
   </Card>
 );
+
+// ====================================================================
+// CONFIG DIALOG
+// ====================================================================
+
+const ConfigDialog = ({ config, onSave }) => {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState(null);
+
+  const [localConfig, setLocalConfig] = useState({
+    imobiliaria: { ...config?.imobiliaria },
+    credito: { ...config?.credito },
+  });
+
+  useEffect(() => {
+    if (config) {
+      setLocalConfig({
+        imobiliaria: { ...config.imobiliaria },
+        credito: { ...config.credito },
+      });
+    }
+  }, [config]);
+
+  const handleChange = (area, field, value) => {
+    const numVal = parseFloat(value);
+    if (!isNaN(numVal) && numVal >= 0 && numVal <= 100) {
+      setLocalConfig((prev) => ({
+        ...prev,
+        [area]: { ...prev[area], [field]: numVal },
+      }));
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      await onSave(localConfig);
+      setSuccess(true);
+      setTimeout(() => {
+        setOpen(false);
+        setSuccess(false);
+      }, 1500);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Erro ao guardar configurações.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fields = [
+    { key: "comissao_consultor_pct", label: "% Comissão Consultor", description: "Percentagem da comissão paga ao consultor" },
+    { key: "retida_agencia_pct", label: "% Retida pela Agência", description: "Percentagem da comissão retida como lucro bruto" },
+    { key: "taxa_impostos_sobre_lucro", label: "% Impostos sobre Lucro", description: "Taxa de imposto sobre o lucro bruto" },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2">
+          <Settings className="h-4 w-4" />
+          Configurações
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Percent className="h-5 w-5 text-purple-600" />
+            Configurações Financeiras
+          </DialogTitle>
+          <DialogDescription>
+            Defina as percentagens de comissão e impostos para cada área de negócio.
+            As alterações aplicam-se imediatamente ao dashboard.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6 py-4">
+          {/* IMOBILIÁRIA */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-purple-600" />
+              <h3 className="font-semibold text-sm">Imobiliária</h3>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {fields.map((f) => (
+                <div key={`imob-${f.key}`} className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">{f.label}</Label>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      value={localConfig.imobiliaria?.[f.key] ?? ""}
+                      onChange={(e) => handleChange("imobiliaria", f.key, e.target.value)}
+                      className="pr-8"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">{f.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* CRÉDITO */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <CreditCard className="h-4 w-4 text-blue-600" />
+              <h3 className="font-semibold text-sm">Crédito</h3>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {fields.map((f) => (
+                <div key={`cred-${f.key}`} className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">{f.label}</Label>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      value={localConfig.credito?.[f.key] ?? ""}
+                      onChange={(e) => handleChange("credito", f.key, e.target.value)}
+                      className="pr-8"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">{f.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-center gap-2 p-3 rounded-lg border border-red-200 bg-red-50 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="flex items-center gap-2 p-3 rounded-lg border border-green-200 bg-green-50 text-sm text-green-700">
+            <Check className="h-4 w-4 flex-shrink-0" />
+            Configurações guardadas com sucesso!
+          </div>
+        )}
+
+        <DialogFooter className="gap-2">
+          <DialogClose asChild>
+            <Button variant="outline" disabled={saving}>Cancelar</Button>
+          </DialogClose>
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Guardar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// ====================================================================
+// AREA DETAIL TAB (Imobiliária ou Crédito)
+// ====================================================================
+
+const AreaDetail = ({ area, data, monthlyData, performanceData, selectedYear }) => {
+  const isImob = area === "imobiliaria";
+  const color = isImob ? "text-purple-600" : "text-blue-600";
+  const iconBg = isImob ? "bg-purple-50" : "bg-blue-50";
+  const label = isImob ? "Imobiliária" : "Crédito";
+
+  if (!data) return null;
+
+  // Chart data
+  const areaChartData = (monthlyData || []).map((m) => ({
+    name: m.month_label,
+    Receita: isImob ? m.imob_receita : m.cred_receita,
+    Comissões: isImob ? m.imob_comissoes : m.cred_comissoes,
+    "Lucro Líquido": isImob ? m.imob_lucro_liquido : m.cred_lucro_liquido,
+  }));
+
+  // Variation keys
+  const varPrefix = isImob ? "imob_" : "cred_";
+  const varReceita = performanceData?.variations?.[`${varPrefix}receita`];
+  const varLucro = performanceData?.variations?.[`${varPrefix}lucro`];
+
+  return (
+    <div className="space-y-4">
+      {/* StatCards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <FinanceStatCard
+          title={`Receita ${label}`}
+          value={formatCurrency(data.total_receita)}
+          subtitle={`${data.processos_com_comissao} processos com comissão`}
+          icon={TrendingUp}
+          color={color}
+          variation={varReceita}
+          iconBg={iconBg}
+        />
+        <FinanceStatCard
+          title="Comissões Pagas"
+          value={formatCurrency(data.comissoes_pagas_consultores)}
+          subtitle={`Consultor: ${formatPct(data.pct_consultor)} | Agência: ${formatPct(data.pct_agencia)}`}
+          icon={Users}
+          color="text-orange-600"
+          iconBg="bg-orange-50"
+        />
+        <FinanceStatCard
+          title="Lucro Bruto Agência"
+          value={formatCurrency(data.lucro_bruto_agencia)}
+          subtitle={`Impostos: ${formatCurrency(data.total_impostos)} (${formatPct(data.pct_impostos)})`}
+          icon={Landmark}
+          color="text-red-600"
+          iconBg="bg-red-50"
+        />
+        <FinanceStatCard
+          title="Lucro Líquido"
+          value={formatCurrency(data.lucro_liquido_agencia)}
+          subtitle={`Margem: ${formatPct(data.taxa_margem)}`}
+          icon={DollarSign}
+          color="text-green-600"
+          iconBg="bg-green-50"
+          variation={varLucro}
+        />
+      </div>
+
+      {/* KPI secundários */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-xs text-muted-foreground">Processos</p>
+            <p className="text-xl font-bold mt-1">{data.total_processos}</p>
+            <p className="text-[10px] text-muted-foreground">concluídos</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-xs text-muted-foreground">Comissão Média</p>
+            <p className="text-xl font-bold mt-1">{formatCurrency(data.valor_medio_comissao)}</p>
+            <p className="text-[10px] text-muted-foreground">por processo</p>
+          </CardContent>
+        </Card>
+        {isImob && (
+          <Card className="col-span-2">
+            <CardContent className="p-4 text-center">
+              <p className="text-xs text-muted-foreground">Valor Total Imóveis</p>
+              <p className="text-xl font-bold mt-1">{formatCurrency(data.total_valor_imoveis)}</p>
+              <p className="text-[10px] text-muted-foreground">volume de negócios</p>
+            </CardContent>
+          </Card>
+        )}
+        {!isImob && (
+          <Card className="col-span-2">
+            <CardContent className="p-4 text-center">
+              <p className="text-xs text-muted-foreground">Montante Total Crédito</p>
+              <p className="text-xl font-bold mt-1">{formatCurrency(data.total_credit_montante)}</p>
+              <p className="text-[10px] text-muted-foreground">financiado</p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Gráfico mensal da área */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Evolução Mensal — {label} ({selectedYear})
+          </CardTitle>
+          <CardDescription>Receita, comissões e lucro líquido</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[200px] sm:h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={areaChartData}>
+                <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                <XAxis dataKey="name" fontSize={12} />
+                <YAxis
+                  fontSize={12}
+                  tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v)}
+                />
+                <Tooltip content={<FinanceTooltip />} />
+                <Legend />
+                <Bar dataKey="Receita" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Comissões" fill="#f97316" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Lucro Líquido" fill="#22c55e" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tabela de processos */}
+      {data.processes && data.processes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Processos — {label}
+            </CardTitle>
+            <CardDescription>Processos concluídos ordenados por comissão</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-3 font-medium text-muted-foreground">Processo</th>
+                    <th className="text-left py-2 px-3 font-medium text-muted-foreground">Cliente</th>
+                    <th className="text-left py-2 px-3 font-medium text-muted-foreground">Tipo</th>
+                    <th className="text-right py-2 px-3 font-medium text-muted-foreground">Comissão</th>
+                    <th className="text-right py-2 px-3 font-medium text-muted-foreground">Comiss. Consultor</th>
+                    <th className="text-right py-2 px-3 font-medium text-green-600">Lucro Agência</th>
+                    {isImob && (
+                      <th className="text-right py-2 px-3 font-medium text-muted-foreground">Valor Imóvel</th>
+                    )}
+                    {!isImob && (
+                      <th className="text-right py-2 px-3 font-medium text-muted-foreground">Montante Crédito</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.processes
+                    .filter((p) => p.comissao > 0)
+                    .slice(0, 20)
+                    .map((p, idx) => (
+                      <tr
+                        key={p.id || idx}
+                        className="border-b hover:bg-muted/50 cursor-pointer"
+                        onClick={() => p.id && navigate(`/processo/${p.id}`)}
+                      >
+                        <td className="py-2 px-3 font-mono text-xs">#{p.process_number || "—"}</td>
+                        <td className="py-2 px-3">{p.client_name}</td>
+                        <td className="py-2 px-3">
+                          <Badge variant="outline" className="text-xs">{p.process_type || "—"}</Badge>
+                        </td>
+                        <td className="py-2 px-3 text-right font-semibold">{formatCurrency(p.comissao)}</td>
+                        <td className="py-2 px-3 text-right text-orange-600">{formatCurrency(p.comissao_consultor)}</td>
+                        <td className="py-2 px-3 text-right font-semibold text-green-600">{formatCurrency(p.lucro_agencia)}</td>
+                        {isImob && (
+                          <td className="py-2 px-3 text-right">{p.valor_imovel > 0 ? formatCurrency(p.valor_imovel) : "—"}</td>
+                        )}
+                        {!isImob && (
+                          <td className="py-2 px-3 text-right">{p.montante_credito > 0 ? formatCurrency(p.montante_credito) : "—"}</td>
+                        )}
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+};
+
+// Need navigate in AreaDetail - wrap with a component that has it
+// Actually, let me restructure — I'll define AreaDetail inside the main component or pass navigate
 
 // ====================================================================
 // MAIN COMPONENT
@@ -167,6 +554,7 @@ const FinanceDashboard = () => {
   const [monthly, setMonthly] = useState(null);
   const [commissions, setCommissions] = useState(null);
   const [performance, setPerformance] = useState(null);
+  const [config, setConfig] = useState(null);
 
   // Filtros
   const currentYear = new Date().getFullYear();
@@ -178,17 +566,21 @@ const FinanceDashboard = () => {
     setError(null);
     try {
       const params = { year: selectedYear };
-      const [summaryRes, monthlyRes, commissionsRes, performanceRes] =
+      const [summaryRes, monthlyRes, commissionsRes, performanceRes, configRes] =
         await Promise.all([
           getFinanceSummary(params),
           getFinanceMonthly(params),
           getFinanceCommissions(params),
           getFinancePerformance(params),
+          getFinanceConfig(),
         ]);
       setSummary(summaryRes.data);
       setMonthly(monthlyRes.data);
       setCommissions(commissionsRes.data);
       setPerformance(performanceRes.data);
+      if (configRes.data?.config) {
+        setConfig(configRes.data.config);
+      }
     } catch (err) {
       console.error("Erro ao carregar dados financeiros:", err);
       setError(err.response?.data?.detail || "Erro ao carregar dados financeiros.");
@@ -209,30 +601,27 @@ const FinanceDashboard = () => {
     }
   };
 
-  // Data para gráfico mensal
-  const monthlyChartData = (monthly?.monthly || []).map((m) => ({
-    name: m.month_label,
-    Receita: m.receita,
-    Despesas: m.despesas,
-    Lucro: m.lucro,
-  }));
+  const handleSaveConfig = async (newConfig) => {
+    await updateFinanceConfig(newConfig);
+    setConfig(newConfig);
+    // Refetch data with new percentages
+    await fetchAllData();
+  };
 
-  // Data para gráfico de valor de imóveis por mês
-  const imoveisChartData = (monthly?.monthly || []).map((m) => ({
+  // Chart data para comparação imob vs cred
+  const comparisonChartData = (monthly?.monthly || []).map((m) => ({
     name: m.month_label,
-    "Valor Imóveis": m.valor_imoveis,
-    Processos: m.num_processos,
+    Imobiliária: m.imob_receita,
+    Crédito: m.cred_receita,
   }));
 
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+        <div className="p-4 md:p-6 space-y-4">
           <div className="flex items-center gap-3">
             <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
-            <span className="text-muted-foreground">
-              A carregar dados financeiros...
-            </span>
+            <span className="text-muted-foreground">A carregar dados financeiros...</span>
           </div>
         </div>
       </DashboardLayout>
@@ -250,32 +639,25 @@ const FinanceDashboard = () => {
               Dashboard Financeiro
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Visão geral financeira da empresa — exclusivo para Administração
+              Visão financeira por área de negócio — exclusivo para Administração
             </p>
           </div>
 
-          {/* Selector de Ano */}
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => handleYearChange(-1)}
-              disabled={selectedYear <= 2020}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <div className="flex items-center gap-2 px-4 py-2 border rounded-lg bg-background">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              <span className="font-semibold">{selectedYear}</span>
+            <ConfigDialog config={config} onSave={handleSaveConfig} />
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="icon" onClick={() => handleYearChange(-1)} disabled={selectedYear <= 2020}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <div className="flex items-center gap-2 px-4 py-2 border rounded-lg bg-background">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <span className="font-semibold">{selectedYear}</span>
+              </div>
+              <Button variant="outline" size="icon" onClick={() => handleYearChange(1)} disabled={selectedYear >= currentYear + 1}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => handleYearChange(1)}
-              disabled={selectedYear >= currentYear + 1}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
           </div>
         </div>
 
@@ -287,374 +669,146 @@ const FinanceDashboard = () => {
           </Card>
         )}
 
-        {/* KPIs Principais */}
-        {summary && performance && (
+        {/* KPIs Globais */}
+        {summary && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <FinanceStatCard
               title="Receita Total"
-              value={formatCurrency(summary.total_receita)}
-              subtitle={`${summary.processos_com_comissao} processos com comissão`}
+              value={formatCurrency(summary.global?.total_receita)}
+              subtitle="Imobiliária + Crédito"
               icon={TrendingUp}
               color="text-green-600"
-              variation={performance.variations?.receita}
+              iconBg="bg-green-50"
+              variation={performance?.variations?.receita}
             />
             <FinanceStatCard
-              title="Despesas Estimadas"
-              value={formatCurrency(summary.total_despesas)}
-              subtitle="Comissões de colaboradores"
-              icon={TrendingDown}
-              color="text-red-600"
-              variation={performance.variations?.receita !== undefined ? (performance.variations.receita > 0 ? performance.variations.receita * 0.5 : performance.variations.receita) : undefined}
+              title="Comissões Pagas"
+              value={formatCurrency(summary.global?.total_comissoes_pagas)}
+              subtitle="Total a colaboradores"
+              icon={Users}
+              color="text-orange-600"
+              iconBg="bg-orange-50"
             />
             <FinanceStatCard
-              title="Lucro Líquido"
-              value={formatCurrency(summary.lucro_liquido)}
-              subtitle={`Margem: ${summary.taxa_margem}%`}
+              title="Lucro Líquido Total"
+              value={formatCurrency(summary.global?.total_lucro_liquido)}
+              subtitle={`Margem: ${formatPct(summary.global?.taxa_margem)}`}
               icon={DollarSign}
               color="text-blue-600"
-              variation={performance.variations?.lucro}
+              iconBg="bg-blue-50"
+              variation={performance?.variations?.lucro}
             />
             <FinanceStatCard
-              title="Valor Total Imóveis"
-              value={formatCurrency(summary.total_valor_imoveis)}
-              subtitle={`${summary.total_processos_concluidos} processos concluídos`}
-              icon={Building2}
-              color="text-purple-600"
-              variation={performance.variations?.valor_imoveis}
+              title="Total Impostos"
+              value={formatCurrency(summary.global?.total_impostos)}
+              subtitle={`${summary.global?.total_processos} processos concluídos`}
+              icon={Landmark}
+              color="text-red-600"
+              iconBg="bg-red-50"
             />
           </div>
         )}
 
-        {/* Tabs com conteúdo detalhado */}
-        <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid">
-            <TabsTrigger value="overview">Visão Geral</TabsTrigger>
-            <TabsTrigger value="monthly">Mensal</TabsTrigger>
-            <TabsTrigger value="commissions">Comissões</TabsTrigger>
+        {/* Tabs: Imobiliária | Crédito | Mensal | Comissões */}
+        <Tabs defaultValue="imobiliaria" className="space-y-4">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:w-auto lg:inline-grid">
+            <TabsTrigger value="imobiliaria" className="gap-1.5">
+              <Building2 className="h-3.5 w-3.5" />
+              Imobiliária
+            </TabsTrigger>
+            <TabsTrigger value="credito" className="gap-1.5">
+              <CreditCard className="h-3.5 w-3.5" />
+              Crédito
+            </TabsTrigger>
+            <TabsTrigger value="monthly" className="gap-1.5">
+              <Calendar className="h-3.5 w-3.5" />
+              Mensal
+            </TabsTrigger>
+            <TabsTrigger value="commissions" className="gap-1.5">
+              <Users className="h-3.5 w-3.5" />
+              Comissões
+            </TabsTrigger>
           </TabsList>
 
-          {/* TAB: Visão Geral */}
-          <TabsContent value="overview" className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Gráfico de Receita/Despesas/Lucro */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Receitas vs Despesas vs Lucro
-                  </CardTitle>
-                  <CardDescription>
-                    Evolução mensal em {selectedYear}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[200px] sm:h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={monthlyChartData}>
-                        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                        <XAxis dataKey="name" fontSize={12} />
-                        <YAxis
-                          fontSize={12}
-                          tickFormatter={(v) =>
-                            v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v
-                          }
-                        />
-                        <Tooltip content={<FinanceTooltip />} />
-                        <Legend />
-                        <Bar
-                          dataKey="Receita"
-                          fill="#22c55e"
-                          radius={[4, 4, 0, 0]}
-                        />
-                        <Bar
-                          dataKey="Despesas"
-                          fill="#ef4444"
-                          radius={[4, 4, 0, 0]}
-                        />
-                        <Bar
-                          dataKey="Lucro"
-                          fill="#3b82f6"
-                          radius={[4, 4, 0, 0]}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
+          {/* TAB: Imobiliária */}
+          <TabsContent value="imobiliaria">
+            <AreaDetail
+              area="imobiliaria"
+              data={summary?.imobiliaria}
+              monthlyData={monthly?.monthly}
+              performanceData={performance}
+              selectedYear={selectedYear}
+            />
+          </TabsContent>
 
-              {/* Gráfico de Valor Imóveis */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Valor de Imóveis por Mês
-                  </CardTitle>
-                  <CardDescription>
-                    Volume de negócios imobiliários em {selectedYear}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[200px] sm:h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={imoveisChartData}>
-                        <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                        <XAxis dataKey="name" fontSize={12} />
-                        <YAxis
-                          fontSize={12}
-                          yAxisId="left"
-                          tickFormatter={(v) =>
-                            v >= 1000000
-                              ? `${(v / 1000000).toFixed(1)}M`
-                              : v >= 1000
-                              ? `${(v / 1000).toFixed(0)}k`
-                              : v
-                          }
-                        />
-                        <YAxis
-                          fontSize={12}
-                          yAxisId="right"
-                          orientation="right"
-                          tickFormatter={(v) => v}
-                        />
-                        <Tooltip content={<FinanceTooltip />} />
-                        <Legend />
-                        <Line
-                          yAxisId="left"
-                          type="monotone"
-                          dataKey="Valor Imóveis"
-                          stroke="#8b5cf6"
-                          strokeWidth={2}
-                          dot={{ r: 4 }}
-                        />
-                        <Line
-                          yAxisId="right"
-                          type="monotone"
-                          dataKey="Processos"
-                          stroke="#f59e0b"
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                          strokeDasharray="5 5"
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Top Processos por Comissão */}
-            {summary && summary.processes && summary.processes.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Top Processos por Comissão
-                  </CardTitle>
-                  <CardDescription>
-                    Processos concluídos com maior valor de comissão
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                            Processo
-                          </th>
-                          <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                            Cliente
-                          </th>
-                          <th className="text-right py-2 px-3 font-medium text-muted-foreground">
-                            Comissão
-                          </th>
-                          <th className="text-right py-2 px-3 font-medium text-muted-foreground">
-                            Valor Imóvel
-                          </th>
-                          <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                            Consultor
-                          </th>
-                          <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                            Mediador
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {summary.processes
-                          .filter((p) => p.comissao > 0)
-                          .slice(0, 15)
-                          .map((p, idx) => (
-                            <tr
-                              key={p.id || idx}
-                              className="border-b hover:bg-muted/50 cursor-pointer"
-                              onClick={() => p.id && navigate(`/processo/${p.id}`)}
-                            >
-                              <td className="py-2 px-3 font-mono text-xs">
-                                #{p.process_number || "—"}
-                              </td>
-                              <td className="py-2 px-3">{p.client_name}</td>
-                              <td className="py-2 px-3 text-right font-semibold text-green-600">
-                                {formatCurrency(p.comissao)}
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                {p.valor_imovel > 0
-                                  ? formatCurrency(p.valor_imovel)
-                                  : "—"}
-                              </td>
-                              <td className="py-2 px-3">
-                                <div className="flex flex-wrap gap-1">
-                                  {Array.isArray(p.consultor) &&
-                                    p.consultor.map((c, i) =>
-                                      c ? (
-                                        <Badge
-                                          key={i}
-                                          variant="outline"
-                                          className="text-xs"
-                                        >
-                                          {c}
-                                        </Badge>
-                                      ) : null
-                                    )}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3">
-                                <div className="flex flex-wrap gap-1">
-                                  {Array.isArray(p.mediador) &&
-                                    p.mediador.map((m, i) =>
-                                      m ? (
-                                        <Badge
-                                          key={i}
-                                          variant="outline"
-                                          className="text-xs"
-                                        >
-                                          {m}
-                                        </Badge>
-                                      ) : null
-                                    )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Estado dos dados */}
-            <Card className="border-amber-200 bg-amber-50">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <BarChart3 className="h-5 w-5 text-amber-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-800">
-                      Nota sobre os dados financeiros
-                    </p>
-                    <p className="text-xs text-amber-700 mt-1">
-                      Os valores são calculados com base no campo{" "}
-                      <code className="bg-amber-100 px-1 rounded">
-                        comissao_mediacao
-                      </code>{" "}
-                      dos processos concluídos. As despesas são estimadas em
-                      50% da receita (comissões de colaboradores). Para dados
-                      mais precisos, certifique-se de que os valores de comissão
-                      estão preenchidos nos processos.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          {/* TAB: Crédito */}
+          <TabsContent value="credito">
+            <AreaDetail
+              area="credito"
+              data={summary?.credito}
+              monthlyData={monthly?.monthly}
+              performanceData={performance}
+              selectedYear={selectedYear}
+            />
           </TabsContent>
 
           {/* TAB: Mensal */}
           <TabsContent value="monthly" className="space-y-4">
             {monthly && (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <FinanceStatCard
-                    title="Receita Anual"
-                    value={formatCurrency(monthly.total_receita)}
-                    subtitle="Total de comissões"
-                    icon={TrendingUp}
-                    color="text-green-600"
-                  />
-                  <FinanceStatCard
-                    title="Despesas Anuais"
-                    value={formatCurrency(monthly.total_despesas)}
-                    subtitle="Estimativa de comissões pagas"
-                    icon={TrendingDown}
-                    color="text-red-600"
-                  />
-                  <FinanceStatCard
-                    title="Processos Concluídos"
-                    value={formatNumber(monthly.total_processos)}
-                    subtitle={`Imóveis: ${formatCurrency(monthly.total_valor_imoveis)}`}
-                    icon={Calendar}
-                    color="text-purple-600"
-                  />
-                </div>
+                {/* Comparação Imob vs Crédito */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Imobiliária vs Crédito — {selectedYear}</CardTitle>
+                    <CardDescription>Receita mensal por área de negócio</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-[200px] sm:h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={comparisonChartData}>
+                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                          <XAxis dataKey="name" fontSize={12} />
+                          <YAxis fontSize={12} tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v)} />
+                          <Tooltip content={<FinanceTooltip />} />
+                          <Legend />
+                          <Bar dataKey="Imobiliária" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="Crédito" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
 
                 {/* Tabela mensal detalhada */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">
-                      Detalhe Mensal — {selectedYear}
-                    </CardTitle>
+                    <CardTitle className="text-base">Detalhe Mensal — {selectedYear}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                              Mês
-                            </th>
-                            <th className="text-right py-2 px-3 font-medium text-muted-foreground">
-                              Processos
-                            </th>
-                            <th className="text-right py-2 px-3 font-medium text-muted-foreground">
-                              Valor Imóveis
-                            </th>
-                            <th className="text-right py-2 px-3 font-medium text-green-600">
-                              Receita
-                            </th>
-                            <th className="text-right py-2 px-3 font-medium text-red-600">
-                              Despesas
-                            </th>
-                            <th className="text-right py-2 px-3 font-medium text-blue-600">
-                              Lucro
-                            </th>
+                            <th className="text-left py-2 px-3 font-medium text-muted-foreground">Mês</th>
+                            <th className="text-right py-2 px-3 font-medium text-muted-foreground">Proc.</th>
+                            <th className="text-right py-2 px-3 font-medium text-purple-600">Imob. Receita</th>
+                            <th className="text-right py-2 px-3 font-medium text-purple-700">Imob. Lucro</th>
+                            <th className="text-right py-2 px-3 font-medium text-blue-600">Créd. Receita</th>
+                            <th className="text-right py-2 px-3 font-medium text-blue-700">Créd. Lucro</th>
+                            <th className="text-right py-2 px-3 font-medium text-green-600">Total Lucro</th>
                           </tr>
                         </thead>
                         <tbody>
                           {monthly.monthly.map((m) => (
-                            <tr
-                              key={m.month}
-                              className="border-b hover:bg-muted/50"
-                            >
-                              <td className="py-2 px-3 font-medium">
-                                {m.month_label}
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                {m.num_processos}
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                {m.valor_imoveis > 0
-                                  ? formatCurrency(m.valor_imoveis)
-                                  : "—"}
-                              </td>
-                              <td className="py-2 px-3 text-right text-green-600 font-medium">
-                                {m.receita > 0
-                                  ? formatCurrency(m.receita)
-                                  : "—"}
-                              </td>
-                              <td className="py-2 px-3 text-right text-red-600">
-                                {m.despesas > 0
-                                  ? formatCurrency(m.despesas)
-                                  : "—"}
-                              </td>
-                              <td className="py-2 px-3 text-right text-blue-600 font-semibold">
-                                {m.lucro > 0
-                                  ? formatCurrency(m.lucro)
-                                  : "—"}
+                            <tr key={m.month} className="border-b hover:bg-muted/50">
+                              <td className="py-2 px-3 font-medium">{m.month_label}</td>
+                              <td className="py-2 px-3 text-right">{m.num_processos}</td>
+                              <td className="py-2 px-3 text-right">{m.imob_receita > 0 ? formatCurrency(m.imob_receita) : "—"}</td>
+                              <td className="py-2 px-3 text-right">{m.imob_lucro_liquido > 0 ? formatCurrency(m.imob_lucro_liquido) : "—"}</td>
+                              <td className="py-2 px-3 text-right">{m.cred_receita > 0 ? formatCurrency(m.cred_receita) : "—"}</td>
+                              <td className="py-2 px-3 text-right">{m.cred_lucro_liquido > 0 ? formatCurrency(m.cred_lucro_liquido) : "—"}</td>
+                              <td className="py-2 px-3 text-right font-semibold text-green-600">
+                                {formatCurrency((m.imob_lucro_liquido || 0) + (m.cred_lucro_liquido || 0))}
                               </td>
                             </tr>
                           ))}
@@ -662,68 +816,17 @@ const FinanceDashboard = () => {
                         <tfoot>
                           <tr className="font-bold border-t-2">
                             <td className="py-3 px-3">Total</td>
-                            <td className="py-3 px-3 text-right">
-                              {monthly.total_processos}
-                            </td>
-                            <td className="py-3 px-3 text-right">
-                              {formatCurrency(monthly.total_valor_imoveis)}
-                            </td>
+                            <td className="py-3 px-3 text-right">{monthly.totals?.total_processos}</td>
+                            <td className="py-3 px-3 text-right text-purple-600">{formatCurrency(monthly.totals?.total_imob_receita)}</td>
+                            <td className="py-3 px-3 text-right text-purple-700">{formatCurrency(monthly.totals?.total_imob_lucro)}</td>
+                            <td className="py-3 px-3 text-right text-blue-600">{formatCurrency(monthly.totals?.total_cred_receita)}</td>
+                            <td className="py-3 px-3 text-right text-blue-700">{formatCurrency(monthly.totals?.total_cred_lucro)}</td>
                             <td className="py-3 px-3 text-right text-green-600">
-                              {formatCurrency(monthly.total_receita)}
-                            </td>
-                            <td className="py-3 px-3 text-right text-red-600">
-                              {formatCurrency(monthly.total_despesas)}
-                            </td>
-                            <td className="py-3 px-3 text-right text-blue-600">
-                              {formatCurrency(monthly.total_lucro)}
+                              {formatCurrency((monthly.totals?.total_imob_lucro || 0) + (monthly.totals?.total_cred_lucro || 0))}
                             </td>
                           </tr>
                         </tfoot>
                       </table>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Gráfico acumulado */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">
-                      Evolução Mensal Acumulada
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-[200px] sm:h-[300px] lg:h-[350px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={monthlyChartData}>
-                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                          <XAxis dataKey="name" fontSize={12} />
-                          <YAxis
-                            fontSize={12}
-                            tickFormatter={(v) =>
-                              v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v
-                            }
-                          />
-                          <Tooltip content={<FinanceTooltip />} />
-                          <Legend />
-                          <Bar
-                            dataKey="Receita"
-                            fill="#22c55e"
-                            radius={[4, 4, 0, 0]}
-                            stackId="a"
-                          />
-                          <Bar
-                            dataKey="Despesas"
-                            fill="#ef4444"
-                            radius={[4, 4, 0, 0]}
-                            stackId="b"
-                          />
-                          <Bar
-                            dataKey="Lucro"
-                            fill="#3b82f6"
-                            radius={[4, 4, 0, 0]}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
                     </div>
                   </CardContent>
                 </Card>
@@ -739,103 +842,62 @@ const FinanceDashboard = () => {
                   <FinanceStatCard
                     title="Total Comissões Pagas"
                     value={formatCurrency(commissions.total_comissoes_pagas)}
-                    subtitle="Estimativa de pagamentos a colaboradores"
+                    subtitle="Pagamentos a colaboradores"
                     icon={Users}
-                    color="text-red-600"
+                    color="text-orange-600"
+                    iconBg="bg-orange-50"
                   />
                   <FinanceStatCard
                     title="Colaboradores Activos"
                     value={commissions.collaborators.length}
-                    subtitle="Consultores e intermediários com processos"
+                    subtitle="Consultores e intermediários"
                     icon={Users}
                     color="text-blue-600"
+                    iconBg="bg-blue-50"
                   />
                 </div>
 
-                {/* Ranking de colaboradores */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">
-                      Ranking de Colaboradores — {selectedYear}
-                    </CardTitle>
-                    <CardDescription>
-                      Comissões associadas a processos concluídos
-                    </CardDescription>
+                    <CardTitle className="text-base">Ranking de Colaboradores — {selectedYear}</CardTitle>
+                    <CardDescription>Comissões por área de negócio</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {commissions.collaborators.length === 0 ? (
-                      <p className="text-center text-muted-foreground py-8">
-                        Sem dados de comissões para este período.
-                      </p>
+                      <p className="text-center text-muted-foreground py-8">Sem dados de comissões para este período.</p>
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="border-b">
-                              <th className="text-left py-2 px-3 font-medium text-muted-foreground w-8">
-                                #
-                              </th>
-                              <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                                Colaborador
-                              </th>
-                              <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                                Função
-                              </th>
-                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">
-                                Processos
-                              </th>
-                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">
-                                Comissão Total
-                              </th>
-                              <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                                Tipos
-                              </th>
+                              <th className="text-left py-2 px-3 font-medium text-muted-foreground w-8">#</th>
+                              <th className="text-left py-2 px-3 font-medium text-muted-foreground">Colaborador</th>
+                              <th className="text-left py-2 px-3 font-medium text-muted-foreground">Função</th>
+                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Processos</th>
+                              <th className="text-right py-2 px-3 font-medium text-purple-600">Imobiliária</th>
+                              <th className="text-right py-2 px-3 font-medium text-blue-600">Crédito</th>
+                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Total</th>
                             </tr>
                           </thead>
                           <tbody>
                             {commissions.collaborators.map((c, idx) => (
-                              <tr
-                                key={c.name}
-                                className="border-b hover:bg-muted/50"
-                              >
-                                <td className="py-2 px-3 text-muted-foreground font-mono">
-                                  {idx + 1}
-                                </td>
-                                <td className="py-2 px-3 font-medium">
-                                  {c.name}
-                                </td>
+                              <tr key={c.name} className="border-b hover:bg-muted/50">
+                                <td className="py-2 px-3 text-muted-foreground font-mono">{idx + 1}</td>
+                                <td className="py-2 px-3 font-medium">{c.name}</td>
                                 <td className="py-2 px-3">
-                                  <Badge
-                                    variant={
-                                      c.role === "consultor"
-                                        ? "default"
-                                        : "secondary"
-                                    }
-                                    className="text-xs"
-                                  >
-                                    {c.role === "consultor"
-                                      ? "Consultor"
-                                      : "Intermediário"}
+                                  <Badge variant={c.role === "consultor" ? "default" : "secondary"} className="text-xs">
+                                    {c.role === "consultor" ? "Consultor" : "Intermediário"}
                                   </Badge>
                                 </td>
-                                <td className="py-2 px-3 text-right">
-                                  {c.num_processos}
+                                <td className="py-2 px-3 text-right">{c.num_processos}</td>
+                                <td className="py-2 px-3 text-right text-purple-600">
+                                  {formatCurrency(c.areas?.imobiliaria || 0)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-blue-600">
+                                  {formatCurrency(c.areas?.credito || 0)}
                                 </td>
                                 <td className="py-2 px-3 text-right font-semibold text-green-600">
                                   {formatCurrency(c.total_comissao)}
-                                </td>
-                                <td className="py-2 px-3">
-                                  <div className="flex flex-wrap gap-1">
-                                    {c.tipos_processo.map((t, i) => (
-                                      <Badge
-                                        key={i}
-                                        variant="outline"
-                                        className="text-xs capitalize"
-                                      >
-                                        {t}
-                                      </Badge>
-                                    ))}
-                                  </div>
                                 </td>
                               </tr>
                             ))}
