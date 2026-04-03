@@ -281,7 +281,7 @@ const FilteredProcessList = () => {
 
               {/* O9 - Desktop: Table */}
               <div className="hidden md:block">
-            <ScrollArea className="h-[600px]">
+            <ScrollArea className="h-[400px] sm:h-[600px]">
               <Table>
                 <TableHeader>
                   <TableRow>

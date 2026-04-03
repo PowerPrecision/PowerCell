@@ -836,7 +836,7 @@ const BackgroundJobsPage = () => {
                 </p>
               </div>
             ) : (
-              <ScrollArea className="h-[500px] pr-2">
+              <ScrollArea className="h-[300px] sm:h-[500px] pr-2">
                 <div className="space-y-3">
                   {jobs.map(job => (
                     <JobCard 

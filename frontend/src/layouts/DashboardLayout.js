@@ -844,7 +844,7 @@ const DashboardLayout = ({ children, title }) => {
         </header>
 
         {/* Page content */}
-        <main className="p-4 lg:p-6 pb-24 md:pb-6 overflow-hidden">{children}</main>
+        <main className="p-4 lg:p-6 pb-24 md:pb-6 overflow-x-auto">{children}</main>
       </div>
       
       {/* Mobile Bottom Navigation */}
