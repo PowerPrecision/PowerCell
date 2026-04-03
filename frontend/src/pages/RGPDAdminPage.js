@@ -1,6 +1,7 @@
 /**
  * RGPDAdminPage - Página de Administração de RGPD
  * Permite ao admin visualizar e editar os dados dos formulários RGPD assinados
+ * Inclui aba de edição do template legal RGPD
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
@@ -10,6 +11,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +29,7 @@ import {
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { toast } from "sonner";
+import { getRGPDTemplate, updateRGPDTemplate } from "../services/api";
 import {
   FileText,
   Loader2,
@@ -40,16 +43,20 @@ import {
   Users,
   FileSignature,
   ExternalLink,
+  Save,
+  RotateCcw,
+  FileEdit,
+  Info,
 } from "lucide-react";
-import { 
-  StatCard, 
-  ConfirmDeleteModal, 
-  LoadingState, 
-  EmptyState, 
+import {
+  StatCard,
+  ConfirmDeleteModal,
+  LoadingState,
+  EmptyState,
   Pagination,
   AccessRestricted,
   AdminSearchFilter,
-  PageHeader
+  PageHeader,
 } from "../components/admin/AdminPageShared";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -396,7 +403,232 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
   );
 };
 
-const RGPDAdminPage = () => {
+// ============ ABA: TEMPLATE RGPD ============
+
+const RGPDTemplateTab = () => {
+  const { token, user } = useAuth();
+  const [templateContent, setTemplateContent] = useState("");
+  const [originalContent, setOriginalContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [templateMeta, setTemplateMeta] = useState({
+    is_default: true,
+    updated_at: null,
+    updated_by: null,
+  });
+
+  const isAdminOrCEO = user?.role === "admin" || user?.role === "ceo";
+
+  useEffect(() => {
+    fetchTemplate();
+  }, [token]);
+
+  const fetchTemplate = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/rgpd/admin/template`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setTemplateContent(data.content);
+        setOriginalContent(data.content);
+        setTemplateMeta({
+          is_default: data.is_default,
+          updated_at: data.updated_at,
+          updated_by: data.updated_by,
+        });
+      } else if (response.status === 403) {
+        setTemplateContent("Não tem permissão para visualizar o template RGPD.");
+      } else {
+        toast.error("Erro ao carregar o template RGPD");
+      }
+    } catch (error) {
+      console.error("Erro:", error);
+      toast.error("Erro ao carregar o template RGPD");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!templateContent.trim()) {
+      toast.error("O template não pode estar vazio");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await updateRGPDTemplate(templateContent);
+
+      if (response.status === 200 || response.status === 201) {
+        const data = response.data;
+        toast.success("Template RGPD guardado com sucesso");
+        setOriginalContent(templateContent);
+        setTemplateMeta({
+          is_default: false,
+          updated_at: data.updated_at,
+          updated_by: user?.name || "Utilizador",
+        });
+      }
+    } catch (error) {
+      if (error.response?.status === 403) {
+        toast.error("Apenas Admin ou CEO podem editar o template");
+      } else {
+        toast.error("Erro ao guardar o template RGPD");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      const response = await updateRGPDTemplate("");
+
+      if (response.status === 200 || response.status === 201) {
+        // Busca o template padrão novamente
+        const getResponse = await getRGPDTemplate();
+        if (getResponse.status === 200) {
+          const data = getResponse.data;
+          setTemplateContent(data.content);
+          setOriginalContent(data.content);
+          setTemplateMeta({
+            is_default: data.is_default,
+            updated_at: data.updated_at,
+            updated_by: data.updated_by,
+          });
+        }
+        toast.success("Template restaurado para o valor padrão");
+      }
+    } catch (error) {
+      toast.error("Erro ao restaurar o template padrão");
+    }
+  };
+
+  const hasChanges = templateContent !== originalContent;
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-12">
+          <LoadingState />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Info Bar */}
+      <Card>
+        <CardContent className="py-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              <Info className="h-4 w-4 text-blue-500" />
+              <span className="text-sm text-muted-foreground">
+                {templateMeta.is_default
+                  ? "A utilizar o template padrão. Edite para personalizar o texto legal do RGPD."
+                  : `Última atualização: ${
+                      templateMeta.updated_at
+                        ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
+                        : "N/A"
+                    } ${templateMeta.updated_by ? `por ${templateMeta.updated_by}` : ""}`}
+              </span>
+            </div>
+            {templateMeta.is_default && (
+              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                Template Padrão
+              </Badge>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Editor */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileEdit className="h-5 w-5" />
+            Texto do Formulário RGPD
+          </CardTitle>
+          <CardDescription>
+            Edite o texto legal do formulário de consentimento RGPD. As variáveis como {"{{NOME}}"}, {"{{CONTRIBUINTE}}"} e {"{{MORADA}}"} serão substituídas automaticamente pelos dados do cliente.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Textarea
+            value={templateContent}
+            onChange={(e) => setTemplateContent(e.target.value)}
+            rows={20}
+            className="font-mono text-sm leading-relaxed"
+            placeholder="Introduza o texto do template RGPD..."
+            disabled={!isAdminOrCEO}
+          />
+
+          {/* Variáveis disponíveis */}
+          <div className="bg-muted/50 rounded-lg p-3">
+            <p className="text-sm font-medium mb-2">Variáveis disponíveis:</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                "{{NOME}}",
+                "{{CONTRIBUINTE}}",
+                "{{MORADA}}",
+                "{{CODIGO_POSTAL}}",
+                "{{TIPO_DOCUMENTO}}",
+                "{{NUMERO_DOCUMENTO}}",
+                "{{VALIDADE_DOCUMENTO}}",
+                "{{DATA_ASSINATURA}}",
+              ].map((variable) => (
+                <Badge key={variable} variant="secondary" className="font-mono text-xs">
+                  {variable}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          {isAdminOrCEO ? (
+            <div className="flex items-center justify-between pt-2 border-t">
+              <Button
+                variant="outline"
+                onClick={handleReset}
+                disabled={saving || templateMeta.is_default}
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Restaurar Padrão
+              </Button>
+              <div className="flex items-center gap-2">
+                {hasChanges && (
+                  <span className="text-sm text-amber-600 font-medium">
+                    Alterações por guardar
+                  </span>
+                )}
+                <Button onClick={handleSave} disabled={saving || !hasChanges}>
+                  {saving ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  Guardar Template
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground pt-2 border-t">
+              Apenas utilizadores Admin ou CEO podem editar o template RGPD.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+// ============ ABA: PEDIDOS RGPD ============
+
+const RGPDPedidosTab = () => {
   const { token, user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState([]);
@@ -553,120 +785,104 @@ const RGPDAdminPage = () => {
     }
   };
 
-  // Verificar acesso
-  const accessDenied = <AccessRestricted userRole={user?.role} allowedRoles={["admin", "staff"]} />;
-  if (accessDenied) {
-    return <DashboardLayout>{accessDenied}</DashboardLayout>;
-  }
-
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <PageHeader
-          icon={FileSignature}
-          title="Gestão de RGPD"
-          description="Visualize e edite os dados dos formulários RGPD assinados"
-          onRefresh={() => { fetchData(); fetchStats(); }}
-        />
+    <div className="space-y-4">
+      {/* Estatísticas */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <StatCard title="Total" value={stats.total} icon={FileText} color="text-blue-600" />
+          <StatCard title="Assinados" value={stats.signed} icon={CheckCircle} color="text-green-600" />
+          <StatCard title="Pendentes" value={stats.pending} icon={Clock} color="text-yellow-600" />
+          <StatCard title="Expirados" value={stats.expired} icon={XCircle} color="text-red-600" />
+          <StatCard title="Assinados Hoje" value={stats.signed_today} icon={Users} color="text-purple-600" />
+        </div>
+      )}
 
-        {/* Estatísticas */}
-        {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <StatCard title="Total" value={stats.total} icon={FileText} color="text-blue-600" />
-            <StatCard title="Assinados" value={stats.signed} icon={CheckCircle} color="text-green-600" />
-            <StatCard title="Pendentes" value={stats.pending} icon={Clock} color="text-yellow-600" />
-            <StatCard title="Expirados" value={stats.expired} icon={XCircle} color="text-red-600" />
-            <StatCard title="Assinados Hoje" value={stats.signed_today} icon={Users} color="text-purple-600" />
-          </div>
-        )}
+      {/* Filtros */}
+      <AdminSearchFilter
+        search={search}
+        onSearchChange={(v) => { setSearch(v); setPage(1); }}
+        statusFilter={statusFilter}
+        onStatusChange={(v) => { setStatusFilter(v); setPage(1); }}
+        statusOptions={RGPD_STATUS_OPTIONS}
+        searchPlaceholder="Pesquisar por nome ou NIF..."
+      />
 
-        {/* Filtros */}
-        <AdminSearchFilter
-          search={search}
-          onSearchChange={(v) => { setSearch(v); setPage(1); }}
-          statusFilter={statusFilter}
-          onStatusChange={(v) => { setStatusFilter(v); setPage(1); }}
-          statusOptions={RGPD_STATUS_OPTIONS}
-          searchPlaceholder="Pesquisar por nome ou NIF..."
-        />
-
-        {/* Lista */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Pedidos de RGPD ({total})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <LoadingState />
-            ) : requests.length === 0 ? (
-              <EmptyState icon={FileText} message="Nenhum RGPD encontrado" />
-            ) : (
-              <div className="space-y-2">
-                {/* Table Header */}
-                <div className="grid grid-cols-12 gap-2 px-3 py-2 text-sm font-medium text-muted-foreground border-b">
-                  <div className="col-span-3">Cliente</div>
-                  <div className="col-span-2">NIF</div>
-                  <div className="col-span-2">Estado</div>
-                  <div className="col-span-2">Data</div>
-                  <div className="col-span-3 text-right">Ações</div>
-                </div>
-
-                {/* Rows */}
-                {requests.map((rgpd) => (
-                  <div
-                    key={rgpd.id}
-                    className="grid grid-cols-12 gap-2 px-3 py-3 items-center hover:bg-muted/50 rounded-lg"
-                  >
-                    <div className="col-span-3">
-                      <p className="font-medium truncate">{rgpd.client_name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{rgpd.client_email}</p>
-                    </div>
-                    <div className="col-span-2 text-sm">
-                      {rgpd.consent_data?.contribuinte || "-"}
-                    </div>
-                    <div className="col-span-2">
-                      <StatusBadge status={rgpd.status} />
-                    </div>
-                    <div className="col-span-2 text-sm text-muted-foreground">
-                      {rgpd.signed_at
-                        ? new Date(rgpd.signed_at).toLocaleDateString("pt-PT")
-                        : new Date(rgpd.created_at).toLocaleDateString("pt-PT")}
-                    </div>
-                    <div className="col-span-3 flex justify-end gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => handleView(rgpd)} title="Ver detalhes">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      {rgpd.status === "signed" && (
-                        <Button variant="ghost" size="sm" onClick={() => handleEdit(rgpd)} title="Editar">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                      )}
-                      {rgpd.status === "pending" && (
-                        <Button variant="ghost" size="sm" onClick={() => handleResend(rgpd)} disabled={actionLoading} title="Reenviar email">
-                          <Send className="h-4 w-4" />
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDeleteModal({ open: true, rgpd })}
-                        title="Eliminar"
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+      {/* Lista */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Pedidos de RGPD ({total})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <LoadingState />
+          ) : requests.length === 0 ? (
+            <EmptyState icon={FileText} message="Nenhum RGPD encontrado" />
+          ) : (
+            <div className="space-y-2">
+              {/* Table Header */}
+              <div className="grid grid-cols-12 gap-2 px-3 py-2 text-sm font-medium text-muted-foreground border-b">
+                <div className="col-span-3">Cliente</div>
+                <div className="col-span-2">NIF</div>
+                <div className="col-span-2">Estado</div>
+                <div className="col-span-2">Data</div>
+                <div className="col-span-3 text-right">Ações</div>
               </div>
-            )}
 
-            {/* Pagination */}
-            <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
-          </CardContent>
-        </Card>
-      </div>
+              {/* Rows */}
+              {requests.map((rgpd) => (
+                <div
+                  key={rgpd.id}
+                  className="grid grid-cols-12 gap-2 px-3 py-3 items-center hover:bg-muted/50 rounded-lg"
+                >
+                  <div className="col-span-3">
+                    <p className="font-medium truncate">{rgpd.client_name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{rgpd.client_email}</p>
+                  </div>
+                  <div className="col-span-2 text-sm">
+                    {rgpd.consent_data?.contribuinte || "-"}
+                  </div>
+                  <div className="col-span-2">
+                    <StatusBadge status={rgpd.status} />
+                  </div>
+                  <div className="col-span-2 text-sm text-muted-foreground">
+                    {rgpd.signed_at
+                      ? new Date(rgpd.signed_at).toLocaleDateString("pt-PT")
+                      : new Date(rgpd.created_at).toLocaleDateString("pt-PT")}
+                  </div>
+                  <div className="col-span-3 flex justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => handleView(rgpd)} title="Ver detalhes">
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    {rgpd.status === "signed" && (
+                      <Button variant="ghost" size="sm" onClick={() => handleEdit(rgpd)} title="Editar">
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {rgpd.status === "pending" && (
+                      <Button variant="ghost" size="sm" onClick={() => handleResend(rgpd)} disabled={actionLoading} title="Reenviar email">
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeleteModal({ open: true, rgpd })}
+                      title="Eliminar"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          <Pagination page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
+        </CardContent>
+      </Card>
 
       {/* Modals */}
       <EditModal
@@ -693,6 +909,54 @@ const RGPDAdminPage = () => {
         itemDetails={deleteModal.rgpd ? `${deleteModal.rgpd.client_email} • Estado: ${deleteModal.rgpd.status}` : ""}
         loading={actionLoading}
       />
+    </div>
+  );
+};
+
+// ============ PÁGINA PRINCIPAL ============
+
+const RGPDAdminPage = () => {
+  const { user } = useAuth();
+
+  // Verificar acesso
+  const accessDenied = <AccessRestricted userRole={user?.role} allowedRoles={["admin", "staff"]} />;
+  if (accessDenied) {
+    return <DashboardLayout>{accessDenied}</DashboardLayout>;
+  }
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <PageHeader
+          icon={FileSignature}
+          title="Gestão de RGPD"
+          description="Visualize e edite os dados dos formulários RGPD assinados e personalize o template legal"
+          onRefresh={() => window.location.reload()}
+        />
+
+        {/* Tabs */}
+        <Tabs defaultValue="pedidos" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="pedidos" className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Pedidos RGPD
+            </TabsTrigger>
+            <TabsTrigger value="template" className="flex items-center gap-2">
+              <FileEdit className="h-4 w-4" />
+              Template RGPD
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="pedidos">
+            <RGPDPedidosTab />
+          </TabsContent>
+
+          <TabsContent value="template">
+            <RGPDTemplateTab />
+          </TabsContent>
+        </Tabs>
+      </div>
     </DashboardLayout>
   );
 };
