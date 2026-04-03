@@ -84,9 +84,9 @@ def can_view_process(user: dict, process: dict) -> bool:
     Verifica se o utilizador pode ver o processo baseado no seu papel.
     
     Regras:
-    - Staff (admin, ceo, diretor, administrativo, consultor, mediador, intermediario): 
+    - Staff (admin, ceo, diretor, administrativo, consultor, mediador, intermediario, indexacao): 
       podem ver TODOS os processos da empresa
-    - Indexação: apenas processos atribuídos a ele (assigned_indexacao_id)
+    - Indexação vê todos os processos para poder atribuir a consultores/intermediários
     - Clientes: apenas os seus próprios processos
     
     Args:
@@ -99,12 +99,9 @@ def can_view_process(user: dict, process: dict) -> bool:
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    # INDEXACAO pode ver APENAS os processos que lhe estão atribuídos
-    if user_role == "indexacao":
-        return process.get("assigned_indexacao_id") == user_id
-    
-    # Outros staff podem ver todos os processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]
+    # Todos os staff podem ver todos os processos
+    # Indexação incluído pois precisa de ver todos para atribuir processos
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return True
     
@@ -129,12 +126,9 @@ def build_query_filter(user: dict) -> dict:
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    # INDEXACAO vê todos os processos (acesso total de leitura)
-    if user_role == "indexacao":
-        return {}
-    
-    # Outros staff veem todos os processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]
+    # Staff (incluindo indexacao) veem todos os processos
+    # Indexação precisa de ver todos para poder atribuir a consultores/intermediários
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return {}
     
