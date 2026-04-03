@@ -542,7 +542,7 @@ const TrelloIntegration = () => {
                     {status.member_mapping.map((mapping, idx) => (
                   <div 
                     key={idx}
-                    className={`flex items-center justify-between p-3 rounded text-sm ${
+                    className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded text-sm ${
                       mapping.matched ? "bg-green-50 border border-green-200" : "bg-amber-50 border border-amber-200"
                     }`}
                   >
@@ -560,7 +560,7 @@ const TrelloIntegration = () => {
                     
                     <div className="flex items-center gap-2">
                       <select
-                        className="text-sm border rounded px-2 py-1 bg-white dark:bg-gray-900 min-w-[200px]"
+                        className="text-sm border rounded px-2 py-1 bg-white dark:bg-gray-900 w-full sm:min-w-[200px]"
                         value={
                           pendingMappings[mapping.trello_username] !== undefined 
                             ? pendingMappings[mapping.trello_username] 

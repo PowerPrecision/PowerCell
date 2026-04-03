@@ -567,7 +567,7 @@ const MinutasPage = () => {
                 )}
               </div>
             ) : (
-              <ScrollArea className="h-[500px]">
+              <ScrollArea className="h-[300px] sm:h-[500px]">
                 <div className="grid gap-4">
                   {filteredMinutas.map((minuta) => (
                     <Card key={minuta.id} className="hover:shadow-md transition-shadow">

@@ -811,7 +811,7 @@ const LeadsKanban = () => {
           <div className="flex items-center gap-2">
             <Label className="text-sm whitespace-nowrap">Filtrar por Consultor:</Label>
             <Select value={filterConsultor} onValueChange={setFilterConsultor}>
-              <SelectTrigger className="w-[200px]" data-testid="filter-consultor">
+              <SelectTrigger className="w-full sm:w-[200px]" data-testid="filter-consultor">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
               <SelectContent>
@@ -828,7 +828,7 @@ const LeadsKanban = () => {
           <div className="flex items-center gap-2">
             <Label className="text-sm whitespace-nowrap">Filtrar por Estado:</Label>
             <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-[180px]" data-testid="filter-status">
+              <SelectTrigger className="w-full sm:w-[180px]" data-testid="filter-status">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
               <SelectContent>

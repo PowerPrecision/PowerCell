@@ -336,7 +336,7 @@ async def get_finance_performance(
 
     won_statuses = ["concluidos"]
 
-    def _calc_year_metrics(yr: int) -> dict:
+    async def _calc_year_metrics(yr: int) -> dict:
         start = f"{yr}-01-01T00:00:00.000Z"
         end = f"{yr}-12-31T23:59:59.999Z"
 

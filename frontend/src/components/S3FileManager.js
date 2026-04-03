@@ -1961,7 +1961,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           {/* VISTA DE LISTA - Explorador de Ficheiros */}
           {/* ========================================= */}
           {viewMode === "list" && (
-            <div className="flex gap-2 mt-3 h-[450px]">
+            <div className="flex flex-col sm:flex-row gap-2 mt-3 h-[300px] sm:h-[450px]">
               {/* Sidebar - Categorias (apenas ícones) */}
               <div className="w-10 flex-shrink-0 border rounded-lg overflow-hidden flex flex-col">
                 <div className="bg-muted/50 px-1 py-1.5 text-[10px] font-medium border-b flex items-center justify-center">
@@ -2405,7 +2405,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             draggable
                             onDragStart={(e) => handleDragStart(e, file)}
                             onDragEnd={handleDragEnd}
-                            className={`flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group cursor-grab active:cursor-grabbing ${isDragging ? "opacity-40 ring-2 ring-teal-400" : ""}`}
+                            className={`flex flex-col w-[140px] sm:w-[180px] md:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group cursor-grab active:cursor-grabbing ${isDragging ? "opacity-40 ring-2 ring-teal-400" : ""}`}
                           >
                             {/* Icon and actions row */}
                             <div className="flex items-center justify-between mb-2">
@@ -2493,7 +2493,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               draggable
                               onDragStart={(e) => handleDragStart(e, file)}
                               onDragEnd={handleDragEnd}
-                              className={`flex flex-col w-[180px] sm:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group cursor-grab active:cursor-grabbing ${isDragging ? "opacity-40 ring-2 ring-teal-400" : ""}`}
+                              className={`flex flex-col w-[140px] sm:w-[180px] md:w-[200px] p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group cursor-grab active:cursor-grabbing ${isDragging ? "opacity-40 ring-2 ring-teal-400" : ""}`}
                               data-testid={`file-item-${idx}`}
                             >
                               {/* Icon and actions row */}
@@ -3317,7 +3317,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
               {/* Detalhes */}
               {organizeResults.details?.length > 0 && (
-                <div className="border rounded-lg max-h-40 overflow-auto">
+                <div className="border rounded-lg max-h-40 overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead className="bg-muted sticky top-0">
                       <tr>

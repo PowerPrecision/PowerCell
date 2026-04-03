@@ -131,24 +131,22 @@ async def _call_gemini(content: str, task_type: str, context: str, model: str) -
         if "2.0" in model:
             gemini_model = model.replace("gemini-", "gemini-")
         
-        model_instance = genai.GenerativeModel(gemini_model)
+        model_instance = genai.GenerativeModel(
+            gemini_model,
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
+        )
         response = model_instance.generate_content(prompt)
         
         result_text = response.text.strip()
         
-        # Limpar markdown
-        if result_text.startswith("```json"):
-            result_text = result_text[7:]
-        if result_text.startswith("```"):
-            result_text = result_text[3:]
-        if result_text.endswith("```"):
-            result_text = result_text[:-3]
-        
         try:
-            data = json.loads(result_text.strip())
+            data = json.loads(result_text)
             return {"success": True, "data": data, "model": model}
         except json.JSONDecodeError:
-            return {"success": True, "data": {"raw": result_text}, "model": model}
+            logger.warning(f"Gemini não retornou JSON válido para {task_type}")
+            return {"success": False, "error": "Resposta inválida do modelo", "model": model}
             
     except Exception as e:
         logger.error(f"Erro Gemini: {e}")
@@ -169,25 +167,30 @@ async def _call_openai(content: str, task_type: str, context: str, model: str) -
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"{task_type}-analysis",
-            system_message="Responde sempre em formato JSON estruturado. Usa português de Portugal."
+            system_message="Responde SEMPRE e APENAS em formato JSON válido. Sem texto, sem markdown, sem explicações. Apenas o JSON."
         ).with_model("openai", model)
         
         response = await chat.send_message(UserMessage(text=prompt))
         
-        # Limpar markdown
+        # Limpar markdown wrapping
         result_text = response.strip()
         if result_text.startswith("```json"):
             result_text = result_text[7:]
-        if result_text.startswith("```"):
+        elif result_text.startswith("```"):
             result_text = result_text[3:]
         if result_text.endswith("```"):
             result_text = result_text[:-3]
         
         try:
             data = json.loads(result_text.strip())
-            return {"success": True, "data": data, "model": model}
+            if isinstance(data, dict):
+                return {"success": True, "data": data, "model": model}
+            else:
+                logger.warning(f"OpenAI não retornou dict para {task_type}")
+                return {"success": False, "error": "Resposta não é um objeto JSON", "model": model}
         except json.JSONDecodeError:
-            return {"success": True, "data": {"raw": result_text}, "model": model}
+            logger.warning(f"OpenAI não retornou JSON válido para {task_type}")
+            return {"success": False, "error": "Resposta inválida do modelo", "model": model}
             
     except Exception as e:
         logger.error(f"Erro OpenAI: {e}")
