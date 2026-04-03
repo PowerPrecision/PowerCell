@@ -177,6 +177,56 @@ def get_openai_client():
     return AsyncOpenAI(**client_kwargs)
 
 
+def _parse_json_response(response_text: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse robusto de JSON da resposta do LLM.
+    
+    Estratégia (defesa em profundidade):
+    1. json.loads() direto — quando response_format={"type": "json_object"} garante JSON puro
+    2. Strip de markdown (```json ... ```) — LLMs podem envolver em code blocks
+    3. re.search como ÚLTIMO recurso — frágil, mas evita perda total de dados
+    
+    Args:
+        response_text: Texto da resposta do LLM
+        
+    Returns:
+        Dict parseado, ou None se não for possível
+    """
+    import json
+    
+    if not response_text or not response_text.strip():
+        return None
+    
+    # 1. Tentar parse direto (response_format garante JSON puro)
+    try:
+        return json.loads(response_text.strip())
+    except (json.JSONDecodeError, ValueError):
+        pass
+    
+    # 2. Tentar remover wrapping de markdown code blocks
+    cleaned = response_text.strip()
+    if cleaned.startswith('```'):
+        # Remover ```json ... ``` ou ``` ... ```
+        lines = cleaned.split('\n')
+        if len(lines) > 1:
+            # Remover primeira e última linha (```json e ```)
+            inner = '\n'.join(lines[1:-1])
+            try:
+                return json.loads(inner.strip())
+            except (json.JSONDecodeError, ValueError):
+                pass
+    
+    # 3. Último recurso: regex (frágil, mas melhor que nada)
+    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group())
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+    return None
+
+
 async def analyze_document_with_ai(
     file_content: bytes,
     file_name: str,
@@ -264,11 +314,12 @@ async def analyze_document_with_ai(
                     response = await client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[
-                            {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
+                            {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT + "\n\nIMPORTANTE: Retorna APENAS JSON válido, sem texto adicional antes ou depois."},
                             {"role": "user", "content": f"Analise este documento ({file_name}) extraído de um PDF. Conteúdo:\n\n{text_content}"}
                         ],
                         max_tokens=2000,
-                        temperature=0.1
+                        temperature=0.1,
+                        response_format={"type": "json_object"}
                     )
                 else:
                     return {"success": False, "error": "Não foi possível extrair texto do PDF"}
@@ -281,7 +332,7 @@ async def analyze_document_with_ai(
             response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT},
+                    {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT + "\n\nIMPORTANTE: Retorna APENAS JSON válido, sem texto adicional antes ou depois."},
                     {
                         "role": "user",
                         "content": [
@@ -291,7 +342,8 @@ async def analyze_document_with_ai(
                     }
                 ],
                 max_tokens=2000,
-                temperature=0.1
+                temperature=0.1,
+                response_format={"type": "json_object"}
             )
         
         # Obter a resposta
@@ -314,34 +366,21 @@ async def analyze_document_with_ai(
         except Exception as counter_err:
             logger.warning(f"Erro ao incrementar contador de treino IA: {counter_err}")
         
-        # Parse da resposta JSON
-        import json
-        
-        # Tentar extrair JSON da resposta
-        json_match = re.search(r'\{[\s\S]*\}', response_text)
-        if json_match:
-            try:
-                result = json.loads(json_match.group())
-                result["success"] = True
-                result["file_name"] = file_name
-                return result
-            except json.JSONDecodeError as e:
-                logger.warning(f"Erro ao fazer parse do JSON: {e}")
-                return {
-                    "success": True,
-                    "tipo_documento": "outro",
-                    "confianca": 0.5,
-                    "dados_extraidos": {},
-                    "observacoes": response_text,
-                    "file_name": file_name
-                }
+        # Parse da resposta JSON (response_format garante JSON puro,
+        # mas usamos parse robusto como defesa em profundidade)
+        result = _parse_json_response(response_text)
+        if result:
+            result["success"] = True
+            result["file_name"] = file_name
+            return result
         else:
+            logger.warning(f"Não foi possível parsear JSON da resposta do LLM para {file_name}")
             return {
                 "success": True,
                 "tipo_documento": "outro",
                 "confianca": 0.3,
                 "dados_extraidos": {},
-                "observacoes": response_text,
+                "observacoes": response_text[:500],
                 "file_name": file_name
             }
             
