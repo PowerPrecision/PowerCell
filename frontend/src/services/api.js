@@ -506,5 +506,9 @@ export const getFinanceMonthly = (params = {}) => api.get("/finance/monthly", { 
 export const getFinanceCommissions = (params = {}) => api.get("/finance/commissions", { params });
 export const getFinancePerformance = (params = {}) => api.get("/finance/performance", { params });
 
+// ===== RGPD TEMPLATE =====
+export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
+export const updateRGPDTemplate = (content) => api.put("/rgpd/admin/template", { content });
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
