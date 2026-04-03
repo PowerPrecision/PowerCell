@@ -1247,13 +1247,16 @@ IMPORTANTE:
 Conteúdo:
 {clean_html}"""
             
-            # Usar Gemini 2.0 Flash
-            model = genai.GenerativeModel("gemini-2.0-flash")
+            # Usar Gemini 2.0 Flash com modo JSON nativo
+            model = genai.GenerativeModel(
+                "gemini-2.0-flash",
+                generation_config={"response_mime_type": "application/json"}
+            )
             response = model.generate_content(prompt)
             
             result_text = response.text.strip()
             
-            # Limpar possíveis markdown code blocks
+            # Fallback: limpar possíveis markdown code blocks (defesa em profundidade)
             if result_text.startswith("```json"):
                 result_text = result_text[7:]
             if result_text.startswith("```"):

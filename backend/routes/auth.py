@@ -14,7 +14,7 @@ from services.auth import (
 )
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone,
-    log_sanitization_rejection
+    sanitize_string, log_sanitization_rejection
 )
 from middleware.rate_limit import limiter
 from services.refresh_token_service import (
@@ -134,14 +134,40 @@ async def update_preferences(
 ):
     """
     Atualiza as preferências de notificação do utilizador.
+    Sanitiza todas as chaves e valores string para prevenir stored XSS.
     """
     user_id = user["id"]
     
     # Extrair preferências de notificação
     notifications = data.get("notifications", {})
     
+    # Sanitizar: apenas permitir chaves esperadas e limpar valores
+    ALLOWED_NOTIFICATION_KEYS = {
+        "email_new_process", "email_status_change", "email_document_upload",
+        "email_task_assigned", "email_deadline_reminder", "email_urgent_only",
+        "email_daily_summary", "email_weekly_report",
+        "inapp_new_process", "inapp_status_change", "inapp_document_upload",
+        "inapp_task_assigned", "inapp_comments",
+        "is_test_user"
+    }
+    
+    sanitized_notifications = {}
+    for key, value in notifications.items():
+        # Rejeitar chaves não esperadas (previne injection de campos arbitrários)
+        if key not in ALLOWED_NOTIFICATION_KEYS:
+            log_sanitization_rejection(f"preferences.{key}", str(key), "chave de notificação não permitida")
+            continue
+        # Valores devem ser booleanos
+        if isinstance(value, bool):
+            sanitized_notifications[key] = value
+        elif isinstance(value, str):
+            # Strings: aceitar apenas "true"/"false"
+            sanitized_notifications[key] = value.lower() in ("true", "1", "yes")
+        else:
+            sanitized_notifications[key] = bool(value)
+    
     update_data = {
-        "notification_preferences": notifications,
+        "notification_preferences": sanitized_notifications,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -297,9 +323,9 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
         user["role"]
     )
     
-    # Criar refresh token (longo)
-    device_info = request.headers.get("User-Agent", "")[:200]
-    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "")
+    # Criar refresh token (longo) - sanitizar headers para prevenir stored XSS
+    device_info = sanitize_string(request.headers.get("User-Agent", ""), max_length=200)
+    ip_address = sanitize_string(request.headers.get("X-Forwarded-For", request.client.host if request.client else ""), max_length=45)
     
     _, refresh_token = await create_refresh_token_db(
         user["id"],
@@ -338,8 +364,8 @@ async def refresh_tokens(request: Request, data: dict):
     if not refresh_token:
         raise HTTPException(status_code=400, detail="refresh_token é obrigatório")
     
-    device_info = request.headers.get("User-Agent", "")[:200]
-    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "")
+    device_info = sanitize_string(request.headers.get("User-Agent", ""), max_length=200)
+    ip_address = sanitize_string(request.headers.get("X-Forwarded-For", request.client.host if request.client else ""), max_length=45)
     
     result = await rotate_refresh_token(
         refresh_token,
