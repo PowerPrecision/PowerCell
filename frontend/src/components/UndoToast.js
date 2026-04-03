@@ -99,7 +99,7 @@ export function UndoToastContent({
 
   return (
     <div className={cn(
-      'flex items-start gap-3 p-4 rounded-lg border shadow-lg min-w-[300px] max-w-[400px]',
+      'flex items-start gap-3 p-4 rounded-lg border shadow-lg w-[calc(100vw-2rem)] sm:min-w-[300px] max-w-[400px]',
       config.bgClass,
       config.borderClass
     )}>

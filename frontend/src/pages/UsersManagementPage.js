@@ -482,7 +482,7 @@ const UsersManagementPage = () => {
                 </div>
 
                 {/* O9 - Desktop: Table */}
-                <div className="hidden md:block rounded-md border">
+                <div className="hidden md:block rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>

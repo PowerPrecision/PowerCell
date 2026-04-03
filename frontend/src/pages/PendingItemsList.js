@@ -317,7 +317,7 @@ const PendingItemsList = () => {
                 <p className="text-sm">Está tudo em dia.</p>
               </div>
             ) : (
-              <ScrollArea className="h-[500px]">
+              <ScrollArea className="h-[300px] sm:h-[500px]">
                 <div className="space-y-3">
                   {filteredItems.map((item) => (
                     <div
