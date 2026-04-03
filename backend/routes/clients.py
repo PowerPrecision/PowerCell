@@ -214,8 +214,8 @@ async def list_registered_clients(
                 {"process_ids": None}
             ]
     
-    # Filtro para INDEXACAO - ver apenas clientes atribuídos a ele
-    if assigned_to_me or user_role == "indexacao":
+    # Filtro para assigned_to_me - opcional para qualquer role
+    if assigned_to_me:
         query["assigned_to"] = user_id
     
     # Construir ordenação
