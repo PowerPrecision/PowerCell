@@ -73,9 +73,13 @@ const MyClientsPage = () => {
   };
 
   const filteredClients = useMemo(() => {
+    const normalizedSearch = searchTerm
+      ? searchTerm.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+      : "";
+
     return clients.filter((client) => {
-      const matchesSearch = 
-        client.client_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      const matchesSearch = !normalizedSearch || 
+        client.client_name?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalizedSearch) ||
         client.client_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         client.process_number?.toString().includes(searchTerm);
       
