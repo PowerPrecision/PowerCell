@@ -293,7 +293,11 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
             logger.warning(f"Login falhou: email vazio ou sem @")
             raise HTTPException(status_code=401, detail="Credenciais inválidas")
         
-        user = await db.users.find_one({"email": clean_email}, {"_id": 0})
+        # Case-insensitive query (MongoDB é case-sensitive por default)
+        user = await db.users.find_one(
+            {"email": {"$regex": f"^{clean_email}$", "$options": "i"}},
+            {"_id": 0}
+        )
         if not user:
             logger.warning(f"Login falhou: utilizador não encontrado para email={clean_email}")
             raise HTTPException(status_code=401, detail="Credenciais inválidas")
