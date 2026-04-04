@@ -16,7 +16,7 @@ from services.auth import (
     validate_password_strength
 )
 from utils.input_sanitization import (
-    sanitize_email, sanitize_string, log_sanitization_rejection
+    sanitize_string, log_sanitization_rejection
 )
 from middleware.rate_limit import limiter
 from services.refresh_token_service import (
@@ -284,71 +284,80 @@ async def change_password(
 async def login_v2(request: Request, data: UserLogin, response: Response):
     """
     Login com suporte a refresh tokens.
-    Retorna access_token (15 min) + refresh_token (7 dias).
+    Retorna access_token (2h) + refresh_token (7 dias).
     """
-    # Sanitizar email antes de consultar BD
-    clean_email = sanitize_email(data.email)
-    if not clean_email:
-        log_sanitization_rejection("email", data.email, "email inválido no login")
-        logger.warning(f"Login falhou: email rejeitado pela sanitização: {data.email[:30] if data.email else 'vazio'}")
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
-    user = await db.users.find_one({"email": clean_email}, {"_id": 0})
-    if not user:
-        logger.warning(f"Login falhou: utilizador não encontrado para email={clean_email}")
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
-    password_field = user.get("password") or user.get("hashed_password", "")
-    if not password_field:
-        logger.error(f"Login falhou: utilizador {user['id']} não tem password definida")
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
-    if not verify_password(data.password, password_field):
-        logger.warning(f"Login falhou: password incorrecta para user={user['id']} email={clean_email}")
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
-    if not user.get("is_active", True):
-        logger.warning(f"Login falhou: conta desactivada user={user['id']} email={clean_email}")
-        raise HTTPException(status_code=401, detail="Conta desativada")
-    
-    logger.info(f"Login bem-sucedido: user={user['id']} email={clean_email} role={user['role']}")
-    
-    # Criar access token (curto)
-    access_token = create_access_token(
-        user["id"], 
-        user["email"], 
-        user["role"]
-    )
-    
-    # Criar refresh token (longo) - sanitizar headers para prevenir stored XSS
-    device_info = sanitize_string(request.headers.get("User-Agent", ""), max_length=200)
-    ip_address = sanitize_string(request.headers.get("X-Forwarded-For", request.client.host if request.client else ""), max_length=45)
-    
-    _, refresh_token = await create_refresh_token_db(
-        user["id"],
-        device_info=device_info,
-        ip_address=ip_address
-    )
-    
-    # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
-    return JSONResponse(
-        status_code=200,
-        content={
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "user": {
-                "id": user["id"],
-                "email": user["email"],
-                "name": user["name"],
-                "phone": user.get("phone"),
-                "role": user["role"],
-                "created_at": user["created_at"],
-                "onedrive_folder": user.get("onedrive_folder")
+    try:
+        # Normalizar email (sem bleach/sanitize_email — simples e seguro)
+        clean_email = str(data.email).strip().lower() if data.email else ""
+        if not clean_email or "@" not in clean_email:
+            logger.warning(f"Login falhou: email vazio ou sem @")
+            raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        
+        user = await db.users.find_one({"email": clean_email}, {"_id": 0})
+        if not user:
+            logger.warning(f"Login falhou: utilizador não encontrado para email={clean_email}")
+            raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        
+        password_field = user.get("password") or user.get("hashed_password", "")
+        if not password_field:
+            logger.error(f"Login falhou: utilizador {user['id']} sem password")
+            raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        
+        if not verify_password(data.password, password_field):
+            logger.warning(f"Login falhou: password incorrecta para user={user['id']}")
+            raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        
+        if not user.get("is_active", True):
+            logger.warning(f"Login falhou: conta desactivada user={user['id']}")
+            raise HTTPException(status_code=401, detail="Conta desativada")
+        
+        logger.info(f"Login bem-sucedido: user={user['id']} email={clean_email} role={user['role']}")
+        
+        # Criar access token
+        access_token = create_access_token(
+            user["id"],
+            user["email"],
+            user["role"]
+        )
+        
+        # Criar refresh token
+        device_info = str(request.headers.get("User-Agent", ""))[:200]
+        client_host = ""
+        try:
+            client_host = request.client.host if request.client else ""
+        except Exception:
+            pass
+        ip_address = str(request.headers.get("X-Forwarded-For", client_host))[:45]
+        
+        _, refresh_token = await create_refresh_token_db(
+            user["id"],
+            device_info=device_info,
+            ip_address=ip_address
+        )
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_type": "bearer",
+                "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+                "user": {
+                    "id": user["id"],
+                    "email": user["email"],
+                    "name": user["name"],
+                    "phone": user.get("phone"),
+                    "role": user["role"],
+                    "created_at": user["created_at"],
+                    "onedrive_folder": user.get("onedrive_folder")
+                }
             }
-        }
-    )
+        )
+    except HTTPException:
+        raise  # Re-lançar HTTPExceptions (401, 403, etc.)
+    except Exception as e:
+        logger.exception(f"Login crash inesperado: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {type(e).__name__}")
 
 
 @router.post("/refresh")
