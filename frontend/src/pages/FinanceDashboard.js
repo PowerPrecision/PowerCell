@@ -345,6 +345,7 @@ const ConfigDialog = ({ config, onSave }) => {
 // ====================================================================
 
 const AreaDetail = ({ area, data, monthlyData, performanceData, selectedYear }) => {
+  const navigate = useNavigate();
   const isImob = area === "imobiliaria";
   const color = isImob ? "text-purple-600" : "text-blue-600";
   const iconBg = isImob ? "bg-purple-50" : "bg-blue-50";
@@ -533,9 +534,6 @@ const AreaDetail = ({ area, data, monthlyData, performanceData, selectedYear }) 
     </div>
   );
 };
-
-// Need navigate in AreaDetail - wrap with a component that has it
-// Actually, let me restructure — I'll define AreaDetail inside the main component or pass navigate
 
 // ====================================================================
 // MAIN COMPONENT
