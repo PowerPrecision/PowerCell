@@ -129,7 +129,7 @@ class UserRole:
 
 
 class UserRegister(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     name: str
     phone: Optional[str] = None
@@ -160,7 +160,7 @@ class TokenResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     name: str
     phone: Optional[str] = None
@@ -170,6 +170,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    email: Optional[str] = None  # Email pode ser actualizado
     name: Optional[str] = None
     phone: Optional[str] = None
     role: Optional[str] = None
