@@ -55,6 +55,14 @@ const filterConfig = {
     filter: null, // Filtro especial via deadlines
     showDeadlineInfo: true
   },
+  indexacao: {
+    title: "Indexação",
+    description: "Processos com atribuição de Indexação",
+    icon: FileText,
+    color: "text-gray-600",
+    bgColor: "bg-gray-50",
+    filter: (p) => !!p.assigned_indexacao_id
+  },
   waiting: {
     title: "Clientes em Espera",
     description: "Processos no estado inicial de espera",
