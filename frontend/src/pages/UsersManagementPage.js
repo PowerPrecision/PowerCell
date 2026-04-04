@@ -278,16 +278,13 @@ const UsersManagementPage = () => {
                       <Input 
                         value={formData.name} 
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })} 
-                        required 
                       />
                     </div>
                     <div className="space-y-2">
                       <Label>Email</Label>
                       <Input 
-                        type="email" 
                         value={formData.email} 
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-                        required 
                       />
                     </div>
                     <div className="space-y-2">
@@ -298,7 +295,6 @@ const UsersManagementPage = () => {
                             type={showPassword ? "text" : "password"} 
                             value={formData.password} 
                             onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
-                            required 
                             className="pr-20"
                           />
                           <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
@@ -582,7 +578,13 @@ const UsersManagementPage = () => {
               <Input 
                 value={formData.name} 
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })} 
-                required 
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input 
+                value={formData.email || ""} 
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
               />
             </div>
             <div className="space-y-2">
