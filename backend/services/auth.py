@@ -3,8 +3,8 @@ from typing import List, Dict, Any, Tuple
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
-import bcrypt
 import re
+from passlib.context import CryptContext
 
 from config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_HOURS
 from database import db
@@ -12,6 +12,10 @@ from models.auth import UserRole
 
 
 security = HTTPBearer()
+
+# Password hashing context — unificado com seed.py (passlib)
+# Isto resolve incompatibilidade entre bcrypt directo e passlib
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def validate_password_strength(password: str) -> Tuple[bool, str]:
@@ -58,11 +62,11 @@ def validate_password_strength(password: str) -> Tuple[bool, str]:
 
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    return pwd_context.hash(password)
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    return pwd_context.verify(password, hashed)
 
 
 def create_token(user_id: str, email: str, role: str) -> str:

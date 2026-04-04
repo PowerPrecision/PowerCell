@@ -54,10 +54,14 @@ def sanitize_string(value: str, max_length: int = 200) -> str:
         strip=True
     )
     
-    # 3. Remover entidades HTML que possam ter escapado
-    value = re.sub(r'&[a-zA-Z]+;', '', value)
-    value = re.sub(r'&#\d+;', '', value)
-    value = re.sub(r'&#x[0-9a-fA-F]+;', '', value)
+    # 3. Remover entidades HTML que possam ter escapado (apenas entidades conhecidas)
+    # FIX: Anteriormente removia &qualquer_coisa; o que podia corromper texto legítimo
+    html_entities = [
+        r'&(?:nbsp|lt|gt|amp|quot|apos|copy|reg|trade|mdash|ndash|hellip|laquo|raquo);',
+        r'&(?:#x[0-9a-fA-F]+|#[0-9]+);',
+    ]
+    for entity_pattern in html_entities:
+        value = re.sub(entity_pattern, '', value)
     
     # 4. Strip whitespace e normalizar espaços
     value = ' '.join(value.split())

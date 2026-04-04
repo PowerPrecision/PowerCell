@@ -303,18 +303,28 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
     clean_email = sanitize_email(data.email)
     if not clean_email:
         log_sanitization_rejection("email", data.email, "email inválido no login")
+        logger.warning(f"Login falhou: email rejeitado pela sanitização: {data.email[:30] if data.email else 'vazio'}")
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     
     user = await db.users.find_one({"email": clean_email}, {"_id": 0})
     if not user:
+        logger.warning(f"Login falhou: utilizador não encontrado para email={clean_email}")
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     
     password_field = user.get("password") or user.get("hashed_password", "")
+    if not password_field:
+        logger.error(f"Login falhou: utilizador {user['id']} não tem password definida")
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+    
     if not verify_password(data.password, password_field):
+        logger.warning(f"Login falhou: password incorrecta para user={user['id']} email={clean_email}")
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     
     if not user.get("is_active", True):
+        logger.warning(f"Login falhou: conta desactivada user={user['id']} email={clean_email}")
         raise HTTPException(status_code=401, detail="Conta desativada")
+    
+    logger.info(f"Login bem-sucedido: user={user['id']} email={clean_email} role={user['role']}")
     
     # Criar access token (curto)
     access_token = create_access_token(
