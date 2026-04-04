@@ -46,8 +46,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/emails", tags=["Emails"])
 
-# Subrouter dedicado para documentação — montado separadamente para evitar conflitos com /{email_id}
-doc_router = APIRouter(prefix="/emails", tags=["Email Documentation"])
+# NOTA: doc_router foi removido. Os endpoints send-documentation e document-recipients
+# estão agora registados no router principal ANTES das rotas com /{email_id}.
+# Isto resolve o bug 404 que ocorria quando a ordem de montagem dos routers
+# no server.py causava conflitos com o catch-all /{email_id}.
+doc_router = None  # Mantido como None para compatibilidade com server.py
 
 # Armazenar status de sincronizações em progresso
 _sync_status = {}
@@ -78,7 +81,7 @@ async def enrich_email(email: dict) -> dict:
 
 # ==== DOCUMENT RECIPIENTS & SEND DOCUMENTATION (antes de /{email_id} para evitar conflito) ====
 
-@doc_router.get("/document-recipients")
+@router.get("/document-recipients")
 async def get_document_recipients(
     current_user: dict = Depends(get_current_user)
 ):
@@ -119,7 +122,11 @@ async def get_document_recipients(
     }
 
 
-@doc_router.post("/send-documentation/{process_id}")
+# ==== SEND DOCUMENTATION (antes de /{email_id} para evitar conflito de rota) ====
+# Estes endpoints devem estar ANTES das rotas com /{email_id} para que
+# o FastAPI faça match correcto e não trate "send-documentation" como um email_id.
+
+@router.post("/send-documentation/{process_id}")
 async def send_documentation_email(
     process_id: str,
     data: dict = Body(...),

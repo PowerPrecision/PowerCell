@@ -189,7 +189,7 @@ class DocumentRecipientsConfig(BaseModel):
 
 class DSTIConfig(BaseModel):
     """Configuração da análise DSTI automática"""
-    enabled: bool = False
+    enabled: bool = True
     # Limiar para alerta de risco elevado (percentagem, default 40%)
     high_risk_threshold: float = 40.0
     # Limiar para alerta de risco muito elevado (percentagem, default 50% - limite BdP)
