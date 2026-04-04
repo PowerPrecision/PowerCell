@@ -58,7 +58,10 @@ async def get_my_clients(user: dict = Depends(require_roles([
     elif role in [UserRole.INDEXACAO, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         # Indexacao, Admin, CEO, Diretor e Administrativo veem todos
         # Indexacao precisa de ver todos para poder atribuir processos
-        query = {}
+        query = {
+            "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+            "is_active": {"$ne": False}
+        }
     else:
         # Outros roles não têm acesso
         query = {"_id": None}  # Query que não retorna nada
@@ -81,6 +84,10 @@ async def get_my_clients(user: dict = Depends(require_roles([
             "next_action": 1
         }
     ).sort("client_name", 1).limit(100).to_list(100)
+    
+    # Desencriptar dados sensíveis (client_phone, client_nif)
+    from services.process_service import decrypt_processes_list
+    processes = decrypt_processes_list(processes)
     
     # Para cada processo, buscar tarefas pendentes detalhadas
     for process in processes:
@@ -130,8 +137,11 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
             ]
         }
     elif role in [UserRole.INDEXACAO, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
-        # Indexacao, Admin, CEO, Diretor e Administrativo veem todos
-        query = {}
+        # Indexacao, Admin, CEO, Diretor e Administrativo veem todos (ativos)
+        query = {
+            "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+            "is_active": {"$ne": False}
+        }
     else:
         query = {"_id": None}
     

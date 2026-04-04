@@ -770,8 +770,11 @@ async def get_my_clients(user: dict = Depends(require_roles([
             ]
         }
     elif role == UserRole.INDEXACAO:
-        # Indexação vê todos os processos para poder atribuir a consultores/intermediários
-        query = {}
+        # Indexação vê todos os processos ACTIVOS (exclui concluídos, desistências, eliminados)
+        query = {
+            "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+            "is_active": {"$ne": False}
+        }
     else:
         # Admin/CEO/Diretor/Administrativo vêem todos
         query = {}
@@ -796,6 +799,9 @@ async def get_my_clients(user: dict = Depends(require_roles([
             "property_id": 1
         }
     ).sort("client_name", 1).to_list(500)
+    
+    # Desencriptar dados sensíveis (client_phone, client_nif)
+    processes = decrypt_processes_list(processes)
     
     # Obter labels das fases do workflow ordenadas
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
