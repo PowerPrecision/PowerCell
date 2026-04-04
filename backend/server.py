@@ -53,7 +53,7 @@ from routes.alerts import router as alerts_router
 from routes.websocket import router as websocket_router
 from routes.push_notifications import router as push_notifications_router
 from routes.tasks import router as tasks_router
-from routes.emails import router as emails_router, doc_router as emails_doc_router
+from routes.emails import router as emails_router  # doc_router removido - rotas agora no router principal
 from routes.trello import router as trello_router
 from routes.ai_bulk import router as ai_bulk_router
 from routes.leads import router as leads_router
@@ -404,7 +404,7 @@ app.include_router(alerts_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
 app.include_router(push_notifications_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
-app.include_router(emails_doc_router, prefix="/api")  # Antes do emails_router para evitar conflito com /{email_id}
+# emails_doc_router removido — send-documentation e document-recipients agora no router principal (antes de /{email_id})
 app.include_router(emails_router, prefix="/api")
 app.include_router(trello_router, prefix="/api")
 app.include_router(ai_bulk_router, prefix="/api")
