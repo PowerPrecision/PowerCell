@@ -129,7 +129,7 @@ class UserRole:
 
 
 class UserRegister(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     name: str
     phone: Optional[str] = None

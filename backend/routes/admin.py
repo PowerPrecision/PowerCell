@@ -9,7 +9,6 @@ from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from services.auth import hash_password, require_roles
 from utils.input_sanitization import (
-    sanitize_email, sanitize_name, sanitize_phone,
     log_sanitization_rejection
 )
 from services.permissions import (
