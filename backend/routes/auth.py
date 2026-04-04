@@ -13,8 +13,7 @@ from services.auth import (
     validate_password_strength
 )
 from utils.input_sanitization import (
-    sanitize_email, sanitize_name, sanitize_phone,
-    sanitize_string, log_sanitization_rejection
+    sanitize_email, sanitize_string, log_sanitization_rejection
 )
 from middleware.rate_limit import limiter
 from services.refresh_token_service import (
@@ -34,18 +33,13 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 @router.post("/register", response_model=TokenResponse)
 @limiter.limit("3/hour")
 async def register(request: Request, response: Response, data: UserRegister):
-    # Sanitizar inputs
-    clean_email = sanitize_email(data.email)
+    # Normalizar inputs (sem validação de formato)
+    clean_email = (data.email or "").strip().lower()
     if not clean_email:
-        log_sanitization_rejection("email", data.email, "email inválido")
-        raise HTTPException(status_code=400, detail="Email inválido")
+        raise HTTPException(status_code=400, detail="Email é obrigatório")
     
-    clean_name = sanitize_name(data.name)
-    if not clean_name:
-        log_sanitization_rejection("name", data.name, "nome inválido")
-        raise HTTPException(status_code=400, detail="Nome inválido")
-    
-    clean_phone = sanitize_phone(data.phone) if data.phone else None
+    clean_name = (data.name or "").strip()
+    clean_phone = (data.phone or "").strip() if data.phone else None
     
     existing = await db.users.find_one({"email": clean_email})
     if existing:
@@ -210,18 +204,8 @@ async def update_profile(
     
     for field in allowed_fields:
         if field in data and data[field] is not None:
-            if field == "name":
-                clean_val = sanitize_name(data[field])
-                if not clean_val:
-                    raise HTTPException(status_code=400, detail="Nome inválido")
-                update_data[field] = clean_val
-            elif field == "phone":
-                clean_val = sanitize_phone(data[field])
-                if not clean_val:
-                    raise HTTPException(status_code=400, detail="Telefone inválido")
-                update_data[field] = clean_val
-            else:
-                update_data[field] = data[field]
+            # Aceitar qualquer valor — sem validação de formato
+            update_data[field] = str(data[field]).strip()
     
     if not update_data:
         raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
