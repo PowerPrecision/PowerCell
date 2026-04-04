@@ -1,8 +1,11 @@
 import uuid
 import re
+import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 from database import db
 from models.auth import (
