@@ -1050,9 +1050,6 @@ const ProcessDetails = () => {
   
   // Modo de visualização (read-only) quando não tem edit_process
   const isViewMode = !hasEditProcess;
-  
-  // Role INDEXACAO: mantido para compatibilidade com lógica existente
-  const isIndexacaoRole = userRole === "indexacao";
 
   // Função para eliminar o cliente/processo
   const handleDeleteClient = async () => {
@@ -1403,119 +1400,18 @@ const ProcessDetails = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Para role INDEXACAO: mostrar apenas info básica e Documentos */}
-            {isIndexacaoRole ? (
-              <>
-                {/* Banner de modo de visualização */}
-                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-3">
-                  <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
-                  <p className="text-sm text-amber-800 dark:text-amber-200">
-                    <strong>Modo de visualização.</strong> Não tem permissões para editar os dados base do processo. Pode gerir documentos, tarefas, chat e atribuição de utilizadores.
-                  </p>
-                </div>
-                
-                {/* Info básica do cliente */}
-                <Card className="border-border">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Informação do Cliente</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-muted-foreground text-xs">Nome</Label>
-                        <p className="font-medium">{process?.client_name || "-"}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-xs">Email</Label>
-                        <p className="font-medium">{personalData?.email || "-"}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-xs">Telefone</Label>
-                        <p className="font-medium">{personalData?.phone || "-"}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-xs">NIF</Label>
-                        <p className="font-medium">{personalData?.nif || "-"}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                {/* Documentos - acesso completo para upload/delete */}
-                <Card className="border-border">
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <FolderOpen className="h-5 w-5" />
-                      Documentos
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <UnifiedDocumentsPanel 
-                      key={documentsRefreshKey}
-                      processId={id}
-                      clientName={process?.client_name}
-                      onAIDataExtracted={handleAIDataExtractedFromDocs}
-                    />
-                  </CardContent>
-                </Card>
+            {/* Banner de modo de visualização para roles sem edit_process */}
+            {isViewMode && (
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  <strong>Modo de visualização.</strong> Não tem permissões para editar os dados base do processo. Pode gerir documentos, tarefas, chat e atribuição de utilizadores.
+                </p>
+              </div>
+            )}
 
-                {/* Tarefas - visível se tem manage_tasks */}
-                {canManageTasks && (
-                <Card className="border-border">
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <Check className="h-5 w-5" />
-                      Tarefas
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <TasksPanel 
-                      processId={id} 
-                      processName={process?.client_name}
-                      compact={false}
-                    />
-                  </CardContent>
-                </Card>
-                )}
-
-                {/* Atribuição de Utilizadores - visível se tem assign_process_users */}
-                {canAssignUsers && (
-                <Card className="border-border">
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <Users className="h-5 w-5" />
-                      Atribuição de Utilizadores
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-muted-foreground">Gerir consultores, intermediários e indexação atribuídos a este processo.</p>
-                        <Button size="sm" variant="outline" onClick={openAssignDialog}>
-                          <Users className="h-4 w-4 mr-2" />
-                          Atribuir
-                        </Button>
-                      </div>
-                      {process?.consultor_name && (
-                        <div className="flex items-center gap-2 text-sm">
-                          <Badge variant="outline">Consultor</Badge>
-                          <span>{process.consultor_name}</span>
-                        </div>
-                      )}
-                      {process?.mediador_name && (
-                        <div className="flex items-center gap-2 text-sm">
-                          <Badge variant="outline">Intermediário</Badge>
-                          <span>{process.mediador_name}</span>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-                )}
-              </>
-            ) : (
-              /* Layout normal para outras roles */
-              <Card className="border-border">
+            {/* Layout normal do processo (todas as roles) */}
+            <Card className="border-border">
               <CardHeader>
                 <CardTitle className="text-lg">Dados do Processo</CardTitle>
               </CardHeader>
@@ -2774,6 +2670,7 @@ const ProcessDetails = () => {
 
                 <Separator className="my-6" />
 
+                {!isViewMode && (
                 <div className="flex justify-end">
                   <Button onClick={handleSave} disabled={saving} data-testid="save-process-btn">
                     {saving ? (
@@ -2782,6 +2679,60 @@ const ProcessDetails = () => {
                       "Guardar Alterações"
                     )}
                   </Button>
+                </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Tarefas - visível se tem manage_tasks */}
+            {canManageTasks && (
+            <Card className="border-border">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Check className="h-5 w-5" />
+                  Tarefas
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TasksPanel
+                  processId={id}
+                  processName={process?.client_name}
+                  compact={false}
+                />
+              </CardContent>
+            </Card>
+            )}
+
+            {/* Atribuição de Utilizadores - visível se tem assign_process_users */}
+            {canAssignUsers && (
+            <Card className="border-border">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Atribuição de Utilizadores
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">Gerir consultores, intermediários e indexação atribuídos a este processo.</p>
+                    <Button size="sm" variant="outline" onClick={openAssignDialog}>
+                      <Users className="h-4 w-4 mr-2" />
+                      Atribuir
+                    </Button>
+                  </div>
+                  {process?.consultor_name && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Badge variant="outline">Consultor</Badge>
+                      <span>{process.consultor_name}</span>
+                    </div>
+                  )}
+                  {process?.mediador_name && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Badge variant="outline">Intermediário</Badge>
+                      <span>{process.mediador_name}</span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
