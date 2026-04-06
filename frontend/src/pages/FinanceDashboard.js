@@ -452,7 +452,7 @@ const AreaDetail = ({ area, data, monthlyData, performanceData, selectedYear }) 
         </CardHeader>
         <CardContent>
           <div className="h-[200px] sm:h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
               <BarChart data={areaChartData}>
                 <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                 <XAxis dataKey="name" fontSize={12} />
@@ -762,7 +762,7 @@ const FinanceDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="h-[200px] sm:h-[300px]">
-                      <ResponsiveContainer width="100%" height="100%">
+                      <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                         <BarChart data={comparisonChartData}>
                           <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                           <XAxis dataKey="name" fontSize={12} />
