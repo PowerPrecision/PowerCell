@@ -61,6 +61,7 @@ const SendDocumentationModal = ({
   const [ccEmails, setCcEmails] = useState("");
   const [config, setConfig] = useState(null);
   const [warnings, setWarnings] = useState([]);
+  const [selectedToEmails, setSelectedToEmails] = useState([]);
 
   // Carregar configuração e documentos
   useEffect(() => {
@@ -82,6 +83,8 @@ const SendDocumentationModal = ({
         setConfig(configData);
         setRecipients(configData.recipients || []);
         setEmailTemplate(configData.email_template || "");
+        // Pré-selecionar todos os TO emails por padrão
+        setSelectedToEmails(configData.default_to_emails || []);
       }
 
       // Carregar documentos do processo
@@ -137,6 +140,25 @@ const SendDocumentationModal = ({
     );
   };
 
+  // Toggle TO email
+  const toggleToEmail = (email) => {
+    setSelectedToEmails(prev =>
+      prev.includes(email)
+        ? prev.filter(e => e !== email)
+        : [...prev, email]
+    );
+  };
+
+  // Selecionar todos os TO emails
+  const selectAllToEmails = () => {
+    const allTo = config?.default_to_emails || [];
+    if (selectedToEmails.length === allTo.length) {
+      setSelectedToEmails([]);
+    } else {
+      setSelectedToEmails(allTo);
+    }
+  };
+
   // Selecionar todos os documentos
   const selectAllDocs = () => {
     if (selectedDocs.length === documents.length) {
@@ -155,7 +177,12 @@ const SendDocumentationModal = ({
     }
     
     if (selectedRecipients.length === 0) {
-      toast.error("Selecione pelo menos um destinatário");
+      toast.error("Selecione pelo menos um destinatário BCC");
+      return;
+    }
+
+    if (selectedToEmails.length === 0) {
+      toast.error("Selecione pelo menos um destinatário TO");
       return;
     }
 
@@ -185,6 +212,7 @@ const SendDocumentationModal = ({
         },
         body: JSON.stringify({
           document_ids: selectedDocs,
+          to_emails: selectedToEmails,
           bcc_recipients: selectedRecipients,
           cc_emails: ccEmails ? ccEmails.split(",").map(e => e.trim()) : [],
           custom_message: user?.role?.match(/admin|ceo/i) ? customMessage : undefined,
@@ -203,6 +231,7 @@ const SendDocumentationModal = ({
         // Reset state
         setSelectedDocs([]);
         setSelectedRecipients([]);
+        setSelectedToEmails(config?.default_to_emails || []);
         setCustomMessage("");
         setCcEmails("");
       } else {
@@ -389,16 +418,32 @@ const SendDocumentationModal = ({
 
             {/* Coluna Direita: Email */}
             <div className="space-y-4">
-              {/* TO — Múltiplos emails */}
+              {/* TO — Múltiplos emails com checkbox */}
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">TO (Destinatário Principal)</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">
+                    TO (Destinatário Principal) — {selectedToEmails.length}/{(config?.default_to_emails || []).length}
+                  </Label>
+                  {(config?.default_to_emails || []).length > 1 && (
+                    <Button variant="ghost" size="sm" className="h-5 text-xs" onClick={selectAllToEmails}>
+                      {selectedToEmails.length === (config?.default_to_emails || []).length ? "Desmarcar todos" : "Selecionar todos"}
+                    </Button>
+                  )}
+                </div>
                 {config?.default_to_emails && config.default_to_emails.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5 p-2 bg-muted rounded-md min-h-[38px]">
+                  <div className="border rounded-md p-1.5 bg-muted/30 space-y-0.5">
                     {config.default_to_emails.map((email, i) => (
-                      <Badge key={i} variant="secondary" className="text-xs font-mono">
-                        <Mail className="h-3 w-3 mr-1" />
-                        {email}
-                      </Badge>
+                      <label
+                        key={i}
+                        className="flex items-center gap-2 p-1.5 rounded hover:bg-muted cursor-pointer"
+                      >
+                        <Checkbox
+                          checked={selectedToEmails.includes(email)}
+                          onCheckedChange={() => toggleToEmail(email)}
+                        />
+                        <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-mono">{email}</span>
+                      </label>
                     ))}
                   </div>
                 ) : (
@@ -490,7 +535,7 @@ const SendDocumentationModal = ({
           </Button>
           <Button
             onClick={handleSend}
-            disabled={sending || selectedDocs.length === 0 || selectedRecipients.length === 0}
+            disabled={sending || selectedDocs.length === 0 || selectedRecipients.length === 0 || selectedToEmails.length === 0}
           >
             {sending ? (
               <>
