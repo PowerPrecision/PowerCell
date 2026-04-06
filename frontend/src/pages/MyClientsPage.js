@@ -260,13 +260,14 @@ const MyClientsPage = () => {
                         key={client.id} 
                         className="cursor-pointer hover:bg-gray-50"
                         data-testid={`client-row-${client.id}`}
+                        onClick={() => navigate(`/processo/${client.id}`)}
                       >
                         <TableCell className="font-medium text-gray-500">
                           #{client.process_number || "-"}
                         </TableCell>
                         <TableCell>
                           <div className="space-y-1">
-                            <div className="font-medium">{client.client_name}</div>
+                            <div className="font-medium text-blue-600 hover:text-blue-800 hover:underline">{client.client_name}</div>
                             <div className="flex items-center gap-3 text-xs text-gray-500">
                               {client.client_email && (
                                 <span className="flex items-center gap-1">
@@ -328,7 +329,10 @@ const MyClientsPage = () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => navigate(`/processo/${client.id}`)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/processo/${client.id}`);
+                            }}
                             data-testid={`view-client-${client.id}`}
                           >
                             <Eye className="w-4 h-4 mr-1" />
