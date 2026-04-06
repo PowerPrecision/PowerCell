@@ -55,9 +55,17 @@ async def get_my_clients(user: dict = Depends(require_roles([
                 {"created_by": user_email}
             ]
         }
-    elif role in [UserRole.INDEXACAO, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
-        # Indexacao, Admin, CEO, Diretor e Administrativo veem todos
-        # Indexacao precisa de ver todos para poder atribuir processos
+    elif role == UserRole.INDEXACAO:
+        # Indexacao vê apenas os processos atribuídos a si (assigned_indexacao_id)
+        # ou processos criados por si (created_by)
+        query = {
+            "$or": [
+                {"assigned_indexacao_id": user_id},
+                {"created_by": user_email}
+            ]
+        }
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+        # Admin/CEO/Diretor/Administrativo veem todos os ativos
         query = {
             "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
             "is_active": {"$ne": False}
@@ -136,8 +144,16 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
                 {"created_by": user_email}
             ]
         }
-    elif role in [UserRole.INDEXACAO, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
-        # Indexacao, Admin, CEO, Diretor e Administrativo veem todos (ativos)
+    elif role == UserRole.INDEXACAO:
+        # Indexacao vê apenas os processos atribuídos a si
+        query = {
+            "$or": [
+                {"assigned_indexacao_id": user_id},
+                {"created_by": user_email}
+            ]
+        }
+    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+        # Admin/CEO/Diretor/Administrativo veem todos (ativos)
         query = {
             "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
             "is_active": {"$ne": False}
