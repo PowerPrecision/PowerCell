@@ -138,11 +138,12 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
   // Normalizar o status atual
   const normalizedCurrentStatus = normalizeStatus(currentStatus);
 
+  // Encontrar a fase atual (declarado ANTES do useCallback para evitar temporal dead zone)
+  const currentPhaseInfo = phasesMap[normalizedCurrentStatus];
+  const currentOrder = currentPhaseInfo?.order || 0;
+
   // Processar histórico para construir timeline
   const buildTimeline = useCallback(() => {
-    // Encontrar a fase atual
-    const currentPhaseInfo = phasesMap[normalizedCurrentStatus];
-    const currentOrder = currentPhaseInfo?.order || 0;
 
     // Se não há fases carregadas, não mostrar nada
     if (sortedPhases.length === 0) {
@@ -236,7 +237,6 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
   // Calcular estatísticas
   const completedPhases = timelineData.filter(t => t.isCompleted).length;
   const totalDays = timelineData.reduce((acc, t) => acc + (t.daysInPhase || 0), 0);
-  const currentPhaseInfo = phasesMap[normalizedCurrentStatus];
 
   return (
     <Card data-testid="process-timeline" className="overflow-hidden">
