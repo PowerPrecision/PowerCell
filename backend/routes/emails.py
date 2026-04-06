@@ -100,17 +100,33 @@ async def get_document_recipients(
             "recipients": [],
             "email_template": None,
             "default_to": None,
-            "default_to_name": None
+            "default_to_name": None,
+            "default_to_emails": []
         }
+    
+    import json
     
     # Parse recipients JSON
     recipients = []
     if doc_config.recipients:
         try:
-            import json
             recipients = json.loads(doc_config.recipients)
         except (json.JSONDecodeError, TypeError):
             recipients = []
+    
+    # Parse default_to_emails (múltiplos emails TO)
+    default_to_emails = []
+    if doc_config.default_to_emails:
+        try:
+            parsed = json.loads(doc_config.default_to_emails)
+            if isinstance(parsed, list):
+                default_to_emails = [e for e in parsed if e and "@" in str(e)]
+        except (json.JSONDecodeError, TypeError):
+            default_to_emails = []
+    
+    # Fallback: se default_to_emails está vazio mas default_to tem valor, usá-lo
+    if not default_to_emails and doc_config.default_to and "@" in str(doc_config.default_to):
+        default_to_emails = [doc_config.default_to]
     
     return {
         "enabled": True,
@@ -118,6 +134,7 @@ async def get_document_recipients(
         "email_template": doc_config.email_template,
         "default_to": doc_config.default_to,
         "default_to_name": doc_config.default_to_name,
+        "default_to_emails": default_to_emails,
         "can_edit": current_user["role"] in ["admin", "ceo"]
     }
 
@@ -268,8 +285,22 @@ Com os melhores cumprimentos,
             sender_email=current_user.get("email", "")
         )
     
-    # Preparar destinatários
-    to_emails = [doc_config.default_to] if doc_config.default_to else [current_user["email"]]
+    # Preparar destinatários TO (suporta múltiplos emails)
+    to_emails = []
+    if doc_config.default_to_emails:
+        try:
+            import json
+            parsed_to = json.loads(doc_config.default_to_emails)
+            if isinstance(parsed_to, list):
+                to_emails = [e for e in parsed_to if e and "@" in str(e)]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # Fallback para default_to singular (compatibilidade)
+    if not to_emails and doc_config.default_to and "@" in str(doc_config.default_to):
+        to_emails = [doc_config.default_to]
+    # Último fallback: email do utilizador actual
+    if not to_emails:
+        to_emails = [current_user["email"]]
     subject = f"Documentação - {client_name} (Processo #{process_number})"
     
     # Enviar email

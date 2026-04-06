@@ -389,14 +389,25 @@ const SendDocumentationModal = ({
 
             {/* Coluna Direita: Email */}
             <div className="space-y-4">
-              {/* TO */}
+              {/* TO — Múltiplos emails */}
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">TO (Destinatário Principal)</Label>
-                <Input
-                  value={config?.default_to || ""}
-                  disabled
-                  className="bg-muted"
-                />
+                {config?.default_to_emails && config.default_to_emails.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 p-2 bg-muted rounded-md min-h-[38px]">
+                    {config.default_to_emails.map((email, i) => (
+                      <Badge key={i} variant="secondary" className="text-xs font-mono">
+                        <Mail className="h-3 w-3 mr-1" />
+                        {email}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <Input
+                    value={config?.default_to || ""}
+                    disabled
+                    className="bg-muted"
+                  />
+                )}
               </div>
 
               {/* CC */}

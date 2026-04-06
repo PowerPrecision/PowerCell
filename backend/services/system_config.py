@@ -198,6 +198,10 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
         if isinstance(current.get("recipients"), list):
             import json
             current["recipients"] = json.dumps(current["recipients"], ensure_ascii=False)
+        # Se default_to_emails é uma lista, converter para JSON string
+        if isinstance(current.get("default_to_emails"), list):
+            import json
+            current["default_to_emails"] = json.dumps(current["default_to_emails"], ensure_ascii=False)
         config.document_recipients = DocumentRecipientsConfig(**current)
     elif section == "auto_draft":
         current = config.auto_draft.model_dump()
