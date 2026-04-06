@@ -2801,24 +2801,7 @@ const ProcessDetails = () => {
 
             {/* Accordion para agrupar painéis secundários - visível se tiver manage_tasks */}
             {(!isViewMode || canManageTasks) && (
-            <Accordion type="multiple" defaultValue={["tasks"]} className="space-y-2">
-              {/* Tarefas */}
-              <AccordionItem value="tasks" className="border rounded-lg">
-                <AccordionTrigger className="px-3 py-2 text-sm hover:no-underline">
-                  <span className="flex items-center gap-2">
-                    <Check className="h-4 w-4" />
-                    Tarefas
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent className="px-3 pb-3">
-                  <TasksPanel 
-                    processId={id} 
-                    processName={process.client_name}
-                    compact={true}
-                    maxHeight="150px"
-                  />
-                </AccordionContent>
-              </AccordionItem>
+            <Accordion type="multiple" defaultValue={[]} className="space-y-2">
 
               {/* Match Imóveis */}
               <AccordionItem value="match" className="border rounded-lg">
