@@ -2702,41 +2702,6 @@ const ProcessDetails = () => {
               </CardContent>
             </Card>
             )}
-
-            {/* Atribuição de Utilizadores - visível se tem assign_process_users */}
-            {canAssignUsers && (
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Users className="h-5 w-5" />
-                  Atribuição de Utilizadores
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">Gerir consultores, intermediários e indexação atribuídos a este processo.</p>
-                    <Button size="sm" variant="outline" onClick={openAssignDialog}>
-                      <Users className="h-4 w-4 mr-2" />
-                      Atribuir
-                    </Button>
-                  </div>
-                  {process?.consultor_name && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Badge variant="outline">Consultor</Badge>
-                      <span>{process.consultor_name}</span>
-                    </div>
-                  )}
-                  {process?.mediador_name && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Badge variant="outline">Intermediário</Badge>
-                      <span>{process.mediador_name}</span>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-            )}
           </div>
 
           {/* Sidebar - Organizada com Accordions */}
