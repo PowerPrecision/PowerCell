@@ -672,7 +672,8 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     O sistema APENAS guarda emails que cumpram UMA destas 5 condições:
     
     1. Emails trocados entre o Utilizador Logado e o Comercial (owner_email).
-    2. Emails trocados entre o Utilizador Logado e QUALQUER EMAIL do Cliente.
+    2. Emails trocados entre o Utilizador Logado e QUALQUER EMAIL definido nas
+       Configurações do Sistema → Destinatários de Documentação → Email Principal (TO).
        CONDIÇÃO DUPLA: O nome do cliente deve aparecer no assunto ou corpo.
        (Elimina falsos positivos — email trocado mas sem referência ao cliente)
     3. Emails trocados entre o Comercial (owner_email) e geral@powerealestate.pt.
@@ -680,7 +681,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
     
     SUPORTE A MÚLTIPLOS EMAILS:
-    O campo "Email Principal" pode conter múltiplos emails (separados por vírgula,
+    Os campos de email podem conter múltiplos emails (separados por vírgula,
     ponto-e-vírgula ou espaço). O sistema itera sobre todos eles.
     
     Args:
@@ -702,6 +703,27 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         "geral@powerealestate.pt",
         "geral@precisioncredito.pt"
     ]
+    
+    # ===== DESTINATÁRIOS DE DOCUMENTAÇÃO (Configurações do Sistema) =====
+    # Usados na Regra 2: emails trocados entre o utilizador e os destinatários TO
+    doc_recipient_to_emails = []
+    try:
+        from services.system_config import get_system_config
+        sys_config = await get_system_config()
+        doc_rec_config = sys_config.document_recipients
+        if doc_rec_config.default_to_emails:
+            import json as _json
+            try:
+                parsed = _json.loads(doc_rec_config.default_to_emails)
+                if isinstance(parsed, list):
+                    doc_recipient_to_emails = [e.lower().strip() for e in parsed if e and "@" in str(e)]
+            except (_json.JSONDecodeError, TypeError):
+                pass
+        # Fallback: se default_to_emails vazio, usar default_to singular
+        if not doc_recipient_to_emails and doc_rec_config.default_to and "@" in str(doc_rec_config.default_to):
+            doc_recipient_to_emails = [doc_rec_config.default_to.lower().strip()]
+    except Exception as e:
+        logger.warning(f"Não foi possível carregar destinatários de documentação: {e}")
     
     # ===== EXTRAÇÃO DE VARIÁVEIS DO PROCESSO =====
     
@@ -756,6 +778,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     logger.info(f"  - Email comercial (owner): {owner_email}")
     logger.info(f"  - Email utilizador logado: {user_email_lower}")
     logger.info(f"  - Emails monitorizados (IMAP only): {monitored_emails}")
+    logger.info(f"  - Destinatários doc TO (regra 2): {doc_recipient_to_emails}")
     
     # Usar versão async para buscar contas (inclui DB)
     accounts = await get_email_accounts_async()
@@ -793,6 +816,8 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         emails_to_search.extend(company_emails)
         # Incluir monitorizados para busca (a filtragem rigorosa decide o que entra)
         emails_to_search.extend(monitored_emails)
+        # Incluir destinatários de documentação TO para a regra 2
+        emails_to_search.extend(doc_recipient_to_emails)
         
         if emails_to_search:
             inbox_emails = await fetch_emails_from_account(
@@ -882,8 +907,9 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         
         REGRAS ATUALIZADAS:
         1. Emails trocados entre Utilizador Logado e Comercial (owner_email).
-        2. Emails trocados entre Utilizador Logado e QUALQUER EMAIL do Cliente
-           + CONDIÇÃO OBRIGATÓRIA: nome do cliente deve aparecer no assunto ou corpo.
+        2. Emails trocados entre Utilizador Logado e QUALQUER EMAIL dos Destinatários
+           de Documentação (TO) definidos nas Configurações do Sistema.
+           CONDIÇÃO OBRIGATÓRIA: nome do cliente deve aparecer no assunto ou corpo.
            (Verificação dupla para eliminar falsos positivos)
         3. Emails trocados entre Comercial (owner_email) e geral@powerealestate.pt.
         4. Emails trocados entre Comercial (owner_email) e geral@precisioncredito.pt.
@@ -901,18 +927,19 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         if exchanged_between(user_email_lower, owner_email, em):
             return True
         
-        # REGRA 2: Emails trocados entre Utilizador Logado e QUALQUER EMAIL do Cliente
+        # REGRA 2: Emails trocados entre Utilizador Logado e DESTINATÁRIOS DE DOCUMENTAÇÃO (TO)
+        # Estes emails vêm das Configurações do Sistema → Destinatários de Documentação
         # CONDIÇÃO DUPLA: match de email + verificação do nome no assunto/corpo
-        match_result = exchanged_between_any(client_emails, em)
+        match_result = exchanged_between_any(doc_recipient_to_emails, em)
         if match_result[0]:
             # Match por email encontrado — agora verificar o NOME DO CLIENTE
             if client_name_in_email(em):
-                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]}, nome encontrado ✓")
+                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]} (destinatário doc), nome encontrado ✓")
                 return True
             else:
-                # Email trocado com cliente mas NOME não encontrado no conteúdo
+                # Email trocado com destinatário de documentação mas NOME não encontrado
                 # → Falso positivo provável, descartar
-                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]}, nome NÃO encontrado ✗ → descartado")
+                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]} (destinatário doc), nome NÃO encontrado ✗ → descartado")
                 return False
         
         # REGRA 3: Emails trocados entre Comercial e geral@powerealestate.pt
