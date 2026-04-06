@@ -65,6 +65,8 @@ const DocumentRecipientsManager = ({ token, user }) => {
   const [emailTemplate, setEmailTemplate] = useState("");
   const [defaultTo, setDefaultTo] = useState("");
   const [defaultToName, setDefaultToName] = useState("");
+  const [defaultToEmails, setDefaultToEmails] = useState([]);
+  const [newToEmail, setNewToEmail] = useState("");
   const [hasChanges, setHasChanges] = useState(false);
 
   // Dialog states
@@ -100,6 +102,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         setDefaultTo(data.default_to || "");
         setDefaultTo(data.default_to || "geral@powerealestate.pt");
         setDefaultToName(data.default_to_name || "Power Real Estate");
+        setDefaultToEmails(data.default_to_emails || []);
       }
     } catch (error) {
       console.error("Erro ao carregar configuração:", error);
@@ -125,6 +128,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
           email_template: emailTemplate,
           default_to: defaultTo,
           default_to_name: defaultToName,
+          default_to_emails: JSON.stringify(defaultToEmails.filter(e => e && e.includes("@"))),
         }),
       });
 
@@ -230,6 +234,34 @@ Com os melhores cumprimentos,
 {sender_name}
 {sender_email}`;
 
+  // Adicionar múltiplos emails TO (separados por vírgula, ponto-e-vírgula ou espaço)
+  const addMultipleEmails = (input) => {
+    if (!input || !input.trim()) return;
+    
+    // Separar por vírgula, ponto-e-vírgula, ou espaço
+    const parts = input.split(/[,;\s]+/).filter(e => e.trim());
+    const newEmails = [];
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    for (const part of parts) {
+      const email = part.trim().toLowerCase();
+      if (email && emailRegex.test(email)) {
+        // Evitar duplicados
+        if (!defaultToEmails.includes(email) && !newEmails.includes(email)) {
+          newEmails.push(email);
+        }
+      }
+    }
+    
+    if (newEmails.length > 0) {
+      setDefaultToEmails(prev => [...prev, ...newEmails]);
+      setNewToEmail("");
+      setHasChanges(true);
+    } else if (parts.length > 0) {
+      toast.error("Nenhum email válido encontrado. Use formato: email@exemplo.pt");
+    }
+  };
+
   // Verificar permissões
   const canEdit = user?.role?.match(/admin|ceo/i);
 
@@ -300,26 +332,45 @@ Com os melhores cumprimentos,
 
         {enabled && (
           <>
-            {/* Configuração do Email Principal */}
+            {/* Configuração do Email Principal (TO) — Múltiplos emails */}
             <div className="space-y-4">
               <h4 className="font-medium flex items-center gap-2">
                 <Mail className="h-4 w-4" />
-                Email Principal (TO)
+                Email Principal (TO) — Múltiplos Destinatários
               </h4>
+              <p className="text-sm text-muted-foreground">
+                Adicione todos os emails que devem receber a documentação no campo TO. 
+                Pode separar múltiplos emails ou adicioná-los individualmente.
+              </p>
+              
+              {/* Campo de input rápido para adicionar emails */}
+              <div className="flex gap-2">
+                <Input
+                  placeholder="email@exemplo.pt"
+                  value={newToEmail}
+                  onChange={(e) => setNewToEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === ",") {
+                      e.preventDefault();
+                      addMultipleEmails(newToEmail);
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => addMultipleEmails(newToEmail)}
+                  disabled={!newToEmail.trim()}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Adicionar
+                </Button>
+              </div>
+
+              {/* Nome do remetente TO */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input
-                    placeholder="geral@powerealestate.pt"
-                    value={defaultTo}
-                    onChange={(e) => {
-                      setDefaultTo(e.target.value);
-                      setHasChanges(true);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Nome</Label>
+                  <Label>Nome TO</Label>
                   <Input
                     placeholder="Power Real Estate"
                     value={defaultToName}
@@ -329,7 +380,49 @@ Com os melhores cumprimentos,
                     }}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>Email TO primário (compatibilidade)</Label>
+                  <Input
+                    placeholder="geral@powerealestate.pt"
+                    value={defaultTo}
+                    onChange={(e) => {
+                      setDefaultTo(e.target.value);
+                      setHasChanges(true);
+                    }}
+                  />
+                </div>
               </div>
+
+              {/* Lista de emails TO */}
+              {defaultToEmails.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">
+                    {defaultToEmails.length} destinatário(s) TO configurado(s)
+                  </Label>
+                  <div className="flex flex-wrap gap-2">
+                    {defaultToEmails.map((email, index) => (
+                      <Badge
+                        key={index}
+                        variant="secondary"
+                        className="flex items-center gap-1 pl-3 pr-1 py-1.5"
+                      >
+                        <Mail className="h-3 w-3 mr-1" />
+                        <span className="text-sm">{email}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDefaultToEmails(prev => prev.filter((_, i) => i !== index));
+                            setHasChanges(true);
+                          }}
+                          className="ml-1 h-5 w-5 rounded-full hover:bg-muted flex items-center justify-center"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <Separator />
