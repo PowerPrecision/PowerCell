@@ -449,22 +449,53 @@ const DashboardLayout = ({ children, title }) => {
 
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
     const userRole = user?.role?.toLowerCase();
+    const userPermissions = user?.permissions || {};
+    const userPages = userPermissions?.pages || [];
+    const userActions = userPermissions?.actions || [];
+    
     if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(userRole)) {
-      // Menu para INDEXACAO - apenas processos atribuídos e documentos
+      // Menu para INDEXACAO - baseado em permissões
       if (userRole === "indexacao") {
+        const indexacaoMain = [];
+        
+        // "Meus Clientes" - verificar permissão "my_clients"
+        if (userPages.includes("my_clients")) {
+          indexacaoMain.push({
+            label: "Meus Clientes",
+            icon: Users,
+            href: "/meus-clientes",
+          });
+        }
+        
+        // "Dashboard"
+        if (userPages.includes("dashboard")) {
+          indexacaoMain.unshift({
+            label: "Dashboard",
+            icon: LayoutDashboard,
+            href: dashboardHref,
+          });
+        }
+        
+        // "Clientes"
+        if (userPages.includes("clients")) {
+          indexacaoMain.push({
+            label: "Clientes",
+            icon: Users,
+            href: "/clientes",
+          });
+        }
+        
+        // "Processos" (Kanban)
+        if (userPages.includes("processes")) {
+          indexacaoMain.push({
+            label: "Processos",
+            icon: LayoutGrid,
+            href: "/staff",
+          });
+        }
+        
         return {
-          main: [
-            {
-              label: "Meus Clientes",
-              icon: Users,
-              href: "/meus-clientes",
-            },
-            {
-              label: "Clientes",
-              icon: Users,
-              href: "/clientes",
-            },
-          ],
+          main: indexacaoMain,
           groups: [],
         };
       }

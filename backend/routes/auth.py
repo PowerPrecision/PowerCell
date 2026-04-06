@@ -102,7 +102,7 @@ async def login(request: Request, data: UserLogin, response: Response):
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)):
-    """Retorna o utilizador atual incluindo info de impersonate se aplicável."""
+    """Retorna o utilizador atual incluindo info de impersonate e permissões se aplicável."""
     response = {
         "id": user["id"],
         "email": user["email"],
@@ -113,6 +113,14 @@ async def get_me(user: dict = Depends(get_current_user)):
         "onedrive_folder": user.get("onedrive_folder"),
         "is_active": user.get("is_active", True)
     }
+    
+    # Incluir permissões do utilizador (se existirem, caso contrário usar defaults do role)
+    if user.get("permissions"):
+        response["permissions"] = user["permissions"]
+    else:
+        # Resolver permissões padrão do role
+        from services.permissions import get_default_permissions_for_role
+        response["permissions"] = get_default_permissions_for_role(user.get("role", "cliente"))
     
     # Incluir informação de impersonate se presente
     if user.get("is_impersonated"):
