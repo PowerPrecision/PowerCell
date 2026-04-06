@@ -435,7 +435,7 @@ async def fix_duplicate_processes(user: dict = Depends(require_roles([UserRole.A
 # ============== USER MANAGEMENT ROUTES ==============
 
 @router.get("/users", response_model=List[UserResponse])
-async def get_users(role: Optional[str] = None, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))):
+async def get_users(role: Optional[str] = None, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))):
     """Lista utilizadores. Acessível a Admin, CEO, Diretor, Consultor e Intermediário."""
     query = {}
     if role:
