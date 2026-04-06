@@ -124,11 +124,16 @@ export default function ClientsPage() {
   // Verificar se pode eliminar clientes (apenas admin, ceo, diretor, administrativo)
   const canDeleteClients = ["admin", "ceo", "diretor", "administrativo"].includes(user?.role);
   
-  // Verificar se pode criar processos (indexacao NÃO pode)
-  const canCreateProcess = user?.role !== "indexacao";
+  // Verificar se pode criar processos - baseado em permissões
+  const userActions = user?.permissions?.actions || [];
+  const canCreateProcess = userActions.length > 0 
+    ? userActions.includes("create_process")
+    : user?.role !== "indexacao";
   
-  // Verificar se pode criar clientes
-  const canCreateClients = true;
+  // Verificar se pode criar clientes - baseado em permissões
+  const canCreateClients = userActions.length > 0 
+    ? userActions.includes("create_client")
+    : true; // Por defeito todos podem criar
 
   const fetchClients = useCallback(async () => {
     try {

@@ -1011,18 +1011,47 @@ const ProcessDetails = () => {
 
   // Normalizar role para comparação case-insensitive
   const userRole = user?.role?.toLowerCase() || "";
+  const userPermissions = user?.permissions || {};
+  const userPages = userPermissions?.pages || [];
+  const userActions = userPermissions?.actions || [];
   
-  const canEditPersonal = ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
-  const canEditFinancial = ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
-  const canEditRealEstate = ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
-  const canEditCredit = ["mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao" && 
+  // Permissões baseadas em actions (se disponíveis) ou fallback para role
+  const hasEditProcess = userActions.length > 0 
+    ? userActions.includes("edit_process") 
+    : ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole);
+  
+  const canEditPersonal = hasEditProcess;
+  const canEditFinancial = hasEditProcess;
+  const canEditRealEstate = hasEditProcess && 
+    (userActions.length > 0 ? true : ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+  const canEditCredit = hasEditProcess && 
+    (userActions.length > 0 ? true : ["mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole)) &&
     (workflowStatuses.filter(s => s.order >= 3).map(s => s.name).includes(process?.status) || 
      process?.status === "ch_aprovado" || process?.status === "fase_bancaria");
-  const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
-  const canManageDeadlines = ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole) && userRole !== "indexacao";
+  const canChangeStatus = hasEditProcess && 
+    (userActions.length > 0 ? true : ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+  const canManageDeadlines = hasEditProcess && 
+    (userActions.length > 0 ? true : ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canDeleteClient = ["admin", "ceo", "diretor", "administrativo"].includes(userRole);
   
-  // Role INDEXACAO: só pode ver dados e gerir documentos (upload/delete)
+  // Permissões específicas por action
+  const canManageTasks = userActions.length > 0 
+    ? userActions.includes("manage_tasks") 
+    : ["admin", "ceo", "consultor", "mediador", "diretor", "administrativo"].includes(userRole);
+  const canUploadDocs = userActions.length > 0 
+    ? userActions.includes("upload_docs") 
+    : true; // Por defeito todos podem upload
+  const canUseChat = userActions.length > 0 
+    ? userActions.includes("use_chat") 
+    : true; // Por defeito todos podem usar chat
+  const canAssignUsers = userActions.length > 0 
+    ? userActions.includes("assign_process_users") 
+    : ["admin", "ceo", "diretor"].includes(userRole);
+  
+  // Modo de visualização (read-only) quando não tem edit_process
+  const isViewMode = !hasEditProcess;
+  
+  // Role INDEXACAO: mantido para compatibilidade com lógica existente
   const isIndexacaoRole = userRole === "indexacao";
 
   // Função para eliminar o cliente/processo
@@ -1376,6 +1405,14 @@ const ProcessDetails = () => {
             {/* Para role INDEXACAO: mostrar apenas info básica e Documentos */}
             {isIndexacaoRole ? (
               <>
+                {/* Banner de modo de visualização */}
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+                  <p className="text-sm text-amber-800 dark:text-amber-200">
+                    <strong>Modo de visualização.</strong> Não tem permissões para editar os dados base do processo. Pode gerir documentos, tarefas, chat e atribuição de utilizadores.
+                  </p>
+                </div>
+                
                 {/* Info básica do cliente */}
                 <Card className="border-border">
                   <CardHeader>
@@ -1420,6 +1457,60 @@ const ProcessDetails = () => {
                     />
                   </CardContent>
                 </Card>
+
+                {/* Tarefas - visível se tem manage_tasks */}
+                {canManageTasks && (
+                <Card className="border-border">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Check className="h-5 w-5" />
+                      Tarefas
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <TasksPanel 
+                      processId={id} 
+                      processName={process?.client_name}
+                      compact={false}
+                    />
+                  </CardContent>
+                </Card>
+                )}
+
+                {/* Atribuição de Utilizadores - visível se tem assign_process_users */}
+                {canAssignUsers && (
+                <Card className="border-border">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Atribuição de Utilizadores
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">Gerir consultores, intermediários e indexação atribuídos a este processo.</p>
+                        <Button size="sm" variant="outline" onClick={openAssignDialog}>
+                          <Users className="h-4 w-4 mr-2" />
+                          Atribuir
+                        </Button>
+                      </div>
+                      {process?.consultor_name && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <Badge variant="outline">Consultor</Badge>
+                          <span>{process.consultor_name}</span>
+                        </div>
+                      )}
+                      {process?.mediador_name && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <Badge variant="outline">Intermediário</Badge>
+                          <span>{process.mediador_name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+                )}
               </>
             ) : (
               /* Layout normal para outras roles */
@@ -2698,8 +2789,8 @@ const ProcessDetails = () => {
 
           {/* Sidebar - Organizada com Accordions */}
           <div className="space-y-3">
-            {/* Activity Section - escondido para INDEXACAO */}
-            {!isIndexacaoRole && (
+            {/* Activity Section - visível se NÃO for modo de visualização ou se tiver use_chat */}
+            {(!isViewMode || canUseChat) && (
             <Card className="border-border">
               <CardHeader className="pb-2 py-3">
                 <CardTitle className="text-sm flex items-center gap-2">
@@ -2756,8 +2847,8 @@ const ProcessDetails = () => {
             </Card>
             )}
 
-            {/* Accordion para agrupar painéis secundários - escondido para INDEXACAO */}
-            {!isIndexacaoRole && (
+            {/* Accordion para agrupar painéis secundários - visível se tiver manage_tasks */}
+            {(!isViewMode || canManageTasks) && (
             <Accordion type="multiple" defaultValue={["tasks"]} className="space-y-2">
               {/* Tarefas */}
               <AccordionItem value="tasks" className="border rounded-lg">
@@ -2796,8 +2887,8 @@ const ProcessDetails = () => {
             </Accordion>
             )}
 
-            {/* Side Tabs - Prazos e Histórico - escondido para INDEXACAO */}
-            {!isIndexacaoRole && (
+            {/* Side Tabs - Prazos e Histórico - visível se NÃO for modo de visualização */}
+            {!isViewMode && (
             <Card className="border-border">
               <CardContent className="p-0">
                 <Tabs value={sideTab} onValueChange={setSideTab}>
