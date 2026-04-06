@@ -677,7 +677,9 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
        CONDIÇÃO DUPLA: O nome do cliente deve aparecer no assunto ou corpo.
        (Elimina falsos positivos — email trocado mas sem referência ao cliente)
     3. Emails trocados entre o Comercial (owner_email) e geral@powerealestate.pt.
+       CONDIÇÃO DUPLA: O nome do cliente deve aparecer no assunto ou corpo.
     4. Emails trocados entre o Comercial (owner_email) e geral@precisioncredito.pt.
+       CONDIÇÃO DUPLA: O nome do cliente deve aparecer no assunto ou corpo.
     5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
     
     SUPORTE A MÚLTIPLOS EMAILS:
@@ -912,7 +914,9 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
            CONDIÇÃO OBRIGATÓRIA: nome do cliente deve aparecer no assunto ou corpo.
            (Verificação dupla para eliminar falsos positivos)
         3. Emails trocados entre Comercial (owner_email) e geral@powerealestate.pt.
+           CONDIÇÃO OBRIGATÓRIA: nome do cliente deve aparecer no assunto ou corpo.
         4. Emails trocados entre Comercial (owner_email) e geral@precisioncredito.pt.
+           CONDIÇÃO OBRIGATÓRIA: nome do cliente deve aparecer no assunto ou corpo.
         5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
         
         Returns:
@@ -943,12 +947,24 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
                 return False
         
         # REGRA 3: Emails trocados entre Comercial e geral@powerealestate.pt
+        # CONDIÇÃO DUPLA: match de email + verificação do nome no assunto/corpo
         if exchanged_between(owner_email, "geral@powerealestate.pt", em):
-            return True
+            if client_name_in_email(em):
+                logger.debug("Regra 3 (dupla verificação): email owner↔geral@powerealestate.pt, nome encontrado ✓")
+                return True
+            else:
+                logger.debug("Regra 3 (dupla verificação): email owner↔geral@powerealestate.pt, nome NÃO encontrado ✗ → descartado")
+                return False
         
         # REGRA 4: Emails trocados entre Comercial e geral@precisioncredito.pt
+        # CONDIÇÃO DUPLA: match de email + verificação do nome no assunto/corpo
         if exchanged_between(owner_email, "geral@precisioncredito.pt", em):
-            return True
+            if client_name_in_email(em):
+                logger.debug("Regra 4 (dupla verificação): email owner↔geral@precisioncredito.pt, nome encontrado ✓")
+                return True
+            else:
+                logger.debug("Regra 4 (dupla verificação): email owner↔geral@precisioncredito.pt, nome NÃO encontrado ✗ → descartado")
+                return False
         
         # Nenhuma regra satisfeita → excluir
         return False

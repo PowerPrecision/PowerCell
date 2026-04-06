@@ -1140,6 +1140,8 @@ const EmailHistoryPanel = ({
         onMarkEmail={markEmail}
         onUnmarkEmail={unmarkEmail}
         token={token}
+        clientName={clientName}
+        processId={processId}
       />
 
       {/* Modal de Templates */}

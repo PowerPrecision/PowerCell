@@ -62,7 +62,9 @@ const EmailViewerModal = ({
   onSelectEmail,
   onMarkEmail,
   onUnmarkEmail,
-  token
+  token,
+  clientName,
+  processId
 }) => {
   const [currentEmail, setCurrentEmail] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -298,8 +300,23 @@ const EmailViewerModal = ({
 
           {/* Conteúdo do email - lado direito */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Header com navegação */}
-            <div className="p-3 border-b flex items-center justify-between bg-background shrink-0">
+            {/* Barra de navegação com breadcrumb de contexto */}
+            <div className="px-3 py-1.5 border-b bg-muted/30 shrink-0">
+              {/* Breadcrumb de contexto */}
+              {clientName && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+                  <Mail className="h-3 w-3" />
+                  <span>Processo: {clientName}</span>
+                  <ChevronLeft className="h-3 w-3 rotate-180" />
+                  <span className="text-foreground font-medium truncate">
+                    {currentEmail?.subject || "Email"}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Header com navegação prev/next */}
+            <div className="px-3 py-2 border-b flex items-center justify-between bg-background shrink-0">
               <div className="flex items-center gap-2">
                 <Button 
                   variant="outline" 
