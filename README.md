@@ -100,6 +100,41 @@ PowerCell/
 - **Motor de Automação** (`/automation`): Regras "Se X, Então Y" sem código
 - Gestão de Estados do Workflow
 
+### Perfis de Utilizador e Permissões
+
+O sistema suporta os seguintes perfis (roles), cada um com permissões específicas de páginas e ações:
+
+| Perfil | Páginas Acedidas | Ações Permitidas |
+|-------|-------------------|------------------|
+| **Admin** | Todas | Todas |
+| **CEO** | Todas | Todas |
+| **Diretor** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, Stats, Imóveis, Minutas, Leads | CRUD processos/clientes, upload/delete docs, financeiros |
+| **Consultor** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Imóveis, Minutas, Leads | CRUD processos/clientes, upload docs, financeiros, imóveis |
+| **Mediador/Intermediário** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Minutas | CRUD processos/clientes, upload docs, financeiros |
+| **Administrativo** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, Registos, Validades | CRUD processos/clientes, upload/delete docs |
+| **Indexação** | Dashboard, Kanban, Processos, Clientes, Docs, Notificações, **Meus Clientes** | Upload/delete/download docs, atribuir clientes, gerir tarefas, usar chat, atribuir utilizadores |
+| **Cliente** | Nenhuma (acesso externo) | Nenhuma |
+
+#### Perfil INDEXACAO - Detalhes
+
+O perfil de **Indexação** foi projetado para operadores focados na organização documental:
+
+- **Páginas**: Acede a Dashboard, Kanban, Processos, Clientes, Documentos, Notificações e "Meus Clientes"
+- **Não tem acesso a**: Criar/editar clientes ou processos (dados base são **read-only**)
+- **Funcionalidades permitidas**:
+  - Upload, delete e download de documentos
+  - Gestão de tarefas (criar, editar, completar)
+  - Chat interno
+  - Atribuição de utilizadores a processos (consultores, intermediários, indexação)
+  - Atribuição de clientes
+- **Proteção de dados**: O backend retorna HTTP 403 se o utilizador tentar editar dados base via API
+
+#### "Meus Clientes"
+
+- **Endpoint**: `GET /api/clients/me` e `GET /api/my-clients`
+- **Frontend**: Rota `/meus-clientes` - apenas visível se o utilizador tiver a permissão `my_clients`
+- Mostra apenas processos onde o utilizador está atribuído (por role)
+
 ### Segurança
 - JWT com access token (24h) + refresh token (7d)
 - Rate limiting (uploads, deletes, IA)
