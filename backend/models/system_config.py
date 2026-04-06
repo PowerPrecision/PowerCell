@@ -183,8 +183,9 @@ class DocumentRecipientsConfig(BaseModel):
     enabled: bool = False
     recipients: Optional[str] = None  # JSON string com lista de destinatários
     email_template: Optional[str] = None  # Template do email com variáveis
-    default_to: Optional[str] = None  # Email principal (TO)
+    default_to: Optional[str] = None  # Email principal (TO) — mantido para compatibilidade
     default_to_name: Optional[str] = None  # Nome do destinatário TO
+    default_to_emails: Optional[str] = None  # JSON string com lista de emails TO (múltiplos destinatários principais)
 
 
 class DSTIConfig(BaseModel):
