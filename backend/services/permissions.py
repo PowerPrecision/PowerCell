@@ -36,6 +36,7 @@ AVAILABLE_PAGES = [
     "leads",             # Gestor de Visitas / Leads
     "permissions",       # Perfis e Permissões
     "form_manager",      # Gestão do Formulário
+    "my_clients",        # Os Meus Clientes
 ]
 
 # Ações disponíveis no sistema
@@ -63,6 +64,10 @@ AVAILABLE_ACTIONS = [
     "manage_automation", # Gerir automações
     "view_reports",      # Ver relatórios
     "manage_ai",         # Gerir configurações de IA
+    "manage_tasks",      # Gerir tarefas
+    "use_chat",          # Utilizar chat interno
+    "assign_process_users",  # Atribuir utilizadores a processos
+    "download_docs",     # Descarregar documentos
 ]
 
 # Permissões padrão por role
@@ -137,10 +142,13 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
     },
     "indexacao": {
         "pages": [
-            "dashboard", "kanban", "processes", "clients", "documents", "notifications"
+            "dashboard", "kanban", "processes", "clients", "documents",
+            "notifications", "my_clients"
         ],
         "actions": [
-            "upload_docs", "delete_docs", "assign_clients"
+            "upload_docs", "delete_docs", "download_docs",
+            "assign_clients", "manage_tasks", "use_chat",
+            "assign_process_users"
         ],
     },
     "cliente": {

@@ -42,6 +42,110 @@ router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
 
 
+@router.get("/me")
+async def get_my_assigned_clients(
+    search: Optional[str] = Query(None, description="Pesquisar por nome ou email"),
+    limit: int = Query(100, le=500),
+    skip: int = Query(0),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Obter clientes/processos atribuídos ao utilizador logado.
+    
+    Retorna apenas os processos onde o utilizador actual está atribuído
+    (assigned_consultor_id, assigned_mediador_id, assigned_indexacao_id, ou created_by).
+    
+    Permissões: Qualquer utilizador autenticado com role de staff.
+    """
+    from models.auth import UserRole
+    
+    user_id = user.get("id", "")
+    user_email = user.get("email", "")
+    user_role = user.get("role", "")
+    
+    # Construir query baseada no papel
+    if user_role == UserRole.CONSULTOR:
+        query = {
+            "$or": [
+                {"assigned_consultor_ids": user_id},
+                {"assigned_consultor_id": user_id},
+                {"created_by": user_email}
+            ]
+        }
+    elif user_role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+        query = {
+            "$or": [
+                {"assigned_mediador_ids": user_id},
+                {"assigned_mediador_id": user_id},
+                {"created_by": user_email}
+            ]
+        }
+    elif user_role == UserRole.INDEXACAO:
+        query = {
+            "$or": [
+                {"assigned_indexacao_id": user_id},
+                {"created_by": user_email}
+            ]
+        }
+    elif user_role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+        query = {
+            "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+            "is_active": {"$ne": False}
+        }
+    else:
+        query = {"created_by": user_email}
+    
+    # Search filter
+    if search:
+        search = sanitize_string(search, max_length=200)
+        name_regex = create_accent_insensitive_regex(search)
+        search_filter = {
+            "$or": [
+                {"client_name": name_regex},
+                {"client_email": {"$regex": re.escape(search), "$options": "i"}}
+            ]
+        }
+        query = {"$and": [query, search_filter]}
+    
+    # Buscar processos
+    processes = await db.processes.find(
+        query,
+        {"_id": 0, "id": 1, "process_number": 1, "client_name": 1,
+         "client_email": 1, "client_phone": 1, "status": 1,
+         "assigned_consultor_id": 1, "assigned_mediador_id": 1,
+         "created_at": 1, "updated_at": 1}
+    ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
+    
+    # Desencriptar dados sensíveis
+    from services.process_service import decrypt_processes_list
+    processes = decrypt_processes_list(processes)
+    
+    # Buscar status labels
+    workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    status_map = {s["name"]: s for s in workflow_statuses}
+    
+    clients_list = []
+    for p in processes:
+        status_info = status_map.get(p.get("status"), {})
+        clients_list.append({
+            "id": p["id"],
+            "process_number": p.get("process_number"),
+            "client_name": p.get("client_name", "Sem nome"),
+            "client_email": p.get("client_email"),
+            "client_phone": p.get("client_phone"),
+            "status": p.get("status"),
+            "status_label": status_info.get("label", p.get("status", "Desconhecido")),
+            "status_color": status_info.get("color", "#6B7280"),
+            "created_at": p.get("created_at"),
+            "updated_at": p.get("updated_at"),
+        })
+    
+    return {
+        "clients": clients_list,
+        "total": len(clients_list)
+    }
+
+
 def create_accent_insensitive_regex(search_term: str) -> dict:
     """
     Cria um regex MongoDB que ignora acentos.
@@ -872,6 +976,26 @@ async def update_client(
     
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    
+    # Verificar permissão de edição
+    user_role = user.get("role", "")
+    user_permissions = user.get("permissions", {})
+    user_actions = user_permissions.get("actions", [])
+    
+    # Se o utilizador tem permissões personalizadas, verificar se tem "edit_client"
+    # Caso contrário, verificar pelo role (roles que historicamente podem editar)
+    can_edit = "edit_client" in user_actions
+    if not can_edit and not user_actions:
+        # Sem permissões personalizadas - verificar pelo role
+        from models.auth import UserRole
+        can_edit = user_role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, 
+                                UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
+    
+    if not can_edit:
+        raise HTTPException(
+            status_code=403, 
+            detail="Não tem permissão para editar dados do cliente. Apenas visualização."
+        )
     
     # Sanitizar inputs
     sanitized_nome = None
