@@ -1381,6 +1381,7 @@ const ProcessDetails = () => {
           processId={id}
           currentStatus={process.status}
           history={process.status_history || activities.filter(a => a.type === 'status_change')}
+          workflowStatuses={workflowStatuses}
         />
 
         {/* TAREFA 2: Resolver conflitos de dados IA */}

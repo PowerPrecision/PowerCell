@@ -1,8 +1,10 @@
 /**
  * ProcessTimeline - Timeline visual do processo
  * Mostra a evolução do processo através das diferentes fases
+ * 
+ * Usa as fases dinâmicas da BD (workflow_statuses) em vez de dados hardcoded.
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -11,28 +13,25 @@ import { Loader2, CheckCircle, Clock, Circle, ArrowRight } from "lucide-react";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+// Cores de fallback mapeadas a partir do nome da cor da BD
+const COLOR_MAP = {
+  yellow: "#FCD34D", amber: "#F59E0B", orange: "#F97316", red: "#EF4444",
+  green: "#22C55E", emerald: "#10B981", teal: "#14B8A6", cyan: "#06B6D4",
+  blue: "#3B82F6", indigo: "#6366F1", violet: "#8B5CF6", purple: "#A855F7",
+  pink: "#EC4899", rose: "#F43F5E", gray: "#6B7280", slate: "#64748B",
+  lime: "#84CC16", sky: "#0EA5E9", fuchsia: "#D946EF",
+};
 
-// Fases do processo - IDs correspondem aos slugs na BD (workflow_statuses)
-const PROCESS_PHASES = [
-  { id: "clientes_espera", label: "Clientes em Espera", color: "#FCD34D", order: 1 },
-  { id: "fase_documental", label: "Fase Documental", color: "#60A5FA", order: 2 },
-  { id: "fase_documental_ii", label: "Fase Documental II", color: "#60A5FA", order: 3 },
-  { id: "enviado_bruno", label: "Enviado ao Bruno", color: "#F97316", order: 4 },
-  { id: "enviado_luis", label: "Enviado ao Luís", color: "#FB923C", order: 5 },
-  { id: "enviado_bcp_rui", label: "Enviado BCP Rui", color: "#FB923C", order: 6 },
-  { id: "entradas_precision", label: "Entradas Precision", color: "#F97316", order: 7 },
-  { id: "fase_bancaria", label: "Fase Bancária - Pré Aprovação", color: "#38BDF8", order: 8 },
-  { id: "fase_visitas", label: "Fase de Visitas", color: "#60A5FA", order: 9 },
-  { id: "ch_aprovado", label: "CH Aprovado - Avaliação", color: "#4ADE80", order: 10 },
-  { id: "fase_escritura", label: "Fase de Escritura", color: "#22D3EE", order: 11 },
-  { id: "escritura_agendada", label: "Escritura Agendada", color: "#818CF8", order: 12 },
-  { id: "concluidos", label: "Concluídos", color: "#10B981", order: 13 },
-  { id: "desistencias", label: "Desistências", color: "#6B7280", order: 14 },
-];
+const getColor = (colorName) => {
+  if (!colorName) return "#6B7280";
+  // Se já é um hex color
+  if (colorName.startsWith("#")) return colorName;
+  return COLOR_MAP[colorName.toLowerCase()] || "#6B7280";
+};
 
-// Normalizar status (mapear variantes para o ID principal)
+// Normalizar status (mapear variantes antigas para o nome atual na BD)
 const normalizeStatus = (status) => {
+  if (!status) return status;
   const statusMap = {
     "clientes_em_espera": "clientes_espera",
     "enviado_ao_bruno": "enviado_bruno",
@@ -49,11 +48,9 @@ const normalizeStatus = (status) => {
 };
 
 // Componente de nó da timeline (compacto)
-const TimelineNode = ({ phase, isCompleted, isCurrent, date, daysInPhase }) => {
-  const phaseInfo = PROCESS_PHASES.find(p => p.id === phase) || { 
-    label: phase, 
-    color: "#9CA3AF" 
-  };
+const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, date, daysInPhase }) => {
+  const nodeColor = phaseInfo ? getColor(phaseInfo.color) : "#9CA3AF";
+  const label = phaseInfo?.label || "Desconhecida";
 
   return (
     <div className="flex flex-col items-center min-w-[80px]">
@@ -66,12 +63,12 @@ const TimelineNode = ({ phase, isCompleted, isCurrent, date, daysInPhase }) => {
             ? "border-blue-500 bg-blue-50"
             : "border-gray-300 bg-white"
         }`}
-        style={isCurrent ? { borderColor: phaseInfo.color } : {}}
+        style={isCurrent ? { borderColor: nodeColor } : {}}
       >
         {isCompleted ? (
           <CheckCircle className="h-3 w-3" />
         ) : isCurrent ? (
-          <Circle className="h-3 w-3" style={{ color: phaseInfo.color }} />
+          <Circle className="h-3 w-3" style={{ color: nodeColor }} />
         ) : (
           <Circle className="h-3 w-3 text-gray-300" />
         )}
@@ -80,7 +77,7 @@ const TimelineNode = ({ phase, isCompleted, isCurrent, date, daysInPhase }) => {
       {/* Label */}
       <div className="mt-1 text-center max-w-[80px]">
         <p className={`text-[10px] font-medium leading-tight ${isCurrent ? "text-blue-600" : isCompleted ? "text-green-600" : "text-gray-500"}`}>
-          {phaseInfo.label}
+          {label}
         </p>
         {date && (
           <p className="text-[9px] text-muted-foreground">
@@ -113,26 +110,54 @@ const TimelineConnector = ({ isCompleted }) => (
   </div>
 );
 
-const ProcessTimeline = ({ processId, currentStatus, history }) => {
+const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }) => {
   const { token } = useAuth();
   const [timelineData, setTimelineData] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
+  // Construir mapa de fases a partir dos workflowStatuses dinâmicos
+  const phasesMap = useMemo(() => {
+    if (!workflowStatuses || workflowStatuses.length === 0) return {};
+    const map = {};
+    workflowStatuses.forEach(s => {
+      map[s.name] = {
+        id: s.name,
+        label: s.label || s.name,
+        color: getColor(s.color),
+        order: s.order || 0,
+      };
+    });
+    return map;
+  }, [workflowStatuses]);
+
+  // Lista de fases ordenada
+  const sortedPhases = useMemo(() => {
+    return Object.values(phasesMap).sort((a, b) => a.order - b.order);
+  }, [phasesMap]);
+
   // Normalizar o status atual
   const normalizedCurrentStatus = normalizeStatus(currentStatus);
 
   // Processar histórico para construir timeline
   const buildTimeline = useCallback(() => {
     // Encontrar a fase atual
-    const currentPhaseInfo = PROCESS_PHASES.find(p => p.id === normalizedCurrentStatus);
+    const currentPhaseInfo = phasesMap[normalizedCurrentStatus];
     const currentOrder = currentPhaseInfo?.order || 0;
+
+    // Se não há fases carregadas, não mostrar nada
+    if (sortedPhases.length === 0) {
+      setTimelineData([]);
+      setLoading(false);
+      return;
+    }
 
     // Se não há histórico, mostrar todas as fases até a atual
     if (!history || history.length === 0) {
-      const timeline = PROCESS_PHASES
-        .filter(p => p.order <= currentOrder && p.order < 90) // Excluir recusado/desistiu
+      const timeline = sortedPhases
+        .filter(p => p.order <= currentOrder)
         .map(p => ({
           phase: p.id,
+          phaseInfo: p,
           date: null,
           isCurrent: p.id === normalizedCurrentStatus,
           isCompleted: p.order < currentOrder,
@@ -167,6 +192,7 @@ const ProcessTimeline = ({ processId, currentStatus, history }) => {
 
         timeline.push({
           phase: status,
+          phaseInfo: phasesMap[status] || { id: status, label: status, color: "#6B7280", order: 50 },
           date: entryDate,
           daysInPhase: status !== normalizedCurrentStatus ? daysInPhase : undefined,
           isCurrent: status === normalizedCurrentStatus,
@@ -179,22 +205,19 @@ const ProcessTimeline = ({ processId, currentStatus, history }) => {
     if (!seenPhases.has(normalizedCurrentStatus)) {
       timeline.push({
         phase: normalizedCurrentStatus,
+        phaseInfo: currentPhaseInfo || { id: normalizedCurrentStatus, label: normalizedCurrentStatus, color: "#6B7280", order: currentOrder },
         date: null,
         isCurrent: true,
         isCompleted: false,
       });
     }
 
-    // Ordenar pela ordem das fases
-    timeline.sort((a, b) => {
-      const orderA = PROCESS_PHASES.find(p => p.id === a.phase)?.order || 50;
-      const orderB = PROCESS_PHASES.find(p => p.id === b.phase)?.order || 50;
-      return orderA - orderB;
-    });
+    // Ordenar pela ordem das fases (usando order da BD)
+    timeline.sort((a, b) => (a.phaseInfo?.order || 50) - (b.phaseInfo?.order || 50));
 
     setTimelineData(timeline);
     setLoading(false);
-  }, [history, normalizedCurrentStatus]);
+  }, [history, normalizedCurrentStatus, phasesMap, sortedPhases, currentPhaseInfo]);
 
   useEffect(() => {
     buildTimeline();
@@ -213,7 +236,7 @@ const ProcessTimeline = ({ processId, currentStatus, history }) => {
   // Calcular estatísticas
   const completedPhases = timelineData.filter(t => t.isCompleted).length;
   const totalDays = timelineData.reduce((acc, t) => acc + (t.daysInPhase || 0), 0);
-  const currentPhaseInfo = PROCESS_PHASES.find(p => p.id === normalizedCurrentStatus);
+  const currentPhaseInfo = phasesMap[normalizedCurrentStatus];
 
   return (
     <Card data-testid="process-timeline" className="overflow-hidden">
@@ -227,7 +250,7 @@ const ProcessTimeline = ({ processId, currentStatus, history }) => {
             {currentPhaseInfo && (
               <Badge 
                 className="text-[10px] px-1.5 py-0"
-                style={{ backgroundColor: currentPhaseInfo.color, color: '#fff' }}
+                style={{ backgroundColor: getColor(currentPhaseInfo.color), color: '#fff' }}
               >
                 {currentPhaseInfo.label}
               </Badge>
@@ -247,7 +270,7 @@ const ProcessTimeline = ({ processId, currentStatus, history }) => {
             {timelineData.map((item, index) => (
               <React.Fragment key={item.phase}>
                 <TimelineNode
-                  phase={item.phase}
+                  phaseInfo={item.phaseInfo}
                   isCompleted={item.isCompleted}
                   isCurrent={item.isCurrent}
                   date={item.date}
