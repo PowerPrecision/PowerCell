@@ -29,7 +29,7 @@ import {
   Paperclip, User, Star, StarOff, Bookmark, BookmarkOff,
   AlertCircle, CheckCircle, Download, Eye, EyeOff, Reply,
   Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet,
-  Sparkles, Copy, ExternalLink
+  Sparkles, Copy, ExternalLink, Tag
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
