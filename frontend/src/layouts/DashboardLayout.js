@@ -485,12 +485,12 @@ const DashboardLayout = ({ children, title }) => {
           });
         }
         
-        // "Processos" (Kanban)
+        // "Os Meus Processos" (só os processos atribuídos ao utilizador)
         if (userPages.includes("processes")) {
           indexacaoMain.push({
-            label: "Processos",
+            label: "Os Meus Processos",
             icon: LayoutGrid,
-            href: "/staff",
+            href: "/meus-clientes",
           });
         }
         

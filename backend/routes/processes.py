@@ -620,15 +620,13 @@ async def get_kanban_board(
             {"assigned_mediador_id": user_id}
         ]
     elif role == UserRole.INDEXACAO:
-        # Indexação vê apenas os processos atribuídos a si
-        query["$or"] = [
-            {"assigned_indexacao_id": user_id},
-            {"created_by": user.get("email", "")}
-        ]
-    # Admin, CEO, Administrativo, Diretor see all (no base filter)
+        # Indexação vê TODOS os processos no kanban (Dashboard)
+        # Os processos atribuídos a si são vistos em "Os Meus Processos" (/my-clients)
+        pass
+    # Admin, CEO, Administrativo, Diretor, Indexação see all (no base filter)
 
     # Apply additional filters (only for roles that can see all)
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
         if consultor_id:
             if consultor_id == "none":
                 # Sem consultor atribuído
