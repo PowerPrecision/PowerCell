@@ -239,7 +239,7 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minHeight={250}>
                   <BarChart data={statusData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
@@ -262,7 +262,7 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minHeight={250}>
                   <PieChart>
                     <Pie
                       data={prioridadeData}
@@ -294,7 +294,7 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minHeight={250}>
                   <BarChart data={valorPorFaseData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
@@ -320,7 +320,7 @@ const StatisticsPage = () => {
                 </CardHeader>
                 <CardContent className="h-80">
                   {leadsStats?.funnel_data && (
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
                       <BarChart data={leadsStats.funnel_data} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" />
@@ -347,7 +347,7 @@ const StatisticsPage = () => {
                 </CardHeader>
                 <CardContent className="h-80">
                   {leadsStats?.leads_by_source && leadsStats.leads_by_source.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
                       <PieChart>
                         <Pie
                           data={leadsStats.leads_by_source}
