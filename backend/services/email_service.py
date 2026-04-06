@@ -672,15 +672,16 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     O sistema APENAS guarda emails que cumpram UMA destas 5 condições:
     
     1. Emails trocados entre o Utilizador Logado e o Comercial (owner_email).
-    2. Emails trocados entre o Utilizador Logado e o Cliente (client_email).
+    2. Emails trocados entre o Utilizador Logado e QUALQUER EMAIL do Cliente.
+       CONDIÇÃO DUPLA: O nome do cliente deve aparecer no assunto ou corpo.
+       (Elimina falsos positivos — email trocado mas sem referência ao cliente)
     3. Emails trocados entre o Comercial (owner_email) e geral@powerealestate.pt.
     4. Emails trocados entre o Comercial (owner_email) e geral@precisioncredito.pt.
     5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
     
-    CONTEXTO DE NEGÓCIO:
-    - Comercial (owner_email): Agente imobiliário que fez a angariação.
-    - Utilizador Logado (user_email): Consultor/funcionário a usar o sistema.
-    - Cliente (client_email): Cliente do processo.
+    SUPORTE A MÚLTIPLOS EMAILS:
+    O campo "Email Principal" pode conter múltiplos emails (separados por vírgula,
+    ponto-e-vírgula ou espaço). O sistema itera sobre todos eles.
     
     Args:
         process_id: ID do processo
@@ -704,17 +705,37 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     
     # ===== EXTRAÇÃO DE VARIÁVEIS DO PROCESSO =====
     
-    # Email do Cliente
+    # Email do Cliente — suporta múltiplos emails (string separada por vírgula/ponto-e-vírgula ou lista)
     personal_data = process.get("personal_data", {}) or {}
-    client_email = personal_data.get("email") or process.get("client_email")
-    if client_email:
+    raw_client_email = personal_data.get("email") or process.get("client_email")
+    client_emails = []  # Lista de emails do cliente
+    
+    if raw_client_email:
         # Limpar emails com formatação markdown do Trello (ex: [text](mailto:email))
-        clean_email = client_email
-        if "[" in clean_email and "]" in clean_email:
-            match = re.search(r'[\w\.-]+@[\w\.-]+', clean_email)
-            if match:
-                clean_email = match.group()
-        client_email = clean_email.lower().strip()
+        cleaned = raw_client_email
+        if "[" in cleaned and "]" in cleaned:
+            # Extrair todos os emails de links mailto: 
+            cleaned_emails = re.findall(r'[\w\.-]+@[\w\.-]+', cleaned)
+        else:
+            # Separar por vírgula, ponto-e-vírgula, ou ponto (comum em emails copiados)
+            cleaned_emails = re.split(r'[,;\s]+', cleaned)
+        
+        for email in cleaned_emails:
+            email = email.strip().lower()
+            if email and "@" in email:
+                client_emails.append(email)
+        
+        # Remover duplicados preservando ordem
+        seen = set()
+        unique_emails = []
+        for e in client_emails:
+            if e not in seen:
+                seen.add(e)
+                unique_emails.append(e)
+        client_emails = unique_emails
+    
+    # Para compatibilidade com código existente, manter client_email como primeiro da lista
+    client_email = client_emails[0] if client_emails else None
     
     # Email do Comercial (owner_email) — agente imobiliário que fez a angariação
     real_estate_data = process.get("real_estate_data", {}) or {}
@@ -731,7 +752,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     
     logger.info(f"Sincronizando emails para processo {process_id}")
     logger.info(f"  - Cliente: {client_name}")
-    logger.info(f"  - Email cliente: {client_email}")
+    logger.info(f"  - Email(s) cliente: {client_emails}")
     logger.info(f"  - Email comercial (owner): {owner_email}")
     logger.info(f"  - Email utilizador logado: {user_email_lower}")
     logger.info(f"  - Emails monitorizados (IMAP only): {monitored_emails}")
@@ -764,8 +785,8 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         emails_to_search = []
         if user_email_lower:
             emails_to_search.append(user_email_lower)
-        if client_email:
-            emails_to_search.append(client_email)
+        # Incluir TODOS os emails do cliente (suporte a múltiplos)
+        emails_to_search.extend(client_emails)
         if owner_email:
             emails_to_search.append(owner_email)
         # Incluir emails gerais da empresa para capturar regras 3 e 4
@@ -797,6 +818,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         """
         Verifica se o NOME DO CLIENTE aparece explicitamente no assunto ou corpo.
         Usa partes >= 3 caracteres para evitar falsos positivos.
+        Case-insensitive via .lower() em client_name_parts (já preparado).
         """
         if not client_name_parts:
             return False
@@ -805,6 +827,33 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         body_html = (em.get("body_html") or "").lower()
         content = subject + " " + body + " " + body_html
         return any(part in content for part in client_name_parts)
+    
+    def exchanged_between_any(account_emails: list, em: Dict) -> tuple:
+        """
+        Verifica se houve troca de emails ENTRE o utilizador logado e QUALQUER UM
+        dos emails da lista account_emails.
+        
+        Returns:
+            tuple: (matched: bool, matched_email: str|None) — qual email fez match
+        """
+        if not account_emails:
+            return (False, None)
+        from_email = (em.get("from_email") or "").lower()
+        to_emails = [e.lower() for e in (em.get("to_emails") or [])]
+        cc_emails = [e.lower() for e in (em.get("cc_emails") or [])]
+        all_recipients = to_emails + cc_emails
+        
+        for acc_email in account_emails:
+            if not acc_email:
+                continue
+            # Utilizador logado enviou para este email do cliente
+            if from_email == user_email_lower and acc_email in all_recipients:
+                return (True, acc_email)
+            # Este email do cliente enviou para o utilizador logado
+            if from_email == acc_email and user_email_lower in all_recipients:
+                return (True, acc_email)
+        
+        return (False, None)
     
     def exchanged_between(email_a: str, email_b: str, em: Dict) -> bool:
         """
@@ -829,11 +878,13 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     
     def email_matches_rules(em: Dict) -> bool:
         """
-        Aplica as 5 regras de filtragem ESTRITAS de negócio.
-        O email é incluído APENAS se cumprir pelo menos UMA destas regras:
+        Aplica as regras de filtragem ESTRITAS de negócio.
         
+        REGRAS ATUALIZADAS:
         1. Emails trocados entre Utilizador Logado e Comercial (owner_email).
-        2. Emails trocados entre Utilizador Logado e Cliente (client_email).
+        2. Emails trocados entre Utilizador Logado e QUALQUER EMAIL do Cliente
+           + CONDIÇÃO OBRIGATÓRIA: nome do cliente deve aparecer no assunto ou corpo.
+           (Verificação dupla para eliminar falsos positivos)
         3. Emails trocados entre Comercial (owner_email) e geral@powerealestate.pt.
         4. Emails trocados entre Comercial (owner_email) e geral@precisioncredito.pt.
         5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
@@ -850,9 +901,19 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         if exchanged_between(user_email_lower, owner_email, em):
             return True
         
-        # REGRA 2: Emails trocados entre Utilizador Logado e Cliente
-        if exchanged_between(user_email_lower, client_email, em):
-            return True
+        # REGRA 2: Emails trocados entre Utilizador Logado e QUALQUER EMAIL do Cliente
+        # CONDIÇÃO DUPLA: match de email + verificação do nome no assunto/corpo
+        match_result = exchanged_between_any(client_emails, em)
+        if match_result[0]:
+            # Match por email encontrado — agora verificar o NOME DO CLIENTE
+            if client_name_in_email(em):
+                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]}, nome encontrado ✓")
+                return True
+            else:
+                # Email trocado com cliente mas NOME não encontrado no conteúdo
+                # → Falso positivo provável, descartar
+                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]}, nome NÃO encontrado ✗ → descartado")
+                return False
         
         # REGRA 3: Emails trocados entre Comercial e geral@powerealestate.pt
         if exchanged_between(owner_email, "geral@powerealestate.pt", em):
