@@ -108,6 +108,7 @@ export default function ClientsPage() {
   const [statusFilter, setStatusFilter] = useState("active"); // "all", "active", "inactive" - default: mostrar apenas ativos
   const [phaseFilter, setPhaseFilter] = useState("all"); // Filtro por fase
   const [assignmentFilter, setAssignmentFilter] = useState("all"); // Filtro por atribuição
+  const [indexacaoFilter, setIndexacaoFilter] = useState("all"); // Filtro por indexação: "all", "assigned", "unassigned"
   const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
@@ -149,6 +150,8 @@ export default function ClientsPage() {
       if (phaseFilter && phaseFilter !== "all") params.append("status_filter", phaseFilter);
       // Filtro por atribuição
       if (assignmentFilter && assignmentFilter !== "all") params.append("assignment_filter", assignmentFilter);
+      // Filtro por indexação
+      if (indexacaoFilter && indexacaoFilter !== "all") params.append("indexacao_filter", indexacaoFilter);
 
       const response = await fetch(`${API_URL}/api/clients?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -165,7 +168,7 @@ export default function ClientsPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, statusFilter, phaseFilter, assignmentFilter]);
+  }, [searchTerm, statusFilter, phaseFilter, assignmentFilter, indexacaoFilter]);
 
   useEffect(() => {
     fetchClients();
@@ -403,6 +406,17 @@ export default function ClientsPage() {
                     <SelectItem value="consultor">Apenas Consultor</SelectItem>
                     <SelectItem value="intermediario">Apenas Intermediário</SelectItem>
                     <SelectItem value="none">Sem Atribuição</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={indexacaoFilter} onValueChange={setIndexacaoFilter}>
+                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="indexacao-filter">
+                    <Filter className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder="Indexação" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    <SelectItem value="assigned">Com Indexação</SelectItem>
+                    <SelectItem value="unassigned">Sem Indexação</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={`${sortField}_${sortOrder}`} onValueChange={(v) => {
