@@ -110,6 +110,7 @@ import {
   Calculator,
   TrendingUp,
   Link2,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isAfter } from "date-fns";
@@ -891,6 +892,12 @@ const ProcessDetails = () => {
 
   // Função principal de save que verifica créditos ativos
   const handleSave = async () => {
+    // Bloquear guarda se o processo está em status terminal
+    if (isProcessLocked) {
+      toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
+      return;
+    }
+    
     // Validar NIF antes de guardar
     if (personalData.nif) {
       const validation = validateNIF(personalData.nif);
@@ -1049,7 +1056,10 @@ const ProcessDetails = () => {
     : ["admin", "ceo", "diretor"].includes(userRole);
   
   // Modo de visualização (read-only) quando não tem edit_process
-  const isViewMode = !hasEditProcess;
+  // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
+  const BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"];
+  const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status);
+  const isViewMode = !hasEditProcess || isProcessLocked;
 
   // Função para eliminar o cliente/processo
   const handleDeleteClient = async () => {
@@ -1170,6 +1180,17 @@ const ProcessDetails = () => {
       />
 
       <div className="space-y-6">
+        {/* Aviso de processo bloqueado */}
+        {isProcessLocked && (
+          <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-200 text-sm">
+            <Lock className="h-4 w-4 shrink-0" />
+            <span>
+              Este processo encontra-se em estado terminal (<strong>{currentStatusInfo.label}</strong>). 
+              A edição de dados está bloqueada para todos os utilizadores.
+            </span>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col gap-4">
           {/* Linha 1: Nome e Badge do Status */}

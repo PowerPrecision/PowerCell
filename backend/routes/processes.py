@@ -1227,6 +1227,14 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     if role == UserRole.INDEXACAO:
         raise HTTPException(status_code=403, detail="Indexação não pode alterar dados do processo. Apenas visualizar e gerir documentos.")
     
+    # Bloquear edição de processos em status terminal (eliminados, desistências, concluídos)
+    BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"]
+    if process.get("status") in BLOCKED_STATUSES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Não é possível editar um processo em estado terminal ({process.get('status')})."
+        )
+    
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     
     valid_statuses = [s["name"] for s in await db.workflow_statuses.find({}, {"name": 1, "_id": 0}).to_list(100)]
