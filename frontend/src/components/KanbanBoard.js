@@ -51,7 +51,7 @@ const statusHeaderColors = {
 // Status relacionados com bancos - ao mover para estas colunas, verificar créditos ativos
 const BANK_RELATED_STATUSES = ["enviado_bruno", "enviado_luis", "enviado_bcp_rui", "fase_bancaria", "entradas_precision"];
 
-const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "all" }) => {
+const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "all", indexacaoFilter = "all" }) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [kanbanData, setKanbanData] = useState({ columns: [], total_processes: 0 });
@@ -212,6 +212,13 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
           params.append("mediador_id", mediadorFilter);
         }
       }
+      if (indexacaoFilter && indexacaoFilter !== "all") {
+        if (indexacaoFilter === "none") {
+          params.append("indexacao_id", "none");
+        } else {
+          params.append("indexacao_id", indexacaoFilter);
+        }
+      }
       
       const url = params.toString() 
         ? `${API_URL}/api/processes/kanban?${params.toString()}`
@@ -229,7 +236,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
     } finally {
       setLoading(false);
     }
-  }, [token, consultorFilter, mediadorFilter]);
+  }, [token, consultorFilter, mediadorFilter, indexacaoFilter]);
 
   useEffect(() => {
     fetchKanbanData();
