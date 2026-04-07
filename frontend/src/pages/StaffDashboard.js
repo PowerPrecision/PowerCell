@@ -416,7 +416,17 @@ const StaffDashboard = () => {
 
           {/* Kanban Tab */}
           <TabsContent value="kanban" className="mt-6">
-            <KanbanBoard token={token} user={user} />
+            <Card className="border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                  <LayoutGrid className="h-5 w-5 shrink-0" />
+                  Quadro Geral de Processos
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <KanbanBoard token={token} user={user} />
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Tasks Tab - Minhas Tarefas */}
