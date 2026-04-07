@@ -28,7 +28,7 @@ const filterConfig = {
     icon: TrendingUp,
     color: "text-blue-600",
     bgColor: "bg-blue-50",
-    filter: (p) => !["concluidos", "desistencias"].includes(p.status)
+    filter: (p) => !p.status?.match(/concluidos|desistencias|eliminados/)
   },
   concluded: {
     title: "Processos Concluídos",
@@ -69,7 +69,7 @@ const filterConfig = {
     icon: FileX,
     color: "text-rose-600",
     bgColor: "bg-rose-50",
-    filter: (p) => !p.assigned_indexacao_id && !["concluidos", "desistencias", "eliminados"].includes(p.status)
+    filter: (p) => !p.assigned_indexacao_id && !p.status?.match(/concluidos|desistencias|eliminados/)
   },
   waiting: {
     title: "Clientes em Espera",
