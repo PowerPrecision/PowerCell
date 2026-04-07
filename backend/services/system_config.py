@@ -192,16 +192,24 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
         current.update(filtered_data)
         config.credit_services = CreditServicesConfig(**current)
     elif section == "document_recipients":
+        import json
         current = config.document_recipients.model_dump()
         current.update(filtered_data)
         # Se recipients é uma lista, converter para JSON string
         if isinstance(current.get("recipients"), list):
-            import json
             current["recipients"] = json.dumps(current["recipients"], ensure_ascii=False)
-        # Se default_to_emails é uma lista, converter para JSON string
-        if isinstance(current.get("default_to_emails"), list):
-            import json
-            current["default_to_emails"] = json.dumps(current["default_to_emails"], ensure_ascii=False)
+        # Garantir que default_to_emails é uma string JSON válida
+        dto = current.get("default_to_emails")
+        if isinstance(dto, list):
+            current["default_to_emails"] = json.dumps(dto, ensure_ascii=False)
+        elif isinstance(dto, str) and dto.strip():
+            try:
+                parsed = json.loads(dto)
+                if not isinstance(parsed, list):
+                    logger.warning(f"default_to_emails não é lista: {dto[:100]}")
+            except json.JSONDecodeError:
+                logger.warning(f"default_to_emails inválido: {dto[:100]}")
+        logger.info(f"Saving document_recipients: default_to_emails={str(current.get('default_to_emails', 'MISSING'))[:200]}")
         config.document_recipients = DocumentRecipientsConfig(**current)
     elif section == "auto_draft":
         current = config.auto_draft.model_dump()
@@ -232,7 +240,9 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
     else:
         raise ValueError(f"Secção desconhecida: {section}")
     
-    await save_system_config(config)
+    save_result = await save_system_config(config)
+    if not save_result:
+        raise Exception(f"Falha ao guardar configuração '{section}' na base de dados")
     return config
 
 
