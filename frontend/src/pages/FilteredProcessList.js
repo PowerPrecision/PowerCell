@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { ScrollArea } from "../components/ui/scroll-area";
 import { 
   ArrowLeft, Search, Eye, Loader2, Users, CheckCircle, 
-  XCircle, Clock, TrendingUp, AlertTriangle 
+  XCircle, Clock, TrendingUp, AlertTriangle, FileX
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";
@@ -62,6 +62,14 @@ const filterConfig = {
     color: "text-gray-600",
     bgColor: "bg-gray-50",
     filter: (p) => !!p.assigned_indexacao_id
+  },
+  no_indexacao: {
+    title: "Sem Indexação",
+    description: "Processos sem indexação atribuída",
+    icon: FileX,
+    color: "text-rose-600",
+    bgColor: "bg-rose-50",
+    filter: (p) => !p.assigned_indexacao_id && !["concluidos", "desistencias"].includes(p.status)
   },
   waiting: {
     title: "Clientes em Espera",
