@@ -677,7 +677,9 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
        CONDIÇÃO DUPLA: O nome do cliente deve aparecer no assunto ou corpo.
        (Elimina falsos positivos — email trocado mas sem referência ao cliente)
     3. Emails trocados entre o Comercial (owner_email) e geral@powerealestate.pt.
+       CONDIÇÃO DUPLA: O nome do cliente deve aparecer no assunto ou corpo.
     4. Emails trocados entre o Comercial (owner_email) e geral@precisioncredito.pt.
+       CONDIÇÃO DUPLA: O nome do cliente deve aparecer no assunto ou corpo.
     5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
     
     SUPORTE A MÚLTIPLOS EMAILS:
@@ -694,18 +696,17 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     if not process:
         return {"success": False, "error": "Processo não encontrado"}
     
-    # Nome do cliente para busca por assunto/corpo (regra 5)
+    # Nome do cliente para busca por assunto/corpo
     client_name = process.get("client_name", "")
     client_name_parts = [p.lower() for p in client_name.split() if len(p) >= 3] if client_name else []
     
-    # Emails gerais da empresa (usados nas regras 3 e 4)
-    company_emails = [
-        "geral@powerealestate.pt",
-        "geral@precisioncredito.pt"
-    ]
+    # NIF do cliente — será preenchido após extração de personal_data
+    
     
     # ===== DESTINATÁRIOS DE DOCUMENTAÇÃO (Configurações do Sistema) =====
-    # Usados na Regra 2: emails trocados entre o utilizador e os destinatários TO
+    # Usados nas Regras 2 e 3: emails trocados com os destinatários TO
+    # NOTA: Os antigos "geral@powerealestate.pt" e "geral@precisioncredito.pt" 
+    # deixaram de estar hardcoded e devem ser configurados aqui.
     doc_recipient_to_emails = []
     try:
         from services.system_config import get_system_config
@@ -729,6 +730,17 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     
     # Email do Cliente — suporta múltiplos emails (string separada por vírgula/ponto-e-vírgula ou lista)
     personal_data = process.get("personal_data", {}) or {}
+    
+    # NIF do cliente para busca por assunto/corpo (alternativa ao nome)
+    client_nif = (personal_data.get("nif") or "").strip()
+    client_nif_normalized = re.sub(r'[^\d]', '', client_nif) if client_nif else ""
+    client_nif_forms = set()
+    if client_nif_normalized:
+        client_nif_forms.add(client_nif_normalized)  # "123456789"
+        if len(client_nif_normalized) == 9:
+            client_nif_forms.add(f"{client_nif_normalized[:3]}.{client_nif_normalized[3:6]}.{client_nif_normalized[6:]}")
+        client_nif_forms.add(client_nif.lower())  # formato tal como guardado
+    
     raw_client_email = personal_data.get("email") or process.get("client_email")
     client_emails = []  # Lista de emails do cliente
     
@@ -775,10 +787,11 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     logger.info(f"Sincronizando emails para processo {process_id}")
     logger.info(f"  - Cliente: {client_name}")
     logger.info(f"  - Email(s) cliente: {client_emails}")
+    logger.info(f"  - NIF cliente: {client_nif or 'N/A'}")
     logger.info(f"  - Email comercial (owner): {owner_email}")
     logger.info(f"  - Email utilizador logado: {user_email_lower}")
     logger.info(f"  - Emails monitorizados (IMAP only): {monitored_emails}")
-    logger.info(f"  - Destinatários doc TO (regra 2): {doc_recipient_to_emails}")
+    logger.info(f"  - Destinatários doc TO (regras 2 e 3): {doc_recipient_to_emails}")
     
     # Usar versão async para buscar contas (inclui DB)
     accounts = await get_email_accounts_async()
@@ -836,33 +849,48 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
                     continue
     
     # ====================================================================
-    # REGRAS DE FILTRAGEM ESTRITAS (5 regras de negócio)
+    # REGRAS DE FILTRAGEM ESTRITAS (4 regras de negócio)
     # ====================================================================
     
-    def client_name_in_email(em: Dict) -> bool:
+    def client_identifier_in_email(em: Dict) -> bool:
         """
-        Verifica se o NOME DO CLIENTE aparece explicitamente no assunto ou corpo.
-        Usa partes >= 3 caracteres para evitar falsos positivos.
-        Case-insensitive via .lower() em client_name_parts (já preparado).
+        Verifica se o NOME DO CLIENTE ou o NIF aparece no assunto ou corpo do email.
+        Para o nome: usa partes >= 3 caracteres para evitar falsos positivos.
+        Para o NIF: verifica múltiplos formatos (123456789, 123.456.789, etc.).
         """
-        if not client_name_parts:
-            return False
         subject = (em.get("subject") or "").lower()
         body = (em.get("body") or "").lower()
         body_html = (em.get("body_html") or "").lower()
         content = subject + " " + body + " " + body_html
-        return any(part in content for part in client_name_parts)
+        
+        # Verificar NOME DO CLIENTE
+        if client_name_parts and any(part in content for part in client_name_parts):
+            return True
+        
+        # Verificar NIF do cliente (múltiplos formatos)
+        if client_nif_forms:
+            for nif_form in client_nif_forms:
+                if nif_form and nif_form.lower() in content:
+                    return True
+        
+        return False
     
-    def exchanged_between_any(account_emails: list, em: Dict) -> tuple:
+    def exchanged_between_any(account_emails: list, em: Dict, check_from: str = None) -> tuple:
         """
-        Verifica se houve troca de emails ENTRE o utilizador logado e QUALQUER UM
+        Verifica se houve troca de emails ENTRE um email de referência e QUALQUER UM
         dos emails da lista account_emails.
+        
+        Args:
+            account_emails: Lista de emails a verificar contra.
+            em: Dicionário do email.
+            check_from: Email de referência (default: user_email_lower).
         
         Returns:
             tuple: (matched: bool, matched_email: str|None) — qual email fez match
         """
         if not account_emails:
             return (False, None)
+        ref_email = (check_from or user_email_lower).lower()
         from_email = (em.get("from_email") or "").lower()
         to_emails = [e.lower() for e in (em.get("to_emails") or [])]
         cc_emails = [e.lower() for e in (em.get("cc_emails") or [])]
@@ -871,11 +899,11 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         for acc_email in account_emails:
             if not acc_email:
                 continue
-            # Utilizador logado enviou para este email do cliente
-            if from_email == user_email_lower and acc_email in all_recipients:
+            # Email de referência enviou para este email
+            if from_email == ref_email and acc_email in all_recipients:
                 return (True, acc_email)
-            # Este email do cliente enviou para o utilizador logado
-            if from_email == acc_email and user_email_lower in all_recipients:
+            # Este email enviou para o email de referência
+            if from_email == acc_email and ref_email in all_recipients:
                 return (True, acc_email)
         
         return (False, None)
@@ -905,55 +933,66 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         """
         Aplica as regras de filtragem ESTRITAS de negócio.
         
-        REGRAS ATUALIZADAS:
+        REGRAS (4 regras):
         1. Emails trocados entre Utilizador Logado e Comercial (owner_email).
+           CONDIÇÃO OBRIGATÓRIA: nome do cliente OU NIF deve aparecer no assunto ou corpo.
         2. Emails trocados entre Utilizador Logado e QUALQUER EMAIL dos Destinatários
            de Documentação (TO) definidos nas Configurações do Sistema.
-           CONDIÇÃO OBRIGATÓRIA: nome do cliente deve aparecer no assunto ou corpo.
-           (Verificação dupla para eliminar falsos positivos)
-        3. Emails trocados entre Comercial (owner_email) e geral@powerealestate.pt.
-        4. Emails trocados entre Comercial (owner_email) e geral@precisioncredito.pt.
-        5. Qualquer email onde o NOME DO CLIENTE apareça no Assunto ou Corpo.
+           CONDIÇÃO OBRIGATÓRIA: nome do cliente OU NIF deve aparecer no assunto ou corpo.
+        3. Emails trocados entre Comercial (owner_email) e QUALQUER EMAIL dos Destinatários
+           de Documentação (TO) definidos nas Configurações do Sistema.
+           CONDIÇÃO OBRIGATÓRIA: nome do cliente OU NIF deve aparecer no assunto ou corpo.
+        4. Qualquer email onde o NOME DO CLIENTE ou NIF apareça no Assunto ou Corpo.
         
         Returns:
             True se o email deve ser incluído, False caso contrário.
         """
-        # REGRA 5 (primeiro — sem dependência de variáveis de email):
-        # Qualquer email onde o nome do cliente apareça no assunto ou corpo
-        if client_name_in_email(em):
+        has_identifier = client_identifier_in_email(em)
+        
+        # REGRA 4 (primeiro — sem dependência de variáveis de email):
+        # Qualquer email onde o nome do cliente ou NIF apareça no assunto ou corpo
+        if has_identifier:
             return True
         
         # REGRA 1: Emails trocados entre Utilizador Logado e Comercial
+        # CONDIÇÃO DUPLA: match de email + nome do cliente ou NIF no assunto/corpo
         if exchanged_between(user_email_lower, owner_email, em):
-            return True
+            if has_identifier:
+                logger.debug("Regra 1 (dupla verificação): email user↔owner, identificador encontrado ✓")
+                return True
+            else:
+                logger.debug("Regra 1 (dupla verificação): email user↔owner, identificador NÃO encontrado ✗ → descartado")
+                return False
         
         # REGRA 2: Emails trocados entre Utilizador Logado e DESTINATÁRIOS DE DOCUMENTAÇÃO (TO)
         # Estes emails vêm das Configurações do Sistema → Destinatários de Documentação
-        # CONDIÇÃO DUPLA: match de email + verificação do nome no assunto/corpo
+        # CONDIÇÃO DUPLA: match de email + nome do cliente ou NIF no assunto/corpo
         match_result = exchanged_between_any(doc_recipient_to_emails, em)
         if match_result[0]:
-            # Match por email encontrado — agora verificar o NOME DO CLIENTE
-            if client_name_in_email(em):
-                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]} (destinatário doc), nome encontrado ✓")
+            if has_identifier:
+                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]} (destinatário doc), identificador encontrado ✓")
                 return True
             else:
-                # Email trocado com destinatário de documentação mas NOME não encontrado
-                # → Falso positivo provável, descartar
-                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]} (destinatário doc), nome NÃO encontrado ✗ → descartado")
+                logger.debug(f"Regra 2 (dupla verificação): email matched={match_result[1]} (destinatário doc), identificador NÃO encontrado ✗ → descartado")
                 return False
         
-        # REGRA 3: Emails trocados entre Comercial e geral@powerealestate.pt
-        if exchanged_between(owner_email, "geral@powerealestate.pt", em):
-            return True
-        
-        # REGRA 4: Emails trocados entre Comercial e geral@precisioncredito.pt
-        if exchanged_between(owner_email, "geral@precisioncredito.pt", em):
-            return True
+        # REGRA 3: Emails trocados entre Comercial (owner_email) e DESTINATÁRIOS DE DOCUMENTAÇÃO (TO)
+        # Estes emails vêm das Configurações do Sistema (same list as Rule 2, NOT hardcoded)
+        # CONDIÇÃO DUPLA: match de email + nome do cliente ou NIF no assunto/corpo
+        if owner_email:
+            match_result_owner = exchanged_between_any(doc_recipient_to_emails, em, check_from=owner_email)
+            if match_result_owner[0]:
+                if has_identifier:
+                    logger.debug(f"Regra 3 (dupla verificação): email owner↔{match_result_owner[1]} (destinatário doc), identificador encontrado ✓")
+                    return True
+                else:
+                    logger.debug(f"Regra 3 (dupla verificação): email owner↔{match_result_owner[1]} (destinatário doc), identificador NÃO encontrado ✗ → descartado")
+                    return False
         
         # Nenhuma regra satisfeita → excluir
         return False
     
-    # Filtrar emails pelas 5 regras estritas
+    # Filtrar emails pelas 4 regras estritas
     filtered_emails = [em for em in all_emails if email_matches_rules(em)]
     
     # Remover duplicados por Message-ID

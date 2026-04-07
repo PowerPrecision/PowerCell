@@ -55,3 +55,23 @@ Criado sistema de auditoria completo com 3 novos ficheiros e 8 ficheiros modific
 - Badges coloridos por origem (purple=web, blue=api, orange=ai_automation, green=email)
 - Toda a documentação e comentários em Português (pt-PT)
 - Validação de sintaxe Python passou com sucesso
+
+---
+Task ID: 3
+Agent: Super Z (main)
+Task: Análise RGPD + Fix email bug + Barras de navegação em emails
+
+Work Log:
+- Análise completa do sistema RGPD/GDPR do PowerCell (2 camadas)
+- Identificado bug nas Regras 3 e 4 de associação de emails: não verificavam nome do cliente
+- Corrigido email_service.py: Regras 3 e 4 agora têm verificação dupla (nome no assunto/corpo)
+- Reescrito EmailSearchPage.jsx: barra de navegação prev/next, breadcrumb, atalhos teclado, HTML sanitizado
+- Melhorado EmailViewerModal.js: breadcrumb de contexto com nome do cliente/processo
+- Atualizado EmailHistoryPanel.js: passa clientName/processId para EmailViewerModal
+- Corrigido import em falta (Tag) em EmailViewerModal.js
+
+Stage Summary:
+- RGPD: sistema completo com consentimento (token 24h, assinatura canvas, template legal 11 secções) + GDPR (anonimização 30+ campos, direito esquecimento, portabilidade, auditoria)
+- Bug: email silvamiranda→geral@precisioncredito.pt aparecia para cliente Nelson Lopes Leite via Regra 4 (sem verificação de nome). Corrigido com verificação dupla em Regras 3 e 4
+- Navegação: EmailSearchPage agora tem barra prev/next + breadcrumb + ←/→/Esc. EmailViewerModal mostra contexto do processo/cliente
+- Commits: d84c083, 65ad8db (branch dev)
