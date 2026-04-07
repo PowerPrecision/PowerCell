@@ -135,6 +135,8 @@ const DocumentRecipientsManager = ({ token, user }) => {
       if (response.ok) {
         toast.success("Configuração guardada com sucesso");
         setHasChanges(false);
+        // Recarregar dados do servidor para confirmar que foi guardado corretamente
+        await loadConfig();
       } else {
         const data = await response.json();
         toast.error(data.detail || "Erro ao guardar configuração");

@@ -492,6 +492,13 @@ CONFIG_FIELDS = {
                 placeholder="Power Real Estate",
                 help_text="Nome do destinatário principal"
             ),
+            ConfigField(
+                key="default_to_emails",
+                label="Emails TO Múltiplos (JSON)",
+                type="textarea",
+                placeholder='["geral@powerealestate.pt", "geral@precisioncredito.pt"]',
+                help_text="Lista de emails TO em formato JSON. Gerido automaticamente pelo formulário de Destinatários."
+            ),
         ]
     },
     "dsti_analysis": {
