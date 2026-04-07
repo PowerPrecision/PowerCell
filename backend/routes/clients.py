@@ -597,6 +597,7 @@ async def list_clients(
     show_all: bool = Query(True, description="Se True, mostra todos os clientes da empresa. Se False, apenas os do utilizador"),
     status_filter: Optional[str] = Query(None, description="Filtrar por fase do processo"),
     assignment_filter: Optional[str] = Query(None, description="Filtrar por tipo de atribuição: 'both', 'consultor', 'intermediario', 'none'"),
+    indexacao_filter: Optional[str] = Query(None, description="Filtrar por indexação: 'assigned' (com indexação), 'unassigned' (sem indexação)"),
     limit: int = Query(100, le=500),
     skip: int = Query(0),
     user: dict = Depends(get_current_user)
@@ -702,6 +703,31 @@ async def list_clients(
                         process_query = {"$and": [process_query, assignment_query]}
                 else:
                     process_query = assignment_query
+        
+        # Filtro por indexação
+        if indexacao_filter:
+            indexacao_filter = sanitize_string(indexacao_filter, max_length=50)
+            indexacao_query = None
+            if indexacao_filter == "assigned":
+                # Tem indexação atribuída
+                indexacao_query = {"assigned_indexacao_id": {"$exists": True, "$ne": None}}
+            elif indexacao_filter == "unassigned":
+                # Sem indexação atribuída
+                indexacao_query = {
+                    "$or": [
+                        {"assigned_indexacao_id": None},
+                        {"assigned_indexacao_id": {"$exists": False}}
+                    ]
+                }
+            
+            if indexacao_query:
+                if process_query:
+                    if "$and" in process_query:
+                        process_query["$and"].append(indexacao_query)
+                    else:
+                        process_query = {"$and": [process_query, indexacao_query]}
+                else:
+                    process_query = indexacao_query
         
         # Buscar todos os processos (clientes únicos)
         processes = await db.processes.find(
