@@ -596,12 +596,13 @@ async def get_processes_paginated(
 async def get_kanban_board(
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
+    indexacao_id: Optional[str] = None,
     user: dict = Depends(require_staff())
 ):
     """
     Get processes organized by status for Kanban board.
     Admin/CEO see all, others see only their assigned processes.
-    Supports filtering by consultor_id and mediador_id.
+    Supports filtering by consultor_id, mediador_id, and indexacao_id.
     Supports multiple consultants and intermediaries per process.
     """
     role = user["role"]
@@ -679,6 +680,26 @@ async def get_kanban_board(
                         {"assigned_mediador_ids": mediador_id},
                         {"assigned_mediador_id": mediador_id}
                     ]
+        
+        if indexacao_id:
+            if indexacao_id == "none":
+                # Sem indexação atribuído
+                if "$and" not in query:
+                    query["$and"] = []
+                query["$and"].append({
+                    "$or": [
+                        {"assigned_indexacao_id": {"$in": [None, ""]}},
+                        {"assigned_indexacao_id": {"$exists": False}}
+                    ]
+                })
+            else:
+                # Filtro por indexação específico
+                indexacao_filter = {"assigned_indexacao_id": indexacao_id}
+                if "$or" in query:
+                    # Já tem filtros, combinar com AND
+                    query = {"$and": [query, indexacao_filter]}
+                else:
+                    query = indexacao_filter
     
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)

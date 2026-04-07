@@ -47,6 +47,7 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("overview");
   const [consultorFilter, setConsultorFilter] = useState("all");
   const [mediadorFilter, setMediadorFilter] = useState("all");
+  const [indexacaoFilter, setIndexacaoFilter] = useState("all");
   const [isCreateEventDialogOpen, setIsCreateEventDialogOpen] = useState(false);
   const [selectedDateForEvent, setSelectedDateForEvent] = useState(new Date());
 
@@ -58,6 +59,7 @@ const AdminDashboard = () => {
   ), [users]);
   const consultors = useMemo(() => users.filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
   const intermediarios = useMemo(() => users.filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
+  const indexacaoUsers = useMemo(() => users.filter(u => u.role === "indexacao"), [users]);
 
   // Filter processes
   const filteredProcesses = useMemo(() => {
@@ -68,9 +70,12 @@ const AdminDashboard = () => {
       const matchesMediador = mediadorFilter === "all" || 
         (mediadorFilter === "none" && !process.assigned_mediador_id) ||
         process.assigned_mediador_id === mediadorFilter;
-      return matchesConsultor && matchesMediador;
+      const matchesIndexacao = indexacaoFilter === "all" || 
+        (indexacaoFilter === "none" && !process.assigned_indexacao_id) ||
+        process.assigned_indexacao_id === indexacaoFilter;
+      return matchesConsultor && matchesMediador && matchesIndexacao;
     });
-  }, [processes, consultorFilter, mediadorFilter]);
+  }, [processes, consultorFilter, mediadorFilter, indexacaoFilter]);
 
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { fetchCalendarData(); }, [consultorFilter, mediadorFilter]);
@@ -342,18 +347,18 @@ const AdminDashboard = () => {
                   <span className="sm:hidden">Quadro Processos</span>
                 </CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  {filteredProcesses.length} processos • Filtre por consultor ou intermediário
+                  {filteredProcesses.length} processos • Filtre por consultor, intermediário ou indexação
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                   <div className="space-y-2">
                     <Label>Filtrar por Consultor</Label>
                     <Select value={consultorFilter} onValueChange={setConsultorFilter}>
                       <SelectTrigger><SelectValue placeholder="Todos os consultores" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os consultores</SelectItem>
-                        <SelectItem value="none">Nenhum (sem consultor atribuído)</SelectItem>
+                        <SelectItem value="none">Nenhum (sem consultor)</SelectItem>
                         {consultors.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
                       </SelectContent>
                     </Select>
@@ -364,8 +369,19 @@ const AdminDashboard = () => {
                       <SelectTrigger><SelectValue placeholder="Todos os intermediários" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os intermediários</SelectItem>
-                        <SelectItem value="none">Nenhum (sem intermediário atribuído)</SelectItem>
+                        <SelectItem value="none">Nenhum (sem intermediário)</SelectItem>
                         {intermediarios.map((m) => (<SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Filtrar por Indexação</Label>
+                    <Select value={indexacaoFilter} onValueChange={setIndexacaoFilter}>
+                      <SelectTrigger><SelectValue placeholder="Todos os indexação" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos os Indexação</SelectItem>
+                        <SelectItem value="none">Nenhum (sem indexação)</SelectItem>
+                        {indexacaoUsers.map((u) => (<SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -375,6 +391,7 @@ const AdminDashboard = () => {
                   user={user} 
                   consultorFilter={consultorFilter}
                   mediadorFilter={mediadorFilter}
+                  indexacaoFilter={indexacaoFilter}
                 />
               </CardContent>
             </Card>
