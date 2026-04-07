@@ -69,7 +69,7 @@ const filterConfig = {
     icon: FileX,
     color: "text-rose-600",
     bgColor: "bg-rose-50",
-    filter: (p) => !p.assigned_indexacao_id && !["concluidos", "desistencias"].includes(p.status)
+    filter: (p) => !p.assigned_indexacao_id && !["concluidos", "desistencias", "eliminados"].includes(p.status)
   },
   waiting: {
     title: "Clientes em Espera",
