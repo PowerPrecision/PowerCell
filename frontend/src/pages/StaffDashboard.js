@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -40,6 +40,9 @@ const StaffDashboard = () => {
   const [deadlines, setDeadlines] = useState([]);
   const [dstiAlerts, setDstiAlerts] = useState(null);
   const [activeTab, setActiveTab] = useState("kanban");
+  const [consultorFilter, setConsultorFilter] = useState("all");
+  const [mediadorFilter, setMediadorFilter] = useState("all");
+  const [indexacaoFilter, setIndexacaoFilter] = useState("all");
   
   // Estado para rascunhos automáticos
   const [drafts, setDrafts] = useState([]);
@@ -64,6 +67,10 @@ const StaffDashboard = () => {
   const canManageUsers = isAdminOrCeo;
   const canSeeAllStats = isAdminOrCeo;
 
+  const consultors = useMemo(() => users.filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
+  const intermediarios = useMemo(() => users.filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
+  const indexacaoUsers = useMemo(() => users.filter(u => u.role === "indexacao"), [users]);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -73,7 +80,7 @@ const StaffDashboard = () => {
       setLoading(true);
       const [statsRes, usersRes, expiriesRes, deadlinesRes] = await Promise.all([
         getStats().catch(() => ({ data: {} })),
-        canSeeAllStats ? getUsers().catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+        getUsers().catch(() => ({ data: [] })),
         getUpcomingExpiries(60).catch(() => ({ data: [] })),
         getCalendarDeadlines().catch(() => ({ data: [] })),
       ]);
@@ -422,9 +429,53 @@ const StaffDashboard = () => {
                   <LayoutGrid className="h-5 w-5 shrink-0" />
                   Quadro Geral de Processos
                 </CardTitle>
+                <CardDescription className="text-xs sm:text-sm">
+                  Filtre por consultor, intermediário ou indexação
+                </CardDescription>
               </CardHeader>
               <CardContent className="pt-0">
-                <KanbanBoard token={token} user={user} />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                  <div className="space-y-2">
+                    <Label>Filtrar por Consultor</Label>
+                    <Select value={consultorFilter} onValueChange={setConsultorFilter}>
+                      <SelectTrigger><SelectValue placeholder="Todos os consultores" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos os consultores</SelectItem>
+                        <SelectItem value="none">Nenhum (sem consultor)</SelectItem>
+                        {consultors.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Filtrar por Intermediário</Label>
+                    <Select value={mediadorFilter} onValueChange={setMediadorFilter}>
+                      <SelectTrigger><SelectValue placeholder="Todos os intermediários" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos os intermediários</SelectItem>
+                        <SelectItem value="none">Nenhum (sem intermediário)</SelectItem>
+                        {intermediarios.map((m) => (<SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Filtrar por Indexação</Label>
+                    <Select value={indexacaoFilter} onValueChange={setIndexacaoFilter}>
+                      <SelectTrigger><SelectValue placeholder="Todos os indexação" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos os Indexação</SelectItem>
+                        <SelectItem value="none">Nenhum (sem indexação)</SelectItem>
+                        {indexacaoUsers.map((u) => (<SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <KanbanBoard 
+                  token={token} 
+                  user={user} 
+                  consultorFilter={consultorFilter}
+                  mediadorFilter={mediadorFilter}
+                  indexacaoFilter={indexacaoFilter}
+                />
               </CardContent>
             </Card>
           </TabsContent>
