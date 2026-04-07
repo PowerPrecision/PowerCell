@@ -37,7 +37,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
     # Process status breakdown
     # Active = not concluded and not dropped out
     concluded_statuses = ["concluidos"]
-    dropped_statuses = ["desistencias"]
+    dropped_statuses = ["desistencias", "eliminados"]
 
     concluded_query = {**process_query, "status": {"$in": concluded_statuses}} if process_query else {"status": {"$in": concluded_statuses}}
     dropped_query = {**process_query, "status": {"$in": dropped_statuses}} if process_query else {"status": {"$in": dropped_statuses}}
