@@ -49,6 +49,10 @@ async def get_stats(user: dict = Depends(get_current_user)):
     stats["concluded_processes"] = await db.processes.count_documents(concluded_query)
     stats["dropped_processes"] = await db.processes.count_documents(dropped_query)
     
+    # Processos sem indexação atribuída (ativos apenas)
+    no_indexacao_query = {**active_query, "assigned_indexacao_id": None}
+    stats["no_indexacao_processes"] = await db.processes.count_documents(no_indexacao_query)
+    
     # Get process IDs que o utilizador tem acesso (para contar prazos)
     if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         # Admin, CEO, Administrativo e Diretor vêem todos os prazos pendentes
