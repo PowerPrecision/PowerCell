@@ -173,6 +173,9 @@ async def send_documentation_email(
     cc_emails = [e for e in (sanitize_email(e) for e in data.get("cc_emails", [])) if e]
     custom_message = data.get("custom_message")
     
+    # TO emails: usar os selecionados pelo utilizador, ou fallback para config
+    request_to_emails = [e for e in (sanitize_email(e) for e in data.get("to_emails", [])) if e]
+    
     if not document_ids:
         raise HTTPException(status_code=400, detail="Selecione pelo menos um documento")
     
@@ -286,8 +289,11 @@ Com os melhores cumprimentos,
         )
     
     # Preparar destinatários TO (suporta múltiplos emails)
+    # Prioridade: emails selecionados pelo utilizador > config > fallback
     to_emails = []
-    if doc_config.default_to_emails:
+    if request_to_emails:
+        to_emails = request_to_emails
+    elif doc_config.default_to_emails:
         try:
             import json
             parsed_to = json.loads(doc_config.default_to_emails)

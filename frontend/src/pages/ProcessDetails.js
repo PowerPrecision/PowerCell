@@ -2702,41 +2702,6 @@ const ProcessDetails = () => {
               </CardContent>
             </Card>
             )}
-
-            {/* Atribuição de Utilizadores - visível se tem assign_process_users */}
-            {canAssignUsers && (
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Users className="h-5 w-5" />
-                  Atribuição de Utilizadores
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">Gerir consultores, intermediários e indexação atribuídos a este processo.</p>
-                    <Button size="sm" variant="outline" onClick={openAssignDialog}>
-                      <Users className="h-4 w-4 mr-2" />
-                      Atribuir
-                    </Button>
-                  </div>
-                  {process?.consultor_name && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Badge variant="outline">Consultor</Badge>
-                      <span>{process.consultor_name}</span>
-                    </div>
-                  )}
-                  {process?.mediador_name && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Badge variant="outline">Intermediário</Badge>
-                      <span>{process.mediador_name}</span>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-            )}
           </div>
 
           {/* Sidebar - Organizada com Accordions */}
@@ -2801,24 +2766,7 @@ const ProcessDetails = () => {
 
             {/* Accordion para agrupar painéis secundários - visível se tiver manage_tasks */}
             {(!isViewMode || canManageTasks) && (
-            <Accordion type="multiple" defaultValue={["tasks"]} className="space-y-2">
-              {/* Tarefas */}
-              <AccordionItem value="tasks" className="border rounded-lg">
-                <AccordionTrigger className="px-3 py-2 text-sm hover:no-underline">
-                  <span className="flex items-center gap-2">
-                    <Check className="h-4 w-4" />
-                    Tarefas
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent className="px-3 pb-3">
-                  <TasksPanel 
-                    processId={id} 
-                    processName={process.client_name}
-                    compact={true}
-                    maxHeight="150px"
-                  />
-                </AccordionContent>
-              </AccordionItem>
+            <Accordion type="multiple" defaultValue={[]} className="space-y-2">
 
               {/* Match Imóveis */}
               <AccordionItem value="match" className="border rounded-lg">
