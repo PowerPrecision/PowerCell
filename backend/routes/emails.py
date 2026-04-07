@@ -938,9 +938,31 @@ async def get_process_emails(
     direction: Optional[EmailDirection] = Query(None, description="Filtrar por direção"),
     filter_by_user: bool = Query(False, description="Filtrar apenas emails onde o utilizador participou"),
     include_archived: bool = Query(False, description="Incluir emails arquivados"),
+    force_refresh: bool = Query(False, description="Limpar emails em cache e re-sincronizar do IMAP"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Listar emails de um processo."""
+    """
+    Listar emails de um processo.
+    
+    Se force_refresh=True, elimina todos os emails sincronizados do processo
+    e faz uma nova sincronização IMAP antes de devolver os resultados.
+    """
+    if force_refresh:
+        # Limpar cache: apagar emails sincronizados (marcados com "Sincronizado de" nas notes)
+        delete_result = await db.emails.delete_many({
+            "process_id": process_id,
+            "notes": {"$regex": "^Sincronizado de", "$options": "i"}
+        })
+        logger.info(f"Cache limpa para processo {process_id}: {delete_result.deleted_count} emails removidos")
+        
+        # Re-sincronizar do IMAP
+        user_email = current_user.get("email")
+        try:
+            sync_result = await sync_emails_for_process(process_id, days=30, user_email=user_email)
+            logger.info(f"Re-sync após limpeza de cache: {sync_result}")
+        except Exception as e:
+            logger.error(f"Erro na re-sync após limpeza de cache: {e}")
+    
     query = {"process_id": process_id}
     
     if direction:
