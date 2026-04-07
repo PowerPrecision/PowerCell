@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { ScrollArea } from "../components/ui/scroll-area";
 import { 
   ArrowLeft, Search, Eye, Loader2, Users, CheckCircle, 
-  XCircle, Clock, TrendingUp, AlertTriangle, FileX
+  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";
