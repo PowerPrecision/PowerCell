@@ -12,7 +12,7 @@ import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
-import { Loader2, LayoutGrid, Calendar, Users, FileText, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert, Mail, Send, Trash2, Edit3, ChevronRight, AlertCircle } from "lucide-react";
+import { Loader2, LayoutGrid, Calendar, Users, FileText, FileX, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert, Mail, Send, Trash2, Edit3, ChevronRight, AlertCircle } from "lucide-react";
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
 import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft } from "../services/api";
@@ -237,7 +237,7 @@ const StaffDashboard = () => {
         </div>
 
         {/* Quick Stats - Clickable cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <Card 
             className="cursor-pointer hover:shadow-md transition-shadow"
             onClick={() => navigate('/processos')}
@@ -288,6 +288,20 @@ const StaffDashboard = () => {
                   <p className="text-3xl font-bold text-red-600">{stats.dropped_processes || 0}</p>
                 </div>
                 <p className="text-sm text-red-600/80">Desistências</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card 
+            className="bg-rose-50 dark:bg-rose-950/30 border-rose-200 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => goToFilteredList('no_indexacao')}
+          >
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1">
+                  <FileX className="h-5 w-5 text-rose-600" />
+                  <p className="text-3xl font-bold text-rose-600">{stats.no_indexacao_processes || 0}</p>
+                </div>
+                <p className="text-sm text-rose-600/80">Sem Indexação</p>
               </div>
             </CardContent>
           </Card>
