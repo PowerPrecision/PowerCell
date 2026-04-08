@@ -47,7 +47,6 @@ const AIInsightsPage = React.lazy(() => import("./pages/AIInsightsPage"));
 const AIDataReviewPage = React.lazy(() => import("./pages/AIDataReviewPage"));
 const DiagnosticsPage = React.lazy(() => import("./pages/DiagnosticsPage"));
 const ExpiringDocumentsDashboard = React.lazy(() => import("./pages/ExpiringDocumentsDashboard"));
-const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const ClientRegistrationsPage = React.lazy(() => import("./pages/ClientRegistrationsPage"));
 const WorkflowStatusesPage = React.lazy(() => import("./pages/WorkflowStatusesPage"));
 const AutomationPage = React.lazy(() => import("./pages/AutomationPage"));
@@ -462,14 +461,10 @@ function App() {
             }
           />
 
-          {/* RGPD Admin - Admin and Staff */}
+          {/* RGPD Admin - Redirecionado para Configurações > RGPD */}
           <Route
             path="/admin/rgpd"
-            element={
-              <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <RGPDAdminPage />
-              </ProtectedRoute>
-            }
+            element={<Navigate to="/configuracoes?tab=rgpd" replace />}
           />
 
           {/* Client Registrations - All staff (Registo de Clientes) */}
