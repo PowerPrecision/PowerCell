@@ -84,7 +84,8 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         )
     
     # Verificar se já existe cliente com o mesmo NIF
-    clean_nif = sanitize_nif(nif) if nif else None
+    raw_nif = data.personal_data.nif if data.personal_data else None
+    clean_nif = sanitize_nif(raw_nif) if raw_nif else None
     if clean_nif:
         existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": clean_nif})
         if existing_by_nif:
