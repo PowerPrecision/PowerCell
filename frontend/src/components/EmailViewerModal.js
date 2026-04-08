@@ -26,7 +26,7 @@ import {
 } from "./ui/dropdown-menu";
 import { 
   Mail, Send, Inbox, Clock, X, ChevronLeft, ChevronRight,
-  Paperclip, User, Star, StarOff, Bookmark, BookmarkOff,
+  Paperclip, User, Star, StarOff, Bookmark, BookmarkX,
   AlertCircle, CheckCircle, Download, Eye, EyeOff, Reply,
   Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet,
   Sparkles, Copy, ExternalLink, Tag

@@ -50,7 +50,7 @@ import {
   Mail, Send, Inbox, Plus, Loader2, Clock, User, 
   Paperclip, MoreVertical, Trash2, Eye, ChevronDown, ChevronUp, RefreshCw,
   Settings, X, AtSign, Maximize2, ExternalLink, Link, Search,
-  Star, StarOff, Bookmark, BookmarkOff, Archive, ArchiveRestore,
+  Star, StarOff, Bookmark, BookmarkX, Archive, ArchiveRestore,
   Filter, Calendar, FileText, Download, Image, FileSpreadsheet,
   AlertCircle, CheckCircle, Reply, Copy, Edit3, ChevronLeft, ChevronRight,
   Sparkles, Tag, EyeOff
