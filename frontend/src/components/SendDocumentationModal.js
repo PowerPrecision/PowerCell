@@ -212,6 +212,10 @@ const SendDocumentationModal = ({
         },
         body: JSON.stringify({
           document_ids: selectedDocs,
+          s3_paths: selectedDocs.map(id => {
+            const doc = documents.find(d => d.id === id);
+            return doc?.s3_path;
+          }).filter(Boolean),
           to_emails: selectedToEmails,
           bcc_recipients: selectedRecipients,
           cc_emails: ccEmails ? ccEmails.split(",").map(e => e.trim()) : [],
