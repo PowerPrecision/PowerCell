@@ -47,6 +47,10 @@ import {
   Link,
   UserCheck,
   FileEdit,
+  FileSignature,
+  History,
+  Info,
+  RotateCcw,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -61,6 +65,7 @@ const SECTION_ICONS = {
   maintenance: Wrench,
   document_recipients: Building2,
   auto_draft: FileEdit,
+  rgpd: FileSignature,
 };
 
 // Componente para campo de configuração
@@ -480,7 +485,7 @@ const SystemConfigPage = () => {
       </DashboardLayout>
     );
   }
-  if (user?.role !== "admin") {
+  if (!["admin", "ceo"].includes(user?.role)) {
     return (
       <DashboardLayout>
         <div className="text-center py-12">
@@ -1096,6 +1101,331 @@ const SystemConfigPage = () => {
     );
   };
 
+  // Componente de Gestão RGPD
+  const RGPDTab = () => {
+    const [templateContent, setTemplateContent] = useState("");
+    const [originalContent, setOriginalContent] = useState("");
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [templateMeta, setTemplateMeta] = useState({
+      is_default: true,
+      version: null,
+      updated_at: null,
+      updated_by: null,
+    });
+    const [versions, setVersions] = useState([]);
+    const [loadingVersions, setLoadingVersions] = useState(false);
+    const [changelog, setChangelog] = useState("");
+    
+    const isAdminOrCEO = user?.role === "admin" || user?.role === "ceo";
+
+    useEffect(() => {
+      fetchTemplate();
+    }, [token]);
+
+    const fetchTemplate = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/api/rgpd/admin/template`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setTemplateContent(data.content);
+          setOriginalContent(data.content);
+          setTemplateMeta({
+            is_default: data.is_default,
+            version: data.version,
+            updated_at: data.updated_at,
+            updated_by: data.updated_by,
+          });
+        }
+      } catch (error) {
+        console.error("Erro:", error);
+        toast.error("Erro ao carregar o template RGPD");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const fetchVersions = async () => {
+      setLoadingVersions(true);
+      try {
+        const response = await fetch(`${API_URL}/api/rgpd/admin/template/versions`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setVersions(data.versions || []);
+        }
+      } catch (error) {
+        console.error("Erro:", error);
+      } finally {
+        setLoadingVersions(false);
+      }
+    };
+
+    const handleSave = async () => {
+      if (!templateContent.trim()) {
+        toast.error("O template não pode estar vazio");
+        return;
+      }
+      setSaving(true);
+      try {
+        const response = await fetch(`${API_URL}/api/rgpd/admin/template`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content: templateContent, changelog: changelog || undefined }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          toast.success(`Template RGPD guardado (v${data.version || ""})`);
+          setOriginalContent(templateContent);
+          setChangelog("");
+          fetchTemplate();
+          fetchVersions();
+        } else if (response.status === 403) {
+          toast.error("Apenas Admin ou CEO podem editar o template");
+        } else {
+          toast.error("Erro ao guardar o template");
+        }
+      } catch (error) {
+        toast.error("Erro ao guardar o template RGPD");
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const handleReset = async () => {
+      setSaving(true);
+      try {
+        const response = await fetch(`${API_URL}/api/rgpd/admin/template`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content: "", changelog: "Restaurado para template padrão" }),
+        });
+        if (response.ok) {
+          toast.success("Template restaurado para o valor padrão");
+          fetchTemplate();
+          fetchVersions();
+        }
+      } catch (error) {
+        toast.error("Erro ao restaurar o template padrão");
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const hasChanges = templateContent !== originalContent;
+
+    if (loading) {
+      return (
+        <Card>
+          <CardContent className="py-12 flex justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {/* Info Bar */}
+        <Card>
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <Info className="h-4 w-4 text-blue-500" />
+                <span className="text-sm text-muted-foreground">
+                  {templateMeta.is_default
+                    ? "A utilizar o template padrão. Edite para personalizar."
+                    : `Versão ${templateMeta.version || "1.0"} — Última atualização: ${
+                        templateMeta.updated_at
+                          ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
+                          : "N/A"
+                      } ${templateMeta.updated_by ? `por ${templateMeta.updated_by}` : ""}`}
+                </span>
+              </div>
+              {templateMeta.is_default ? (
+                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                  Template Padrão
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                  v{templateMeta.version || "1.0"}
+                </Badge>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Editor */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileEdit className="h-5 w-5" />
+              Texto do Formulário RGPD
+            </CardTitle>
+            <CardDescription>
+              Edite o texto legal do formulário de consentimento RGPD. As variáveis serão substituídas automaticamente pelos dados do cliente.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Textarea
+              value={templateContent}
+              onChange={(e) => setTemplateContent(e.target.value)}
+              rows={20}
+              className="font-mono text-sm leading-relaxed"
+              placeholder="Introduza o texto do template RGPD..."
+              disabled={!isAdminOrCEO}
+            />
+
+            {/* Variáveis disponíveis */}
+            <div className="bg-muted/50 rounded-lg p-3">
+              <p className="text-sm font-medium mb-2">Variáveis disponíveis:</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  "{{NOME_CLIENTE}}",
+                  "{{NOME_EMPRESA}}",
+                  "{{CONTRIBUINTE}}",
+                  "{{MORADA}}",
+                  "{{CODIGO_POSTAL}}",
+                  "{{TIPO_DOCUMENTO}}",
+                  "{{NUMERO_DOCUMENTO}}",
+                  "{{VALIDADE_DOCUMENTO}}",
+                  "{{DATA_ASSINATURA}}",
+                ].map((variable) => (
+                  <Badge key={variable} variant="secondary" className="font-mono text-xs">
+                    {variable}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            {/* Changelog input */}
+            {isAdminOrCEO && hasChanges && (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Notas da alteração (opcional)</Label>
+                <Input
+                  value={changelog}
+                  onChange={(e) => setChangelog(e.target.value)}
+                  placeholder="Ex: Adicionado ponto sobre partilha de dados com bancos"
+                />
+              </div>
+            )}
+
+            {/* Actions */}
+            {isAdminOrCEO ? (
+              <div className="flex items-center justify-between pt-2 border-t">
+                <Button
+                  variant="outline"
+                  onClick={handleReset}
+                  disabled={saving || templateMeta.is_default}
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Restaurar Padrão
+                </Button>
+                <div className="flex items-center gap-2">
+                  {hasChanges && (
+                    <span className="text-sm text-amber-600 font-medium">
+                      Alterações por guardar
+                    </span>
+                  )}
+                  <Button onClick={handleSave} disabled={saving || !hasChanges}>
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    Guardar Template
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground pt-2 border-t">
+                Apenas utilizadores Admin ou CEO podem editar o template RGPD.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Version History */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <History className="h-5 w-5 text-muted-foreground" />
+                <div>
+                  <CardTitle className="text-lg">Histórico de Versões</CardTitle>
+                  <CardDescription>Cada alteração ao template cria uma nova versão para rastreio legal</CardDescription>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchVersions} disabled={loadingVersions}>
+                {loadingVersions ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <RefreshCw className="h-3 w-3 mr-1" />
+                )}
+                Atualizar
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {versions.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                Nenhuma versão anterior registada.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {versions.map((v) => (
+                  <div
+                    key={v.id}
+                    className={`flex items-center justify-between p-3 rounded-lg border ${
+                      v.is_active
+                        ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                        : "bg-muted/30"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {v.is_active && <CheckCircle className="h-4 w-4 text-green-600" />}
+                      <div>
+                        <p className="text-sm font-medium">
+                          Versão {v.version}
+                          {v.is_active && (
+                            <Badge variant="outline" className="ml-2 text-xs bg-green-100 text-green-700 border-green-300">
+                              Ativa
+                            </Badge>
+                          )}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {v.created_at
+                            ? new Date(v.created_at).toLocaleString("pt-PT")
+                            : "N/A"}
+                          {v.created_by ? ` — ${v.created_by}` : ""}
+                        </p>
+                        {v.changelog && (
+                          <p className="text-xs text-muted-foreground italic mt-0.5">
+                            {v.changelog}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -1118,7 +1448,7 @@ const SystemConfigPage = () => {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 lg:grid-cols-7">
+          <TabsList className="grid w-full grid-cols-4 sm:grid-cols-6 lg:grid-cols-9">
             {sections.map((key) => {
               const Icon = SECTION_ICONS[key] || Settings;
               return (
@@ -1128,6 +1458,10 @@ const SystemConfigPage = () => {
                 </TabsTrigger>
               );
             })}
+            <TabsTrigger value="rgpd" className="gap-2">
+              <FileSignature className="h-4 w-4" />
+              <span className="hidden sm:inline">RGPD</span>
+            </TabsTrigger>
             <TabsTrigger value="maintenance" className="gap-2">
               <Wrench className="h-4 w-4" />
               <span className="hidden sm:inline">Manutenção</span>
@@ -1150,6 +1484,10 @@ const SystemConfigPage = () => {
               )}
             </TabsContent>
           ))}
+          
+          <TabsContent value="rgpd" className="mt-6">
+            <RGPDTab />
+          </TabsContent>
           
           <TabsContent value="maintenance" className="mt-6">
             <MaintenanceSection />

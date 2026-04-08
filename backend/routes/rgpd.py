@@ -11,7 +11,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from database import db
@@ -204,14 +204,53 @@ async def sign_rgpd_form(
     
     Este endpoint é público (sem autenticação) para permitir que
     o cliente assine o RGPD através do link no email.
+    Após assinatura, regista a versão do template RGPD utilizado
+    para prova legal da versão assinada pelo cliente.
     """
     result = await sign_rgpd(token, consent_data.model_dump())
     
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Erro ao assinar RGPD"))
     
-    # M8 - Registar atividade de assinatura no processo
+    # Obter a versão ativa do template RGPD e guardar no pedido
+    # para prova legal de qual versão o cliente assinou
+    request_id = result.get("request_id")
     process_id = result.get("process_id")
+    if request_id:
+        try:
+            # Buscar a versão ativa do template RGPD
+            active_version = await db[RGPD_TEMPLATE_VERSIONS_COLLECTION].find_one(
+                {"is_active": True},
+                {"_id": 0}
+            )
+            if active_version:
+                # Guardar versão do template no pedido RGPD para prova legal
+                await db[RGPD_REQUESTS_COLLECTION].update_one(
+                    {"id": request_id},
+                    {"$set": {
+                        "rgpd_template_version_id": active_version["id"],
+                        "rgpd_template_version": active_version["version"]
+                    }}
+                )
+                logger.info(f"Versão do template RGPD v{active_version['version']} registada no pedido {request_id}")
+            else:
+                # Fallback: verificar system_config
+                config_doc = await db.system_config.find_one(
+                    {"_id": "rgpd_template"},
+                    {"_id": 0, "active_version_id": 1, "active_version": 1}
+                )
+                if config_doc and config_doc.get("active_version_id"):
+                    await db[RGPD_REQUESTS_COLLECTION].update_one(
+                        {"id": request_id},
+                        {"$set": {
+                            "rgpd_template_version_id": config_doc["active_version_id"],
+                            "rgpd_template_version": config_doc.get("active_version", 1)
+                        }}
+                    )
+        except Exception as e:
+            logger.warning(f"Não foi possível registar versão do template RGPD: {e}")
+    
+    # M8 - Registar atividade de assinatura no processo
     if process_id:
         await _add_process_activity(
             process_id=process_id,
@@ -272,6 +311,7 @@ async def get_rgpd_form_data(token: str):
     
     Este endpoint é público e retorna os dados do processo
     para pré-preencher o formulário de RGPD.
+    Inclui o texto do template RGPD renderizado com variáveis dinâmicas.
     """
     request = await validate_token(token)
     
@@ -283,7 +323,16 @@ async def get_rgpd_form_data(token: str):
     
     personal_data = process.get("personal_data", {}) if process else {}
     
-    return {
+    # Extrair dados do documento de identificação
+    documento_id = personal_data.get("documento_id", {})
+    if isinstance(documento_id, dict):
+        tipo_documento = documento_id.get("type", "")
+        numero_documento = documento_id.get("number", "")
+    else:
+        tipo_documento = ""
+        numero_documento = str(documento_id) if documento_id else ""
+    
+    response_data = {
         "client_name": request["client_name"],
         "client_email": request["client_email"],
         "nif": personal_data.get("nif", ""),
@@ -291,6 +340,86 @@ async def get_rgpd_form_data(token: str):
         "documento_id": personal_data.get("documento_id", ""),
         "data_validade_cc": personal_data.get("data_validade_cc", "")
     }
+    
+    # Renderizar o template RGPD com variáveis dinâmicas
+    try:
+        template_text = await _get_active_rgpd_template()
+        
+        if template_text:
+            # Tentar obter nome da empresa da configuração do sistema
+            empresa_nome = "Power Real Estate, Lda."
+            try:
+                config = await db.system_config.find_one(
+                    {"_id": "main"},
+                    {"_id": 0, "settings.empresa_nome": 1}
+                )
+                if config:
+                    settings = config.get("settings", {})
+                    if settings.get("empresa_nome"):
+                        empresa_nome = settings["empresa_nome"]
+            except Exception:
+                pass  # Usar nome padrão
+            
+            # Data atual formatada como DD/MM/YYYY
+            data_assinatura = datetime.now(timezone.utc).strftime("%d/%m/%Y")
+            
+            # Substituir variáveis dinâmicas no template
+            rendered = template_text
+            rendered = rendered.replace("{{NOME_CLIENTE}}", request["client_name"])
+            rendered = rendered.replace("{{NOME}}", request["client_name"])
+            rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
+            rendered = rendered.replace("{{CONTRIBUINTE}}", personal_data.get("nif", ""))
+            rendered = rendered.replace("{{MORADA}}", personal_data.get("morada_fiscal", ""))
+            rendered = rendered.replace("{{CODIGO_POSTAL}}", personal_data.get("codigo_postal", ""))
+            rendered = rendered.replace("{{TIPO_DOCUMENTO}}", tipo_documento)
+            rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", numero_documento)
+            rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", personal_data.get("data_validade_cc", ""))
+            rendered = rendered.replace("{{DATA_ASSINATURA}}", data_assinatura)
+            
+            response_data["rgpd_text"] = rendered
+        else:
+            response_data["rgpd_text"] = None
+    except Exception as e:
+        logger.warning(f"Não foi possível renderizar template RGPD: {e}")
+        response_data["rgpd_text"] = None
+    
+    return response_data
+
+
+async def _get_active_rgpd_template() -> Optional[str]:
+    """
+    Função auxiliar para obter o texto do template RGPD ativo.
+    
+    Prioridade:
+    1. Versão ativa na coleção rgpd_template_versions
+    2. Conteúdo em system_config (compatibilidade retroativa)
+    3. Template padrão definido no código
+    
+    Returns:
+        Texto do template ou None em caso de erro
+    """
+    try:
+        # Tentar obter da coleção de versões
+        active_version = await db[RGPD_TEMPLATE_VERSIONS_COLLECTION].find_one(
+            {"is_active": True},
+            {"_id": 0, "content": 1}
+        )
+        if active_version and active_version.get("content"):
+            return active_version["content"]
+        
+        # Fallback: system_config (compatibilidade retroativa)
+        doc = await db.system_config.find_one(
+            {"_id": "rgpd_template"},
+            {"_id": 0, "content": 1}
+        )
+        if doc and doc.get("content"):
+            return doc["content"]
+        
+        # Template padrão
+        return RGPD_DEFAULT_TEMPLATE
+    except Exception as e:
+        logger.error(f"Erro ao obter template RGPD ativo: {e}")
+        return RGPD_DEFAULT_TEMPLATE
 
 
 @router.get("/list/{process_id}")
@@ -379,6 +508,7 @@ async def list_all_rgpd(
 class RGPDTemplateUpdate(BaseModel):
     """Modelo para atualização do template RGPD."""
     content: str
+    changelog: Optional[str] = Field(None, description="Descrição opcional da alteração realizada")
 
 
 # Template padrão RGPD
@@ -461,9 +591,10 @@ async def get_rgpd_template(
     """
     Obter o template de texto RGPD.
 
-    Permissões: Apenas admin e CEO.
+    PROTEÇÃO: Apenas admin e CEO podem visualizar o template RGPD.
     Retorna o conteúdo atual do template RGPD guardado na base de dados.
     Se não existir um template personalizado, retorna o template padrão.
+    Inclui informação da versão ativa quando disponível.
     """
     try:
         doc = await db.system_config.find_one({"_id": "rgpd_template"}, {"_id": 0})
@@ -473,18 +604,26 @@ async def get_rgpd_template(
                 "content": doc["content"],
                 "updated_at": doc.get("updated_at"),
                 "updated_by": doc.get("updated_by"),
-                "is_default": False
+                "is_default": False,
+                "active_version_id": doc.get("active_version_id"),
+                "active_version": doc.get("active_version")
             }
 
         return {
             "content": RGPD_DEFAULT_TEMPLATE,
             "updated_at": None,
             "updated_by": None,
-            "is_default": True
+            "is_default": True,
+            "active_version_id": None,
+            "active_version": None
         }
     except Exception as e:
         logger.error(f"Erro ao obter template RGPD: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Erro ao obter template RGPD")
+
+
+# Coleção para guardar o histórico de versões do template RGPD
+RGPD_TEMPLATE_VERSIONS_COLLECTION = "rgpd_template_versions"
 
 
 @router.put("/admin/template")
@@ -493,21 +632,52 @@ async def update_rgpd_template(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
-    Atualizar o template de texto RGPD.
+    Atualizar o template de texto RGPD (com versionamento).
 
-    Permissões: Apenas admin e CEO.
-    Guarda o novo conteúdo do template na coleção system_config.
+    PROTEÇÃO: Apenas admin e CEO podem alterar o template RGPD.
+    Cada atualização cria uma nova versão na coleção rgpd_template_versions,
+    marcando todas as versões anteriores como inativas.
+    O system_config continua a apontar para a versão ativa para consulta rápida.
     """
     try:
         now = datetime.now(timezone.utc).isoformat()
+        created_by = user.get("name", user.get("email", "unknown"))
 
+        # Calcular próximo número de versão (auto-incrementado: 1.0, 2.0, 3.0...)
+        last_version = await db[RGPD_TEMPLATE_VERSIONS_COLLECTION].find_one(
+            sort=[("version", -1)]
+        )
+        next_version = (last_version["version"] + 1) if last_version else 1
+
+        # Criar novo documento de versão
+        new_version_id = str(uuid.uuid4())
+        version_doc = {
+            "id": new_version_id,
+            "content": template_data.content,
+            "version": next_version,
+            "changelog": template_data.changelog,
+            "created_at": now,
+            "created_by": created_by,
+            "is_active": True
+        }
+        await db[RGPD_TEMPLATE_VERSIONS_COLLECTION].insert_one(version_doc)
+
+        # Marcar todas as versões anteriores como inativas
+        await db[RGPD_TEMPLATE_VERSIONS_COLLECTION].update_many(
+            {"id": {"$ne": new_version_id}},
+            {"$set": {"is_active": False}}
+        )
+
+        # Atualizar system_config para apontar para a versão ativa
         await db.system_config.update_one(
             {"_id": "rgpd_template"},
             {
                 "$set": {
                     "content": template_data.content,
+                    "active_version_id": new_version_id,
+                    "active_version": next_version,
                     "updated_at": now,
-                    "updated_by": user.get("name", user.get("email", "unknown"))
+                    "updated_by": created_by
                 },
                 "$setOnInsert": {
                     "created_at": now
@@ -516,16 +686,70 @@ async def update_rgpd_template(
             upsert=True
         )
 
-        logger.info(f"Template RGPD atualizado por {user.get('name', 'unknown')}")
+        logger.info(f"Template RGPD versão {next_version} criada por {created_by}")
 
         return {
             "success": True,
-            "message": "Template RGPD atualizado com sucesso",
+            "message": f"Template RGPD atualizado com sucesso (versão {next_version})",
+            "version": next_version,
+            "version_id": new_version_id,
             "updated_at": now
         }
     except Exception as e:
         logger.error(f"Erro ao atualizar template RGPD: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Erro ao atualizar template RGPD")
+
+
+@router.get("/admin/template/versions")
+async def list_rgpd_template_versions(
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Listar todas as versões do template RGPD (sem conteúdo completo).
+
+    PROTEÇÃO: Apenas admin e CEO podem ver o histórico de versões.
+    Retorna metadados de cada versão para consulta rápida.
+    """
+    try:
+        versions = await db[RGPD_TEMPLATE_VERSIONS_COLLECTION].find(
+            {},
+            {"_id": 0, "content": 0}  # Excluir conteúdo completo da listagem
+        ).sort("version", -1).to_list(100)
+
+        return {
+            "versions": versions,
+            "total": len(versions)
+        }
+    except Exception as e:
+        logger.error(f"Erro ao listar versões do template RGPD: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Erro ao listar versões do template RGPD")
+
+
+@router.get("/admin/template/versions/{version_id}")
+async def get_rgpd_template_version(
+    version_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Obter o conteúdo completo de uma versão específica do template RGPD.
+
+    PROTEÇÃO: Apenas admin e CEO podem ver versões do template.
+    """
+    try:
+        version = await db[RGPD_TEMPLATE_VERSIONS_COLLECTION].find_one(
+            {"id": version_id},
+            {"_id": 0}
+        )
+
+        if not version:
+            raise HTTPException(status_code=404, detail="Versão do template RGPD não encontrada")
+
+        return version
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao obter versão do template RGPD: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Erro ao obter versão do template RGPD")
 
 
 @router.get("/admin/{request_id}")
