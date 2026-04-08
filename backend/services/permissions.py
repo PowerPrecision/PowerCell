@@ -253,6 +253,47 @@ def should_sync_permissions(
     return False
 
 
+def sync_permissions_with_role_defaults(
+    user_permissions: Dict[str, List[str]],
+    role: str
+) -> Dict[str, List[str]]:
+    """
+    Sincroniza as permissões de um utilizador com as padrão do seu role.
+    
+    Garante que o utilizador tem TODAS as actions/pages definidas para o seu role,
+    sem remover permissões extras que possam ter sido adicionadas manualmente.
+    
+    Este mecanismo resolve o problema de permissões legacy: quando novas actions
+    são adicionadas a um role (ex: view_financials para indexacao), os utilizadores
+    existentes que já tinham permissões guardadas no documento não recebem as novas.
+    
+    Args:
+        user_permissions: Permissões atuais do utilizador (do documento MongoDB)
+        role: Role do utilizador
+        
+    Returns:
+        Dict com permissões mescladas (defaults + extras do utilizador)
+    """
+    if not user_permissions or not role:
+        return get_default_permissions_for_role(role)
+    
+    default_perms = get_default_permissions_for_role(role)
+    
+    # Mesclar: defaults do role + extras que o utilizador já tinha
+    merged_pages = list(set(
+        default_perms.get("pages", []) + user_permissions.get("pages", [])
+    ))
+    merged_actions = list(set(
+        default_perms.get("actions", []) + user_permissions.get("actions", [])
+    ))
+    
+    # Filtrar apenas permissões válidas
+    return validate_permissions({
+        "pages": merged_pages,
+        "actions": merged_actions,
+    })
+
+
 def get_role_display_info() -> Dict[str, Dict[str, str]]:
     """
     Retorna informações de exibição para cada role.
