@@ -768,6 +768,11 @@ const ProcessDetails = () => {
         }
       }
 
+      // Indexação só envia dados financeiros
+      if (user.role === "indexacao") {
+        updateData.financial_data = cleanedFinancialData;
+      }
+
       if (user.role !== "cliente" && statusToSave !== process.status) {
         updateData.status = statusToSave;
       }
@@ -969,7 +974,7 @@ const ProcessDetails = () => {
     : ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole);
   
   const canEditPersonal = hasEditProcess;
-  const canEditFinancial = hasEditProcess;
+  const canEditFinancial = hasEditProcess || (userActions.includes("view_financials") && userRole === "indexacao");
   const canEditRealEstate = hasEditProcess && 
     (userActions.length > 0 ? true : ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canEditCredit = hasEditProcess && 
@@ -1000,7 +1005,7 @@ const ProcessDetails = () => {
   // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
   const BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"];
   const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status);
-  const isViewMode = !hasEditProcess || isProcessLocked;
+  const isViewMode = (!hasEditProcess && !(userActions.includes("view_financials") && userRole === "indexacao")) || isProcessLocked;
 
   // Função para eliminar o cliente/processo
   const handleDeleteClient = async () => {
@@ -1362,8 +1367,8 @@ const ProcessDetails = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Banner de modo de visualização para roles sem edit_process */}
-            {isViewMode && (
+            {/* Banner de modo de visualização para roles sem edit_process (exceto indexacao que edita financeiros) */}
+            {isViewMode && !isProcessLocked && (
               <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-3">
                 <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
                 <p className="text-sm text-amber-800 dark:text-amber-200">

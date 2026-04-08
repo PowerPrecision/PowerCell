@@ -1286,9 +1286,8 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     except Exception:
         pass
     
-    # Indexação não pode actualizar dados do processo
-    if role == UserRole.INDEXACAO:
-        raise HTTPException(status_code=403, detail="Indexação não pode alterar dados do processo. Apenas visualizar e gerir documentos.")
+    # Indexação só pode actualizar dados financeiros (restante é bloqueado mais abaixo)
+    is_indexacao = role == UserRole.INDEXACAO
     
     # Bloquear edição de processos em status terminal (eliminados, desistências, concluídos)
     BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"]
@@ -1304,7 +1303,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     
     # Check role-based permissions
     can_update_personal = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
-    can_update_financial = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
+    can_update_financial = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO]
     can_update_real_estate = UserRole.can_act_as_consultor(role)
     can_update_credit = UserRole.can_act_as_mediador(role)
     can_update_status = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
