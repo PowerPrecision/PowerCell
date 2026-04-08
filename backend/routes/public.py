@@ -73,6 +73,19 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # Verificar se já existe cliente com o mesmo email
     existing_by_email = await db.clients.find_one({"contacto.email": clean_email.lower()})
     if existing_by_email:
+        # Registar duplicado no system_error_logger para monitoring
+        try:
+            from services.system_error_logger import system_error_logger
+            await system_error_logger.log_error(
+                error_type="duplicate_registration",
+                message=f"Registo duplicado (email): {clean_email}",
+                component="public_form",
+                details={"reason": "email", "email": clean_email, "existing_client_id": existing_by_email.get("id")},
+                severity="info",
+                request_path="/api/public/client-registration"
+            )
+        except Exception:
+            pass
         return JSONResponse(
             status_code=200,
             content={
@@ -89,6 +102,19 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     if clean_nif:
         existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": clean_nif})
         if existing_by_nif:
+            # Registar duplicado no system_error_logger para monitoring
+            try:
+                from services.system_error_logger import system_error_logger
+                await system_error_logger.log_error(
+                    error_type="duplicate_registration",
+                    message=f"Registo duplicado (NIF): {clean_nif}",
+                    component="public_form",
+                    details={"reason": "nif", "nif": clean_nif, "existing_client_id": existing_by_nif.get("id")},
+                    severity="info",
+                    request_path="/api/public/client-registration"
+                )
+            except Exception:
+                pass
             return JSONResponse(
                 status_code=200,
                 content={
@@ -182,6 +208,18 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             await db.clients.update_one({"id": client_id}, {"$set": encrypted})
     except Exception as e:
         logger.warning(f"Falha ao encriptar dados do cliente {client_id}: {e}")
+        try:
+            from services.system_error_logger import system_error_logger
+            await system_error_logger.log_error(
+                error_type="encryption_failure",
+                message=f"Falha ao encriptar dados do cliente {client_id}: {e}",
+                component="public_form",
+                details={"client_id": client_id, "error": str(e)},
+                severity="warning",
+                request_path="/api/public/client-registration"
+            )
+        except Exception:
+            pass
     
     # =========================================
     # M3 - CRIAR PASTA S3 PARA O CLIENTE
@@ -205,6 +243,18 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
                 logger.info(f"Pasta S3 criada para cliente {client_id}: {s3_folder_name}")
     except Exception as e:
         logger.warning(f"Não foi possível criar pasta S3 para cliente {client_id}: {e}")
+        try:
+            from services.system_error_logger import system_error_logger
+            await system_error_logger.log_error(
+                error_type="s3_folder_failure",
+                message=f"Falha ao criar pasta S3 para cliente {client_id}: {e}",
+                component="public_form",
+                details={"client_id": client_id, "error": str(e)},
+                severity="warning",
+                request_path="/api/public/client-registration"
+            )
+        except Exception:
+            pass
     
     # =========================================
     # ENVIAR EMAIL DE CONFIRMAÇÃO AO CLIENTE
