@@ -17,6 +17,7 @@ import { Progress } from "../components/ui/progress";
 import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
+import * as Sentry from "@sentry/react";
 import { cn } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
@@ -611,6 +612,22 @@ const PublicClientForm = ({ previewMode = false }) => {
     const validationErrors = validateForm();
     if (validationErrors.length > 0) {
       validationErrors.forEach(err => toast.error(err));
+      // Reportar erros de validação ao Sentry para análise de friction
+      Sentry.withScope((scope) => {
+        scope.setLevel('info');
+        scope.setTransactionName('form-validation');
+        scope.setExtra('step', currentStep);
+        scope.setExtra('errors', validationErrors);
+        scope.setExtra('formData_preview', {
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          nif: formData.nif ? '***' : null,
+          compra_tipo: formData.compra_tipo,
+          titular2_name: formData.titular2_name,
+        });
+        Sentry.captureMessage(`Formulário: ${validationErrors.length} erro(s) de validação`);
+      });
       return;
     }
 
@@ -700,6 +717,15 @@ const PublicClientForm = ({ previewMode = false }) => {
       if (response.data.blocked) {
         setBlockedMessage(response.data.message);
         toast.info(response.data.message);
+        // Reportar duplicado ao Sentry
+        Sentry.withScope((scope) => {
+          scope.setLevel('info');
+          scope.setTransactionName('form-duplicate');
+          scope.setTag('duplicate_reason', response.data.reason);
+          scope.setExtra('email', formData.email);
+          scope.setExtra('nif', formData.nif ? '***' : null);
+          Sentry.captureMessage(`Registo bloqueado: duplicado (${response.data.reason})`);
+        });
       } else {
         // Limpar rascunho após submissão com sucesso
         clearDraft();
@@ -710,7 +736,9 @@ const PublicClientForm = ({ previewMode = false }) => {
       console.error("Error submitting form:", error);
       // Tratar diferentes formatos de erro do backend
       let errorMessage = "Erro ao enviar registo";
+      let statusCode = null;
       if (error.response?.data?.detail) {
+        statusCode = error.response?.status;
         const detail = error.response.data.detail;
         if (typeof detail === 'string') {
           errorMessage = detail;
@@ -722,6 +750,26 @@ const PublicClientForm = ({ previewMode = false }) => {
         }
       }
       toast.error(errorMessage);
+      // Reportar erro de submissão ao Sentry
+      Sentry.withScope((scope) => {
+        scope.setLevel(statusCode >= 500 ? 'error' : 'warning');
+        scope.setTransactionName('form-submission');
+        scope.setExtra('statusCode', statusCode);
+        scope.setExtra('errorMessage', errorMessage);
+        scope.setExtra('step', currentStep);
+        scope.setExtra('formData_preview', {
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          nif: formData.nif ? '***' : null,
+          compra_tipo: formData.compra_tipo,
+          process_type: formData.process_type,
+        });
+        if (error.response) {
+          scope.setExtra('responseData', error.response.data);
+        }
+        Sentry.captureException(error);
+      });
     } finally {
       setLoading(false);
     }
