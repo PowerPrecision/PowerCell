@@ -775,7 +775,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     if user_email_lower:
         internal_emails.add(user_email_lower)
     for acc in accounts:
-        acc_user = (acc.email or "").lower().strip()
+        acc_user = (acc.get("imap_user") or acc.get("smtp_user") or "").lower().strip()
         if acc_user and "@" in acc_user:
             internal_emails.add(acc_user)
     for de in doc_recipient_to_emails:
