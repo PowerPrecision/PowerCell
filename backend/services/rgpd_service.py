@@ -9,6 +9,7 @@ Este módulo implementa:
 - Envio de emails
 """
 import uuid
+import io
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
@@ -255,6 +256,13 @@ async def sign_rgpd(
         }
     )
     
+    # Gerar PDF do RGPD assinado e guardar nos docs do cliente
+    try:
+        await _save_signed_rgpd_pdf(request["process_id"], request, consent_data)
+    except Exception as e:
+        logger.error(f"Erro ao guardar RGPD assinado nos docs: {e}", exc_info=True)
+        # Não falha a assinatura — o PDF é um extra
+    
     # Adicionar atividade ao processo
     await log_history(
         request["process_id"],
@@ -477,3 +485,275 @@ Sistema CRM
     except Exception as e:
         logger.error(f"Failed to send RGPD signed notification: {e}")
         return False
+
+
+# ====================================================================
+# GERAÇÃO DE PDF DO RGPD ASSINADO
+# ====================================================================
+
+async def _save_signed_rgpd_pdf(
+    process_id: str,
+    rgpd_request: dict,
+    consent_data: dict
+):
+    """
+    Gera um PDF do RGPD assinado e guarda-o nos documentos do cliente (S3).
+    
+    O PDF inclui:
+    - Template RGPD renderizado com variáveis dinâmicas
+    - Dados preenchidos pelo cliente
+    - Imagem da assinatura digital
+    
+    Args:
+        process_id: ID do processo
+        rgpd_request: Documento do pedido RGPD
+        consent_data: Dados de consentimento preenchidos
+    """
+    import io
+    import asyncio
+    import base64
+    from services.s3_storage import s3_service
+    
+    if not s3_service.is_configured():
+        logger.warning("S3 não configurado — RGPD PDF não guardado nos docs")
+        return
+    
+    # Buscar processo para obter client_name e dados
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        logger.warning(f"Processo {process_id} não encontrado — RGPD PDF não guardado")
+        return
+    
+    client_name = process.get("client_name", rgpd_request.get("client_name", "Cliente"))
+    
+    # Buscar template RGPD renderizado
+    rgpd_text = await _get_rendered_rgpd_text(process_id, rgpd_request, consent_data)
+    
+    # Gerar PDF
+    pdf_bytes = _generate_rgpd_pdf(rgpd_text, consent_data)
+    if not pdf_bytes:
+        logger.error("Falha ao gerar PDF do RGPD")
+        return
+    
+    # Upload para S3 na pasta "RGPD"
+    filename = f"RGPD_{client_name.replace(' ', '_')}_{rgpd_request['id'][:8]}.pdf"
+    file_buffer = io.BytesIO(pdf_bytes)
+    
+    loop = asyncio.get_event_loop()
+    s3_path = await loop.run_in_executor(
+        None,
+        lambda: s3_service.upload_file(
+            file_buffer,
+            process_id,
+            client_name,
+            "RGPD",
+            filename,
+            content_type="application/pdf"
+        )
+    )
+    
+    if s3_path:
+        logger.info(f"RGPD PDF guardado nos docs: {s3_path}")
+        
+        # Registar no histórico do processo
+        await log_history(
+            process_id,
+            {"id": rgpd_request["id"], "name": consent_data.get("nome", "Cliente"), "role": "cliente"},
+            "RGPD assinado guardado como PDF",
+            field="documento",
+            new_value=filename
+        )
+    else:
+        logger.error("Falha ao fazer upload do RGPD PDF para S3")
+
+
+async def _get_rendered_rgpd_text(
+    process_id: str,
+    rgpd_request: dict,
+    consent_data: dict
+) -> str:
+    """
+    Obtém o template RGPD renderizado com as variáveis dinâmicas substituídas.
+    
+    Reutiliza a mesma lógica do endpoint GET /api/rgpd/data/{token}
+    """
+    from routes.rgpd import _get_active_rgpd_template
+    
+    # Buscar dados do processo (desencriptados)
+    process = await db.processes.find_one({"id": process_id})
+    if process:
+        from services.process_service import decrypt_sensitive_data
+        process = decrypt_sensitive_data(process)
+    
+    personal_data = process.get("personal_data", {}) if process else {}
+    
+    # Template
+    template_text = await _get_active_rgpd_template()
+    if not template_text:
+        template_text = "DOCUMENTO DE CONSENTIMENTO RGPD\n" + "=" * 50 + "\n\n"
+    
+    # Substituir variáveis
+    rendered = template_text
+    client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
+    rendered = rendered.replace("{{NOME_CLIENTE}}", client_name)
+    rendered = rendered.replace("{{NOME}}", client_name)
+    rendered = rendered.replace("{{CONTRIBUINTE}}", consent_data.get("contribuinte", personal_data.get("nif", "")))
+    rendered = rendered.replace("{{MORADA}}", consent_data.get("morada", personal_data.get("morada_fiscal", "")))
+    rendered = rendered.replace("{{CODIGO_POSTAL}}", consent_data.get("codigo_postal", ""))
+    rendered = rendered.replace("{{TIPO_DOCUMENTO}}", consent_data.get("tipo_documento", ""))
+    rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", consent_data.get("numero_documento", ""))
+    rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", consent_data.get("validade_documento", personal_data.get("data_validade_cc", "")))
+    rendered = rendered.replace("{{DATA_ASSINATURA}}", consent_data.get("data_assinatura", ""))
+    
+    return rendered
+
+
+def _generate_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
+    """
+    Gera um PDF com o texto do RGPD e a assinatura do cliente.
+    
+    Uses reportlab to create a properly formatted PDF with:
+    - RGPD template text
+    - Signature image (if provided)
+    - Signing metadata at the bottom
+    
+    Args:
+        rgpd_text: Texto do RGPD renderizado
+        consent_data: Dados de consentimento (inclui assinatura base64)
+        
+    Returns:
+        PDF bytes ou None se falhar
+    """
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import inch, cm
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.utils import ImageReader
+        from reportlab.lib.colors import black, grey
+    except ImportError:
+        logger.error("reportlab não disponível para gerar PDF do RGPD")
+        return None
+    
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    page_width, page_height = A4
+    
+    # Margens
+    margin_left = 2 * cm
+    margin_right = 2 * cm
+    margin_top = 2 * cm
+    margin_bottom = 2.5 * cm
+    
+    # Configurar fonte
+    font_name = "Helvetica"
+    font_size = 9
+    title_size = 11
+    line_height = font_size + 3
+    
+    # === HEADER ===
+    c.setFont(font_name, title_size)
+    y = page_height - margin_top
+    
+    # === RGPD TEXT ===
+    c.setFont(font_name, font_size)
+    max_width = page_width - margin_left - margin_right
+    max_chars = int(max_width / (font_size * 0.48))
+    
+    for line in rgpd_text.split('\n'):
+        # Skip template variables that weren't replaced
+        if "{{" in line:
+            continue
+        
+        # Handle long lines by word-wrapping
+        words = line.split(' ')
+        current_line = ""
+        
+        for word in words:
+            test_line = f"{current_line} {word}".strip()
+            if len(test_line) > max_chars and current_line:
+                # Draw current line
+                try:
+                    c.drawString(margin_left, y, current_line)
+                except Exception:
+                    current_line = current_line.encode('latin-1', errors='replace').decode('latin-1')
+                    c.drawString(margin_left, y, current_line)
+                
+                y -= line_height
+                current_line = word
+            else:
+                current_line = test_line
+        
+        # Draw remaining
+        if current_line.strip():
+            try:
+                c.drawString(margin_left, y, current_line)
+            except Exception:
+                current_line = current_line.encode('latin-1', errors='replace').decode('latin-1')
+                c.drawString(margin_left, y, current_line)
+        
+        y -= line_height
+        
+        # New page if needed
+        if y < margin_bottom + 5 * cm:  # Reserve space for signature
+            c.showPage()
+            c.setFont(font_name, font_size)
+            y = page_height - margin_top
+    
+    # === SIGNATURE SECTION ===
+    y = max(y - 2 * cm, margin_bottom + 4 * cm)
+    
+    # Separator line
+    c.setStrokeColor(grey)
+    c.setLineWidth(0.5)
+    c.line(margin_left, y + 0.5 * cm, page_width - margin_right, y + 0.5 * cm)
+    
+    # Signing metadata
+    y -= 0.5 * cm
+    c.setFont(font_name, font_size)
+    
+    data_assinatura = consent_data.get("data_assinatura", "")
+    nome = consent_data.get("nome", "")
+    contribuinte = consent_data.get("contribuinte", "")
+    morada = consent_data.get("morada", "")
+    
+    # Signature info
+    info_lines = [
+        f"Assinado por: {nome}",
+        f"Contribuinte: {contribuinte}",
+        f"Morada: {morada}",
+        f"Data: {data_assinatura}",
+    ]
+    
+    for info_line in info_lines:
+        if info_line.strip():
+            try:
+                c.drawString(margin_left, y, info_line)
+            except Exception:
+                info_line = info_line.encode('latin-1', errors='replace').decode('latin-1')
+                c.drawString(margin_left, y, info_line)
+            y -= line_height
+    
+    # Signature image (base64)
+    assinatura_b64 = consent_data.get("assinatura", "")
+    if assinatura_b64 and "," in assinatura_b64:
+        try:
+            img_data = base64.b64decode(assinatura_b64.split(",")[1])
+            img_buffer = io.BytesIO(img_data)
+            img_reader = ImageReader(img_buffer)
+            
+            # Scale signature to reasonable size (max 6cm wide)
+            img_w, img_h = img_reader.getSize()
+            max_sig_width = 6 * cm
+            if img_w > max_sig_width:
+                scale = max_sig_width / img_w
+                img_w = max_sig_width
+                img_h = img_h * scale
+            
+            # Draw signature
+            sig_y = max(y - 1.5 * cm, margin_bottom)
+            c.drawImage(img_reader, margin_left, sig_y, width=img_w, height=img_h, mask='auto')
+        except Exception as e:
+            logger.warning(f"Não foi possível incluir assinatura no PDF: {e}")
+    
+    c.save()
+    return buffer.getvalue()
