@@ -7,6 +7,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+
+// eslint-disable-next-line no-undef
+const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -222,7 +226,7 @@ const RGPDPage = () => {
   useEffect(() => {
     const validateToken = async () => {
       try {
-        const response = await fetch(`/api/rgpd/validate/${token}`);
+        const response = await fetch(`${API_URL}/api/rgpd/validate/${token}`);
         
         if (!response.ok) {
           throw new Error('Token inválido ou expirado');
@@ -232,7 +236,7 @@ const RGPDPage = () => {
         setTokenData(data);
         
         // Buscar dados pré-preenchidos
-        const formDataResponse = await fetch(`/api/rgpd/data/${token}`);
+        const formDataResponse = await fetch(`${API_URL}/api/rgpd/data/${token}`);
         if (formDataResponse.ok) {
           const prefilledData = await formDataResponse.json();
           setFormData(prefilledData);
@@ -305,7 +309,7 @@ const RGPDPage = () => {
     setSubmitting(true);
 
     try {
-      const response = await fetch(`/api/rgpd/sign/${token}`, {
+      const response = await fetch(`${API_URL}/api/rgpd/sign/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
