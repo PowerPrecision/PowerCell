@@ -15,6 +15,7 @@ import { FullPageSkeleton } from "./components/ui/skeletons";
 import LoginPage from "./pages/LoginPage";
 import PublicClientForm from "./pages/PublicClientForm";
 import StaffDashboard from "./pages/StaffDashboard";
+import KanbanPage from "./pages/KanbanPage";
 import ProcessDetails from "./pages/ProcessDetails";
 import RGPDPage from "./pages/RGPDPage";
 import TempLinkUploadPage from "./pages/TempLinkUploadPage";
@@ -110,11 +111,11 @@ const DashboardRedirect = () => {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin vai para /admin, CEO vai para /staff (menu limitado)
+  // Admin vai para /admin, CEO e outros staff vão para /processos
   if (user.role === "admin") {
     return <Navigate to="/admin" replace />;
   }
-  return <Navigate to="/staff" replace />;
+  return <Navigate to="/processos" replace />;
 };
 
 // Componente para redirecionar a rota raiz baseado no estado de autenticação
@@ -129,12 +130,12 @@ const RootRedirect = () => {
     );
   }
 
-  // Se autenticado, redireciona para o dashboard apropriado
+  // Se autenticado, redireciona para /processos (página principal)
   if (user) {
     if (user.role === "admin") {
       return <Navigate to="/admin" replace />;
     }
-    return <Navigate to="/staff" replace />;
+    return <Navigate to="/processos" replace />;
   }
 
   // Se não autenticado, mostra o formulário público
@@ -172,6 +173,16 @@ function App() {
           {/* Dashboard redirect */}
           <Route path="/dashboard" element={<DashboardRedirect />} />
           
+          {/* Kanban Page - Primary landing page for staff */}
+          <Route
+            path="/kanban"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <KanbanPage />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Staff Dashboard (Consultor, Mediador, Diretor, Administrativo, CEO) */}
           <Route
             path="/staff"

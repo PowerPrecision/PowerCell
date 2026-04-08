@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import asyncio
 from fastapi import APIRouter, Depends
 
 from database import db
@@ -12,7 +13,12 @@ router = APIRouter(tags=["Stats"])
 
 @router.get("/stats")
 async def get_stats(user: dict = Depends(get_current_user)):
-    """Get statistics based on user role. Staff see only their assigned processes."""
+    """Get statistics based on user role. Staff see only their assigned processes.
+    
+    OTIMIZAÇÃO: Todas as queries count_documents são executadas em paralelo
+    com asyncio.gather(), reduzindo o tempo total de ~12 chamadas sequenciais
+    para 2-3 chamadas paralelas.
+    """
     # O13 - Redis cache: TTL 60s por role+user
     cache_key = f"stats:{user['role']}:{user['id']}"
     cached = await cache_get(cache_key)
@@ -35,80 +41,107 @@ async def get_stats(user: dict = Depends(get_current_user)):
     # Admin, CEO, Administrativo e Diretor see all (no filter)
     
     # Process status breakdown
-    # Active = not concluded and not dropped out
     concluded_statuses = ["concluidos"]
     dropped_statuses = ["desistencias", "eliminados"]
 
     concluded_query = {**process_query, "status": {"$in": concluded_statuses}} if process_query else {"status": {"$in": concluded_statuses}}
     dropped_query = {**process_query, "status": {"$in": dropped_statuses}} if process_query else {"status": {"$in": dropped_statuses}}
     active_query = {**process_query, "status": {"$nin": concluded_statuses + dropped_statuses}} if process_query else {"status": {"$nin": concluded_statuses + dropped_statuses}}
-
-    # total_processes = apenas processos ativos (sem concluídos e desistências)
-    stats["total_processes"] = await db.processes.count_documents(active_query)
-    stats["active_processes"] = stats["total_processes"]
-    stats["concluded_processes"] = await db.processes.count_documents(concluded_query)
-    stats["dropped_processes"] = await db.processes.count_documents(dropped_query)
-    
-    # Processos sem indexação atribuída (ativos apenas)
     no_indexacao_query = {**active_query, "assigned_indexacao_id": None}
-    stats["no_indexacao_processes"] = await db.processes.count_documents(no_indexacao_query)
     
-    # Get process IDs que o utilizador tem acesso (para contar prazos)
+    # ── BUSCA PARALELA: 4 contagens de processos + 1 contagem de tarefas ──
+    (
+        total_processes,
+        concluded_processes,
+        dropped_processes,
+        no_indexacao_processes,
+        pending_tasks_count,
+    ) = await asyncio.gather(
+        db.processes.count_documents(active_query),
+        db.processes.count_documents(concluded_query),
+        db.processes.count_documents(dropped_query),
+        db.processes.count_documents(no_indexacao_query),
+        db.tasks.count_documents({"completed": False, "assigned_to": user_id}),
+    )
+    
+    stats["total_processes"] = total_processes
+    stats["active_processes"] = total_processes
+    stats["concluded_processes"] = concluded_processes
+    stats["dropped_processes"] = dropped_processes
+    stats["no_indexacao_processes"] = no_indexacao_processes
+    stats["pending_tasks"] = pending_tasks_count
+    
+    # ── DEADLINES: depende do role ──
     if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
-        # Admin, CEO, Administrativo e Diretor vêem todos os prazos pendentes
-        pending_deadlines_count = await db.deadlines.count_documents({"completed": False})
+        # Admin vê todos os prazos — query simples em paralelo com user counts
+        pending_deadlines_coro = db.deadlines.count_documents({"completed": False})
     elif role == UserRole.CLIENTE:
-        # Clientes vêem apenas prazos dos seus processos
-        my_processes = await db.processes.find({"client_id": user_id}, {"id": 1, "_id": 0}).to_list(1000)
-        my_process_ids = [p["id"] for p in my_processes]
-        pending_deadlines_count = await db.deadlines.count_documents({
-            "process_id": {"$in": my_process_ids}, 
-            "completed": False
-        }) if my_process_ids else 0
+        # Clientes: buscar IDs dos processos primeiro
+        my_process_docs = await db.processes.find(
+            {"client_id": user_id}, {"id": 1, "_id": 0}
+        ).to_list(1000)
+        my_process_ids = [p["id"] for p in my_process_docs]
+        if my_process_ids:
+            pending_deadlines_coro = db.deadlines.count_documents({
+                "process_id": {"$in": my_process_ids}, "completed": False
+            })
+        else:
+            pending_deadlines_coro = asyncio.sleep(0, result=0)
     else:
-        # Consultores/Intermediários vêem apenas prazos dos processos que lhes estão atribuídos
-        my_processes = await db.processes.find({
-            "$or": [
+        # Consultores/Intermediários: buscar IDs dos processos atribuídos
+        my_process_docs = await db.processes.find(
+            {"$or": [
                 {"assigned_consultor_id": user_id},
                 {"consultor_id": user_id},
                 {"assigned_mediador_id": user_id},
                 {"intermediario_id": user_id}
-            ]
-        }, {"id": 1, "_id": 0}).to_list(1000)
-        my_process_ids = [p["id"] for p in my_processes]
-        
-        # Contar prazos dos processos atribuídos OU criados pelo utilizador
+            ]},
+            {"id": 1, "_id": 0}
+        ).to_list(1000)
+        my_process_ids = [p["id"] for p in my_process_docs]
         if my_process_ids:
-            pending_deadlines_count = await db.deadlines.count_documents({
+            pending_deadlines_coro = db.deadlines.count_documents({
                 "$or": [
                     {"process_id": {"$in": my_process_ids}, "completed": False},
                     {"created_by": user_id, "process_id": None, "completed": False}
                 ]
             })
         else:
-            pending_deadlines_count = await db.deadlines.count_documents({
-                "created_by": user_id, 
-                "process_id": None, 
-                "completed": False
+            pending_deadlines_coro = db.deadlines.count_documents({
+                "created_by": user_id, "process_id": None, "completed": False
             })
     
-    # Tarefas pendentes atribuídas ao utilizador
-    task_query = {"completed": False, "assigned_to": user_id}
-    pending_tasks_count = await db.tasks.count_documents(task_query)
-    
-    # Total de pendentes = prazos + tarefas
-    stats["pending_deadlines"] = pending_deadlines_count
-    stats["pending_tasks"] = pending_tasks_count
-    stats["total_pending"] = pending_deadlines_count + pending_tasks_count
-    
-    # User stats (Admin and CEO only)
+    # ── USER STATS (Admin/CEO): executar em paralelo com deadlines ──
     if role in [UserRole.ADMIN, UserRole.CEO]:
-        stats["total_users"] = await db.users.count_documents({})
-        stats["active_users"] = await db.users.count_documents({"is_active": {"$ne": False}})
-        stats["inactive_users"] = await db.users.count_documents({"is_active": False})
-        stats["clients"] = await db.users.count_documents({"role": UserRole.CLIENTE})
-        stats["consultors"] = await db.users.count_documents({"role": {"$in": [UserRole.CONSULTOR, UserRole.DIRETOR]}})
-        stats["intermediarios"] = await db.users.count_documents({"role": {"$in": [UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR]}})
+        (
+            pending_deadlines_count,
+            total_users,
+            active_users,
+            inactive_users,
+            clients_count,
+            consultors_count,
+            intermediarios_count,
+        ) = await asyncio.gather(
+            pending_deadlines_coro,
+            db.users.count_documents({}),
+            db.users.count_documents({"is_active": {"$ne": False}}),
+            db.users.count_documents({"is_active": False}),
+            db.users.count_documents({"role": UserRole.CLIENTE}),
+            db.users.count_documents({"role": {"$in": [UserRole.CONSULTOR, UserRole.DIRETOR]}}),
+            db.users.count_documents({"role": {"$in": [UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR]}}),
+        )
+        
+        stats["total_users"] = total_users
+        stats["active_users"] = active_users
+        stats["inactive_users"] = inactive_users
+        stats["clients"] = clients_count
+        stats["consultors"] = consultors_count
+        stats["intermediarios"] = intermediarios_count
+    else:
+        pending_deadlines_count = await pending_deadlines_coro
+    
+    stats["pending_deadlines"] = pending_deadlines_count
+    stats["total_pending"] = pending_deadlines_count + pending_tasks_count
     
     # O13 - Cache result for 60 seconds
     await cache_set(cache_key, stats, ttl=60)
@@ -119,7 +152,9 @@ async def get_stats(user: dict = Depends(get_current_user)):
 async def get_leads_stats(user: dict = Depends(require_staff())):
     """
     Estatísticas de leads para a página de Estatísticas.
-    Retorna contagens por estado, origem e ranking de consultores.
+    
+    OTIMIZAÇÃO: Contagens por status executadas em paralelo com asyncio.gather().
+    N+1 de nomes de consultores substituído por $in batch lookup.
     """
     # O13 - Redis cache: TTL 120s
     cache_key = f"stats:leads:{user['id']}"
@@ -127,23 +162,27 @@ async def get_leads_stats(user: dict = Depends(require_staff())):
     if cached:
         return cached
     
-    # Contagem de leads por estado
     lead_statuses = ["novo", "contactado", "visita_agendada", "proposta", "reservado", "descartado"]
-    leads_by_status = {}
     
-    for status in lead_statuses:
-        count = await db.property_leads.count_documents({"status": status})
-        leads_by_status[status] = count
-    
-    # Total de leads
-    total_leads = sum(leads_by_status.values())
-    
-    # Leads por fonte (source)
-    pipeline_source = [
+    # ── BUSCA PARALELA: 6 contagens por status + agregação por source + top consultores ──
+    status_coros = [db.property_leads.count_documents({"status": s}) for s in lead_statuses]
+    source_cursor = db.property_leads.aggregate([
         {"$group": {"_id": "$source", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
-    ]
-    source_cursor = db.property_leads.aggregate(pipeline_source)
+    ])
+    consultor_cursor = db.property_leads.aggregate([
+        {"$match": {"created_by_id": {"$ne": None}}},
+        {"$group": {"_id": "$created_by_id", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 5}
+    ])
+    
+    # Executar todas as contagens em paralelo
+    status_counts = await asyncio.gather(*status_coros)
+    leads_by_status = dict(zip(lead_statuses, status_counts))
+    total_leads = sum(status_counts)
+    
+    # Aggregate por source (consumir cursor)
     leads_by_source = []
     async for doc in source_cursor:
         leads_by_source.append({
@@ -151,27 +190,31 @@ async def get_leads_stats(user: dict = Depends(require_staff())):
             "count": doc["count"]
         })
     
-    # Top 5 consultores com mais leads angariados
-    pipeline_consultors = [
-        {"$match": {"created_by_id": {"$ne": None}}},
-        {"$group": {"_id": "$created_by_id", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 5}
-    ]
-    consultor_cursor = db.property_leads.aggregate(pipeline_consultors)
+    # Top consultores (consumir cursor + batch lookup de nomes)
     top_consultors_raw = []
     async for doc in consultor_cursor:
         top_consultors_raw.append({"user_id": doc["_id"], "leads_count": doc["count"]})
     
-    # Enriquecer com nomes dos consultores
+    # ── BATCH LOOKUP: buscar todos os nomes de uma vez com $in ──
     top_consultors = []
-    for item in top_consultors_raw:
-        user = await db.users.find_one({"id": item["user_id"]}, {"name": 1, "email": 1, "_id": 0})
-        if user:
-            top_consultors.append({
-                "name": user.get("name") or user.get("email"),
-                "leads_count": item["leads_count"]
-            })
+    if top_consultors_raw:
+        user_ids = [item["user_id"] for item in top_consultors_raw if item["user_id"]]
+        if user_ids:
+            users_cursor = db.users.find(
+                {"id": {"$in": user_ids}}, 
+                {"name": 1, "email": 1, "id": 1, "_id": 0}
+            )
+            users_map = {}
+            async for u in users_cursor:
+                users_map[u["id"]] = u
+            
+            for item in top_consultors_raw:
+                u = users_map.get(item["user_id"])
+                if u:
+                    top_consultors.append({
+                        "name": u.get("name") or u.get("email"),
+                        "leads_count": item["leads_count"]
+                    })
     
     result = {
         "total_leads": total_leads,
@@ -204,7 +247,6 @@ async def get_conversion_stats(user: dict = Depends(require_staff())):
     if cached:
         return cached
     
-    # Buscar leads que chegaram a proposta ou reservado
     pipeline = [
         {"$match": {"status": {"$in": ["proposta", "reservado"]}}},
         {"$project": {
