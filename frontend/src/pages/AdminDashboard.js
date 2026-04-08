@@ -44,7 +44,7 @@ const AdminDashboard = () => {
   const [staleStats, setStaleStats] = useState(null);
   const [showStaleList, setShowStaleList] = useState(false);
   
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState("kanban");
   const [consultorFilter, setConsultorFilter] = useState("all");
   const [mediadorFilter, setMediadorFilter] = useState("all");
   const [indexacaoFilter, setIndexacaoFilter] = useState("all");

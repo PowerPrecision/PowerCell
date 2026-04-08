@@ -619,12 +619,21 @@ const UsersManagementPage = () => {
             </div>
             <div className="space-y-2">
               <Label>Nova Password (deixar em branco para manter)</Label>
-              <Input 
-                type="password" 
-                value={formData.password} 
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
-                placeholder="Digite apenas se quiser alterar"
-              />
+              <div className="relative">
+                <Input 
+                  type={showPassword ? "text" : "password"} 
+                  value={formData.password} 
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
+                  placeholder="Digite apenas se quiser alterar"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
             <DialogFooter>
               <Button type="submit" disabled={formLoading}>

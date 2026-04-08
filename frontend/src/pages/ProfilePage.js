@@ -71,6 +71,7 @@ const ProfilePage = () => {
   });
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(null);
 
@@ -588,18 +589,28 @@ const ProfilePage = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm_password">Confirmar Nova Password</Label>
-                <Input
-                  id="confirm_password"
-                  type="password"
-                  value={passwordData.confirm_password}
-                  onChange={(e) =>
-                    setPasswordData({
-                      ...passwordData,
-                      confirm_password: e.target.value,
-                    })
-                  }
-                  placeholder="Confirme a nova password"
-                />
+                <div className="relative">
+                  <Input
+                    id="confirm_password"
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={passwordData.confirm_password}
+                    onChange={(e) =>
+                      setPasswordData({
+                        ...passwordData,
+                        confirm_password: e.target.value,
+                      })
+                    }
+                    placeholder="Confirme a nova password"
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {passwordData.confirm_password &&
                   passwordData.new_password !== passwordData.confirm_password && (
                     <p className="text-xs text-destructive">
