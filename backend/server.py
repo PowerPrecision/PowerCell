@@ -172,6 +172,11 @@ async def add_security_headers(request, call_next):
         "usb=()"
     )
     
+    # Prevenir cache de endpoints da API
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    
     return response
 
 
@@ -328,6 +333,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             "Access-Control-Allow-Origin": allowed_origin,
             "Access-Control-Allow-Credentials": "true",
         }
+    
+    # Prevenir cache de respostas de erro (evita browser servir 404 cached)
+    headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    headers["Pragma"] = "no-cache"
+    headers["Expires"] = "0"
     
     return JSONResponse(
         status_code=exc.status_code,
