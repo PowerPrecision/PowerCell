@@ -17,6 +17,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.application import MIMEApplication
+from email import encoders as email_encoders
+import mimetypes
 from email.header import decode_header
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -771,7 +775,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     if user_email_lower:
         internal_emails.add(user_email_lower)
     for acc in accounts:
-        acc_user = (acc.get("imap_user") or acc.get("smtp_user") or "").lower().strip()
+        acc_user = (acc.email or "").lower().strip()
         if acc_user and "@" in acc_user:
             internal_emails.add(acc_user)
     for de in doc_recipient_to_emails:
@@ -990,7 +994,8 @@ async def send_email(
     cc_emails: Optional[List[str]] = None,
     bcc_emails: Optional[List[str]] = None,
     process_id: Optional[str] = None,
-    created_by: Optional[str] = None
+    created_by: Optional[str] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Enviar email através de uma das contas configuradas.
@@ -1005,6 +1010,7 @@ async def send_email(
         bcc_emails: BCC
         process_id: ID do processo (para guardar no histórico)
         created_by: ID do utilizador que enviou
+        attachments: Lista de anexos [{"filename": "...", "content_bytes": b"...", "content_type": "..."}]
     """
     accounts = get_email_accounts()
     account = next((a for a in accounts if a.name == account_name), None)
@@ -1017,19 +1023,54 @@ async def send_email(
             return {"success": False, "error": "Nenhuma conta de email configurada"}
     
     try:
-        # Criar mensagem
-        msg = MIMEMultipart("alternative")
+        has_attachments = attachments and len(attachments) > 0
+        
+        if has_attachments:
+            # MIMEMultipart("mixed") permite corpo + anexos
+            msg = MIMEMultipart("mixed")
+            # Sub-mensagem para corpo (alternative = plain + html)
+            body_part = MIMEMultipart("alternative")
+            body_part.attach(MIMEText(body, "plain", "utf-8"))
+            if body_html:
+                body_part.attach(MIMEText(body_html, "html", "utf-8"))
+            msg.attach(body_part)
+            
+            # Adicionar anexos
+            for att in attachments:
+                filename = att.get("filename", "documento")
+                content_bytes = att.get("content_bytes")
+                content_type = att.get("content_type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+                
+                if not content_bytes:
+                    logger.warning(f"Anexo sem conteúdo: {filename}")
+                    continue
+                
+                # Se for PDF, usar MIMEApplication; senão MIMEBase
+                maintype, subtype = content_type.split("/", 1) if "/" in content_type else ("application", "octet-stream")
+                
+                if maintype == "application":
+                    att_part = MIMEApplication(content_bytes, _subtype=subtype)
+                else:
+                    att_part = MIMEBase(maintype, subtype)
+                    att_part.set_payload(content_bytes)
+                    email_encoders.encode_base64(att_part)
+                
+                att_part.add_header("Content-Disposition", "attachment", filename=filename)
+                msg.attach(att_part)
+                logger.info(f"Anexo adicionado: {filename} ({len(content_bytes)} bytes, {content_type})")
+        else:
+            # Sem anexos — usar "alternative" (plain + html)
+            msg = MIMEMultipart("alternative")
+            msg.attach(MIMEText(body, "plain", "utf-8"))
+            if body_html:
+                msg.attach(MIMEText(body_html, "html", "utf-8"))
+        
         msg["Subject"] = subject
         msg["From"] = account.email
         msg["To"] = ", ".join(to_emails)
         
         if cc_emails:
             msg["Cc"] = ", ".join(cc_emails)
-        
-        # Adicionar corpo
-        msg.attach(MIMEText(body, "plain", "utf-8"))
-        if body_html:
-            msg.attach(MIMEText(body_html, "html", "utf-8"))
         
         # Enviar
         context = ssl.create_default_context()
@@ -1039,9 +1080,18 @@ async def send_email(
             all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
             server.sendmail(account.email, all_recipients, msg.as_string())
         
-        logger.info(f"Email enviado via {account.name} para {to_emails}")
+        logger.info(f"Email enviado via {account.name} para {to_emails} ({len(attachments or [])} anexos)")
         
         # Guardar no histórico
+        attachment_records = []
+        if attachments:
+            for att in attachments:
+                attachment_records.append({
+                    "filename": att.get("filename", "documento"),
+                    "content_type": att.get("content_type", "application/octet-stream"),
+                    "size": len(att.get("content_bytes", b""))
+                })
+        
         if process_id:
             email_doc = {
                 "id": str(uuid.uuid4()),
@@ -1054,12 +1104,12 @@ async def send_email(
                 "subject": subject,
                 "body": body,
                 "body_html": body_html,
-                "attachments": [],
+                "attachments": attachment_records,
                 "status": "sent",
                 "sent_at": datetime.now(timezone.utc).isoformat(),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "created_by": created_by,
-                "notes": f"Enviado via {account.name}",
+                "notes": f"Enviado via {account.name}" + (f" com {len(attachment_records)} anexo(s)" if attachment_records else ""),
                 "synced": False,
                 "account": account.name
             }

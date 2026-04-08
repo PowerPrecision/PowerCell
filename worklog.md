@@ -1,4 +1,28 @@
 ---
+Task ID: 7
+Agent: Main Agent
+Task: Corrigir erro 404 em POST /api/emails/send-documentation/{process_id} + bugs relacionados
+
+Work Log:
+- Analisado SendDocumentationModal.js (frontend) - URL e payload corretos
+- Analisado backend/routes/emails.py - rota send-documentation EXISTE (linha 146)
+- Analisado server.py - router montado corretamente, doc_router removido
+- Verificado ordem de rotas - send-documentation antes de /{email_id}, sem conflito
+- Identificado bug AttributeError: acc.get('imap_user') em email_service.py linha 774
+- Identificado bug funcional: documentos NÃO eram anexados ao email enviado
+- Identificado bug: registo duplicado no histórico de emails (send_email + rota)
+- Corrigido acc.get() → acc.email (EmailAccount é objeto, não dict)
+- Adicionado suporte a attachments em send_email() (MIMEMultipart mixed + MIMEApplication/MIMEBase)
+- Rota send-documentation agora descarrega documentos do S3 e anexa ao email
+- Removido registo duplicado, adicionada label "documentação" ao registo existente
+
+Stage Summary:
+- Commit c2752d1: fix send-documentation (3 bugs corrigidos)
+- Ficheiros: backend/services/email_service.py, backend/routes/emails.py
+- 404: rota já existia, código precisa ser deployado no Render
+- Novos imports: MIMEBase, MIMEApplication, email_encoders, mimetypes
+
+---
 Task ID: 1
 Agent: Super Z (main)
 Task: Implementar funcionalidade Auto-Rascunho de E-mails
