@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import KanbanBoard from "../components/KanbanBoard";
@@ -39,10 +39,50 @@ const StaffDashboard = () => {
   const [expiries, setExpiries] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [dstiAlerts, setDstiAlerts] = useState(null);
-  const [activeTab, setActiveTab] = useState("kanban");
-  const [consultorFilter, setConsultorFilter] = useState("all");
-  const [mediadorFilter, setMediadorFilter] = useState("all");
-  const [indexacaoFilter, setIndexacaoFilter] = useState("all");
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Ler filtros da URL (persistidos na navegação)
+  const [activeTab, setActiveTab] = useState(() => searchParams.get("tab") || "kanban");
+  const [consultorFilter, setConsultorFilter] = useState(() => searchParams.get("consultor") || "all");
+  const [mediadorFilter, setMediadorFilter] = useState(() => searchParams.get("mediador") || "all");
+  const [indexacaoFilter, setIndexacaoFilter] = useState(() => searchParams.get("indexacao") || "all");
+
+  // Atualizar filtros na URL
+  const updateTab = useCallback((tab) => {
+    setActiveTab(tab);
+    setSearchParams(prev => {
+      if (tab === "kanban") prev.delete("tab");
+      else prev.set("tab", tab);
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const updateConsultorFilter = useCallback((value) => {
+    setConsultorFilter(value);
+    setSearchParams(prev => {
+      if (value === "all") prev.delete("consultor");
+      else prev.set("consultor", value);
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const updateMediadorFilter = useCallback((value) => {
+    setMediadorFilter(value);
+    setSearchParams(prev => {
+      if (value === "all") prev.delete("mediador");
+      else prev.set("mediador", value);
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const updateIndexacaoFilter = useCallback((value) => {
+    setIndexacaoFilter(value);
+    setSearchParams(prev => {
+      if (value === "all") prev.delete("indexacao");
+      else prev.set("indexacao", value);
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
   
   // Estado para rascunhos automáticos
   const [drafts, setDrafts] = useState([]);
@@ -380,7 +420,7 @@ const StaffDashboard = () => {
         )}
 
         {/* Main Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={updateTab}>
           <TabsList className="flex-wrap">
             <TabsTrigger value="kanban" className="gap-2">
               <LayoutGrid className="h-4 w-4" />
@@ -437,7 +477,7 @@ const StaffDashboard = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                   <div className="space-y-2">
                     <Label>Filtrar por Consultor</Label>
-                    <Select value={consultorFilter} onValueChange={setConsultorFilter}>
+                    <Select value={consultorFilter} onValueChange={updateConsultorFilter}>
                       <SelectTrigger><SelectValue placeholder="Todos os consultores" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os consultores</SelectItem>
@@ -448,7 +488,7 @@ const StaffDashboard = () => {
                   </div>
                   <div className="space-y-2">
                     <Label>Filtrar por Intermediário</Label>
-                    <Select value={mediadorFilter} onValueChange={setMediadorFilter}>
+                    <Select value={mediadorFilter} onValueChange={updateMediadorFilter}>
                       <SelectTrigger><SelectValue placeholder="Todos os intermediários" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os intermediários</SelectItem>
@@ -459,7 +499,7 @@ const StaffDashboard = () => {
                   </div>
                   <div className="space-y-2">
                     <Label>Filtrar por Indexação</Label>
-                    <Select value={indexacaoFilter} onValueChange={setIndexacaoFilter}>
+                    <Select value={indexacaoFilter} onValueChange={updateIndexacaoFilter}>
                       <SelectTrigger><SelectValue placeholder="Todos os indexação" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os Indexação</SelectItem>

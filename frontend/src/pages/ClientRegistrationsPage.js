@@ -11,6 +11,7 @@
  * - Atribuir cliente a utilizador (cria processo)
  */
 import React, { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -66,14 +67,63 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const ClientRegistrationsPage = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState([]);
   const [total, setTotal] = useState(0);
-  const [search, setSearch] = useState("");
-  const [hasProcessFilter, setHasProcessFilter] = useState("false");
-  const [sortField, setSortField] = useState("created_at");
-  const [sortOrder, setSortOrder] = useState("desc");
-  const [assignedToMe, setAssignedToMe] = useState(false);
+  
+  // Ler filtros da URL (persistidos na navegação)
+  const [search, setSearch] = useState(() => searchParams.get("search") || "");
+  const [hasProcessFilter, setHasProcessFilter] = useState(() => searchParams.get("has_process") || "false");
+  const [sortField, setSortField] = useState(() => searchParams.get("sort_field") || "created_at");
+  const [sortOrder, setSortOrder] = useState(() => searchParams.get("sort_order") || "desc");
+  const [assignedToMe, setAssignedToMe] = useState(() => searchParams.get("assigned_to_me") === "true");
+
+  // Debounce para pesquisa
+  const searchTimeoutRef = React.useRef(null);
+
+  // Atualizar filtros na URL
+  const updateSearch = useCallback((value) => {
+    setSearch(value);
+    // Debounce: só atualiza a URL após 300ms sem input
+    clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      setSearchParams(prev => {
+        if (value) prev.set("search", value);
+        else prev.delete("search");
+        return prev;
+      }, { replace: true });
+    }, 300);
+  }, [setSearchParams]);
+
+  const updateHasProcessFilter = useCallback((value) => {
+    setHasProcessFilter(value);
+    setSearchParams(prev => {
+      if (value === "all") prev.delete("has_process");
+      else prev.set("has_process", value);
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const updateSort = useCallback((value) => {
+    const [field, order] = value.split('_');
+    setSortField(field);
+    setSortOrder(order);
+    setSearchParams(prev => {
+      prev.set("sort_field", field);
+      prev.set("sort_order", order);
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const updateAssignedToMe = useCallback((value) => {
+    setAssignedToMe(value);
+    setSearchParams(prev => {
+      if (value) prev.set("assigned_to_me", "true");
+      else prev.delete("assigned_to_me");
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
   
   // Assign dialog
   const [assignDialog, setAssignDialog] = useState({ open: false, client: null });
@@ -117,7 +167,7 @@ const ClientRegistrationsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]);
+  }, [token, search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchClients();
@@ -326,12 +376,12 @@ const ClientRegistrationsPage = () => {
                 <Input
                   placeholder="Pesquisar por nome, email ou NIF..."
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => updateSearch(e.target.value)}
                   className="pl-10"
                 />
               </div>
               
-              <Select value={hasProcessFilter} onValueChange={setHasProcessFilter}>
+              <Select value={hasProcessFilter} onValueChange={updateHasProcessFilter}>
                 <SelectTrigger className="w-full sm:w-[160px]">
                   <Filter className="h-4 w-4 mr-2" />
                   <SelectValue placeholder="Filtrar..." />
@@ -353,11 +403,7 @@ const ClientRegistrationsPage = () => {
                 </SelectContent>
               </Select>
               
-              <Select value={`${sortField}_${sortOrder}`} onValueChange={(v) => {
-                const [field, order] = v.split('_');
-                setSortField(field);
-                setSortOrder(order);
-              }}>
+              <Select value={`${sortField}_${sortOrder}`} onValueChange={updateSort}>
                 <SelectTrigger className="w-full sm:w-[155px]">
                   <ArrowUpDown className="h-4 w-4 mr-2" />
                   <SelectValue placeholder="Ordenar" />
@@ -374,7 +420,7 @@ const ClientRegistrationsPage = () => {
                 <Button
                   variant={assignedToMe ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setAssignedToMe(!assignedToMe)}
+                  onClick={() => updateAssignedToMe(!assignedToMe)}
                   className="gap-2"
                 >
                   <Users className="h-4 w-4" />

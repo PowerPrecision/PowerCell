@@ -156,8 +156,8 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const getNavItems = () => {
-    // Admin vai para /admin, CEO e outros staff vão para /staff
-    const dashboardHref = user?.role?.toLowerCase() === "admin" ? "/admin" : "/staff";
+    // Admin vai para /admin, CEO e outros staff vão para /kanban
+    const dashboardHref = user?.role?.toLowerCase() === "admin" ? "/admin" : "/kanban";
     
     const baseItems = [
       {
@@ -197,7 +197,7 @@ const DashboardLayout = ({ children, title }) => {
           {
             label: "Quadro Geral",
             icon: LayoutGrid,
-            href: "/staff",
+            href: "/kanban",
           },
         ],
         groups: [
@@ -293,7 +293,7 @@ const DashboardLayout = ({ children, title }) => {
           {
             label: "Quadro Geral",
             icon: LayoutGrid,
-            href: "/staff",
+            href: "/kanban",
           },
         ],
         groups: [
