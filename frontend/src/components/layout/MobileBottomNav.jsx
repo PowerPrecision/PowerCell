@@ -13,11 +13,11 @@ const MobileBottomNav = () => {
   
   // Determinar o dashboard correcto baseado no role
   const getDashboardPath = () => {
-    if (!user) return "/dashboard";
-    if (user.role === "admin" || user.role === "ceo" || user.role === "administrativo") {
+    if (!user) return "/kanban";
+    if (user.role === "admin") {
       return "/admin";
     }
-    return "/staff";
+    return "/kanban";
   };
 
   // Determinar o caminho correcto para clientes baseado no role
