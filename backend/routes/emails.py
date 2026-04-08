@@ -166,8 +166,9 @@ async def send_documentation_email(
     if not doc_config.enabled:
         raise HTTPException(status_code=400, detail="Envio de documentação não está activado")
     
-    # Dados do request
+    # Dados do request - aceitar document_ids E/OU s3_paths
     document_ids = data.get("document_ids", [])
+    s3_paths = data.get("s3_paths", [])
     # Sanitize email addresses from user input
     bcc_recipients = [e for e in (sanitize_email(e) for e in data.get("bcc_recipients", [])) if e]
     cc_emails = [e for e in (sanitize_email(e) for e in data.get("cc_emails", [])) if e]
@@ -176,7 +177,7 @@ async def send_documentation_email(
     # TO emails: usar os selecionados pelo utilizador, ou fallback para config
     request_to_emails = [e for e in (sanitize_email(e) for e in data.get("to_emails", [])) if e]
     
-    if not document_ids:
+    if not document_ids and not s3_paths:
         raise HTTPException(status_code=400, detail="Selecione pelo menos um documento")
     
     if not bcc_recipients:
@@ -229,10 +230,37 @@ async def send_documentation_email(
         )
     
     # Obter documentos da coleção document_metadata (onde são guardados)
-    documents = await db.document_metadata.find(
-        {"id": {"$in": document_ids}},
-        {"_id": 0}
-    ).to_list(100)
+    documents = []
+    if document_ids:
+        metadata_docs = await db.document_metadata.find(
+            {"id": {"$in": document_ids}},
+            {"_id": 0}
+        ).to_list(100)
+        documents.extend(metadata_docs)
+    
+    # Complementar com documentos por s3_path (fallback para docs S3-only)
+    if s3_paths:
+        existing_paths = {d.get("s3_path") for d in documents if d.get("s3_path")}
+        paths_to_lookup = [p for p in s3_paths if p not in existing_paths]
+        if paths_to_lookup:
+            s3_docs = await db.document_metadata.find(
+                {"s3_path": {"$in": paths_to_lookup}},
+                {"_id": 0}
+            ).to_list(100)
+            documents.extend(s3_docs)
+            # Marcar paths que NÃO estão em document_metadata
+            found_paths = {d.get("s3_path") for d in s3_docs}
+            for path in paths_to_lookup:
+                if path not in found_paths:
+                    # Documento existe no S3 mas não em metadados — criar entrada mínima
+                    filename = path.rsplit("/", 1)[-1] if "/" in path else path
+                    documents.append({
+                        "id": str(uuid.uuid4()),
+                        "filename": filename,
+                        "original_name": filename,
+                        "s3_path": path,
+                        "content_type": None
+                    })
     
     if not documents:
         raise HTTPException(status_code=404, detail="Nenhum documento encontrado")
