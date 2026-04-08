@@ -7,7 +7,6 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Loader2, Search, Phone, Mail, User, Users, GripVertical, Eye, ChevronLeft, ChevronRight, AlertCircle, MapPin, Home, Euro, Calendar, ExternalLink, List, LayoutGrid, Plus, UserPlus, UserMinus } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
@@ -48,9 +47,6 @@ const statusHeaderColors = {
   red: "bg-red-500",
 };
 
-// Status relacionados com bancos - ao mover para estas colunas, verificar créditos ativos
-const BANK_RELATED_STATUSES = ["enviado_bruno", "enviado_luis", "enviado_bcp_rui", "fase_bancaria", "entradas_precision"];
-
 const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "all", indexacaoFilter = "all" }) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -66,10 +62,6 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
   // O7 - Filtros do Kanban
   const [dateFilter, setDateFilter] = useState("all"); // all, today, week, month
   const [urgencyFilter, setUrgencyFilter] = useState("all"); // all, overdue, urgent, normal
-  
-  // Estado para aviso de bancos com créditos ativos
-  const [showBankWarning, setShowBankWarning] = useState(false);
-  const [pendingMove, setPendingMove] = useState(null);
   
   // Estado para criação de novo cliente
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -276,15 +268,6 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
     setDragOverColumn(null);
   };
 
-  // Função para obter bancos com créditos ativos do processo
-  const getActiveBanks = (process) => {
-    // Os bancos com créditos ativos estão em financial_data.bancos_creditos
-    if (process.financial_data?.bancos_creditos && Array.isArray(process.financial_data.bancos_creditos)) {
-      return process.financial_data.bancos_creditos.filter(banco => banco && banco.trim() !== "");
-    }
-    return [];
-  };
-
   // Função para executar a movimentação do processo
   const executeMoveProcess = async (process, targetColumn, sourceColumn) => {
     // Optimistic update
@@ -347,35 +330,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
     const { process, sourceColumn } = draggingCard;
     setDraggingCard(null);
 
-    // Verificar se está a mover para uma coluna relacionada com bancos
-    if (BANK_RELATED_STATUSES.includes(targetColumn)) {
-      const activeBanks = getActiveBanks(process);
-      if (activeBanks.length > 0) {
-        // Mostrar aviso com os bancos onde o cliente tem créditos ativos
-        setPendingMove({ process, targetColumn, sourceColumn, activeBanks });
-        setShowBankWarning(true);
-        return;
-      }
-    }
-
-    // Se não há créditos ativos ou não é coluna de banco, mover diretamente
     await executeMoveProcess(process, targetColumn, sourceColumn);
-  };
-
-  // Confirmar movimentação após aviso de bancos
-  const handleConfirmBankMove = async () => {
-    if (pendingMove) {
-      const { process, targetColumn, sourceColumn } = pendingMove;
-      await executeMoveProcess(process, targetColumn, sourceColumn);
-    }
-    setShowBankWarning(false);
-    setPendingMove(null);
-  };
-
-  // Cancelar movimentação
-  const handleCancelBankMove = () => {
-    setShowBankWarning(false);
-    setPendingMove(null);
   };
 
   const filteredColumns = kanbanData.columns.map((column) => ({
@@ -1221,40 +1176,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
         </DialogContent>
       </Dialog>
 
-      {/* AlertDialog para aviso de bancos com créditos ativos */}
-      <AlertDialog open={showBankWarning} onOpenChange={setShowBankWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertCircle className="h-5 w-5" />
-              Aviso: Créditos Ativos
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-3">
-                <p>
-                  O cliente <strong>{pendingMove?.process?.client_name}</strong> tem créditos ativos nos seguintes bancos:
-                </p>
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <ul className="list-disc list-inside space-y-1">
-                    {pendingMove?.activeBanks?.map((bank, index) => (
-                      <li key={index} className="font-medium text-amber-800">{bank}</li>
-                    ))}
-                  </ul>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Tem a certeza que deseja enviar este processo para balcões?
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleCancelBankMove}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmBankMove} className="bg-amber-600 hover:bg-amber-700">
-              Confirmar Envio
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+
     </div>
   );
 };

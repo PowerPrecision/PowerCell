@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -46,9 +46,26 @@ const MyClientsPage = () => {
   const [clients, setClients] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Sync filters with URL
+  const searchTerm = searchParams.get("search") || "";
+  const statusFilter = searchParams.get("status") || "all";
+  const setSearchTerm = (value) => {
+    setSearchParams(prev => {
+      if (value) prev.set("search", value);
+      else prev.delete("search");
+      return prev;
+    }, { replace: true });
+  };
+  const setStatusFilter = (value) => {
+    setSearchParams(prev => {
+      if (value && value !== "all") prev.set("status", value);
+      else prev.delete("status");
+      return prev;
+    }, { replace: true });
+  };
 
   useEffect(() => {
     fetchData();
