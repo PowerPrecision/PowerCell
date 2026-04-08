@@ -23,6 +23,30 @@ logger = logging.getLogger(__name__)
 TOKEN_EXPIRY_HOURS = 24
 RGPD_REQUESTS_COLLECTION = "rgpd_requests"
 
+# Mapeamento de tipos de documento para exibição legível
+TIPOS_DOCUMENTO_LABELS = {
+    "bilhete_de_identidade": "Bilhete de Identidade",
+    "cartao_de_cidadao": "Cartão de Cidadão",
+    "passaporte": "Passaporte",
+    "carta_de_conducao": "Carta de Condução",
+    "autorizacao_de_residencia": "Autorização de Residência"
+}
+
+
+def get_tipo_documento_label(tipo_documento: str) -> str:
+    """
+    Converte o valor do enum tipo_documento para um formato legível.
+    
+    Args:
+        tipo_documento: Valor do enum (ex: "cartao_de_cidadao")
+    
+    Returns:
+        Label formatado (ex: "Cartão de Cidadão")
+    """
+    if not tipo_documento:
+        return "N/A"
+    return TIPOS_DOCUMENTO_LABELS.get(tipo_documento, tipo_documento)
+
 
 async def create_rgpd_request(
     process_id: str,
@@ -421,6 +445,9 @@ async def send_rgpd_signed_email(
     Returns:
         True se enviado com sucesso
     """
+    # Formatar tipo de documento para exibição legível
+    tipo_documento_label = get_tipo_documento_label(consent_data.get('tipo_documento'))
+    
     subject = f"RGPD Assinado - {client_name}"
     
     body_text = f"""Olá {user_name},
@@ -429,7 +456,7 @@ O cliente {client_name} assinou o documento RGPD com os seguintes dados:
 
 Nome: {consent_data.get('nome', 'N/A')}
 Contribuinte: {consent_data.get('contribuinte', 'N/A')}
-Tipo de Documento: {consent_data.get('tipo_documento', 'N/A')}
+Tipo de Documento: {tipo_documento_label}
 Número do Documento: {consent_data.get('numero_documento', 'N/A')}
 Morada: {consent_data.get('morada', 'N/A')}
 Data da Assinatura: {consent_data.get('data_assinatura', 'N/A')}
@@ -455,7 +482,7 @@ Sistema CRM
         <h3 style="margin-top: 0; color: #28a745;">✅ RGPD Assinado</h3>
         <p><strong>Nome:</strong> {consent_data.get('nome', 'N/A')}</p>
         <p><strong>Contribuinte:</strong> {consent_data.get('contribuinte', 'N/A')}</p>
-        <p><strong>Tipo de Documento:</strong> {consent_data.get('tipo_documento', 'N/A')}</p>
+        <p><strong>Tipo de Documento:</strong> {tipo_documento_label}</p>
         <p><strong>Número do Documento:</strong> {consent_data.get('numero_documento', 'N/A')}</p>
         <p><strong>Morada:</strong> {consent_data.get('morada', 'N/A')}</p>
         <p><strong>Data da Assinatura:</strong> {consent_data.get('data_assinatura', 'N/A')}</p>
@@ -600,7 +627,9 @@ async def _get_rendered_rgpd_text(
     rendered = rendered.replace("{{CONTRIBUINTE}}", consent_data.get("contribuinte", personal_data.get("nif", "")))
     rendered = rendered.replace("{{MORADA}}", consent_data.get("morada", personal_data.get("morada_fiscal", "")))
     rendered = rendered.replace("{{CODIGO_POSTAL}}", consent_data.get("codigo_postal", ""))
-    rendered = rendered.replace("{{TIPO_DOCUMENTO}}", consent_data.get("tipo_documento", ""))
+    # Formatar tipo de documento para exibição legível
+    tipo_documento_label = get_tipo_documento_label(consent_data.get("tipo_documento"))
+    rendered = rendered.replace("{{TIPO_DOCUMENTO}}", tipo_documento_label)
     rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", consent_data.get("numero_documento", ""))
     rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", consent_data.get("validade_documento", personal_data.get("data_validade_cc", "")))
     rendered = rendered.replace("{{DATA_ASSINATURA}}", consent_data.get("data_assinatura", ""))
