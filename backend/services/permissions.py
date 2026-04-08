@@ -148,7 +148,7 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
         "actions": [
             "upload_docs", "delete_docs", "download_docs",
             "assign_clients", "manage_tasks", "use_chat",
-            "assign_process_users"
+            "assign_process_users", "view_financials"
         ],
     },
     "cliente": {
