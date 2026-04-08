@@ -444,6 +444,14 @@ async def health_check():
     return {"status": "healthy"}
 
 
+# Root path — Render health check uses HEAD / by default
+@app.get("/")
+@app.head("/")
+async def root_health():
+    """Health check para Render (usa HEAD / por padrão)."""
+    return {"status": "ok"}
+
+
 # ====================================================================
 # BACKGROUND JOB MONITOR - Detecção automática de jobs stuck (P2)
 # ====================================================================
