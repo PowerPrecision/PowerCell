@@ -27,6 +27,7 @@ from services.rgpd_service import (
     get_rgpd_by_process,
     sign_rgpd,
     send_rgpd_email,
+    get_tipo_documento_label,
     RGPD_REQUESTS_COLLECTION,
     TOKEN_EXPIRY_HOURS
 )
@@ -380,7 +381,9 @@ async def get_rgpd_form_data(token: str):
             rendered = rendered.replace("{{CONTRIBUINTE}}", response_data["nif"])
             rendered = rendered.replace("{{MORADA}}", response_data["morada"])
             rendered = rendered.replace("{{CODIGO_POSTAL}}", response_data["codigo_postal"])
-            rendered = rendered.replace("{{TIPO_DOCUMENTO}}", tipo_documento)
+            # Formatar tipo de documento para exibição legível no template
+            tipo_documento_label = get_tipo_documento_label(tipo_documento)
+            rendered = rendered.replace("{{TIPO_DOCUMENTO}}", tipo_documento_label)
             rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", numero_documento)
             rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", response_data["validade_documento"])
             rendered = rendered.replace("{{DATA_ASSINATURA}}", data_assinatura)
