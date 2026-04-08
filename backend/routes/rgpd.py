@@ -321,10 +321,16 @@ async def get_rgpd_form_data(token: str):
     # Buscar dados do processo
     process = await db.processes.find_one({"id": request["process_id"]})
     
+    # Desencriptar dados sensíveis antes de extrair
+    if process:
+        from services.process_service import decrypt_sensitive_data
+        process = decrypt_sensitive_data(process)
+    
     personal_data = process.get("personal_data", {}) if process else {}
+    real_estate_data = process.get("real_estate_data", {}) if process else {}
     
     # Extrair dados do documento de identificação
-    documento_id = personal_data.get("documento_id", {})
+    documento_id = personal_data.get("documento_id", "")
     if isinstance(documento_id, dict):
         tipo_documento = documento_id.get("type", "")
         numero_documento = documento_id.get("number", "")
@@ -337,8 +343,11 @@ async def get_rgpd_form_data(token: str):
         "client_email": request["client_email"],
         "nif": personal_data.get("nif", ""),
         "morada": personal_data.get("morada_fiscal", ""),
-        "documento_id": personal_data.get("documento_id", ""),
-        "data_validade_cc": personal_data.get("data_validade_cc", "")
+        "numero_documento": numero_documento,
+        "tipo_documento": tipo_documento,
+        "validade_documento": personal_data.get("data_validade_cc", ""),
+        "concelho": real_estate_data.get("concelho", ""),
+        "codigo_postal": real_estate_data.get("codigo_postal", ""),
     }
     
     # Renderizar o template RGPD com variáveis dinâmicas
@@ -368,12 +377,12 @@ async def get_rgpd_form_data(token: str):
             rendered = rendered.replace("{{NOME_CLIENTE}}", request["client_name"])
             rendered = rendered.replace("{{NOME}}", request["client_name"])
             rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
-            rendered = rendered.replace("{{CONTRIBUINTE}}", personal_data.get("nif", ""))
-            rendered = rendered.replace("{{MORADA}}", personal_data.get("morada_fiscal", ""))
-            rendered = rendered.replace("{{CODIGO_POSTAL}}", personal_data.get("codigo_postal", ""))
+            rendered = rendered.replace("{{CONTRIBUINTE}}", response_data["nif"])
+            rendered = rendered.replace("{{MORADA}}", response_data["morada"])
+            rendered = rendered.replace("{{CODIGO_POSTAL}}", response_data["codigo_postal"])
             rendered = rendered.replace("{{TIPO_DOCUMENTO}}", tipo_documento)
             rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", numero_documento)
-            rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", personal_data.get("data_validade_cc", ""))
+            rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", response_data["validade_documento"])
             rendered = rendered.replace("{{DATA_ASSINATURA}}", data_assinatura)
             
             response_data["rgpd_text"] = rendered
