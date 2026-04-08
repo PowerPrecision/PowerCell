@@ -274,11 +274,6 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/gestao-formulario",
               },
               {
-                label: "RGPD",
-                icon: FileSignature,
-                href: "/admin/rgpd",
-              },
-              {
                 label: "Auditoria",
                 icon: ClipboardList,
                 href: "/auditoria",
@@ -415,11 +410,6 @@ const DashboardLayout = ({ children, title }) => {
                 label: "Diagnósticos",
                 icon: Activity,
                 href: "/diagnosticos",
-              },
-              {
-                label: "RGPD",
-                icon: FileSignature,
-                href: "/admin/rgpd",
               },
               {
                 label: "Estados do Workflow",
