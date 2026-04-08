@@ -3,6 +3,7 @@
  * Permite ao admin configurar integrações e definições
  */
 import React, { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -394,10 +395,11 @@ const ConfigSection = ({ section, sectionKey, config, fields, onSave, onTest }) 
 
 const SystemConfigPage = () => {
   const { token, user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
   const [fields, setFields] = useState({});
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("storage");
+  const [activeTab, setActiveTab] = useState(() => searchParams.get("tab") || "storage");
 
   const fetchConfig = useCallback(async () => {
     try {
