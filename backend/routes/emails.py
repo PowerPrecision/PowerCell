@@ -309,7 +309,41 @@ Com os melhores cumprimentos,
         to_emails = [current_user["email"]]
     subject = f"Documentação - {client_name} (Processo #{process_number})"
     
-    # Enviar email
+    # ==== PREPARAR ANEXOS (download do S3) ====
+    email_attachments = []
+    failed_attachments = []
+    for doc in documents:
+        filename = doc.get("original_name", doc.get("filename", "documento"))
+        s3_path = doc.get("s3_path") or doc.get("path")
+        
+        if s3_path:
+            try:
+                from services.s3_storage import s3_service
+                loop = asyncio.get_event_loop()
+                content_bytes = await loop.run_in_executor(
+                    None, lambda p=s3_path: s3_service.get_file_content(p)
+                )
+                if content_bytes:
+                    email_attachments.append({
+                        "filename": filename,
+                        "content_bytes": content_bytes,
+                        "content_type": doc.get("content_type") or doc.get("mime_type")
+                    })
+                    logger.info(f"Anexo preparado: {filename} ({len(content_bytes)} bytes)")
+                else:
+                    failed_attachments.append(filename)
+                    logger.warning(f"Falha ao descarregar anexo do S3: {s3_path}")
+            except Exception as e:
+                failed_attachments.append(filename)
+                logger.error(f"Erro ao descarregar anexo {filename} do S3: {e}")
+        else:
+            failed_attachments.append(filename)
+            logger.warning(f"Documento sem s3_path: {filename}")
+    
+    if failed_attachments:
+        warnings.append(f"⚠️ {len(failed_attachments)} documento(s) não puderam ser anexados: {', '.join(failed_attachments)}")
+    
+    # ==== ENVIAR EMAIL COM ANEXOS ====
     result = await send_email(
         account_name="power",
         to_emails=to_emails,
@@ -318,50 +352,39 @@ Com os melhores cumprimentos,
         cc_emails=cc_emails if cc_emails else None,
         bcc_emails=validated_bcc,
         process_id=process_id,
-        created_by=current_user["id"]
+        created_by=current_user["id"],
+        attachments=email_attachments if email_attachments else None
     )
     
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
     
-    # Sanitize before DB insert
-    subject = sanitize_string(subject, max_length=300)
-    email_body = sanitize_string(email_body, max_length=10000)
-
-    # Registar envio no histórico
-    email_record = {
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "direction": "sent",
-        "from_email": current_user["email"],
-        "to_emails": to_emails,
-        "cc_emails": cc_emails or [],
-        "bcc_emails": validated_bcc,
-        "subject": subject,
-        "body": email_body,
-        "attachments": [{"id": doc.get("id"), "filename": doc.get("original_name", doc.get("filename"))} for doc in documents],
-        "status": "sent",
-        "sent_at": datetime.now(timezone.utc).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "created_by": current_user["id"],
-        "notes": sanitize_string(f"Documentação enviada para {len(validated_bcc)} destinatário(s)", max_length=1000),
-        "is_important": False,
-        "is_read": True,
-        "is_starred": False,
-        "is_archived": False,
-        "labels": ["documentação"]
-    }
+    # NOTA: O registo no histórico já é feito pelo send_email() internamente.
+    # Adicionar label "documentação" ao registo criado pelo send_email
+    try:
+        await db.emails.update_one(
+            {"process_id": process_id, "created_by": current_user["id"], "direction": "sent"},
+            {"$set": {
+                "is_important": False,
+                "is_read": True,
+                "is_starred": False,
+                "is_archived": False,
+            },
+            "$addToSet": {"labels": "documentação"}},
+            sort=[("sent_at", -1)]
+        )
+    except Exception as e:
+        logger.warning(f"Não foi possível adicionar label 'documentação' ao registo: {e}")
     
-    await db.emails.insert_one(email_record)
-    
-    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {len(validated_bcc)} destinatários")
+    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {len(validated_bcc)} destinatários, {len(email_attachments)} anexos")
     
     return {
         "success": True,
-        "message": f"Documentação enviada com sucesso para {len(validated_bcc)} destinatário(s)",
+        "message": f"Documentação enviada com sucesso para {len(validated_bcc)} destinatário(s) ({len(email_attachments)} anexo(s))",
         "warnings": warnings,
         "sent_to": validated_bcc,
-        "email_id": email_record["id"]
+        "attachments_sent": len(email_attachments),
+        "attachments_failed": len(failed_attachments) if failed_attachments else 0
     }
 
 
