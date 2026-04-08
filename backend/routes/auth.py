@@ -102,7 +102,29 @@ async def login(request: Request, data: UserLogin, response: Response):
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)):
-    """Retorna o utilizador atual incluindo info de impersonate e permissões se aplicável."""
+    """Retorna o utilizador atual incluindo info de impersonate e permissões se aplicável.
+    
+    Sincroniza as permissões com as defaults do role em cada request,
+    garantindo que alterações a DEFAULT_PERMISSIONS_BY_ROLE são refletidas
+    imediatamente para todos os utilizadores (resolve permissões legacy).
+    """
+    from services.permissions import get_default_permissions_for_role, sync_permissions_with_role_defaults
+    
+    # Sincronizar permissões: garantir que actions novas no role são adicionadas
+    user_perms = user.get("permissions")
+    role = user.get("role", "cliente")
+    synced_perms = sync_permissions_with_role_defaults(user_perms, role)
+    
+    # Verificar se houve alterações (nova action adicionada) e persistir
+    if user_perms is not None and synced_perms != user_perms:
+        try:
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$set": {"permissions": synced_perms}}
+            )
+        except Exception:
+            pass  # Falha silenciosa — não bloqueia o request
+    
     response = {
         "id": user["id"],
         "email": user["email"],
@@ -111,16 +133,9 @@ async def get_me(user: dict = Depends(get_current_user)):
         "role": user["role"],
         "created_at": user["created_at"],
         "onedrive_folder": user.get("onedrive_folder"),
-        "is_active": user.get("is_active", True)
+        "is_active": user.get("is_active", True),
+        "permissions": synced_perms
     }
-    
-    # Incluir permissões do utilizador (se existirem, caso contrário usar defaults do role)
-    if user.get("permissions"):
-        response["permissions"] = user["permissions"]
-    else:
-        # Resolver permissões padrão do role
-        from services.permissions import get_default_permissions_for_role
-        response["permissions"] = get_default_permissions_for_role(user.get("role", "cliente"))
     
     # Incluir informação de impersonate se presente
     if user.get("is_impersonated"):
@@ -324,6 +339,17 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
             raise HTTPException(status_code=401, detail="Conta desativada")
         
         logger.info(f"Login bem-sucedido: user={user['id']} email={clean_email} role={user['role']}")
+        
+        # Sincronizar permissões com defaults do role (resolve permissões legacy)
+        from services.permissions import sync_permissions_with_role_defaults
+        user_perms = user.get("permissions")
+        user_role = user.get("role", "cliente")
+        synced_perms = sync_permissions_with_role_defaults(user_perms, user_role)
+        if user_perms is not None and synced_perms != user_perms:
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$set": {"permissions": synced_perms}}
+            )
         
         # Criar access token
         access_token = create_access_token(

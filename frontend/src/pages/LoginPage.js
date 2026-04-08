@@ -30,8 +30,8 @@ const LoginPage = () => {
       } else if (user.role === "cliente") {
         navigate("/cliente");
       } else {
-        // CEO e outros staff vão para /staff
-        navigate("/staff");
+        // CEO e outros staff vão para /processos
+        navigate("/processos");
       }
     } catch (error) {
       console.error("Login error:", error);

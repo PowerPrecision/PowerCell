@@ -704,20 +704,66 @@ async def get_kanban_board(
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     
-    # Get processes
-    processes = await db.processes.find(query, {"_id": 0}).to_list(1000)
+    # PROJEÇÃO OTIMIZADA: apenas campos necessários para o Kanban
+    # Evita transferir documentos inteiros, histórico, dados financeiros, etc.
+    kanban_projection = {
+        "_id": 0,
+        "id": 1,
+        "process_number": 1,
+        "client_name": 1,
+        "client_email": 1,
+        "client_phone": 1,
+        "status": 1,
+        "priority": 1,
+        "under_35": 1,
+        "process_type": 1,
+        "property_value": 1,
+        "assigned_consultor_id": 1,
+        "assigned_consultor_ids": 1,
+        "assigned_mediador_id": 1,
+        "assigned_mediador_ids": 1,
+        "assigned_indexacao_id": 1,
+        "created_at": 1,
+        "updated_at": 1,
+        "notes": 1,
+        "tags": 1,
+    }
+    processes = await db.processes.find(query, kanban_projection).to_list(1000)
     
-    # Desencriptar dados sensíveis
-    processes = decrypt_processes_list(processes)
+    # NOTA: Não chamamos decrypt_processes_list() aqui porque:
+    # 1. A projeção já exclui campos sensíveis (personal_data, financial_data, etc.)
+    # 2. client_name/client_email/client_phone vêm desencriptados do serviço de criação
+    # 3. Isto elimina o deepcopy + decrypt de centenas de processos
     
-    # Get all users for name lookup
+    # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
     user_map = {u["id"]: u for u in users}
     
-    # Organize by status
+    # Organize by status - usando dict para lookup O(1) em vez de O(n) por coluna
+    processes_by_status = {}
+    for p in processes:
+        s = p.get("status", "")
+        if s not in processes_by_status:
+            processes_by_status[s] = []
+        processes_by_status[s].append(p)
+    
+    # Contagens otimizadas com count_documents em vez de len(list)
+    concluded_statuses = ["concluidos"]
+    dropped_statuses = ["desistencias"]
+    active_count_query = dict(query) if query else {}
+    active_count_query["status"] = {"$nin": concluded_statuses + dropped_statuses}
+    inactive_count_query = dict(query) if query else {}
+    inactive_count_query["status"] = {"$in": concluded_statuses + dropped_statuses}
+    
+    import asyncio
+    active_count, inactive_count = await asyncio.gather(
+        db.processes.count_documents(active_count_query),
+        db.processes.count_documents(inactive_count_query),
+    )
+    
     kanban = []
     for status in statuses:
-        status_processes = [p for p in processes if p.get("status") == status["name"]]
+        status_processes = processes_by_status.get(status["name"], [])
         
         # Enrich with user names and assignment info
         enriched_processes = []
@@ -746,15 +792,11 @@ async def get_kanban_board(
             "processes": enriched_processes,
             "count": len(enriched_processes)
         })
-    
-    # Excluir processos concluídos e desistências da contagem total
-    active_processes = [p for p in processes if p.get("status") not in ["concluidos", "desistencias"]]
-    inactive_processes = [p for p in processes if p.get("status") in ["concluidos", "desistencias"]]
 
     return {
         "columns": kanban,
-        "total_processes": len(active_processes),
-        "total_inactive": len(inactive_processes),
+        "total_processes": active_count,
+        "total_inactive": inactive_count,
         "user_role": role,
         "current_user_id": user_id
     }

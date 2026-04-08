@@ -156,8 +156,8 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const getNavItems = () => {
-    // Admin vai para /admin, CEO e outros staff vão para /staff
-    const dashboardHref = user?.role?.toLowerCase() === "admin" ? "/admin" : "/staff";
+    // Admin vai para /admin, CEO e outros staff vão para /processos
+    const dashboardHref = user?.role?.toLowerCase() === "admin" ? "/admin" : "/processos";
     
     const baseItems = [
       {
