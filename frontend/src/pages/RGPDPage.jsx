@@ -245,8 +245,11 @@ const RGPDPage = () => {
             nome: prefilledData.client_name || '',
             contribuinte: prefilledData.nif || '',
             morada: prefilledData.morada || '',
-            numero_documento: prefilledData.documento_id || '',
-            validade_documento: prefilledData.data_validade_cc || ''
+            numero_documento: prefilledData.numero_documento || '',
+            tipo_documento: prefilledData.tipo_documento || '',
+            validade_documento: prefilledData.validade_documento || '',
+            concelho: prefilledData.concelho || '',
+            codigo_postal: prefilledData.codigo_postal || ''
           }));
         }
       } catch (err) {
