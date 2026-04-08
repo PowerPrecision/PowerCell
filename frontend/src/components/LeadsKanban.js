@@ -3,7 +3,7 @@
  * Quadro Kanban para gerir leads/visitas de imóveis
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { parseBackendError } from "../utils/errorFormatter";
 import {
@@ -391,6 +391,7 @@ const KanbanColumn = ({ status, leads, onDrop, onEdit, onStatusChange, onDelete,
 const LeadsKanban = () => {
   const navigate = useNavigate();
   const { token, user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [leads, setLeads] = useState({});
   const [clients, setClients] = useState([]);
   const [consultores, setConsultores] = useState([]);
@@ -400,9 +401,23 @@ const LeadsKanban = () => {
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   
-  // Filtros
-  const [filterConsultor, setFilterConsultor] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("all");
+  // Filtros - synced with URL
+  const filterConsultor = searchParams.get("consultor") || "all";
+  const filterStatus = searchParams.get("lead_status") || "all";
+  const setFilterConsultor = (value) => {
+    setSearchParams(prev => {
+      if (value && value !== "all") prev.set("consultor", value);
+      else prev.delete("consultor");
+      return prev;
+    }, { replace: true });
+  };
+  const setFilterStatus = (value) => {
+    setSearchParams(prev => {
+      if (value && value !== "all") prev.set("lead_status", value);
+      else prev.delete("lead_status");
+      return prev;
+    }, { replace: true });
+  };
   
   // Clientes Sugeridos
   const [suggestedClientsDialog, setSuggestedClientsDialog] = useState(false);

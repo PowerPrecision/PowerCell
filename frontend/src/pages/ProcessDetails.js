@@ -26,16 +26,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "../components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Separator } from "../components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
@@ -111,6 +101,8 @@ import {
   TrendingUp,
   Link2,
   Lock,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isAfter } from "date-fns";
@@ -175,9 +167,6 @@ const getBankColor = (bankName) => {
   return "bg-gray-200 text-gray-800";
 };
 
-// Status relacionados com bancos - ao mudar para estes status, verificar créditos ativos
-const BANK_RELATED_STATUSES = ["enviado_bruno", "enviado_luis", "enviado_bcp_rui", "fase_bancaria", "entradas_precision"];
-
 const typeLabels = {
   credito: "Crédito",
   imobiliaria: "Imobiliária",
@@ -237,6 +226,8 @@ const ProcessDetails = () => {
   const [personalData, setPersonalData] = useState({});
   const [titular2Data, setTitular2Data] = useState({});  // Estado para 2º titular
   const [financialData, setFinancialData] = useState({});
+  const [showPortalSenha, setShowPortalSenha] = useState(false);
+  const [showSegSocialSenha, setShowSegSocialSenha] = useState(false);
   const [realEstateData, setRealEstateData] = useState({});
   const [creditData, setCreditData] = useState({});
   const [status, setStatus] = useState("");
@@ -271,10 +262,6 @@ const ProcessDetails = () => {
   const [rgpdStatus, setRgpdStatus] = useState(null);
   const [rgpdLoading, setRgpdLoading] = useState(false);
   const [rgpdSending, setRgpdSending] = useState(false);
-  
-  // Estado para aviso de bancos com créditos ativos
-  const [showBankWarning, setShowBankWarning] = useState(false);
-  const [pendingStatusChange, setPendingStatusChange] = useState(null);
   
   // Estado para o modal CPCV
   const [showCPCVModal, setShowCPCVModal] = useState(false);
@@ -562,17 +549,6 @@ const ProcessDetails = () => {
 
     // Debounce para evitar múltiplas gravações
     const timeoutId = setTimeout(() => {
-      // Verificar se está a mudar para um status relacionado com bancos
-      if (BANK_RELATED_STATUSES.includes(status)) {
-        const activeBanks = getActiveBanks();
-        if (activeBanks.length > 0) {
-          // Mostrar aviso com os bancos onde o cliente tem créditos ativos
-          setPendingStatusChange({ status, activeBanks });
-          setShowBankWarning(true);
-          return;
-        }
-      }
-
       // Guardar apenas o status
       const saveStatusOnly = async () => {
         try {
@@ -749,14 +725,6 @@ const ProcessDetails = () => {
     return cleaned;
   };
 
-  // Função para obter bancos com créditos ativos do processo
-  const getActiveBanks = () => {
-    if (financialData?.bancos_creditos && Array.isArray(financialData.bancos_creditos)) {
-      return financialData.bancos_creditos.filter(banco => banco && banco.trim() !== "");
-    }
-    return [];
-  };
-
   // Função para executar o save após confirmação
   const executeSave = async (statusToSave) => {
     setSaving(true);
@@ -908,34 +876,7 @@ const ProcessDetails = () => {
       }
     }
     
-    // Verificar se está a mudar para um status relacionado com bancos
-    if (user.role !== "cliente" && status !== process.status && BANK_RELATED_STATUSES.includes(status)) {
-      const activeBanks = getActiveBanks();
-      if (activeBanks.length > 0) {
-        // Mostrar aviso com os bancos onde o cliente tem créditos ativos
-        setPendingStatusChange({ status, activeBanks });
-        setShowBankWarning(true);
-        return;
-      }
-    }
-
-    // Se não há créditos ativos ou não é status de banco, salvar diretamente
     await executeSave(status);
-  };
-
-  // Confirmar mudança de status após aviso de bancos
-  const handleConfirmBankStatusChange = async () => {
-    if (pendingStatusChange) {
-      await executeSave(pendingStatusChange.status);
-    }
-    setShowBankWarning(false);
-    setPendingStatusChange(null);
-  };
-
-  // Cancelar mudança de status
-  const handleCancelBankStatusChange = () => {
-    setShowBankWarning(false);
-    setPendingStatusChange(null);
   };
 
   const handleSendComment = async () => {
@@ -2136,14 +2077,24 @@ const ProcessDetails = () => {
                             </div>
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Portal Finanças - Senha</Label>
-                              <Input
-                                type="password"
-                                value={financialData.portal_financas_senha || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, portal_financas_senha: e.target.value })}
-                                disabled={!canEditFinancial}
-                                className="h-9"
-                                placeholder="Senha de acesso"
-                              />
+                              <div className="relative">
+                                <Input
+                                  type={showPortalSenha ? "text" : "password"}
+                                  value={financialData.portal_financas_senha || ""}
+                                  onChange={(e) => setFinancialData({ ...financialData, portal_financas_senha: e.target.value })}
+                                  disabled={!canEditFinancial}
+                                  className="h-9 pr-9"
+                                  placeholder="Senha de acesso"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowPortalSenha(!showPortalSenha)}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  tabIndex={-1}
+                                >
+                                  {showPortalSenha ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
                             </div>
                             {/* Segurança Social Direta */}
                             <div className="space-y-1">
@@ -2158,14 +2109,24 @@ const ProcessDetails = () => {
                             </div>
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Seg. Social - Senha</Label>
-                              <Input
-                                type="password"
-                                value={financialData.seg_social_senha || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, seg_social_senha: e.target.value })}
-                                disabled={!canEditFinancial}
-                                className="h-9"
-                                placeholder="Senha de acesso"
-                              />
+                              <div className="relative">
+                                <Input
+                                  type={showSegSocialSenha ? "text" : "password"}
+                                  value={financialData.seg_social_senha || ""}
+                                  onChange={(e) => setFinancialData({ ...financialData, seg_social_senha: e.target.value })}
+                                  disabled={!canEditFinancial}
+                                  className="h-9 pr-9"
+                                  placeholder="Senha de acesso"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowSegSocialSenha(!showSegSocialSenha)}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  tabIndex={-1}
+                                >
+                                  {showSegSocialSenha ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </CardContent>
@@ -3233,41 +3194,6 @@ const ProcessDetails = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* AlertDialog para aviso de bancos com créditos ativos */}
-      <AlertDialog open={showBankWarning} onOpenChange={setShowBankWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertCircle className="h-5 w-5" />
-              Aviso: Créditos Ativos
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-3">
-                <p>
-                  O cliente <strong>{process?.client_name}</strong> tem créditos ativos nos seguintes bancos:
-                </p>
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <div className="flex flex-wrap gap-2">
-                    {pendingStatusChange?.activeBanks?.map((bank, index) => (
-                      <Badge key={index} className={getBankColor(bank)}>{bank}</Badge>
-                    ))}
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Tem a certeza que deseja alterar o status para &quot;{workflowStatuses.find(s => s.name === pendingStatusChange?.status)?.label || pendingStatusChange?.status}&quot;?
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleCancelBankStatusChange}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmBankStatusChange} className="bg-amber-600 hover:bg-amber-700">
-              Confirmar Alteração
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Modal CPCV - Contrato Promessa Compra e Venda */}
       <CPCVModal

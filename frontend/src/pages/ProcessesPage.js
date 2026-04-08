@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -8,16 +9,25 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { 
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 
 const ProcessesPage = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
+  
+  // Sync filters with URL
+  const searchTerm = searchParams.get("search") || "";
+  const setSearchTerm = (value) => {
+    setSearchParams(prev => {
+      if (value) prev.set("search", value);
+      else prev.delete("search");
+      return prev;
+    }, { replace: true });
+  };
 
   useEffect(() => {
     fetchProcesses();

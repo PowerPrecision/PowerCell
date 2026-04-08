@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -99,16 +99,39 @@ const getContrastColor = (bgColor) => {
 export default function ClientsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState([]);
   const [filteredClients, setFilteredClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sortField, setSortField] = useState("created_at");
-  const [sortOrder, setSortOrder] = useState("desc");
-  const [statusFilter, setStatusFilter] = useState("active"); // "all", "active", "inactive" - default: mostrar apenas ativos
-  const [phaseFilter, setPhaseFilter] = useState("all"); // Filtro por fase
-  const [assignmentFilter, setAssignmentFilter] = useState("all"); // Filtro por atribuição
-  const [indexacaoFilter, setIndexacaoFilter] = useState("all"); // Filtro por indexação: "all", "assigned", "unassigned"
+  
+  // Sync filters with URL search params
+  const searchTerm = searchParams.get("search") || "";
+  const sortField = searchParams.get("sort") || "created_at";
+  const sortOrder = searchParams.get("order") || "desc";
+  const statusFilter = searchParams.get("status") || "active";
+  const phaseFilter = searchParams.get("phase") || "all";
+  const assignmentFilter = searchParams.get("assignment") || "all";
+  const indexacaoFilter = searchParams.get("indexacao") || "all";
+  
+  const updateParam = (key, value) => {
+    setSearchParams(prev => {
+      if (value && value !== "all" && value !== "active" && value !== "created_at_desc") {
+        prev.set(key, value);
+      } else {
+        prev.delete(key);
+      }
+      return prev;
+    }, { replace: true });
+  };
+  
+  const setSearchTerm = (v) => updateParam("search", v);
+  const setStatusFilter = (v) => updateParam("status", v);
+  const setPhaseFilter = (v) => updateParam("phase", v);
+  const setAssignmentFilter = (v) => updateParam("assignment", v);
+  const setIndexacaoFilter = (v) => updateParam("indexacao", v);
+  const setSortField = (v) => updateParam("sort", v);
+  const setSortOrder = (v) => updateParam("order", v);
+  
   const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
