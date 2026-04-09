@@ -6,7 +6,9 @@
  * - Seleção de destinatários (BCC)
  * - Validação contra contas ativas e simulações do cliente
  * - Preview do email com template pré-preenchido
- * - Admin/CEO podem editar o texto do email
+ * - Rich Text Editor (WYSIWYG) para edição do HTML pelo Admin/CEO
+ * 
+ * ATUALIZADO: Integração com RichTextEditor para edição visual de HTML
  */
 import React, { useState, useEffect } from "react";
 import {
@@ -21,10 +23,10 @@ import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Textarea } from "./ui/textarea";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
   AlertCircle,
   CheckCircle,
@@ -36,8 +38,11 @@ import {
   AlertTriangle,
   Building2,
   Eye,
+  Edit3,
+  Code,
 } from "lucide-react";
 import { toast } from "sonner";
+import RichTextEditor, { RichTextViewer } from "./ui/RichTextEditor";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -57,11 +62,16 @@ const SendDocumentationModal = ({
   const [recipients, setRecipients] = useState([]);
   const [selectedRecipients, setSelectedRecipients] = useState([]);
   const [emailTemplate, setEmailTemplate] = useState("");
-  const [customMessage, setCustomMessage] = useState("");
   const [ccEmails, setCcEmails] = useState("");
   const [config, setConfig] = useState(null);
   const [warnings, setWarnings] = useState([]);
   const [selectedToEmails, setSelectedToEmails] = useState([]);
+  
+  // NOVO: Estado para o HTML do email (preview e edição)
+  const [emailHtml, setEmailHtml] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("preview");
 
   // Carregar configuração e documentos
   useEffect(() => {
@@ -69,6 +79,13 @@ const SendDocumentationModal = ({
       loadData();
     }
   }, [open, processId]);
+
+  // Carregar preview do HTML quando os documentos selecionados mudam
+  useEffect(() => {
+    if (open && processId && selectedDocs.length > 0 && canEditTemplate) {
+      loadPreview();
+    }
+  }, [open, processId, selectedDocs]);
 
   const loadData = async () => {
     setLoading(true);
@@ -101,6 +118,28 @@ const SendDocumentationModal = ({
       toast.error("Erro ao carregar dados");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // NOVO: Carregar preview do HTML do backend
+  const loadPreview = async () => {
+    setPreviewLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/emails/preview-documentation/${processId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setEmailHtml(data.html);
+          setEmailSubject(data.subject);
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao carregar preview:", error);
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -204,23 +243,29 @@ const SendDocumentationModal = ({
 
     setSending(true);
     try {
+      const requestBody = {
+        document_ids: selectedDocs,
+        s3_paths: selectedDocs.map(id => {
+          const doc = documents.find(d => d.id === id);
+          return doc?.s3_path;
+        }).filter(Boolean),
+        to_emails: selectedToEmails,
+        bcc_recipients: selectedRecipients,
+        cc_emails: ccEmails ? ccEmails.split(",").map(e => e.trim()) : [],
+      };
+
+      // NOVO: Enviar HTML customizado do editor se for admin/CEO
+      if (canEditTemplate && emailHtml) {
+        requestBody.custom_html_body = emailHtml;
+      }
+
       const response = await fetch(`${API_URL}/api/emails/send-documentation/${processId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          document_ids: selectedDocs,
-          s3_paths: selectedDocs.map(id => {
-            const doc = documents.find(d => d.id === id);
-            return doc?.s3_path;
-          }).filter(Boolean),
-          to_emails: selectedToEmails,
-          bcc_recipients: selectedRecipients,
-          cc_emails: ccEmails ? ccEmails.split(",").map(e => e.trim()) : [],
-          custom_message: user?.role?.match(/admin|ceo/i) ? customMessage : undefined,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
@@ -236,7 +281,8 @@ const SendDocumentationModal = ({
         setSelectedDocs([]);
         setSelectedRecipients([]);
         setSelectedToEmails(config?.default_to_emails || []);
-        setCustomMessage("");
+        setEmailHtml("");
+        setEmailSubject("");
         setCcEmails("");
       } else {
         if (response.status === 404) {
@@ -251,29 +297,6 @@ const SendDocumentationModal = ({
     } finally {
       setSending(false);
     }
-  };
-
-  // Preview do email
-  const previewEmail = () => {
-    const clientName = process?.client_name || "N/A";
-    const clientNif = process?.personal_data?.nif || process?.client_nif || "N/A";
-    const processNumber = process?.process_number || "N/A";
-    const docsList = documents
-      .filter(d => selectedDocs.includes(d.id))
-      .map(d => `- ${d.original_name || d.filename || "Documento"}`)
-      .join("\n");
-
-    let body = customMessage || emailTemplate || "Template não configurado";
-    
-    body = body
-      .replace(/{client_name}/g, clientName)
-      .replace(/{client_nif}/g, clientNif)
-      .replace(/{process_number}/g, processNumber)
-      .replace(/{documents_list}/g, docsList)
-      .replace(/{sender_name}/g, user?.name || "")
-      .replace(/{sender_email}/g, user?.email || "");
-
-    return body;
   };
 
   // Verificar permissões
@@ -305,7 +328,7 @@ const SendDocumentationModal = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh]">
+      <DialogContent className="max-w-5xl max-h-[90vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5 text-primary" />
@@ -326,7 +349,7 @@ const SendDocumentationModal = ({
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Coluna Esquerda: Documentos e Destinatários */}
             <div className="space-y-4">
               {/* Documentos */}
@@ -340,7 +363,7 @@ const SendDocumentationModal = ({
                     {selectedDocs.length === documents.length ? "Desmarcar todos" : "Selecionar todos"}
                   </Button>
                 </div>
-                <ScrollArea className="h-48">
+                <ScrollArea className="h-40">
                   <div className="space-y-1">
                     {documents.map((doc) => (
                       <label
@@ -377,7 +400,7 @@ const SendDocumentationModal = ({
                   <Building2 className="h-4 w-4" />
                   Destinatários (BCC) - {selectedRecipients.length} seleccionado(s)
                 </Label>
-                <ScrollArea className="h-48">
+                <ScrollArea className="h-40">
                   <div className="space-y-1">
                     {recipients.map((recipient) => {
                       const isBlocked = isRecipientBlocked(recipient);
@@ -418,11 +441,8 @@ const SendDocumentationModal = ({
                   </div>
                 </ScrollArea>
               </div>
-            </div>
 
-            {/* Coluna Direita: Email */}
-            <div className="space-y-4">
-              {/* TO — Múltiplos emails com checkbox */}
+              {/* TO Emails */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs text-muted-foreground">
@@ -468,50 +488,96 @@ const SendDocumentationModal = ({
                   onChange={(e) => setCcEmails(e.target.value)}
                 />
               </div>
+            </div>
 
-              {/* Mensagem */}
-              <div className="space-y-1">
+            {/* Coluna Direita: Editor de Email */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Tabs: Preview vs Editor */}
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">
-                    Mensagem do Email
+                  <Label className="text-sm font-medium">
+                    Corpo do Email
                     {canEditTemplate && (
                       <Badge variant="outline" className="ml-2 text-xs">
                         Editável (Admin/CEO)
                       </Badge>
                     )}
                   </Label>
+                  <TabsList>
+                    <TabsTrigger value="preview" className="text-xs">
+                      <Eye className="h-3.5 w-3.5 mr-1" />
+                      Preview
+                    </TabsTrigger>
+                    {canEditTemplate && (
+                      <TabsTrigger value="edit" className="text-xs">
+                        <Edit3 className="h-3.5 w-3.5 mr-1" />
+                        Editar HTML
+                      </TabsTrigger>
+                    )}
+                    {canEditTemplate && (
+                      <TabsTrigger value="code" className="text-xs">
+                        <Code className="h-3.5 w-3.5 mr-1" />
+                        Código
+                      </TabsTrigger>
+                    )}
+                  </TabsList>
                 </div>
-                {canEditTemplate ? (
-                  <Textarea
-                    placeholder="Personalize a mensagem do email..."
-                    value={customMessage || emailTemplate}
-                    onChange={(e) => setCustomMessage(e.target.value)}
-                    className="min-h-[200px] font-mono text-sm"
-                  />
-                ) : (
-                  <ScrollArea className="h-48 border rounded-lg p-2 bg-muted">
-                    <pre className="text-xs whitespace-pre-wrap font-sans">
-                      {previewEmail()}
-                    </pre>
-                  </ScrollArea>
+
+                <TabsContent value="preview" className="mt-2">
+                  {previewLoading ? (
+                    <div className="flex items-center justify-center py-12 border rounded-lg">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : (
+                    <div className="border rounded-lg overflow-hidden">
+                      <RichTextViewer html={emailHtml} className="max-h-[400px] overflow-y-auto" />
+                    </div>
+                  )}
+                </TabsContent>
+
+                {canEditTemplate && (
+                  <TabsContent value="edit" className="mt-2">
+                    <RichTextEditor
+                      value={emailHtml}
+                      onChange={setEmailHtml}
+                      placeholder="Edite o conteúdo do email..."
+                      minHeight={300}
+                      className="max-h-[400px] overflow-y-auto"
+                    />
+                  </TabsContent>
                 )}
-                <p className="text-xs text-muted-foreground">
-                  Variáveis: {"{client_name}"}, {"{client_nif}"}, {"{process_number}"}, {"{documents_list}"}, {"{sender_name}"}, {"{sender_email}"}
+
+                {canEditTemplate && (
+                  <TabsContent value="code" className="mt-2">
+                    <div className="relative">
+                      <pre className="bg-muted p-3 rounded-lg text-xs overflow-auto max-h-[400px] font-mono whitespace-pre-wrap border">
+                        {emailHtml || "Nenhum HTML gerado"}
+                      </pre>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="absolute top-2 right-2"
+                        onClick={() => {
+                          navigator.clipboard.writeText(emailHtml);
+                          toast.success("HTML copiado!");
+                        }}
+                      >
+                        Copiar HTML
+                      </Button>
+                    </div>
+                  </TabsContent>
+                )}
+              </Tabs>
+
+              {/* Info sobre o email */}
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>
+                  <strong>Assunto:</strong> {emailSubject || `Documentação - ${process?.client_name || "N/A"} (Processo #${process?.process_number || "N/A"})`}
+                </p>
+                <p>
+                  <strong>Nota:</strong> O editor WYSIWYG permite adicionar notas, apagar texto, formatar tabelas, negritos, etc. O HTML é enviado diretamente no corpo do email.
                 </p>
               </div>
-
-              {/* Preview */}
-              <details className="border rounded-lg">
-                <summary className="p-2 cursor-pointer text-sm font-medium flex items-center gap-2">
-                  <Eye className="h-4 w-4" />
-                  Preview do Email
-                </summary>
-                <ScrollArea className="h-40 p-2 bg-muted rounded-b-lg">
-                  <pre className="text-xs whitespace-pre-wrap font-sans">
-                    {previewEmail()}
-                  </pre>
-                </ScrollArea>
-              </details>
             </div>
           </div>
         )}
