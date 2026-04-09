@@ -31,11 +31,14 @@ async def get_stats(user: dict = Depends(get_current_user)):
     
     # Build query based on role
     process_query = {}
-    
+
     if role == UserRole.CLIENTE:
         process_query = {"client_id": user_id}
     elif role == UserRole.CONSULTOR:
         process_query = {"assigned_consultor_id": user_id}
+    elif role == UserRole.INDEXACAO:
+        # INDEXACAO vê apenas os processos atribuídos a ele
+        process_query = {"assigned_indexacao_id": user_id}
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
         process_query = {"assigned_mediador_id": user_id}
     # Admin, CEO, Administrativo e Diretor see all (no filter)
