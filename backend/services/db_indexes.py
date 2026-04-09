@@ -6,6 +6,11 @@ Script para criar índices nas colecções MongoDB mais consultadas.
 Melhora significativamente o tempo de resposta para queries frequentes.
 
 Executar manualmente ou na inicialização da aplicação.
+
+NOTA RGPD: Campos encriptados (NIF, telefone, email) são armazenados
+encriptados com Fernet. Para pesquisa, usamos BLIND INDEXES (hashes
+determinísticos SHA-256). Os índices devem apontar para os campos
+de hash (_hash) e NÃO para os campos encriptados.
 ====================================================================
 """
 import logging
@@ -19,6 +24,16 @@ DEPRECATED_INDEXES = {
     "properties": [
         "idx_internal_ref",  # Nome antigo incorreto - campo era internal_ref
         "idx_location",  # Índice antigo com campos incorretos (distrito, concelho) - deve ser (address.district, address.municipality)
+    ],
+    # Índices em campos encriptados são INÚTEIS porque os dados estão encriptados
+    # Deve usar-se os blind indexes (_hash) em vez destes
+    "processes": [
+        "idx_nif",  # Aponta para personal_data.nif que está encriptado - usar nif_hash
+        # NOTA: idx_text_search inclui personal_data.nif que é inútil, mas texto indexes são complexos de alterar
+    ],
+    "clients": [
+        # Índices em campos encriptados que possam ter sido criados anteriormente
+        "idx_nif_plain",  # Se existir algum índice em dados_pessoais.nif plain text
     ]
 }
 
@@ -388,6 +403,82 @@ async def create_indexes(db) -> dict:
                 results["errors"].append(f"document_annotations.{idx['name']}: {str(e)}")
                 logger.error(f"Erro ao criar índice document_annotations.{idx['name']}: {e}")
     
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'clients' - BLIND INDEXES (RGPD)
+    # ====================================================================
+    # IMPORTANTE: Os campos NIF, telefone e email são encriptados com Fernet.
+    # Para pesquisar, usamos BLIND INDEXES (hashes SHA-256 determinísticos).
+    # Os índices DEVEM apontar para os campos _hash, NUNCA para os encriptados.
+    # ====================================================================
+    client_indexes = [
+        # BLIND INDEXES - Pesquisa de dados encriptados
+        # NIF hash - permite encontrar clientes por NIF sem expor o valor real
+        {"keys": [("dados_pessoais.nif_hash", 1)], "name": "idx_client_nif_hash", "sparse": True},
+        
+        # Email hash - permite encontrar clientes por email
+        {"keys": [("contacto.email_hash", 1)], "name": "idx_client_email_hash", "sparse": True},
+        
+        # Telefone hash - permite encontrar clientes por telefone
+        {"keys": [("contacto.telefone_hash", 1)], "name": "idx_client_telefone_hash", "sparse": True},
+        
+        # Titular2 NIF hash - pesquisa do segundo titular
+        {"keys": [("titular2_data.nif_hash", 1)], "name": "idx_client_titular2_nif_hash", "sparse": True},
+        
+        # Índices normais (não encriptados)
+        {"keys": [("nome", 1)], "name": "idx_client_nome"},
+        {"keys": [("id", 1)], "name": "idx_client_id", "unique": True},
+        {"keys": [("assigned_to", 1)], "name": "idx_client_assigned_to", "sparse": True},
+        {"keys": [("created_at", -1)], "name": "idx_client_created_desc"},
+        {"keys": [("registration_completed", 1)], "name": "idx_client_registration"},
+        
+        # Índice composto para listagem de registos pendentes
+        {"keys": [("registration_completed", 1), ("assigned_to", 1)], "name": "idx_client_pending_assignment"},
+    ]
+    
+    for idx in client_indexes:
+        try:
+            await db.clients.create_index(
+                idx["keys"],
+                name=idx["name"],
+                unique=idx.get("unique", False),
+                sparse=idx.get("sparse", False),
+                background=True
+            )
+            results["created"].append(f"clients.{idx['name']}")
+            logger.info(f"Índice criado: clients.{idx['name']}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["skipped"].append(f"clients.{idx['name']}")
+            else:
+                results["errors"].append(f"clients.{idx['name']}: {str(e)}")
+                logger.error(f"Erro ao criar índice clients.{idx['name']}: {e}")
+    
+    # ====================================================================
+    # ÍNDICES ADICIONAIS PARA BLIND INDEXES EM 'processes'
+    # ====================================================================
+    # Os processos também têm dados encriptados com blind indexes
+    process_blind_indexes = [
+        # NIF hash no processo - pesquisa por NIF
+        {"keys": [("personal_data.nif_hash", 1)], "name": "idx_process_nif_hash", "sparse": True},
+    ]
+    
+    for idx in process_blind_indexes:
+        try:
+            await db.processes.create_index(
+                idx["keys"],
+                name=idx["name"],
+                sparse=idx.get("sparse", False),
+                background=True
+            )
+            results["created"].append(f"processes.{idx['name']}")
+            logger.info(f"Índice criado: processes.{idx['name']}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["skipped"].append(f"processes.{idx['name']}")
+            else:
+                results["errors"].append(f"processes.{idx['name']}: {str(e)}")
+                logger.error(f"Erro ao criar índice processes.{idx['name']}: {e}")
+    
     # Resumo
     logger.info(
         f"Criação de índices concluída: "
@@ -405,7 +496,7 @@ async def get_index_stats(db) -> dict:
     """
     stats = {}
     
-    collections = ["processes", "users", "system_error_logs", "properties", "tasks", "chat_messages", "chat_groups"]
+    collections = ["processes", "clients", "users", "system_error_logs", "properties", "tasks", "chat_messages", "chat_groups"]
     
     for collection_name in collections:
         try:
