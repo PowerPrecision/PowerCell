@@ -268,7 +268,8 @@ export const isAuthenticated = () => {
 // ====================================================================
 
 // Processes
-export const getProcesses = () => api.get("/processes");
+export const getProcesses = (params = {}) => api.get("/processes", { params });
+export const getProcessesPaginated = (params = {}) => api.get("/processes/paginated", { params });
 export const getProcess = (id) => api.get(`/processes/${id}`);
 export const createProcess = (data) => api.post("/processes", data);
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
@@ -282,7 +283,7 @@ export const moveProcessKanban = (processId, newStatus) =>
   api.put(`/processes/kanban/${processId}/move`, null, {
     params: { new_status: newStatus }
   });
-export const getMyClients = () => api.get("/processes/my-clients");
+export const getMyClients = (params = {}) => api.get("/processes/my-clients", { params });
 
 // Deadlines
 export const getDeadlines = (processId) => 

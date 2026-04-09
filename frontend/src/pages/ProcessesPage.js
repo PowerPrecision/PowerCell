@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -7,7 +7,8 @@ import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { 
-  Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter
+  Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
@@ -19,25 +20,55 @@ const ProcessesPage = () => {
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // Estado de paginação
+  const [pagination, setPagination] = useState({
+    page: parseInt(searchParams.get("page") || "1"),
+    size: parseInt(searchParams.get("size") || "20"),
+    total: 0,
+    pages: 0
+  });
+  
   // Sync filters with URL
   const searchTerm = searchParams.get("search") || "";
   const setSearchTerm = (value) => {
     setSearchParams(prev => {
       if (value) prev.set("search", value);
       else prev.delete("search");
+      prev.set("page", "1"); // Reset para página 1 ao pesquisar
       return prev;
     }, { replace: true });
   };
 
   useEffect(() => {
     fetchProcesses();
-  }, []);
+  }, [pagination.page, pagination.size]);
 
   const fetchProcesses = async () => {
     try {
       setLoading(true);
-      const response = await getProcesses();
-      setProcesses(response.data);
+      const response = await getProcesses({
+        page: pagination.page,
+        size: pagination.size,
+        search: searchTerm || undefined
+      });
+      
+      // Suporta novo formato paginado
+      if (response.data.items) {
+        setProcesses(response.data.items);
+        setPagination(prev => ({
+          ...prev,
+          total: response.data.total,
+          pages: response.data.pages
+        }));
+      } else {
+        // Compatibilidade com formato antigo (array)
+        setProcesses(response.data);
+        setPagination(prev => ({
+          ...prev,
+          total: response.data.length,
+          pages: 1
+        }));
+      }
     } catch (error) {
       toast.error("Erro ao carregar processos");
     } finally {
@@ -45,12 +76,35 @@ const ProcessesPage = () => {
     }
   };
 
-  const filteredProcesses = processes.filter(p => 
-    p.client_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.client_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.client_phone?.includes(searchTerm) ||
-    p.property_location?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Debounced search
+  const [searchInput, setSearchInput] = useState(searchTerm);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchInput !== searchTerm) {
+        setSearchTerm(searchInput);
+        fetchProcesses();
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  // Funções de paginação
+  const goToPage = useCallback((page) => {
+    setPagination(prev => ({ ...prev, page }));
+    setSearchParams(prev => {
+      prev.set("page", page.toString());
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const changePageSize = useCallback((size) => {
+    setPagination(prev => ({ ...prev, page: 1, size }));
+    setSearchParams(prev => {
+      prev.set("page", "1");
+      prev.set("size", size.toString());
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const getPriorityBadge = (priority) => {
     const colors = {
@@ -64,6 +118,63 @@ const ProcessesPage = () => {
       low: "Baixa",
     };
     return { color: colors[priority] || colors.medium, label: labels[priority] || priority };
+  };
+
+  // Componente de paginação
+  const PaginationControls = () => {
+    const { page, pages, total, size } = pagination;
+    
+    if (pages <= 1) return null;
+    
+    const startItem = (page - 1) * size + 1;
+    const endItem = Math.min(page * size, total);
+    
+    return (
+      <div className="flex items-center justify-between px-4 py-3 border-t">
+        <div className="text-sm text-muted-foreground">
+          Mostrando {startItem} a {endItem} de {total} processos
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => goToPage(1)}
+            disabled={page === 1}
+          >
+            <ChevronsLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => goToPage(page - 1)}
+            disabled={page === 1}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          
+          <span className="text-sm mx-2">
+            Página {page} de {pages}
+          </span>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => goToPage(page + 1)}
+            disabled={page === pages}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => goToPage(pages)}
+            disabled={page === pages}
+          >
+            <ChevronsRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   if (loading) {
@@ -105,7 +216,7 @@ const ProcessesPage = () => {
                   Lista de Processos
                 </CardTitle>
                 <CardDescription>
-                  Total de {processes.length} processos no sistema
+                  Total de {pagination.total} processos no sistema
                 </CardDescription>
               </div>
             </div>
@@ -114,10 +225,10 @@ const ProcessesPage = () => {
             <div className="relative mb-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input 
-                placeholder="Pesquisar por nome, email, telefone ou localização..." 
+                placeholder="Pesquisar por nome ou email..." 
                 className="pl-10" 
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
+                value={searchInput} 
+                onChange={(e) => setSearchInput(e.target.value)} 
               />
             </div>
 
@@ -135,14 +246,14 @@ const ProcessesPage = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProcesses.length === 0 ? (
+                  {processes.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                         {searchTerm ? `Nenhum processo encontrado com "${searchTerm}"` : "Nenhum processo encontrado"}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredProcesses.map((process) => {
+                    processes.map((process) => {
                       const priorityBadge = getPriorityBadge(process.priority);
                       return (
                         <TableRow 
@@ -232,6 +343,9 @@ const ProcessesPage = () => {
                 </TableBody>
               </Table>
             </div>
+            
+            {/* Controlos de Paginação */}
+            <PaginationControls />
           </CardContent>
         </Card>
       </div>
