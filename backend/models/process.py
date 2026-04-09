@@ -465,6 +465,9 @@ class ProcessResponse(BaseModel):
     mediador_name: Optional[str] = None  # Compatibilidade
     assigned_indexacao_id: Optional[str] = None  # Utilizador responsável pela indexação de documentos
     indexacao_name: Optional[str] = None  # Nome do utilizador de indexação
+    # Parceiro (utilizador fantasma para tracking)
+    assigned_parceiro_id: Optional[str] = None  # ID do parceiro atribuído
+    parceiro_name: Optional[str] = None  # Nome do parceiro
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     notes: Optional[str] = None

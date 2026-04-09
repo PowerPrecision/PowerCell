@@ -274,6 +274,16 @@ const ProcessStickyHeader = ({
                     </span>
                   </div>
                 )}
+                
+                {/* Parceiro (Utilizador Fantasma) */}
+                {process?.parceiro_name && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500">Parceiro:</span>
+                    <span className="font-medium text-violet-600 dark:text-violet-400">
+                      {process.parceiro_name}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}
