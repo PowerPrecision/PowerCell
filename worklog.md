@@ -1,4 +1,26 @@
 ---
+Task ID: 8
+Agent: Main Agent
+Task: Corrigir bug na eliminação de destinatários BCC nas configurações do sistema
+
+Work Log:
+- Analisado DocumentRecipientsManager.js - função handleDeleteRecipient apenas removia localmente
+- Identificado que as alterações não eram guardadas automaticamente após eliminar
+- Utilizador precisava de clicar em "Guardar Configuração" manualmente
+- Corrigido handleDeleteRecipient para guardar automaticamente no servidor
+- Corrigido handleSaveRecipient para guardar automaticamente após adicionar/editar
+- Corrigido toggleActive para guardar automaticamente após activar/desactivar
+- Adicionadas mensagens de feedback adequadas (sucesso/erro)
+- Adicionada reversão local em caso de erro no servidor
+
+Stage Summary:
+- Commit bb273b5: Corrigir eliminação de destinatários BCC - guardar automaticamente após cada operação
+- Ficheiro: frontend/src/components/DocumentRecipientsManager.js
+- 106 linhas adicionadas, 11 removidas
+- Agora todas as operações (adicionar, editar, eliminar, toggle) guardam automaticamente
+- Melhoria significativa na UX - utilizador já não precisa de clicar em "Guardar"
+
+---
 Task ID: 7
 Agent: Main Agent
 Task: Corrigir erro 404 em POST /api/emails/send-documentation/{process_id} + bugs relacionados
