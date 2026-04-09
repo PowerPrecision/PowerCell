@@ -70,7 +70,6 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
     client_name: "",
     client_email: "",
     client_phone: "",
-    client_nif: "",
     process_type: "credito_habitacao"
   });
   
@@ -91,28 +90,17 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
       return;
     }
     
-    // Validação do NIF (opcional, mas se preenchido deve ter 9 dígitos)
-    const nifClean = newClient.client_nif ? newClient.client_nif.replace(/[^\d]/g, '') : '';
-    if (newClient.client_nif && nifClean.length !== 9) {
-      toast.error("NIF deve ter exatamente 9 dígitos");
-      return;
-    }
-    
     setCreating(true);
     try {
-      // Construir payload apenas com campos preenchidos
-      const personalData = {
-        nome_completo: newClient.client_name
-      };
-      if (newClient.client_email?.trim()) personalData.email = newClient.client_email.trim();
-      if (newClient.client_phone?.trim()) personalData.telefone = newClient.client_phone.trim();
-      if (nifClean) personalData.nif = nifClean;
-      
       await createClientProcess({
         client_name: newClient.client_name,
-        client_email: newClient.client_email || null,
+        client_email: newClient.client_email,
         process_type: newClient.process_type,
-        personal_data: personalData
+        personal_data: {
+          nome_completo: newClient.client_name,
+          email: newClient.client_email,
+          telefone: newClient.client_phone
+        }
       });
       
       toast.success(`Cliente "${newClient.client_name}" criado com sucesso!`);
@@ -121,7 +109,6 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
         client_name: "",
         client_email: "",
         client_phone: "",
-        client_nif: "",
         process_type: "credito_habitacao"
       });
       fetchKanbanData();
@@ -465,17 +452,6 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          {/* Botão de Criação Rápida de Cliente */}
-          {canCreateClient && (
-            <Button 
-              onClick={() => setShowCreateDialog(true)}
-              className="bg-teal-600 hover:bg-teal-700"
-              data-testid="btn-create-client"
-            >
-              <UserPlus className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Novo Cliente</span>
-            </Button>
-          )}
           {/* Toggle View Mode quando há pesquisa */}
           {searchTerm.length >= 2 && (
             <div className="flex gap-1 border rounded-md p-1">
@@ -1036,24 +1012,18 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
           
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="client_name">
-                Nome do Cliente <span className="text-red-500">*</span>
-              </Label>
+              <Label htmlFor="client_name">Nome do Cliente *</Label>
               <Input
                 id="client_name"
                 placeholder="Nome completo do cliente"
                 value={newClient.client_name}
                 onChange={(e) => setNewClient({ ...newClient, client_name: e.target.value })}
-                required
-                autoFocus
               />
             </div>
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="client_email" className="text-muted-foreground">
-                  Email <span className="text-xs font-normal">(Opcional)</span>
-                </Label>
+                <Label htmlFor="client_email">Email</Label>
                 <Input
                   id="client_email"
                   type="email"
@@ -1063,9 +1033,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="client_phone" className="text-muted-foreground">
-                  Telefone <span className="text-xs font-normal">(Opcional)</span>
-                </Label>
+                <Label htmlFor="client_phone">Telefone</Label>
                 <Input
                   id="client_phone"
                   placeholder="+351 000 000 000"
@@ -1073,26 +1041,6 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
                   onChange={(e) => setNewClient({ ...newClient, client_phone: e.target.value })}
                 />
               </div>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="client_nif" className="text-muted-foreground">
-                NIF <span className="text-xs font-normal">(Opcional)</span>
-              </Label>
-              <Input
-                id="client_nif"
-                placeholder="123456789"
-                value={newClient.client_nif}
-                onChange={(e) => {
-                  // Permitir apenas dígitos
-                  const value = e.target.value.replace(/[^\d]/g, '');
-                  setNewClient({ ...newClient, client_nif: value });
-                }}
-                maxLength={9}
-              />
-              <p className="text-xs text-muted-foreground">
-                Se preenchido, deve conter exatamente 9 dígitos
-              </p>
             </div>
             
             <div className="space-y-2">
