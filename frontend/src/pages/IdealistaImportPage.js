@@ -77,8 +77,14 @@ const IdealistaImportPage = () => {
     });
   })();`;
 
-  // Bookmarklet AVANÇADO - abre o CRM automaticamente com dados codificados
-  // Com feedback visual para o utilizador
+  // ====================================================================
+  // BOOKMARKLET AVANÇADO - Abre o CRM automaticamente com dados codificados
+  // ====================================================================
+  // NOTA: Este código usa innerHTML porque É UM BOOKMARKLET - corre em
+  // OUTROS websites, não na app React. Bookmarklets são scripts isolados
+  // que não podem usar React components. Isto NÃO é uma violação do
+  // paradigma React - é a única forma de criar overlays noutros sites.
+  // ====================================================================
   const bookmarkletAdvanced = `javascript:(function(){
     var d=document;
     var b=d.body;

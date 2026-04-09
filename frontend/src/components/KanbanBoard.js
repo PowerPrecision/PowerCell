@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -59,6 +59,9 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
   const [collapsedColumns, setCollapsedColumns] = useState(new Set()); // Colunas colapsadas
+  
+  // Ref para o container de scroll (substitui document.getElementById)
+  const scrollContainerRef = useRef(null);
   
   // O7 - Filtros do Kanban
   const [dateFilter, setDateFilter] = useState("all"); // all, today, week, month
@@ -523,8 +526,9 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
 
   const [viewMode, setViewMode] = useState("kanban"); // kanban ou list
 
-  const scrollContainer = (direction) => {
-    const container = document.getElementById("kanban-scroll-container");
+  // Função de scroll usando ref em vez de document.getElementById (React way)
+  const scrollContainer = useCallback((direction) => {
+    const container = scrollContainerRef.current;
     if (container) {
       const scrollAmount = 350;
       const newPosition = direction === "left" 
@@ -533,7 +537,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
       container.scrollTo({ left: newPosition, behavior: "smooth" });
       setScrollPosition(newPosition);
     }
-  };
+  }, [scrollPosition]);
 
   if (loading) {
     return (
@@ -787,7 +791,7 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
       <div className="relative">
         <ScrollArea className="w-full whitespace-nowrap rounded-md">
           <div
-            id="kanban-scroll-container"
+            ref={scrollContainerRef}
             className="flex gap-4 pb-4 min-h-[70vh]"
             onScroll={(e) => setScrollPosition(e.currentTarget.scrollLeft)}
           >

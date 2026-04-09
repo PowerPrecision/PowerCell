@@ -1,4 +1,73 @@
 ---
+Task ID: 11
+Agent: Main Agent (Frontend Architect)
+Task: Resolver violação CRÍTICA do paradigma declarativo do React (Manipulação Direta da DOM)
+
+Problem Statement:
+Em várias partes do frontend, o código estava a usar manipulação direta da DOM:
+- document.getElementById() para capturar elementos
+- document.querySelector() para busca de campos
+- element.style.display = "none" para esconder elementos
+- element.classList.add/remove() para classes
+- innerHTML para overlays
+
+Isto viola o paradigma declarativo do React, podendo causar:
+- Estados inconsistentes entre Virtual DOM e Real DOM
+- Memory leaks quando referências ficam órfãs
+- Crashes quando a árvore DOM muda externamente
+
+Solution: React Way Refactoring
+
+Work Log:
+- Scan completo ao frontend/src com grep para identificar violações
+- Encontrados 6 ficheiros com violações legítimas + 4 com uso intencional
+
+Ficheiros Refatorados (6):
+1. KanbanBoard.js - document.getElementById → useRef + useCallback
+   - Adicionado scrollContainerRef para container de scroll
+   - Função scrollContainer agora usa ref.current em vez de DOM query
+   
+2. PublicClientForm.js - document.querySelector → useRef + scoped query
+   - Criado fieldRefs e formContainerRef para gestão de refs
+   - Criado registerFieldRef callback e findFieldElement helper
+   - Validação agora usa refs em vez de querySelector global
+   - Adicionado forwardRef ao ValidatedInput
+   
+3. DocumentChecklist.js - document.getElementById → useRef
+   - Adicionado folderInputRef para input de pasta
+   - Botão agora usa ref.current?.click() em vez de DOM query
+   
+4. TempLinkUploadPage.js - document.getElementById → useRef
+   - Adicionado fileInputRef para input de ficheiros
+   - Drop zone agora usa ref.current?.click()
+   
+5. ThemeContext.js - Documentado como CORRETO
+   - classList no document.documentElement é a API do Tailwind para dark mode
+   - Adicionada documentação a explicar que é intencional
+   
+6. ClientPropertyMatch.js - style.display → useState
+   - Adicionado estado imageError ao componente MatchCard
+   - onError agora usa setState em vez de style.display
+   - Renderização condicional em vez de CSS manipulation
+
+Ficheiros Documentados como Intencionais (4):
+- main.jsx - document.getElementById("root") é o mount point do React
+- PDFAnnotationViewer.js - innerHTML/style necessários para PDF.js canvas
+- IdealistaImportPage.js - innerHTML em bookmarklet (corre noutros sites)
+- HtmlImportModal.js - innerHTML em bookmarklet (corre noutros sites)
+
+Custom Hooks Criados (2):
+- useScrollToElement.js - Hook para scroll automático com refs
+- useOnClickOutside.js - Hook para detetar cliques fora com cleanup
+
+Stage Summary:
+- 10 ficheiros modificados + 2 novos hooks
+- Violações de paradigma resolvidas com padrões React corretos
+- Casos legítimos documentados (PDF.js, Tailwind dark mode, bookmarklets)
+- Custom hooks criados para reutilização futura
+- Código agora adere estritamente aos Hooks do React
+
+---
 Task ID: 10
 Agent: Main Agent
 Task: Resolver falha arquitetural CRÍTICA - Unbounded Arrays & I/O Degradation
