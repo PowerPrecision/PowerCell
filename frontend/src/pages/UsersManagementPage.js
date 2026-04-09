@@ -526,8 +526,8 @@ const UsersManagementPage = () => {
                         </TableCell>
                         <TableCell className="font-mono text-sm">{user.onedrive_folder || "-"}</TableCell>
                         <TableCell className="text-right">
-                          {/* Botão Impersonate - só para admins/ceo e não para si próprio */}
-                          {(currentUser?.role === "admin" || currentUser?.role === "ceo") && user.id !== currentUser?.id && user.role !== "admin" && user.role !== "ceo" && (
+                          {/* Botão Impersonate - admin pode ver como qualquer utilizador (exceto outros admins) */}
+                          {currentUser?.role === "admin" && user.id !== currentUser?.id && user.role !== "admin" && (
                             <Button 
                               variant="ghost" 
                               size="icon" 
