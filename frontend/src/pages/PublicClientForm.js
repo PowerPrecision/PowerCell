@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -50,15 +50,16 @@ const RequiredLabel = ({ htmlFor, children }) => (
   </Label>
 );
 
-// Validated Input Component
-const ValidatedInput = ({ 
+// Validated Input Component - com forwardRef para suportar refs
+const ValidatedInput = forwardRef(({ 
   error, 
   required,
   className,
   ...props 
-}) => (
+}, ref) => (
   <div className="space-y-1">
     <Input
+      ref={ref}
       className={cn(
         className,
         error && "border-red-500 focus-visible:ring-red-500 bg-red-50"
@@ -67,7 +68,8 @@ const ValidatedInput = ({
     />
     {error && <FieldError>{error}</FieldError>}
   </div>
-);
+));
+ValidatedInput.displayName = 'ValidatedInput';
 
 // Validated Select Wrapper
 const ValidatedSelect = ({ 
@@ -221,6 +223,30 @@ const PublicClientForm = ({ previewMode = false }) => {
   
   // Estado para erros de validação por campo
   const [fieldErrors, setFieldErrors] = useState({});
+  
+  // Refs para campos do formulário (substitui document.querySelector)
+  const fieldRefs = useRef({});
+  const formContainerRef = useRef(null);
+  
+  // Função para registar refs de campos de forma declarativa
+  const registerFieldRef = useCallback((fieldName) => (element) => {
+    if (element) {
+      fieldRefs.current[fieldName] = element;
+    }
+  }, []);
+  
+  // Função helper para encontrar campo por nome (scoped ao container)
+  const findFieldElement = useCallback((fieldName) => {
+    // Primeiro tenta o ref registado
+    if (fieldRefs.current[fieldName]) {
+      return fieldRefs.current[fieldName];
+    }
+    // Fallback: query scoped ao container do formulário (não ao document global)
+    if (formContainerRef.current) {
+      return formContainerRef.current.querySelector(`[name="${fieldName}"], [data-testid="${fieldName}"], #${fieldName}`);
+    }
+    return null;
+  }, []);
   
   // Auto-save state
   const [lastSaved, setLastSaved] = useState(null);
@@ -2090,10 +2116,11 @@ const PublicClientForm = ({ previewMode = false }) => {
     if (errors.length > 0) {
       // Mostrar toast com resumo dos erros
       toast.error(`Por favor corrija ${errors.length} erro(s) antes de continuar`);
-      // Scroll para o primeiro campo com erro
+      // Scroll para o primeiro campo com erro usando ref ou scoped query (React way)
       const firstErrorField = Object.keys(newFieldErrors)[0];
       if (firstErrorField) {
-        const element = document.querySelector(`[name="${firstErrorField}"], [data-testid="${firstErrorField}"]`);
+        // Usar helper que tenta ref primeiro, depois scoped query
+        const element = findFieldElement(firstErrorField);
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
           element.focus?.();
@@ -2205,7 +2232,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               Preencha os seus dados para iniciar o processo de análise de crédito habitação
             </CardDescription>
           </CardHeader>
-          <CardContent className="pt-6">
+          <CardContent className="pt-6" ref={formContainerRef}>
             {/* Progress Bar com percentagem */}
             <FormProgressBar 
               currentStep={step} 

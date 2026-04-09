@@ -56,6 +56,7 @@ const ScoreBadge = ({ score }) => {
 // Card de match individual
 const MatchCard = ({ match, onViewLead }) => {
   const { lead, score, match_reasons } = match;
+  const [imageError, setImageError] = useState(false);
 
   const formatPrice = (price) => {
     if (!price) return "N/D";
@@ -114,14 +115,14 @@ const MatchCard = ({ match, onViewLead }) => {
             </div>
           </div>
 
-          {/* Foto */}
-          {lead.photo_url && (
+          {/* Foto - com estado declarativo em vez de style.display */}
+          {lead.photo_url && !imageError && (
             <div className="w-20 h-20 rounded overflow-hidden bg-gray-100 flex-shrink-0">
               <img
                 src={lead.photo_url}
                 alt=""
                 className="w-full h-full object-cover"
-                onError={(e) => e.target.style.display = "none"}
+                onError={() => setImageError(true)}
               />
             </div>
           )}

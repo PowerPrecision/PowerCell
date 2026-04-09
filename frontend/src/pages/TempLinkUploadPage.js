@@ -6,7 +6,7 @@
  * Não requer autenticação.
  * ====================================================================
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -39,6 +39,9 @@ const TempLinkUploadPage = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
+  
+  // Ref para o input de ficheiros (substitui document.getElementById)
+  const fileInputRef = useRef(null);
 
   // Verificar link ao carregar
   useEffect(() => {
@@ -289,7 +292,7 @@ const TempLinkUploadPage = () => {
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
               onDrop={handleDrop}
-              onClick={() => document.getElementById("file-input").click()}
+              onClick={() => fileInputRef.current?.click()}
             >
               <FilePlus className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-2">
@@ -299,7 +302,7 @@ const TempLinkUploadPage = () => {
                 PDF, JPG, PNG, TIFF, DOC, DOCX
               </p>
               <input
-                id="file-input"
+                ref={fileInputRef}
                 type="file"
                 multiple
                 accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.doc,.docx"

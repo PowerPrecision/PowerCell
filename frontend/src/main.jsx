@@ -42,6 +42,14 @@ if (SENTRY_DSN) {
   console.log('⚠️ Sentry DSN not configured - error tracking disabled');
 }
 
+// ====================================================================
+// REACT APP MOUNT POINT
+// ====================================================================
+// document.getElementById("root") é a forma CORRETA de montar a app React.
+// Isto NÃO é uma violação do paradigma - é o ponto de entrada onde o React
+// assume o controlo da DOM. O React 18's createRoot API requer uma referência
+// ao elemento DOM onde a app será renderizada.
+// ====================================================================
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <App />
