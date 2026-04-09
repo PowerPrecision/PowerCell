@@ -442,48 +442,39 @@ const DashboardLayout = ({ children, title }) => {
     const userPermissions = user?.permissions || {};
     const userPages = userPermissions?.pages || [];
     const userActions = userPermissions?.actions || [];
-    
+
     if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(userRole)) {
-      // Menu para INDEXACAO - baseado em permissões
+      // Menu para INDEXACAO - simplificado e focado no fluxo de trabalho
       if (userRole === "indexacao") {
         const indexacaoMain = [];
-        
-        // "Meus Clientes" - verificar permissão "my_clients"
-        if (userPages.includes("my_clients")) {
+
+        // "Quadro Geral" (Kanban) - página principal
+        if (userPages.includes("kanban")) {
           indexacaoMain.push({
-            label: "Meus Clientes",
-            icon: Users,
-            href: "/meus-clientes",
+            label: "Quadro Geral",
+            icon: LayoutGrid,
+            href: "/kanban",
           });
         }
-        
-        // "Dashboard"
-        if (userPages.includes("dashboard")) {
-          indexacaoMain.unshift({
-            label: "Dashboard",
-            icon: LayoutDashboard,
-            href: dashboardHref,
+
+        // "Os Meus Processos" - processos atribuídos ao utilizador
+        if (userPages.includes("processes")) {
+          indexacaoMain.push({
+            label: "Os Meus Processos",
+            icon: FileText,
+            href: "/processos",
           });
         }
-        
-        // "Clientes"
+
+        // "Lista de Clientes"
         if (userPages.includes("clients")) {
           indexacaoMain.push({
-            label: "Clientes",
+            label: "Lista de Clientes",
             icon: Users,
             href: "/clientes",
           });
         }
-        
-        // "Os Meus Processos" (só os processos atribuídos ao utilizador)
-        if (userPages.includes("processes")) {
-          indexacaoMain.push({
-            label: "Os Meus Processos",
-            icon: LayoutGrid,
-            href: "/meus-clientes",
-          });
-        }
-        
+
         return {
           main: indexacaoMain,
           groups: [],
@@ -512,10 +503,10 @@ const DashboardLayout = ({ children, title }) => {
         icon: Users,
         href: "/registos-clientes",
       });
-      
-      // Processos (Gestão de Processos) para todos
+
+      // Lista de Clientes (Gestão de Processos) para todos
       negocioItems.push({
-        label: "Processos",
+        label: "Lista de Clientes",
         icon: User,
         href: "/clientes",
       });
