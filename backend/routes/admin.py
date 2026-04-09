@@ -452,6 +452,49 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     clean_name = (data.name or "").strip()
     clean_phone = (data.phone or "").strip() if data.phone else None
     
+    # Cliente não é um utilizador do sistema - é um processo
+    if data.role == UserRole.CLIENTE:
+        raise HTTPException(status_code=400, detail="Cliente não pode ser criado como utilizador. O cliente é representado pelo processo.")
+    
+    # Validar role - inclui PARCEIRO
+    valid_roles = [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.ADMIN, UserRole.PARCEIRO]
+    if data.role not in valid_roles:
+        raise HTTPException(status_code=400, detail="Role inválido")
+    
+    # PARCEIRO é um "ghost user" - apenas precisa do nome
+    is_parceiro = data.role == UserRole.PARCEIRO
+    
+    if is_parceiro:
+        # Para parceiros: nome é obrigatório, email/password não são necessários
+        if not clean_name:
+            raise HTTPException(status_code=400, detail="Nome é obrigatório")
+        
+        # Gerar email placeholder único para parceiros (para não violar unique constraint)
+        import uuid as uuid_module
+        placeholder_email = f"parceiro_{uuid_module.uuid4().hex[:8]}@placeholder.internal"
+        
+        user_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        
+        user_doc = {
+            "id": user_id,
+            "email": placeholder_email,
+            "password": None,  # Sem password para parceiros
+            "name": clean_name,
+            "phone": clean_phone,
+            "role": data.role,
+            "is_active": True,
+            "onedrive_folder": None,  # Parceiros não precisam de pasta
+            "created_at": now
+        }
+        
+        await db.users.insert_one(user_doc)
+        await _audit_log("user_created", "user", user_id, user, {"role": data.role, "name": clean_name, "type": "parceiro_ghost"})
+        
+        # Não enviar email de boas-vindas para parceiros
+        return UserResponse(**user_doc)
+    
+    # Para outros roles: validar email e password
     existing = await db.users.find_one({"email": clean_email})
     if existing:
         raise HTTPException(status_code=400, detail="Email já registado")
@@ -459,13 +502,6 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     # Validar password (apenas presença — sem validação de força)
     if not data.password:
         raise HTTPException(status_code=400, detail="Password é obrigatória")
-    
-    # Cliente não é um utilizador do sistema - é um processo
-    if data.role == UserRole.CLIENTE:
-        raise HTTPException(status_code=400, detail="Cliente não pode ser criado como utilizador. O cliente é representado pelo processo.")
-    
-    if data.role not in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.ADMIN]:
-        raise HTTPException(status_code=400, detail="Role inválido")
     
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
