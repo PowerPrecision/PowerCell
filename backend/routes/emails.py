@@ -526,6 +526,90 @@ async def get_document_recipients(
     }
 
 
+# ==== PREVIEW DOCUMENTATION (gera HTML sem enviar) ====
+
+@router.get("/preview-documentation/{process_id}")
+async def preview_documentation_email(
+    process_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Gerar preview do HTML do email de documentação.
+    
+    Este endpoint gera e devolve a string HTML final do template
+    (já com os dados do cliente e utilizador injetados), mas NÃO envia o email.
+    
+    Útil para o utilizador visualizar e editar o conteúdo antes de enviar.
+    """
+    from services.system_config import get_system_config
+    
+    # Obter processo
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    # Obter configuração
+    config = await get_system_config()
+    doc_config = config.document_recipients
+    
+    if not doc_config.enabled:
+        raise HTTPException(status_code=400, detail="Envio de documentação não está activado")
+    
+    # Obter documentos do processo para incluir na lista
+    documents = await db.document_metadata.find(
+        {"process_id": process_id},
+        {"_id": 0}
+    ).to_list(100)
+    
+    # Preparar lista de documentos para o email
+    documents_list = "\n".join([
+        f"- {doc.get('original_name', doc.get('filename', 'Documento'))}" 
+        for doc in documents
+    ]) if documents else "Nenhum documento anexado"
+    
+    # Extrair dados para o email
+    client_name = process.get("client_name", "N/A")
+    personal_data = process.get("personal_data", {}) or {}
+    client_nif = personal_data.get("nif", process.get("client_nif", "N/A"))
+    process_number = process.get("process_number", "N/A")
+    
+    # Verificar se existe template personalizado na configuração
+    email_template = doc_config.email_template
+    
+    # Extrair todas as variáveis disponíveis para templates
+    template_vars = _extract_email_variables(process, current_user, documents_list)
+    
+    # Gerar HTML do email
+    if email_template:
+        # Usar template personalizado da configuração com todas as variáveis
+        try:
+            email_body = email_template.format(**template_vars)
+        except KeyError as e:
+            logger.warning(f"Variável não encontrada no template: {e}")
+            # Fallback com variáveis básicas
+            email_body = email_template.format(
+                client_name=client_name,
+                client_nif=client_nif,
+                process_number=process_number,
+                documents_list=documents_list,
+                sender_name=current_user.get("name", ""),
+                sender_email=current_user.get("email", "")
+            )
+    else:
+        # Usar template HTML profissional por defeito
+        email_body = _build_professional_email_html(process, current_user, documents_list)
+    
+    # Retornar o HTML gerado e as variáveis disponíveis
+    return {
+        "success": True,
+        "html": email_body,
+        "subject": f"Documentação - {client_name} (Processo #{process_number})",
+        "template_vars": template_vars,
+        "available_variables": list(template_vars.keys()),
+        "documents_count": len(documents) if documents else 0
+    }
+
+
 # ==== SEND DOCUMENTATION (antes de /{email_id} para evitar conflito de rota) ====
 # Estes endpoints devem estar ANTES das rotas com /{email_id} para que
 # o FastAPI faça match correcto e não trate "send-documentation" como um email_id.
@@ -560,6 +644,10 @@ async def send_documentation_email(
     bcc_recipients = [e for e in (sanitize_email(e) for e in data.get("bcc_recipients", [])) if e]
     cc_emails = [e for e in (sanitize_email(e) for e in data.get("cc_emails", [])) if e]
     custom_message = data.get("custom_message")
+    
+    # NOVO: custom_html_body - HTML já formatado pelo Rich Text Editor
+    # Este campo tem PRIORIDADE MÁXIMA - é usado diretamente sem processamento
+    custom_html_body = data.get("custom_html_body")
     
     # TO emails: usar os selecionados pelo utilizador, ou fallback para config
     request_to_emails = [e for e in (sanitize_email(e) for e in data.get("to_emails", [])) if e]
@@ -670,8 +758,23 @@ async def send_documentation_email(
     # Extrair todas as variáveis disponíveis para templates
     template_vars = _extract_email_variables(process, current_user, documents_list)
     
-    # Se admin/CEO enviou mensagem personalizada, usar essa
-    if custom_message and current_user["role"] in ["admin", "ceo"]:
+    # ============================================================
+    # CONSTRUÇÃO DO CORPO DO EMAIL (prioridade decrescente)
+    # ============================================================
+    # 1. custom_html_body: HTML já formatado pelo Rich Text Editor
+    #    (PRIORIDADE MÁXIMA - usado diretamente, sem sanitização de variáveis)
+    # 2. custom_message: mensagem de texto do admin/CEO (com substituição de variáveis)
+    # 3. email_template: template personalizado da configuração
+    # 4. template HTML profissional por defeito
+    # ============================================================
+    
+    if custom_html_body and current_user["role"] in ["admin", "ceo"]:
+        # USAR HTML CUSTOMIZADO DO EDITOR WYSIWYG
+        # Sanitizar para segurança (remover scripts perigosos)
+        email_body = sanitize_html(custom_html_body)
+        logger.info(f"Usando custom_html_body do Rich Text Editor para processo {process_id}")
+    
+    elif custom_message and current_user["role"] in ["admin", "ceo"]:
         custom_message = sanitize_string(custom_message, max_length=10000)
         try:
             email_body = custom_message.format(**template_vars)
