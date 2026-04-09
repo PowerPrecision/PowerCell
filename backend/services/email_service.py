@@ -775,7 +775,8 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
     if user_email_lower:
         internal_emails.add(user_email_lower)
     for acc in accounts:
-        acc_user = (acc.get("imap_user") or acc.get("smtp_user") or "").lower().strip()
+        # EmailAccount é uma classe com atributo 'email', não um dicionário
+        acc_user = (acc.email or "").lower().strip() if hasattr(acc, 'email') else ""
         if acc_user and "@" in acc_user:
             internal_emails.add(acc_user)
     for de in doc_recipient_to_emails:
@@ -819,7 +820,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
                     except:
                         continue
             except Exception as e:
-                logger.warning(f"Erro ao buscar por nome na conta {account.get('name', '?')}: {e}")
+                logger.warning(f"Erro ao buscar por nome na conta {account.name if hasattr(account, 'name') else '?'}: {e}")
         
         # 2. Buscar por endereços de email relevantes
         if search_list:
@@ -834,7 +835,7 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
                     except:
                         continue
             except Exception as e:
-                logger.warning(f"Erro ao buscar por emails na conta {account.get('name', '?')}: {e}")
+                logger.warning(f"Erro ao buscar por emails na conta {account.name if hasattr(account, 'name') else '?'}: {e}")
     
     # ====================================================================
     # NOVAS REGRAS DE FILTRAGEM (3 regras de negócio)
