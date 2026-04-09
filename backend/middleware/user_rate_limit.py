@@ -37,12 +37,16 @@ RATE_LIMITS_BY_ROLE = {
     "intermediario": {"requests": 200, "window": 60},
     "consultor_intermediario": {"requests": 200, "window": 60},
     "administrativo": {"requests": 200, "window": 60},
+    "indexacao": {"requests": 200, "window": 60},
+    
+    # Parceiros - ghost users sem acesso à plataforma
+    "parceiro": {"requests": 100, "window": 60},
     
     # Clientes - limite baixo
     "cliente": {"requests": 100, "window": 60},  # 100 req/min
     
     # Default para roles desconhecidos
-    "default": {"requests": 50, "window": 60},
+    "default": {"requests": 100, "window": 60},  # Aumentado de 50 para 100
 }
 
 
