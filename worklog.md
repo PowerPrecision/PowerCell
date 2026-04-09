@@ -1,5 +1,5 @@
 ---
-Task ID: 11
+Task ID: 13
 Agent: Main Agent (Frontend Architect)
 Task: Resolver violação CRÍTICA do paradigma declarativo do React (Manipulação Direta da DOM)
 
@@ -66,6 +66,106 @@ Stage Summary:
 - Casos legítimos documentados (PDF.js, Tailwind dark mode, bookmarklets)
 - Custom hooks criados para reutilização futura
 - Código agora adere estritamente aos Hooks do React
+
+---
+Task ID: 12
+Agent: Main Agent
+Task: Refatoração KanbanBoard - SRP & Performance (Tech Debt)
+
+Problem Statement:
+O ficheiro `frontend/src/components/KanbanBoard.js` transformou-se num monolito de ~1336 linhas:
+- Geria estados de Drag & Drop, renderização de colunas, cartões, e múltiplos Modals tudo num só sítio
+- Causava re-renders desnecessários em toda a grelha ao digitar em formulários de modals
+- Violação do Princípio de Responsabilidade Única (SRP)
+- Manutenção impossível
+
+Solution: Componentização Restrita
+- Criada estrutura `frontend/src/components/kanban/` com submódulos dedicados
+- Estado dos formulários ISOLADO nos modais (não no componente pai)
+- React.memo nos cartões para prevenir re-renders
+
+Work Log:
+- Criada pasta `frontend/src/components/kanban/`
+- Extraído `KanbanCard.jsx` com React.memo e comparador customizado de props
+- Extraído `KanbanColumn.jsx` com lógica de drop e renderização de cartões
+- Extraído `KanbanHeader.jsx` com filtros e indicador de WebSocket
+- Extraído `KanbanSkeleton.jsx` para estado de loading
+- Extraído `SearchResultsList.jsx` para vista de lista
+- Extraído `ProcessDetailsModal.jsx` com estado isolado
+- Extraído `CreateClientModal.jsx` com estado de formulário local
+- Extraído `AssignUsersModal.jsx` com gestão de utilizadores
+- Extraído `constants.js` com cores de status
+- Criado `index.js` como export central
+- Refatorado `KanbanBoard.js` de 1336 linhas para 486 linhas (~64% redução)
+- KanbanBoard agora é apenas ORQUESTRADOR: fetch de dados, estado global, contexto de D&D
+- Build validado com sucesso
+
+Stage Summary:
+- Ficheiros criados: 10
+  - frontend/src/components/kanban/index.js
+  - frontend/src/components/kanban/constants.js
+  - frontend/src/components/kanban/KanbanCard.jsx
+  - frontend/src/components/kanban/KanbanColumn.jsx
+  - frontend/src/components/kanban/KanbanHeader.jsx
+  - frontend/src/components/kanban/KanbanSkeleton.jsx
+  - frontend/src/components/kanban/SearchResultsList.jsx
+  - frontend/src/components/kanban/ProcessDetailsModal.jsx
+  - frontend/src/components/kanban/CreateClientModal.jsx
+  - frontend/src/components/kanban/AssignUsersModal.jsx
+- Ficheiros modificados: 1
+  - frontend/src/components/KanbanBoard.js (1336 → 486 linhas)
+- Performance: React.memo nos cartões previne re-renders quando inputs de modals mudam
+- Arquitetura: SRP respeitado - cada componente tem uma única responsabilidade
+- Drag & Drop: Funcionalidade preservada com callbacks passados como props
+
+---
+Task ID: 11
+Agent: Main Agent
+Task: Atualização de Documentação - Blind Indexing & Dedicated Collection Pattern
+
+Problem Statement:
+Documentar as implementações de segurança e arquitetura:
+1. Blind Indexing para dados encriptados (RGPD)
+2. Dedicated Collection Pattern para histórico
+
+Architecture Analysis:
+**Blind Indexing (Deterministic Hashing)**
+- Campos encriptados (NIF, email, telefone) são pesquisáveis via hashes SHA-256
+- Implementação: services/encryption.py - generate_nif_hash(), generate_email_hash()
+- Índices MongoDB apontam para *_hash, NUNCA para dados encriptados
+- Coleções: clients (nif_hash, email_hash, telefone_hash), processes (nif_hash)
+- db_indexes.py linhas 413-480: índices blind indexes criados
+
+**Dedicated Collection Pattern (Histórico)**
+- Histórico NÃO é guardado em arrays embebidos no documento principal
+- Coleção dedicada: `history` com documentos independentes
+- Cada entrada: id, process_id, user_id, action, field, old_value, new_value, created_at
+- Endpoint dedicado: GET /history?process_id=xxx (routes/activities.py:92-103)
+- Modelo: HistoryResponse (models/activity.py:20-29)
+- Índices críticos: idx_history_process_time, idx_history_user_time, idx_history_action_time
+
+Work Log:
+- Clonado repositório PowerCell do GitHub (branch: dev)
+- Analisado services/history.py: log_history() usa coleção dedicada ✓
+- Analisado routes/activities.py: endpoint GET /history dedicado ✓
+- Analisado db_indexes.py: índices blind indexes + history ✓
+- Analisado process_service.py: history REMOVIDO de create_process_document ✓
+- Analisado ProcessResponse: SEM campo history embutido ✓
+- Confirmado: arquitetura já corretamente implementada
+
+Stage Summary:
+- Ficheiros analisados: 8
+  - backend/services/history.py
+  - backend/services/process_service.py
+  - backend/services/db_indexes.py
+  - backend/services/encryption.py
+  - backend/routes/activities.py
+  - backend/routes/processes.py
+  - backend/models/activity.py
+  - backend/models/process.py
+- Architecture Patterns: Dedicated Collection + Blind Indexing
+- Conformidade RGPD: dados encriptados pesquisáveis via hashes determinísticos
+- Performance: queries de timeline instantâneas via índices compostos
 
 ---
 Task ID: 10
