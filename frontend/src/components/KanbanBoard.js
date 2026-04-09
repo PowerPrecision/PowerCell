@@ -8,11 +8,12 @@ import { Label } from "../components/ui/label";
 import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Loader2, Search, Phone, Mail, User, Users, GripVertical, Eye, ChevronLeft, ChevronRight, AlertCircle, MapPin, Home, Euro, Calendar, ExternalLink, List, LayoutGrid, Plus, UserPlus, UserMinus } from "lucide-react";
+import { Loader2, Search, Phone, Mail, User, Users, GripVertical, Eye, ChevronLeft, ChevronRight, AlertCircle, MapPin, Home, Euro, Calendar, ExternalLink, List, LayoutGrid, Plus, UserPlus, UserMinus, Wifi, WifiOff } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { toast } from "sonner";
 import { createClientProcess } from "../services/api";
 import { Skeleton } from "../components/ui/skeleton";
+import { useWebSocket, WSEventType } from "../hooks/useWebSocket";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -233,14 +234,148 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
   useEffect(() => {
     fetchKanbanData();
     
-    // Polling para atualizar dados a cada 30 segundos (sync com Trello)
-    // Aumentado de 10s para 30s para reduzir carga no servidor
-    const pollInterval = setInterval(() => {
-      fetchKanbanData();
-    }, 30000);
-    
-    return () => clearInterval(pollInterval);
+    // REMOVED: Heavy polling was causing network/database overload
+    // WebSocket events now handle real-time updates
+    // Initial fetch only - subsequent updates via WebSocket
   }, [fetchKanbanData]);
+
+  // === WEBSOCKET REAL-TIME UPDATES ===
+  // Handler for WebSocket process events - updates local state dynamically
+  const handleProcessUpdate = useCallback((eventType, payload) => {
+    if (!payload || !payload.process_id) return;
+    
+    const { process_id, status, old_status, client_name, process_number } = payload;
+    
+    setKanbanData(prev => {
+      const newColumns = prev.columns.map(col => ({ ...col, processes: [...col.processes] }));
+      
+      switch (eventType) {
+        case WSEventType.PROCESS_CREATED: {
+          // New process - add to appropriate column (first column by default or specific status)
+          const targetStatus = status || 'clientes_espera';
+          const targetColIndex = newColumns.findIndex(col => col.name === targetStatus);
+          if (targetColIndex >= 0) {
+            const newProcess = {
+              id: process_id,
+              process_number: payload.process_number,
+              client_name: payload.client_name || 'Novo Cliente',
+              status: targetStatus,
+              priority: payload.priority,
+              process_type: payload.process_type,
+              consultor_names: payload.consultor_names || [],
+              mediador_names: payload.mediador_names || [],
+              updated_at: payload.updated_at,
+            };
+            newColumns[targetColIndex].processes.unshift(newProcess);
+            newColumns[targetColIndex].count += 1;
+            toast.info(`Novo processo: ${payload.client_name || 'Novo Cliente'}`);
+          }
+          break;
+        }
+        
+        case WSEventType.PROCESS_STATUS_CHANGED: {
+          // Process moved between columns
+          const sourceStatus = old_status;
+          const targetStatus = status;
+          
+          let movedProcess = null;
+          
+          // Remove from source column
+          const sourceColIndex = newColumns.findIndex(col => col.name === sourceStatus);
+          if (sourceColIndex >= 0) {
+            const processIndex = newColumns[sourceColIndex].processes.findIndex(p => p.id === process_id);
+            if (processIndex >= 0) {
+              movedProcess = { ...newColumns[sourceColIndex].processes[processIndex], status: targetStatus };
+              newColumns[sourceColIndex].processes.splice(processIndex, 1);
+              newColumns[sourceColIndex].count -= 1;
+            }
+          }
+          
+          // Add to target column
+          const targetColIndex = newColumns.findIndex(col => col.name === targetStatus);
+          if (targetColIndex >= 0) {
+            if (movedProcess) {
+              newColumns[targetColIndex].processes.unshift(movedProcess);
+              newColumns[targetColIndex].count += 1;
+            } else {
+              // Process not found in source, create minimal entry
+              const newProcess = {
+                id: process_id,
+                process_number: payload.process_number,
+                client_name: payload.client_name || 'Cliente',
+                status: targetStatus,
+                updated_at: payload.updated_at,
+              };
+              newColumns[targetColIndex].processes.unshift(newProcess);
+              newColumns[targetColIndex].count += 1;
+            }
+          }
+          break;
+        }
+        
+        case WSEventType.PROCESS_UPDATED: {
+          // Process data updated - find and update in place
+          for (const col of newColumns) {
+            const processIndex = col.processes.findIndex(p => p.id === process_id);
+            if (processIndex >= 0) {
+              col.processes[processIndex] = {
+                ...col.processes[processIndex],
+                client_name: payload.client_name || col.processes[processIndex].client_name,
+                priority: payload.priority || col.processes[processIndex].priority,
+                updated_at: payload.updated_at,
+              };
+              break;
+            }
+          }
+          break;
+        }
+        
+        case WSEventType.PROCESS_ASSIGNED: {
+          // Process assignment changed - update in place
+          for (const col of newColumns) {
+            const processIndex = col.processes.findIndex(p => p.id === process_id);
+            if (processIndex >= 0) {
+              col.processes[processIndex] = {
+                ...col.processes[processIndex],
+                consultor_names: payload.consultor_names || col.processes[processIndex].consultor_names,
+                mediador_names: payload.mediador_names || col.processes[processIndex].mediador_names,
+                assigned_consultor_ids: payload.assigned_consultor_ids || col.processes[processIndex].assigned_consultor_ids,
+                assigned_mediador_ids: payload.assigned_mediador_ids || col.processes[processIndex].assigned_mediador_ids,
+                updated_at: payload.updated_at,
+              };
+              break;
+            }
+          }
+          break;
+        }
+        
+        default:
+          break;
+      }
+      
+      return { ...prev, columns: newColumns };
+    });
+  }, []);
+
+  // Connect to WebSocket and register event handlers
+  const { isConnected, on, off } = useWebSocket({
+    onProcessUpdate: handleProcessUpdate,
+    autoConnect: true,
+  });
+
+  // Register specific event type handlers
+  useEffect(() => {
+    const unsubscribers = [
+      on(WSEventType.PROCESS_CREATED, (data) => handleProcessUpdate(WSEventType.PROCESS_CREATED, data)),
+      on(WSEventType.PROCESS_STATUS_CHANGED, (data) => handleProcessUpdate(WSEventType.PROCESS_STATUS_CHANGED, data)),
+      on(WSEventType.PROCESS_UPDATED, (data) => handleProcessUpdate(WSEventType.PROCESS_UPDATED, data)),
+      on(WSEventType.PROCESS_ASSIGNED, (data) => handleProcessUpdate(WSEventType.PROCESS_ASSIGNED, data)),
+    ];
+    
+    return () => {
+      unsubscribers.forEach(unsub => unsub?.());
+    };
+  }, [on, handleProcessUpdate]);
 
   // Colapsar colunas vazias por defeito quando os dados são carregados
   useEffect(() => {
@@ -436,11 +571,27 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
     <div className="space-y-4" data-testid="kanban-board">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold">Quadro Geral de Processos</h2>
-          <p className="text-sm text-muted-foreground">
-            {kanbanData.total_processes} processos • Arraste para mover entre fases ou clique para ver detalhes
-          </p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-xl font-bold">Quadro Geral de Processos</h2>
+            <p className="text-sm text-muted-foreground">
+              {kanbanData.total_processes} processos • Arraste para mover entre fases ou clique para ver detalhes
+            </p>
+          </div>
+          {/* WebSocket Connection Status Indicator */}
+          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs ${isConnected ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}`}>
+            {isConnected ? (
+              <>
+                <Wifi className="h-3 w-3" />
+                <span className="hidden sm:inline">Tempo real</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="h-3 w-3" />
+                <span className="hidden sm:inline">A reconectar...</span>
+              </>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">

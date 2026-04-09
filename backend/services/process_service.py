@@ -113,6 +113,89 @@ def can_view_process(user: dict, process: dict) -> bool:
     return False
 
 
+def can_edit_process_data(user: dict, process: dict) -> tuple:
+    """
+    Verifica se o utilizador pode EDITAR dados do processo (dados pessoais, financeiros, etc.).
+    
+    Esta função é mais restritiva que can_view_process - apenas utilizadores
+    com permissão de escrita podem modificar dados core do processo.
+    
+    SECURITY: Usada para prevenir IDOR em endpoints de resolução de conflitos
+    e confirmação de dados de IA.
+    
+    Regras:
+    - Staff com permissão 'edit_process': Podem editar processos atribuídos ou todos (admin/ceo)
+    - INDEXACAO: NÃO pode editar dados core (apaz upload/atribuição)
+    - CLIENTE: Apenas os seus próprios processos (se permitido pelo negócio)
+    - PARCEIRO: Sem acesso
+    
+    Args:
+        user: Dados do utilizador actual
+        process: Dados do processo
+    
+    Returns:
+        Tuple (can_edit: bool, reason: str)
+    """
+    user_role = user.get("role", "")
+    user_id = user.get("id", "")
+    user_permissions = user.get("permissions", {})
+    user_actions = user_permissions.get("actions", []) if isinstance(user_permissions, dict) else []
+    
+    # Parceiros e clientes não têm permissão de edição via API
+    if user_role in ["parceiro"]:
+        return False, "Parceiros não têm acesso a esta funcionalidade"
+    
+    # Clientes só podem editar os seus próprios processos
+    if user_role == "cliente":
+        if process.get("client_id") != user_id:
+            return False, "Apenas pode editar os seus próprios processos"
+        # Clientes podem editar os seus dados - permitir
+        return True, "OK"
+    
+    # INDEXACAO - Verificar se tem permissão explícita de edit_process
+    # Por defeito, INDEXACAO não tem edit_process nas permissões padrão
+    if user_role == "indexacao":
+        # Verificar se tem permissão custom de edição
+        if "edit_process" not in user_actions:
+            return False, "Indexação não tem permissão para editar dados do processo"
+    
+    # Staff roles que podem editar (verificar se tem action edit_process)
+    staff_edit_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]
+    
+    if user_role in staff_edit_roles:
+        # Admin e CEO podem editar qualquer processo
+        if user_role in ["admin", "ceo"]:
+            return True, "OK"
+        
+        # Diretor e Administrativo podem editar todos os processos
+        if user_role in ["diretor", "administrativo"]:
+            return True, "OK"
+        
+        # Consultor: pode editar se estiver atribuído ao processo
+        if user_role == "consultor":
+            assigned_consultor_ids = process.get("assigned_consultor_ids", [])
+            assigned_consultor_id = process.get("assigned_consultor_id")
+            if user_id in assigned_consultor_ids or user_id == assigned_consultor_id:
+                return True, "OK"
+            # Se não está atribuído, negar
+            return False, "Apenas pode editar processos que lhe estão atribuídos"
+        
+        # Mediador/Intermediário: pode editar se estiver atribuído ao processo
+        if user_role in ["mediador", "intermediario"]:
+            assigned_mediador_ids = process.get("assigned_mediador_ids", [])
+            assigned_mediador_id = process.get("assigned_mediador_id")
+            if user_id in assigned_mediador_ids or user_id == assigned_mediador_id:
+                return True, "OK"
+            # Se não está atribuído, negar
+            return False, "Apenas pode editar processos que lhe estão atribuídos"
+        
+        # Por defeito, permitir para staff
+        return True, "OK"
+    
+    # Role não reconhecido - negar
+    return False, f"Role '{user_role}' não tem permissão para editar dados do processo"
+
+
 def build_query_filter(user: dict) -> dict:
     """
     Constrói o filtro de query baseado no papel do utilizador.
