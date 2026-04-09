@@ -56,6 +56,224 @@ doc_router = None  # Mantido como None para compatibilidade com server.py
 _sync_status = {}
 
 
+def _build_professional_email_html(process: dict, user: dict, documents_list: str) -> str:
+    """
+    Constrói o corpo do email em HTML profissional para envio de documentação B2B.
+    
+    Extrai dados do 1º e 2º proponente, dados financeiros e assinatura.
+    """
+    personal_data = process.get("personal_data", {}) or {}
+    titular2_data = process.get("titular2_data", {}) or {}
+    financial_data = process.get("financial_data", {}) or {}
+    real_estate_data = process.get("real_estate_data", {}) or {}
+    
+    # Helper para formatação segura
+    def safe_val(value, default="N/A"):
+        if value is None or value == "":
+            return default
+        return str(value)
+    
+    def format_currency(value):
+        if value is None or value == "":
+            return "N/A"
+        try:
+            return f"{float(value):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+        except (ValueError, TypeError):
+            return str(value)
+    
+    def format_date(date_str):
+        if not date_str:
+            return "N/A"
+        try:
+            # Tentar formato ISO
+            if "T" in date_str:
+                date_str = date_str.split("T")[0]
+            parts = date_str.split("-")
+            if len(parts) == 3:
+                return f"{parts[2]}/{parts[1]}/{parts[0]}"
+            return date_str
+        except:
+            return date_str
+    
+    # ==== 1º PROPONENTE ====
+    p1_nome = safe_val(personal_data.get("nome_completo") or personal_data.get("nome") or process.get("client_name"))
+    p1_email = safe_val(personal_data.get("email") or process.get("client_email"))
+    p1_telefone = safe_val(personal_data.get("telefone") or personal_data.get("phone") or process.get("client_phone"))
+    p1_data_nascimento = format_date(personal_data.get("birth_date") or personal_data.get("data_nascimento"))
+    p1_tipo_doc = safe_val(personal_data.get("documento_id"), "N/A")
+    p1_nif = safe_val(personal_data.get("nif") or process.get("client_nif"))
+    
+    # Estado civil e regime
+    estado_civil_raw = personal_data.get("estado_civil", "")
+    regime_casamento = ""
+    if estado_civil_raw:
+        if "_" in estado_civil_raw:
+            parts = estado_civil_raw.split("_", 1)
+            p1_estado_civil = parts[0].capitalize()
+            if len(parts) > 1:
+                regime_map = {
+                    "adquiridos": "Comunhão de Adquiridos",
+                    "geral": "Comunhão Geral de Bens",
+                    "separacao": "Separação de Bens"
+                }
+                regime_casamento = regime_map.get(parts[1], parts[1].replace("_", " ").title())
+        else:
+            p1_estado_civil = estado_civil_raw.capitalize()
+    else:
+        p1_estado_civil = "N/A"
+    p1_regime_casamento = regime_casamento if regime_casamento else "N/A"
+    
+    p1_profissao = safe_val(personal_data.get("profissao"))
+    
+    # Vínculo laboral
+    vinculo_raw = personal_data.get("tipo_contrato") or financial_data.get("employment_type") or personal_data.get("vinculo_laboral")
+    vinculo_map = {
+        "efetivo": "Contrato Efetivo",
+        "termo_certo": "Contrato a Termo Certo",
+        "termo_incerto": "Contrato a Termo Incerto",
+        "verde": "Recibos Verdes",
+        "autonomo": "Trabalhador Independente",
+        "empresario": "Empresário",
+        "reformado": "Reformado",
+        "desempregado": "Desempregado"
+    }
+    p1_vinculo = vinculo_map.get(vinculo_raw, safe_val(vinculo_raw, "N/A"))
+    
+    p1_salario = format_currency(personal_data.get("salario_liquido") or financial_data.get("monthly_income"))
+    p1_dependentes = safe_val(personal_data.get("dependentes") or personal_data.get("num_dependentes"))
+    p1_despesas = format_currency(personal_data.get("despesas_mensais") or financial_data.get("despesas_mensais"))
+    
+    # Situação bancária
+    situacao_bancaria = []
+    if financial_data.get("tem_creditos_activos"):
+        situacao_bancaria.append("Tem créditos ativos")
+    if personal_data.get("insolvencia") or financial_data.get("insolvencia"):
+        situacao_bancaria.append("Insolvência")
+    if personal_data.get("incumprimento") or financial_data.get("incumprimento"):
+        situacao_bancaria.append("Incumprimento")
+    p1_situacao_bancaria = ", ".join(situacao_bancaria) if situacao_bancaria else "Sem situações registadas"
+    
+    # ==== 2º PROPONENTE ====
+    p2_nome = safe_val(titular2_data.get("name") or titular2_data.get("nome"), "")
+    p2_email = safe_val(titular2_data.get("email"), "")
+    p2_telefone = safe_val(titular2_data.get("phone") or titular2_data.get("telefone"), "")
+    p2_data_nascimento = format_date(titular2_data.get("birth_date"))
+    p2_tipo_doc = safe_val(titular2_data.get("documento_id"), "")
+    p2_nif = safe_val(titular2_data.get("nif"), "")
+    p2_estado_civil = safe_val(titular2_data.get("estado_civil"), "")
+    if p2_estado_civil and "_" in p2_estado_civil:
+        p2_estado_civil = p2_estado_civil.split("_")[0].capitalize()
+    
+    # Se não houver 2º proponente
+    has_second_proponent = bool(p2_nome)
+    
+    # ==== DADOS DO CRÉDITO ATUAL ====
+    banco_atual = safe_val(financial_data.get("banco_atual") or financial_data.get("banco_credito"))
+    
+    # Número de titulares
+    num_titulares = 1
+    if has_second_proponent:
+        num_titulares = 2
+    
+    contrato_mais_2_anos = safe_val(financial_data.get("contrato_mais_2_anos"), "N/A")
+    if contrato_mais_2_anos == True or contrato_mais_2_anos == "true" or contrato_mais_2_anos == "sim":
+        contrato_mais_2_anos = "Sim"
+    elif contrato_mais_2_anos == False or contrato_mais_2_anos == "false" or contrato_mais_2_anos == "nao":
+        contrato_mais_2_anos = "Não"
+    
+    valor_aquisicao = format_currency(financial_data.get("valor_aquisicao") or real_estate_data.get("valor_imovel"))
+    montante_divida = format_currency(financial_data.get("montante_divida") or financial_data.get("valor_em_divida"))
+    
+    # ==== DADOS DA TRANSFERÊNCIA PRETENDIDA ====
+    valor_extra = format_currency(financial_data.get("valor_extra") or financial_data.get("valor_multiopcoes"))
+    localidade_imovel = safe_val(real_estate_data.get("localizacao") or real_estate_data.get("localidade"))
+    
+    possibilidade_fiador = safe_val(financial_data.get("fiador") or financial_data.get("tem_fiador"), "N/A")
+    if possibilidade_fiador == True or possibilidade_fiador == "true" or possibilidade_fiador == "sim":
+        possibilidade_fiador = "Sim"
+    elif possibilidade_fiador == False or possibilidade_fiador == "false" or possibilidade_fiador == "nao":
+        possibilidade_fiador = "Não"
+    
+    # ==== ASSINATURA ====
+    user_nome = safe_val(user.get("name"))
+    user_telefone = safe_val(user.get("phone"))
+    user_email = safe_val(user.get("email"))
+    
+    # ==== CONSTRUIR HTML ====
+    # Secção do 2º proponente (só se existir)
+    segundo_proponente_html = ""
+    if has_second_proponent:
+        segundo_proponente_html = f'''
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">2º Proponente</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; width: 40%;"><strong>Nome:</strong></td><td>{p2_nome}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>E-mail:</strong></td><td>{p2_email}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contacto:</strong></td><td>{p2_telefone}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Data de Nascimento:</strong></td><td>{p2_data_nascimento}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contribuinte (NIF):</strong></td><td>{p2_nif}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Estado Civil:</strong></td><td>{p2_estado_civil}</td></tr>
+    </table>'''
+    else:
+        segundo_proponente_html = '''
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">2º Proponente</h3>
+    <p style="color: #6b7280; font-style: italic;">Não aplicável</p>'''
+    
+    html = f'''<div style="font-family: 'Segoe UI', Arial, sans-serif; color: #333333; line-height: 1.6; max-width: 800px; margin: 0 auto;">
+    <p>Estimado(a) Parceiro(a),</p>
+    <p>Venho por este meio submeter o pedido de análise para <strong>Transferência de Crédito Habitação</strong>, relativamente ao(s) proponente(s) abaixo identificado(s).</p>
+
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">1º Proponente</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; width: 40%;"><strong>Nome:</strong></td><td>{p1_nome}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>E-mail:</strong></td><td>{p1_email}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contacto:</strong></td><td>{p1_telefone}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Data de Nascimento:</strong></td><td>{p1_data_nascimento}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Documento de Identificação:</strong></td><td>{p1_tipo_doc}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contribuinte (NIF):</strong></td><td>{p1_nif}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Estado Civil:</strong></td><td>{p1_estado_civil}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Regime de Casamento:</strong></td><td>{p1_regime_casamento}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Profissão:</strong></td><td>{p1_profissao}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Vínculo Laboral:</strong></td><td>{p1_vinculo}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Salário Líquido:</strong></td><td>{p1_salario}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Dependentes:</strong></td><td>{p1_dependentes}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Despesas Mensais:</strong></td><td>{p1_despesas}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Situação bancária (Insolvência/Incumprimento):</strong></td><td>{p1_situacao_bancaria}</td></tr>
+    </table>
+
+    {segundo_proponente_html}
+
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">Dados do Crédito Atual</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; width: 50%;"><strong>Banco atual:</strong></td><td>{banco_atual}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Nº de titulares do empréstimo:</strong></td><td>{num_titulares}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contrato celebrado há mais de 2 anos:</strong></td><td>{contrato_mais_2_anos}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Valor de aquisição do imóvel:</strong></td><td>{valor_aquisicao}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Montante em dívida:</strong></td><td>{montante_divida}</td></tr>
+    </table>
+
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">Dados da Transferência Pretendida</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; width: 50%;"><strong>Valor de multiopções/extra pretendido:</strong></td><td>{valor_extra}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Localidade do imóvel:</strong></td><td>{localidade_imovel}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Existe possibilidade de fiador?:</strong></td><td>{possibilidade_fiador}</td></tr>
+    </table>
+    
+    <p style="margin-top: 30px; margin-bottom: 30px;">Estou ao dispor para qualquer esclarecimento.</p>
+
+    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+    <div style="font-size: 14px; color: #4b5563;">
+        <p style="margin: 2px 0;"><strong>{user_nome}</strong></p>
+        <p style="margin: 2px 0;">Tlm: {user_telefone}</p>
+        <p style="margin: 2px 0;">Email: {user_email}</p>
+        <br>
+        <p style="margin: 2px 0;"><strong>PrecisionCrédito</strong></p>
+        <p style="margin: 2px 0;">Licença de Intermediação de Crédito nº 0005798AM</p>
+    </div>
+</div>'''
+    
+    return html
+
+
 async def enrich_email(email: dict) -> dict:
     """Adicionar nomes ao email."""
     # Nome do processo/cliente
@@ -271,38 +489,14 @@ async def send_documentation_email(
         for doc in documents
     ])
     
-    # Preparar template do email
-    email_template = doc_config.email_template or """Prezados,
-
-Segue em anexo a documentação do cliente:
-
-**Cliente:** {client_name}
-**NIF:** {client_nif}
-**Processo:** #{process_number}
-
-**Documentos enviados:**
-{documents_list}
-
-Esta documentação foi enviada através do sistema PowerCell.
-
-Com os melhores cumprimentos,
-{sender_name}
-{sender_email}"""
-    
-    # Substituir variáveis
+    # Extrair dados para o email
     client_name = process.get("client_name", "N/A")
     personal_data = process.get("personal_data", {}) or {}
     client_nif = personal_data.get("nif", process.get("client_nif", "N/A"))
     process_number = process.get("process_number", "N/A")
     
-    email_body = email_template.format(
-        client_name=client_name,
-        client_nif=client_nif,
-        process_number=process_number,
-        documents_list=documents_list,
-        sender_name=current_user.get("name", ""),
-        sender_email=current_user.get("email", "")
-    )
+    # Verificar se existe template personalizado na configuração
+    email_template = doc_config.email_template
     
     # Se admin/CEO enviou mensagem personalizada, usar essa
     if custom_message and current_user["role"] in ["admin", "ceo"]:
@@ -315,6 +509,19 @@ Com os melhores cumprimentos,
             sender_name=current_user.get("name", ""),
             sender_email=current_user.get("email", "")
         )
+    elif email_template:
+        # Usar template personalizado da configuração
+        email_body = email_template.format(
+            client_name=client_name,
+            client_nif=client_nif,
+            process_number=process_number,
+            documents_list=documents_list,
+            sender_name=current_user.get("name", ""),
+            sender_email=current_user.get("email", "")
+        )
+    else:
+        # Usar template HTML profissional por defeito
+        email_body = _build_professional_email_html(process, current_user, documents_list)
     
     # Preparar destinatários TO (suporta múltiplos emails)
     # Prioridade: emails selecionados pelo utilizador > config > fallback
