@@ -1,4 +1,55 @@
 ---
+Task ID: 12
+Agent: Main Agent
+Task: Refatoração KanbanBoard - SRP & Performance (Tech Debt)
+
+Problem Statement:
+O ficheiro `frontend/src/components/KanbanBoard.js` transformou-se num monolito de ~1336 linhas:
+- Geria estados de Drag & Drop, renderização de colunas, cartões, e múltiplos Modals tudo num só sítio
+- Causava re-renders desnecessários em toda a grelha ao digitar em formulários de modals
+- Violação do Princípio de Responsabilidade Única (SRP)
+- Manutenção impossível
+
+Solution: Componentização Restrita
+- Criada estrutura `frontend/src/components/kanban/` com submódulos dedicados
+- Estado dos formulários ISOLADO nos modais (não no componente pai)
+- React.memo nos cartões para prevenir re-renders
+
+Work Log:
+- Criada pasta `frontend/src/components/kanban/`
+- Extraído `KanbanCard.jsx` com React.memo e comparador customizado de props
+- Extraído `KanbanColumn.jsx` com lógica de drop e renderização de cartões
+- Extraído `KanbanHeader.jsx` com filtros e indicador de WebSocket
+- Extraído `KanbanSkeleton.jsx` para estado de loading
+- Extraído `SearchResultsList.jsx` para vista de lista
+- Extraído `ProcessDetailsModal.jsx` com estado isolado
+- Extraído `CreateClientModal.jsx` com estado de formulário local
+- Extraído `AssignUsersModal.jsx` com gestão de utilizadores
+- Extraído `constants.js` com cores de status
+- Criado `index.js` como export central
+- Refatorado `KanbanBoard.js` de 1336 linhas para 486 linhas (~64% redução)
+- KanbanBoard agora é apenas ORQUESTRADOR: fetch de dados, estado global, contexto de D&D
+- Build validado com sucesso
+
+Stage Summary:
+- Ficheiros criados: 10
+  - frontend/src/components/kanban/index.js
+  - frontend/src/components/kanban/constants.js
+  - frontend/src/components/kanban/KanbanCard.jsx
+  - frontend/src/components/kanban/KanbanColumn.jsx
+  - frontend/src/components/kanban/KanbanHeader.jsx
+  - frontend/src/components/kanban/KanbanSkeleton.jsx
+  - frontend/src/components/kanban/SearchResultsList.jsx
+  - frontend/src/components/kanban/ProcessDetailsModal.jsx
+  - frontend/src/components/kanban/CreateClientModal.jsx
+  - frontend/src/components/kanban/AssignUsersModal.jsx
+- Ficheiros modificados: 1
+  - frontend/src/components/KanbanBoard.js (1336 → 486 linhas)
+- Performance: React.memo nos cartões previne re-renders quando inputs de modals mudam
+- Arquitetura: SRP respeitado - cada componente tem uma única responsabilidade
+- Drag & Drop: Funcionalidade preservada com callbacks passados como props
+
+---
 Task ID: 11
 Agent: Main Agent
 Task: Atualização de Documentação - Blind Indexing & Dedicated Collection Pattern
