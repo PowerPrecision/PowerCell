@@ -200,8 +200,7 @@ def _build_professional_email_html(process: dict, user: dict, documents_list: st
     user_email = safe_val(user.get("email"))
     
     # ==== CONSTRUIR HTML ====
-    # Secção do 2º proponente (só se existir)
-    segundo_proponente_html = ""
+    # Secção do 2º proponente (sempre visível, mas com dados ou "Não aplicável")
     if has_second_proponent:
         segundo_proponente_html = f'''
     <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">2º Proponente</h3>
@@ -209,9 +208,6 @@ def _build_professional_email_html(process: dict, user: dict, documents_list: st
         <tr><td style="padding: 4px 0; width: 40%;"><strong>Nome:</strong></td><td>{p2_nome}</td></tr>
         <tr><td style="padding: 4px 0;"><strong>E-mail:</strong></td><td>{p2_email}</td></tr>
         <tr><td style="padding: 4px 0;"><strong>Contacto:</strong></td><td>{p2_telefone}</td></tr>
-        <tr><td style="padding: 4px 0;"><strong>Data de Nascimento:</strong></td><td>{p2_data_nascimento}</td></tr>
-        <tr><td style="padding: 4px 0;"><strong>Contribuinte (NIF):</strong></td><td>{p2_nif}</td></tr>
-        <tr><td style="padding: 4px 0;"><strong>Estado Civil:</strong></td><td>{p2_estado_civil}</td></tr>
     </table>'''
     else:
         segundo_proponente_html = '''
