@@ -155,6 +155,10 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
         "pages": [],  # Clientes não acedem ao sistema
         "actions": [],
     },
+    "parceiro": {
+        "pages": [],  # Parceiros são utilizadores fantasma - sem acesso ao sistema
+        "actions": [],
+    },
 }
 
 
@@ -311,4 +315,5 @@ def get_role_display_info() -> Dict[str, Dict[str, str]]:
         "administrativo": {"label": "Administrativo", "color": "bg-amber-100 text-amber-800"},
         "indexacao": {"label": "Indexação", "color": "bg-gray-100 text-gray-800"},
         "cliente": {"label": "Cliente", "color": "bg-neutral-100 text-neutral-800"},
+        "parceiro": {"label": "Parceiro", "color": "bg-indigo-100 text-indigo-800"},
     }

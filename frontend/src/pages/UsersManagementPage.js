@@ -26,6 +26,7 @@ const roleLabels = {
   indexacao: "Indexação",
   ceo: "CEO",
   admin: "Administrador",
+  parceiro: "Parceiro",
 };
 
 const roleColors = {
@@ -38,6 +39,7 @@ const roleColors = {
   indexacao: "bg-cyan-100 text-cyan-800",
   ceo: "bg-orange-100 text-orange-800",
   admin: "bg-red-100 text-red-800",
+  parceiro: "bg-violet-100 text-violet-800",
 };
 
 const UsersManagementPage = () => {
@@ -380,11 +382,12 @@ const UsersManagementPage = () => {
                           <SelectItem value="diretor">Diretor(a)</SelectItem>
                           <SelectItem value="administrativo">Administrativo(a)</SelectItem>
                           <SelectItem value="indexacao">Indexação</SelectItem>
+                          <SelectItem value="parceiro">Parceiro</SelectItem>
                           <SelectItem value="ceo">CEO</SelectItem>
                           <SelectItem value="admin">Administrador</SelectItem>
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-muted-foreground">Nota: Clientes são processos, não utilizadores do sistema.</p>
+                      <p className="text-xs text-muted-foreground">Nota: Clientes são processos, não utilizadores do sistema. Parceiros são utilizadores fantasma sem acesso à plataforma.</p>
                     </div>
                     <div className="space-y-2">
                       <Label>Pasta Drive</Label>
@@ -427,6 +430,7 @@ const UsersManagementPage = () => {
                   <SelectItem value="diretor">Diretor(a)</SelectItem>
                   <SelectItem value="administrativo">Administrativo(a)</SelectItem>
                   <SelectItem value="indexacao">Indexação</SelectItem>
+                  <SelectItem value="parceiro">Parceiro</SelectItem>
                   <SelectItem value="ceo">CEO</SelectItem>
                   <SelectItem value="admin">Administrador</SelectItem>
                 </SelectContent>
@@ -604,6 +608,7 @@ const UsersManagementPage = () => {
                   <SelectItem value="diretor">Diretor(a)</SelectItem>
                   <SelectItem value="administrativo">Administrativo(a)</SelectItem>
                   <SelectItem value="indexacao">Indexação</SelectItem>
+                  <SelectItem value="parceiro">Parceiro</SelectItem>
                   <SelectItem value="ceo">CEO</SelectItem>
                   <SelectItem value="admin">Administrador</SelectItem>
                 </SelectContent>

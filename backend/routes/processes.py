@@ -597,12 +597,13 @@ async def get_kanban_board(
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
     indexacao_id: Optional[str] = None,
+    parceiro_id: Optional[str] = None,
     user: dict = Depends(require_staff())
 ):
     """
     Get processes organized by status for Kanban board.
     Admin/CEO see all, others see only their assigned processes.
-    Supports filtering by consultor_id, mediador_id, and indexacao_id.
+    Supports filtering by consultor_id, mediador_id, indexacao_id, and parceiro_id.
     Supports multiple consultants and intermediaries per process.
     """
     role = user["role"]
@@ -700,6 +701,26 @@ async def get_kanban_board(
                     query = {"$and": [query, indexacao_filter]}
                 else:
                     query = indexacao_filter
+        
+        if parceiro_id:
+            if parceiro_id == "none":
+                # Sem parceiro atribuído
+                if "$and" not in query:
+                    query["$and"] = []
+                query["$and"].append({
+                    "$or": [
+                        {"assigned_parceiro_id": {"$in": [None, ""]}},
+                        {"assigned_parceiro_id": {"$exists": False}}
+                    ]
+                })
+            else:
+                # Filtro por parceiro específico
+                parceiro_filter = {"assigned_parceiro_id": parceiro_id}
+                if "$or" in query or "$and" in query:
+                    # Já tem filtros, combinar com AND
+                    query = {"$and": [query, parceiro_filter]}
+                else:
+                    query = parceiro_filter
     
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
@@ -723,6 +744,7 @@ async def get_kanban_board(
         "assigned_mediador_id": 1,
         "assigned_mediador_ids": 1,
         "assigned_indexacao_id": 1,
+        "assigned_parceiro_id": 1,
         "created_at": 1,
         "updated_at": 1,
         "notes": 1,
@@ -1417,17 +1439,20 @@ async def assign_process(
     consultor_ids: Optional[str] = None,  # String separada por vírgulas ou ID único
     mediador_ids: Optional[str] = None,   # String separada por vírgulas ou ID único
     indexacao_id: Optional[str] = None,
+    parceiro_id: Optional[str] = None,   # Parceiro (utilizador fantasma)
     # Parâmetros de compatibilidade (deprecated)
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
     user: dict = Depends(require_staff())
 ):
     """
-    Atribuir consultores, intermediários e/ou utilizador de indexação a um processo.
+    Atribuir consultores, intermediários, utilizador de indexação e/ou parceiro a um processo.
     
     Suporta múltiplos consultores e intermediários:
     - consultor_ids: String com IDs separados por vírgula (ex: "id1,id2,id3")
     - mediador_ids: String com IDs separados por vírgula (ex: "id1,id2,id3")
+    
+    O parceiro é um utilizador fantasma (sem acesso ao sistema) para fins de tracking.
     
     Mantém compatibilidade com os parâmetros antigos (consultor_id, mediador_id).
     Qualquer utilizador staff pode atribuir.
@@ -1442,6 +1467,7 @@ async def assign_process(
     old_consultor_ids = process.get("assigned_consultor_ids") or []
     old_mediador_ids = process.get("assigned_mediador_ids") or []
     old_indexacao = process.get("assigned_indexacao_id")
+    old_parceiro = process.get("assigned_parceiro_id")
     
     # Compatibilidade: se consultor_id foi passado, usar como consultor_ids
     if consultor_id and not consultor_ids:
@@ -1572,6 +1598,26 @@ async def assign_process(
                     old_user = await db.users.find_one({"id": old_indexacao}, {"name": 1})
                     old_name = old_user.get("name") if old_user else None
                 await log_history(process_id, user, "Atribuiu indexação", "assigned_indexacao_id", old_name, indexacao_user["name"])
+    
+    # Atribuir parceiro (utilizador fantasma para tracking)
+    if parceiro_id is not None:
+        if parceiro_id == "" or parceiro_id == "null":
+            # Remover parceiro
+            update_data["assigned_parceiro_id"] = None
+            update_data["parceiro_name"] = None
+            if old_parceiro:
+                old_user = await db.users.find_one({"id": old_parceiro}, {"name": 1})
+                await log_history(process_id, user, "Removeu parceiro", "assigned_parceiro_id", old_user.get("name") if old_user else old_parceiro, None)
+        else:
+            parceiro_user = await db.users.find_one({"id": parceiro_id})
+            if parceiro_user:
+                update_data["assigned_parceiro_id"] = parceiro_id
+                update_data["parceiro_name"] = parceiro_user["name"]
+                old_name = None
+                if old_parceiro:
+                    old_user = await db.users.find_one({"id": old_parceiro}, {"name": 1})
+                    old_name = old_user.get("name") if old_user else None
+                await log_history(process_id, user, "Atribuiu parceiro", "assigned_parceiro_id", old_name, parceiro_user["name"])
     
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     return {"success": True, "message": "Atribuições actualizadas com sucesso"}
