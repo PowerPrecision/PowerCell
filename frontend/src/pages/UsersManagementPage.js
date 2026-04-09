@@ -283,17 +283,36 @@ const UsersManagementPage = () => {
                         required
                       />
                     </div>
+                    {/* Email - obrigatório para não-parceiros, opcional para parceiros */}
+                    <div className="space-y-2">
+                      <Label>
+                        Email
+                        {formData.role === "parceiro" && (
+                          <span className="text-xs text-muted-foreground ml-1">(opcional)</span>
+                        )}
+                      </Label>
+                      <Input 
+                        value={formData.email} 
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
+                        required={formData.role !== "parceiro"}
+                        type="email"
+                      />
+                    </div>
+                    {/* Telefone - opcional para todos */}
+                    <div className="space-y-2">
+                      <Label>
+                        Telefone
+                        <span className="text-xs text-muted-foreground ml-1">(opcional)</span>
+                      </Label>
+                      <Input 
+                        value={formData.phone} 
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
+                        type="tel"
+                      />
+                    </div>
                     {/* Campos apenas para não-parceiros */}
                     {formData.role !== "parceiro" && (
                       <>
-                        <div className="space-y-2">
-                          <Label>Email</Label>
-                          <Input 
-                            value={formData.email} 
-                            onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-                            required
-                          />
-                        </div>
                         <div className="space-y-2">
                           <Label>Password</Label>
                           <div className="flex gap-2">
@@ -370,13 +389,6 @@ const UsersManagementPage = () => {
                               </div>
                             );
                           })()}
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Telefone</Label>
-                          <Input 
-                            value={formData.phone} 
-                            onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
-                          />
                         </div>
                         <div className="space-y-2">
                           <Label>Pasta Drive</Label>
@@ -597,23 +609,36 @@ const UsersManagementPage = () => {
                 required
               />
             </div>
+            {/* Email - obrigatório para não-parceiros, opcional para parceiros */}
+            <div className="space-y-2">
+              <Label>
+                Email
+                {formData.role === "parceiro" && (
+                  <span className="text-xs text-muted-foreground ml-1">(opcional)</span>
+                )}
+              </Label>
+              <Input 
+                value={formData.email || ""} 
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
+                required={formData.role !== "parceiro"}
+                type="email"
+              />
+            </div>
+            {/* Telefone - opcional para todos */}
+            <div className="space-y-2">
+              <Label>
+                Telefone
+                <span className="text-xs text-muted-foreground ml-1">(opcional)</span>
+              </Label>
+              <Input 
+                value={formData.phone} 
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
+                type="tel"
+              />
+            </div>
             {/* Campos apenas para não-parceiros */}
             {formData.role !== "parceiro" && (
               <>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input 
-                    value={formData.email || ""} 
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Telefone</Label>
-                  <Input 
-                    value={formData.phone} 
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
-                  />
-                </div>
                 <div className="space-y-2">
                   <Label>Pasta Drive</Label>
                   <Input 
