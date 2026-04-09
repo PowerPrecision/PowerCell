@@ -141,9 +141,14 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
         ],
     },
     "indexacao": {
+        # INDEXACAO tem acesso apenas ao essencial para o seu fluxo de trabalho
+        # Removido "dashboard" e "my_clients" para consolidar a informação
         "pages": [
-            "dashboard", "kanban", "processes", "clients", "documents",
-            "notifications", "my_clients"
+            "kanban",        # Quadro Geral
+            "processes",     # Os Meus Processos
+            "clients",       # Lista de Clientes
+            "documents",
+            "notifications"
         ],
         "actions": [
             "upload_docs", "delete_docs", "download_docs",

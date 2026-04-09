@@ -111,11 +111,12 @@ const DashboardRedirect = () => {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin vai para /admin, CEO e outros staff vão para /processos
+  // Admin vai para /admin, todos os outros staff vão para /kanban (Quadro Geral)
+  // Isso melhora a performance e foco, evitando carregar o Dashboard completo
   if (user.role === "admin") {
     return <Navigate to="/admin" replace />;
   }
-  return <Navigate to="/processos" replace />;
+  return <Navigate to="/kanban" replace />;
 };
 
 // Componente para redirecionar a rota raiz baseado no estado de autenticação
@@ -130,12 +131,13 @@ const RootRedirect = () => {
     );
   }
 
-  // Se autenticado, redireciona para /processos (página principal)
+  // Se autenticado, redireciona para /kanban (Quadro Geral)
+  // Isso melhora a performance e foco no fluxo de trabalho principal
   if (user) {
     if (user.role === "admin") {
       return <Navigate to="/admin" replace />;
     }
-    return <Navigate to="/processos" replace />;
+    return <Navigate to="/kanban" replace />;
   }
 
   // Se não autenticado, mostra o formulário público
