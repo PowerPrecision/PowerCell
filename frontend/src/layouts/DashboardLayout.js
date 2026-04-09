@@ -254,6 +254,11 @@ const DashboardLayout = ({ children, title }) => {
             icon: Cog,
             items: [
               {
+                label: "Sistema",
+                icon: Cog,
+                href: "/configuracoes",
+              },
+              {
                 label: "Estados do Workflow",
                 icon: Settings,
                 href: "/workflow-estados",
