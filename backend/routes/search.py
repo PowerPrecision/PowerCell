@@ -4,12 +4,13 @@ Endpoint para pesquisa unificada em processos, clientes e tarefas
 """
 import logging
 import unicodedata
+import re
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Query
-import re
 
 from database import db
 from services.auth import get_current_user
+from services.encryption import generate_nif_hash, generate_email_hash, generate_telefone_hash
 from utils.input_sanitization import (sanitize_string, sanitize_email, sanitize_phone, sanitize_url, log_sanitization_rejection)
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,17 @@ async def global_search(
     # usamos regex simples case-insensitive
     simple_regex = {"$regex": re.escape(search_term), "$options": "i"}
     
+    # Verificar se a pesquisa parece um NIF (9 dígitos)
+    nif_clean = re.sub(r'[^\d]', '', search_term)
+    is_nif_search = len(nif_clean) == 9
+    
+    # Verificar se parece um email
+    is_email_search = '@' in search_term
+    
+    # Verificar se parece um telefone (9+ dígitos)
+    telefone_clean = re.sub(r'[^\d]', '', search_term)
+    is_telefone_search = len(telefone_clean) >= 9 and len(telefone_clean) <= 15 and search_term.replace('+', '').replace(' ', '').isdigit()
+    
     results = {
         "processes": [],
         "clients": [],
@@ -137,15 +149,32 @@ async def global_search(
     }
     
     try:
-        # Pesquisar processos
-        process_query = {
-            "$or": [
-                {"client_name": regex_pattern},
-                {"personal_data.nif": simple_regex},
-                {"personal_data.email": simple_regex},
-                {"process_type": regex_pattern},
-            ]
-        }
+        # Pesquisar processos - usar blind indexes quando apropriado
+        process_search_conditions = [
+            {"client_name": regex_pattern},
+            {"process_type": regex_pattern},
+        ]
+        
+        # Se parece NIF, usar blind index
+        if is_nif_search:
+            nif_hash = generate_nif_hash(nif_clean)
+            if nif_hash:
+                process_search_conditions.append({"personal_data.nif_hash": nif_hash})
+            # Fallback para dados antigos não migrados
+            process_search_conditions.append({"personal_data.nif": simple_regex})
+        else:
+            process_search_conditions.append({"personal_data.nif": simple_regex})
+        
+        # Se parece email, usar blind index
+        if is_email_search:
+            email_hash = generate_email_hash(search_term.lower().strip())
+            if email_hash:
+                process_search_conditions.append({"personal_data.email_hash": email_hash})
+            process_search_conditions.append({"personal_data.email": simple_regex})
+        else:
+            process_search_conditions.append({"personal_data.email": simple_regex})
+        
+        process_query = {"$or": process_search_conditions}
         
         processes = await db.processes.find(
             process_query,
@@ -161,15 +190,41 @@ async def global_search(
         
         results["processes"] = processes
         
-        # Pesquisar CLIENTES (registos de clientes)
-        client_query = {
-            "$or": [
-                {"nome": regex_pattern},
-                {"dados_pessoais.nif": simple_regex},
-                {"contacto.email": simple_regex},
-                {"contacto.telefone": simple_regex},
-            ]
-        }
+        # Pesquisar CLIENTES (registos de clientes) - usar blind indexes
+        client_search_conditions = [
+            {"nome": regex_pattern},
+        ]
+        
+        # Se parece NIF, usar blind index
+        if is_nif_search:
+            nif_hash = generate_nif_hash(nif_clean)
+            if nif_hash:
+                client_search_conditions.append({"dados_pessoais.nif_hash": nif_hash})
+                client_search_conditions.append({"titular2_data.nif_hash": nif_hash})
+            # Fallback para dados antigos não migrados
+            client_search_conditions.append({"dados_pessoais.nif": simple_regex})
+        else:
+            client_search_conditions.append({"dados_pessoais.nif": simple_regex})
+        
+        # Se parece email, usar blind index
+        if is_email_search:
+            email_hash = generate_email_hash(search_term.lower().strip())
+            if email_hash:
+                client_search_conditions.append({"contacto.email_hash": email_hash})
+            client_search_conditions.append({"contacto.email": simple_regex})
+        else:
+            client_search_conditions.append({"contacto.email": simple_regex})
+        
+        # Se parece telefone, usar blind index
+        if is_telefone_search:
+            telefone_hash = generate_telefone_hash(telefone_clean)
+            if telefone_hash:
+                client_search_conditions.append({"contacto.telefone_hash": telefone_hash})
+            client_search_conditions.append({"contacto.telefone": simple_regex})
+        else:
+            client_search_conditions.append({"contacto.telefone": simple_regex})
+        
+        client_query = {"$or": client_search_conditions}
         
         clients = await db.clients.find(
             client_query,
