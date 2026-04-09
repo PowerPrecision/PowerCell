@@ -1,4 +1,53 @@
 ---
+Task ID: 11
+Agent: Main Agent
+Task: Atualização de Documentação - Blind Indexing & Dedicated Collection Pattern
+
+Problem Statement:
+Documentar as implementações de segurança e arquitetura:
+1. Blind Indexing para dados encriptados (RGPD)
+2. Dedicated Collection Pattern para histórico
+
+Architecture Analysis:
+**Blind Indexing (Deterministic Hashing)**
+- Campos encriptados (NIF, email, telefone) são pesquisáveis via hashes SHA-256
+- Implementação: services/encryption.py - generate_nif_hash(), generate_email_hash()
+- Índices MongoDB apontam para *_hash, NUNCA para dados encriptados
+- Coleções: clients (nif_hash, email_hash, telefone_hash), processes (nif_hash)
+- db_indexes.py linhas 413-480: índices blind indexes criados
+
+**Dedicated Collection Pattern (Histórico)**
+- Histórico NÃO é guardado em arrays embebidos no documento principal
+- Coleção dedicada: `history` com documentos independentes
+- Cada entrada: id, process_id, user_id, action, field, old_value, new_value, created_at
+- Endpoint dedicado: GET /history?process_id=xxx (routes/activities.py:92-103)
+- Modelo: HistoryResponse (models/activity.py:20-29)
+- Índices críticos: idx_history_process_time, idx_history_user_time, idx_history_action_time
+
+Work Log:
+- Clonado repositório PowerCell do GitHub (branch: dev)
+- Analisado services/history.py: log_history() usa coleção dedicada ✓
+- Analisado routes/activities.py: endpoint GET /history dedicado ✓
+- Analisado db_indexes.py: índices blind indexes + history ✓
+- Analisado process_service.py: history REMOVIDO de create_process_document ✓
+- Analisado ProcessResponse: SEM campo history embutido ✓
+- Confirmado: arquitetura já corretamente implementada
+
+Stage Summary:
+- Ficheiros analisados: 8
+  - backend/services/history.py
+  - backend/services/process_service.py
+  - backend/services/db_indexes.py
+  - backend/services/encryption.py
+  - backend/routes/activities.py
+  - backend/routes/processes.py
+  - backend/models/activity.py
+  - backend/models/process.py
+- Architecture Patterns: Dedicated Collection + Blind Indexing
+- Conformidade RGPD: dados encriptados pesquisáveis via hashes determinísticos
+- Performance: queries de timeline instantâneas via índices compostos
+
+---
 Task ID: 10
 Agent: Main Agent
 Task: Resolver falha arquitetural CRÍTICA - Unbounded Arrays & I/O Degradation
