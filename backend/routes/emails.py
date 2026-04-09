@@ -56,6 +56,179 @@ doc_router = None  # Mantido como None para compatibilidade com server.py
 _sync_status = {}
 
 
+def _extract_email_variables(process: dict, user: dict, documents_list: str) -> dict:
+    """
+    Extrai todas as variáveis disponíveis para uso em templates de email.
+    Retorna um dicionário com todas as variáveis que podem ser usadas em templates personalizados.
+    """
+    personal_data = process.get("personal_data", {}) or {}
+    titular2_data = process.get("titular2_data", {}) or {}
+    financial_data = process.get("financial_data", {}) or {}
+    real_estate_data = process.get("real_estate_data", {}) or {}
+    
+    # Helper para formatação segura
+    def safe_val(value, default="N/A"):
+        if value is None or value == "":
+            return default
+        return str(value)
+    
+    def format_currency(value):
+        if value is None or value == "":
+            return "N/A"
+        try:
+            return f"{float(value):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+        except (ValueError, TypeError):
+            return str(value)
+    
+    def format_date(date_str):
+        if not date_str:
+            return "N/A"
+        try:
+            if "T" in date_str:
+                date_str = date_str.split("T")[0]
+            parts = date_str.split("-")
+            if len(parts) == 3:
+                return f"{parts[2]}/{parts[1]}/{parts[0]}"
+            return date_str
+        except:
+            return date_str
+    
+    # 1º Proponente
+    p1_nome = safe_val(personal_data.get("nome_completo") or personal_data.get("nome") or process.get("client_name"))
+    p1_email = safe_val(personal_data.get("email") or process.get("client_email"))
+    p1_telefone = safe_val(personal_data.get("telefone") or personal_data.get("phone") or process.get("client_phone"))
+    p1_data_nascimento = format_date(personal_data.get("birth_date") or personal_data.get("data_nascimento"))
+    p1_tipo_doc = safe_val(personal_data.get("documento_id"))
+    p1_nif = safe_val(personal_data.get("nif") or process.get("client_nif"))
+    
+    # Estado civil e regime
+    estado_civil_raw = personal_data.get("estado_civil", "")
+    regime_casamento = ""
+    if estado_civil_raw:
+        if "_" in estado_civil_raw:
+            parts = estado_civil_raw.split("_", 1)
+            p1_estado_civil = parts[0].capitalize()
+            if len(parts) > 1:
+                regime_map = {
+                    "adquiridos": "Comunhão de Adquiridos",
+                    "geral": "Comunhão Geral de Bens",
+                    "separacao": "Separação de Bens"
+                }
+                regime_casamento = regime_map.get(parts[1], parts[1].replace("_", " ").title())
+        else:
+            p1_estado_civil = estado_civil_raw.capitalize()
+    else:
+        p1_estado_civil = "N/A"
+    p1_regime_casamento = regime_casamento if regime_casamento else "N/A"
+    
+    p1_profissao = safe_val(personal_data.get("profissao"))
+    
+    # Vínculo laboral
+    vinculo_raw = personal_data.get("tipo_contrato") or financial_data.get("employment_type") or personal_data.get("vinculo_laboral")
+    vinculo_map = {
+        "efetivo": "Contrato Efetivo",
+        "termo_certo": "Contrato a Termo Certo",
+        "termo_incerto": "Contrato a Termo Incerto",
+        "verde": "Recibos Verdes",
+        "autonomo": "Trabalhador Independente",
+        "empresario": "Empresário",
+        "reformado": "Reformado",
+        "desempregado": "Desempregado"
+    }
+    p1_vinculo = vinculo_map.get(vinculo_raw, safe_val(vinculo_raw, "N/A"))
+    
+    p1_salario = format_currency(personal_data.get("salario_liquido") or financial_data.get("monthly_income"))
+    p1_dependentes = safe_val(personal_data.get("dependentes") or personal_data.get("num_dependentes"))
+    p1_despesas = format_currency(personal_data.get("despesas_mensais") or financial_data.get("despesas_mensais"))
+    
+    # Situação bancária
+    situacao_bancaria = []
+    if financial_data.get("tem_creditos_activos"):
+        situacao_bancaria.append("Tem créditos ativos")
+    if personal_data.get("insolvencia") or financial_data.get("insolvencia"):
+        situacao_bancaria.append("Insolvência")
+    if personal_data.get("incumprimento") or financial_data.get("incumprimento"):
+        situacao_bancaria.append("Incumprimento")
+    p1_situacao_bancaria = ", ".join(situacao_bancaria) if situacao_bancaria else "Sem situações registadas"
+    
+    # 2º Proponente
+    p2_nome = safe_val(titular2_data.get("name") or titular2_data.get("nome"), "Não aplicável")
+    p2_email = safe_val(titular2_data.get("email"), "Não aplicável")
+    p2_telefone = safe_val(titular2_data.get("phone") or titular2_data.get("telefone"), "Não aplicável")
+    
+    has_second_proponent = bool(titular2_data.get("name") or titular2_data.get("nome"))
+    
+    # Dados do Crédito Atual
+    banco_atual = safe_val(financial_data.get("banco_atual") or financial_data.get("banco_credito"))
+    num_titulares = 2 if has_second_proponent else 1
+    
+    contrato_mais_2_anos = safe_val(financial_data.get("contrato_mais_2_anos"), "N/A")
+    if contrato_mais_2_anos == True or contrato_mais_2_anos == "true" or contrato_mais_2_anos == "sim":
+        contrato_mais_2_anos = "Sim"
+    elif contrato_mais_2_anos == False or contrato_mais_2_anos == "false" or contrato_mais_2_anos == "nao":
+        contrato_mais_2_anos = "Não"
+    
+    valor_aquisicao = format_currency(financial_data.get("valor_aquisicao") or real_estate_data.get("valor_imovel"))
+    montante_divida = format_currency(financial_data.get("montante_divida") or financial_data.get("valor_em_divida"))
+    
+    # Dados da Transferência Pretendida
+    valor_extra = format_currency(financial_data.get("valor_extra") or financial_data.get("valor_multiopcoes"))
+    localidade_imovel = safe_val(real_estate_data.get("localizacao") or real_estate_data.get("localidade"))
+    
+    possibilidade_fiador = safe_val(financial_data.get("fiador") or financial_data.get("tem_fiador"), "N/A")
+    if possibilidade_fiador == True or possibilidade_fiador == "true" or possibilidade_fiador == "sim":
+        possibilidade_fiador = "Sim"
+    elif possibilidade_fiador == False or possibilidade_fiador == "false" or possibilidade_fiador == "nao":
+        possibilidade_fiador = "Não"
+    
+    # Retornar todas as variáveis
+    return {
+        # Dados básicos
+        "client_name": process.get("client_name", "N/A"),
+        "client_nif": p1_nif,
+        "process_number": process.get("process_number", "N/A"),
+        "documents_list": documents_list,
+        
+        # 1º Proponente
+        "p1_nome": p1_nome,
+        "p1_email": p1_email,
+        "p1_telefone": p1_telefone,
+        "p1_data_nascimento": p1_data_nascimento,
+        "p1_tipo_doc": p1_tipo_doc,
+        "p1_nif": p1_nif,
+        "p1_estado_civil": p1_estado_civil,
+        "p1_regime_casamento": p1_regime_casamento,
+        "p1_profissao": p1_profissao,
+        "p1_vinculo": p1_vinculo,
+        "p1_salario": p1_salario,
+        "p1_dependentes": p1_dependentes,
+        "p1_despesas": p1_despesas,
+        "p1_situacao_bancaria": p1_situacao_bancaria,
+        
+        # 2º Proponente
+        "p2_nome": p2_nome,
+        "p2_email": p2_email,
+        "p2_telefone": p2_telefone,
+        
+        # Crédito Atual
+        "banco_atual": banco_atual,
+        "num_titulares": num_titulares,
+        "contrato_mais_2_anos": contrato_mais_2_anos,
+        "valor_aquisicao": valor_aquisicao,
+        "montante_divida": montante_divida,
+        
+        # Transferência Pretendida
+        "valor_extra": valor_extra,
+        "localidade_imovel": localidade_imovel,
+        "possibilidade_fiador": possibilidade_fiador,
+        
+        # Remetente
+        "sender_name": user.get("name", ""),
+        "sender_email": user.get("email", ""),
+        "sender_phone": user.get("phone", ""),
+    }
+
+
 def _build_professional_email_html(process: dict, user: dict, documents_list: str) -> str:
     """
     Constrói o corpo do email em HTML profissional para envio de documentação B2B.
@@ -494,27 +667,39 @@ async def send_documentation_email(
     # Verificar se existe template personalizado na configuração
     email_template = doc_config.email_template
     
+    # Extrair todas as variáveis disponíveis para templates
+    template_vars = _extract_email_variables(process, current_user, documents_list)
+    
     # Se admin/CEO enviou mensagem personalizada, usar essa
     if custom_message and current_user["role"] in ["admin", "ceo"]:
         custom_message = sanitize_string(custom_message, max_length=10000)
-        email_body = custom_message.format(
-            client_name=client_name,
-            client_nif=client_nif,
-            process_number=process_number,
-            documents_list=documents_list,
-            sender_name=current_user.get("name", ""),
-            sender_email=current_user.get("email", "")
-        )
+        try:
+            email_body = custom_message.format(**template_vars)
+        except KeyError as e:
+            logger.warning(f"Variável não encontrada no custom_message: {e}")
+            email_body = custom_message.format(
+                client_name=client_name,
+                client_nif=client_nif,
+                process_number=process_number,
+                documents_list=documents_list,
+                sender_name=current_user.get("name", ""),
+                sender_email=current_user.get("email", "")
+            )
     elif email_template:
-        # Usar template personalizado da configuração
-        email_body = email_template.format(
-            client_name=client_name,
-            client_nif=client_nif,
-            process_number=process_number,
-            documents_list=documents_list,
-            sender_name=current_user.get("name", ""),
-            sender_email=current_user.get("email", "")
-        )
+        # Usar template personalizado da configuração com todas as variáveis
+        try:
+            email_body = email_template.format(**template_vars)
+        except KeyError as e:
+            logger.warning(f"Variável não encontrada no template: {e}")
+            # Fallback com variáveis básicas
+            email_body = email_template.format(
+                client_name=client_name,
+                client_nif=client_nif,
+                process_number=process_number,
+                documents_list=documents_list,
+                sender_name=current_user.get("name", ""),
+                sender_email=current_user.get("email", "")
+            )
     else:
         # Usar template HTML profissional por defeito
         email_body = _build_professional_email_html(process, current_user, documents_list)
