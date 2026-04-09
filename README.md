@@ -139,9 +139,76 @@ O perfil de **Indexação** foi projetado para operadores focados na organizaç�
 - JWT com access token (24h) + refresh token (7d)
 - Rate limiting (uploads, deletes, IA)
 - Encriptação AES-128-CBC (Fernet) para dados sensíveis
+- **Blind Indexing**: Hashes determinísticos (HMAC-SHA256) para pesquisa de dados encriptados
 - DOMPurify para sanitização
 - Validação MIME type (magic bytes)
 - Password strength validation
+
+#### Blind Indexing (Pesquisa de Dados Encriptados)
+
+Para cumprir o RGPD, dados sensíveis como NIF, email e telefone são encriptados com Fernet (AES-128-CBC). No entanto, dados encriptados não são pesquisáveis diretamente. A solução é **Blind Indexing**:
+
+```
+┌─────────────────┐    ┌──────────────────────┐
+│   NIF Original  │───▶│   Fernet Encrypt     │───▶ Armazenado encriptado
+│   "123456789"   │    │   "ENC:xxxx..."       │
+└─────────────────┘    └──────────────────────┘
+         │
+         ▼
+┌─────────────────┐    ┌──────────────────────┐
+│  HMAC-SHA256    │───▶│  nif_hash (índice)   │───▶ Pesquisável!
+│  "a1b2c3..."     │    │  Único por NIF       │
+└─────────────────┘    └──────────────────────┘
+```
+
+**Implementação:**
+- `services/encryption.py`: `generate_nif_hash()`, `generate_email_hash()`
+- Campos de hash: `nif_hash`, `email_hash`, `telefone_hash`
+- Índices MongoDB em `*_hash`, nunca em dados encriptados
+
+**Exemplo de query:**
+```python
+# Pesquisa por NIF
+nif_hash = generate_nif_hash(nif)
+client = await db.clients.find_one({"dados_pessoais.nif_hash": nif_hash})
+```
+
+### Arquitectura de Dados
+
+#### Dedicated Collection Pattern (Histórico)
+
+O histórico de processos NÃO é guardado em arrays embebidos no documento principal. Em vez disso, usa uma **coleção dedicada** (`history`) com documentos independentes:
+
+```
+┌─────────────────────────────┐     ┌─────────────────────────────┐
+│     Collection: processes   │     │     Collection: history     │
+├─────────────────────────────┤     ├─────────────────────────────┤
+│ id: "proc-001"              │     │ id: "hist-001"             │
+│ client_name: "João Silva"   │     │ process_id: "proc-001"      │
+│ status: "em_analise"        │     │ user_id: "user-123"         │
+│ ... (sem array history!)    │     │ action: "Alterou estado"    │
+│                             │     │ field: "status"             │
+│                             │     │ old_value: "clientes_espera"│
+│                             │     │ new_value: "em_analise"     │
+│                             │     │ created_at: "2024-01-15..." │
+└─────────────────────────────┘     └─────────────────────────────┘
+```
+
+**Vantagens:**
+- ✅ Evita limite de 16MB do MongoDB
+- ✅ I/O otimizado (sem reescrever documento inteiro)
+- ✅ Queries instantâneas via índice `process_id + created_at`
+- ✅ Memory bloat eliminado nas listagens
+
+**Endpoint dedicado:**
+```
+GET /api/history?process_id={process_id}
+```
+
+**Índices críticos:**
+- `idx_history_process_time`: (process_id, created_at desc)
+- `idx_history_user_time`: (user_id, created_at desc)
+- `idx_history_action_time`: (action, created_at desc)
 
 ### Observabilidade
 - Sentry SDK (frontend + backend) para monitorização de erros
