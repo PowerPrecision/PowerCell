@@ -489,6 +489,11 @@ const DashboardLayout = ({ children, title }) => {
       const mainItems = [
         ...baseItems,
         statsItem,
+        {
+          label: "Quadro Geral",
+          icon: LayoutGrid,
+          href: "/kanban",
+        },
       ];
       
       const negocioItems = [];
