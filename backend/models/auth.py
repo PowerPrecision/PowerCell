@@ -17,6 +17,7 @@ class UserRoleEnum(str, Enum):
     DIRETOR = "diretor"  # Diretor(a) - gestão de direção
     CEO = "ceo"  # Between admin and staff - can manage basic things + consultor/intermediário tasks
     ADMIN = "admin"
+    PARCEIRO = "parceiro"  # Utilizador fantasma - apenas para tracking/informativo, sem acesso à plataforma
     
     @classmethod
     def from_string(cls, role: str) -> "UserRoleEnum":
@@ -43,11 +44,13 @@ class UserRole:
     DIRETOR = UserRoleEnum.DIRETOR.value
     CEO = UserRoleEnum.CEO.value
     ADMIN = UserRoleEnum.ADMIN.value
+    PARCEIRO = UserRoleEnum.PARCEIRO.value
     
     # Lista de todos os roles válidos
     ALL_ROLES = [e.value for e in UserRoleEnum]
     
     # Grupos de roles para permissões
+    # STAFF_ROLES não inclui PARCEIRO (utilizador fantasma sem acesso à plataforma)
     STAFF_ROLES = [
         UserRoleEnum.CONSULTOR.value,
         UserRoleEnum.INTERMEDIARIO.value,
@@ -142,7 +145,7 @@ class UserLogin(BaseModel):
 
 class UserResponse(BaseModel):
     id: str
-    email: str
+    email: Optional[str] = None  # Opcional para parceiros (ghost user)
     name: str
     phone: Optional[str] = None
     role: str
@@ -160,8 +163,8 @@ class TokenResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: str
-    password: str
+    email: Optional[str] = None  # Opcional para parceiros (ghost user)
+    password: Optional[str] = None  # Opcional para parceiros (ghost user)
     name: str
     phone: Optional[str] = None
     role: str
