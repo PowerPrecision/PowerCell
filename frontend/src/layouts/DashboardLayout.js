@@ -254,6 +254,11 @@ const DashboardLayout = ({ children, title }) => {
             icon: Cog,
             items: [
               {
+                label: "Sistema",
+                icon: Cog,
+                href: "/configuracoes",
+              },
+              {
                 label: "Estados do Workflow",
                 icon: Settings,
                 href: "/workflow-estados",
@@ -484,6 +489,11 @@ const DashboardLayout = ({ children, title }) => {
       const mainItems = [
         ...baseItems,
         statsItem,
+        {
+          label: "Quadro Geral",
+          icon: LayoutGrid,
+          href: "/kanban",
+        },
       ];
       
       const negocioItems = [];
