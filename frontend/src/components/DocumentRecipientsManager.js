@@ -313,23 +313,105 @@ const DocumentRecipientsManager = ({ token, user }) => {
     }
   };
 
-  // Template padrão
-  const defaultTemplate = `Prezados,
+  // Template padrão HTML profissional
+  const defaultTemplate = `<div style="font-family: 'Segoe UI', Arial, sans-serif; color: #333333; line-height: 1.6; max-width: 800px; margin: 0 auto;">
+    <p>Estimado(a) Parceiro(a),</p>
+    <p>Venho por este meio submeter o pedido de análise para <strong>Transferência de Crédito Habitação</strong>, relativamente ao(s) proponente(s) abaixo identificado(s).</p>
 
-Segue em anexo a documentação do cliente:
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">1º Proponente</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; width: 40%;"><strong>Nome:</strong></td><td>{p1_nome}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>E-mail:</strong></td><td>{p1_email}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contacto:</strong></td><td>{p1_telefone}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Data de Nascimento:</strong></td><td>{p1_data_nascimento}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Documento de Identificação:</strong></td><td>{p1_tipo_doc}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contribuinte (NIF):</strong></td><td>{p1_nif}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Estado Civil:</strong></td><td>{p1_estado_civil}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Regime de Casamento:</strong></td><td>{p1_regime_casamento}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Profissão:</strong></td><td>{p1_profissao}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Vínculo Laboral:</strong></td><td>{p1_vinculo}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Salário Líquido:</strong></td><td>{p1_salario}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Dependentes:</strong></td><td>{p1_dependentes}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Despesas Mensais:</strong></td><td>{p1_despesas}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Situação bancária (Insolvência/Incumprimento):</strong></td><td>{p1_situacao_bancaria}</td></tr>
+    </table>
 
-**Cliente:** {client_name}
-**NIF:** {client_nif}
-**Processo:** #{process_number}
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">2º Proponente</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; width: 40%;"><strong>Nome:</strong></td><td>{p2_nome}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>E-mail:</strong></td><td>{p2_email}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contacto:</strong></td><td>{p2_telefone}</td></tr>
+    </table>
 
-**Documentos enviados:**
-{documents_list}
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">Dados do Crédito Atual</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; width: 50%;"><strong>Banco atual:</strong></td><td>{banco_atual}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Nº de titulares do empréstimo:</strong></td><td>{num_titulares}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Contrato celebrado há mais de 2 anos:</strong></td><td>{contrato_mais_2_anos}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Valor de aquisição do imóvel:</strong></td><td>{valor_aquisicao}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Montante em dívida:</strong></td><td>{montante_divida}</td></tr>
+    </table>
 
-Esta documentação foi enviada através do sistema PowerCell.
+    <h3 style="color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; margin-top: 30px;">Dados da Transferência Pretendida</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; width: 50%;"><strong>Valor de multiopções/extra pretendido:</strong></td><td>{valor_extra}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Localidade do imóvel:</strong></td><td>{localidade_imovel}</td></tr>
+        <tr><td style="padding: 4px 0;"><strong>Existe possibilidade de fiador?:</strong></td><td>{possibilidade_fiador}</td></tr>
+    </table>
+    
+    <p style="margin-top: 30px; margin-bottom: 30px;">Estou ao dispor para qualquer esclarecimento.</p>
 
-Com os melhores cumprimentos,
-{sender_name}
-{sender_email}`;
+    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+    <div style="font-size: 14px; color: #4b5563;">
+        <p style="margin: 2px 0;"><strong>{sender_name}</strong></p>
+        <p style="margin: 2px 0;">Tlm: {sender_phone}</p>
+        <p style="margin: 2px 0;">Email: {sender_email}</p>
+        <br>
+        <p style="margin: 2px 0;"><strong>PrecisionCrédito</strong></p>
+        <p style="margin: 2px 0;">Licença de Intermediação de Crédito nº 0005798AM</p>
+    </div>
+</div>`;
+
+  // Todas as variáveis disponíveis para templates
+  const availableVariables = [
+    { name: "{client_name}", desc: "Nome do cliente" },
+    { name: "{client_nif}", desc: "NIF do cliente" },
+    { name: "{process_number}", desc: "Número do processo" },
+    { name: "{documents_list}", desc: "Lista de documentos anexados" },
+    { name: "---", desc: "--- 1º Proponente ---" },
+    { name: "{p1_nome}", desc: "Nome completo" },
+    { name: "{p1_email}", desc: "E-mail" },
+    { name: "{p1_telefone}", desc: "Contacto telefónico" },
+    { name: "{p1_data_nascimento}", desc: "Data de nascimento" },
+    { name: "{p1_tipo_doc}", desc: "Documento de identificação" },
+    { name: "{p1_nif}", desc: "Contribuinte (NIF)" },
+    { name: "{p1_estado_civil}", desc: "Estado civil" },
+    { name: "{p1_regime_casamento}", desc: "Regime de casamento" },
+    { name: "{p1_profissao}", desc: "Profissão" },
+    { name: "{p1_vinculo}", desc: "Vínculo laboral" },
+    { name: "{p1_salario}", desc: "Salário líquido" },
+    { name: "{p1_dependentes}", desc: "Nº de dependentes" },
+    { name: "{p1_despesas}", desc: "Despesas mensais" },
+    { name: "{p1_situacao_bancaria}", desc: "Situação bancária" },
+    { name: "---", desc: "--- 2º Proponente ---" },
+    { name: "{p2_nome}", desc: "Nome completo" },
+    { name: "{p2_email}", desc: "E-mail" },
+    { name: "{p2_telefone}", desc: "Contacto telefónico" },
+    { name: "---", desc: "--- Crédito Atual ---" },
+    { name: "{banco_atual}", desc: "Banco atual" },
+    { name: "{num_titulares}", desc: "Nº de titulares" },
+    { name: "{contrato_mais_2_anos}", desc: "Contrato > 2 anos" },
+    { name: "{valor_aquisicao}", desc: "Valor de aquisição" },
+    { name: "{montante_divida}", desc: "Montante em dívida" },
+    { name: "---", desc: "--- Transferência ---" },
+    { name: "{valor_extra}", desc: "Valor multiopções/extra" },
+    { name: "{localidade_imovel}", desc: "Localidade do imóvel" },
+    { name: "{possibilidade_fiador}", desc: "Possibilidade de fiador" },
+    { name: "---", desc: "--- Remetente ---" },
+    { name: "{sender_name}", desc: "Nome do remetente" },
+    { name: "{sender_email}", desc: "E-mail do remetente" },
+    { name: "{sender_phone}", desc: "Telefone do remetente" },
+  ];
 
   // Adicionar múltiplos emails TO (separados por vírgula, ponto-e-vírgula ou espaço)
   const addMultipleEmails = (input) => {
@@ -634,20 +716,28 @@ Com os melhores cumprimentos,
                 className="min-h-[200px] font-mono text-sm"
               />
               <div className="bg-muted p-3 rounded-lg">
-                <p className="text-xs font-medium mb-2">Variáveis disponíveis:</p>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    "{client_name}",
-                    "{client_nif}",
-                    "{process_number}",
-                    "{documents_list}",
-                    "{sender_name}",
-                    "{sender_email}",
-                  ].map((v) => (
-                    <Badge key={v} variant="outline" className="font-mono text-xs">
-                      {v}
-                    </Badge>
-                  ))}
+                <p className="text-xs font-medium mb-2">Variáveis disponíveis (clique para copiar):</p>
+                <div className="max-h-48 overflow-y-auto">
+                  <div className="flex flex-wrap gap-1.5">
+                    {availableVariables.map((v, i) => (
+                      v.name === "---" ? (
+                        <span key={i} className="w-full text-xs text-muted-foreground font-medium mt-2 mb-1">{v.desc}</span>
+                      ) : (
+                        <Badge
+                          key={i}
+                          variant="outline"
+                          className="font-mono text-xs cursor-pointer hover:bg-primary/10"
+                          onClick={() => {
+                            navigator.clipboard.writeText(v.name);
+                            toast.success(`Copiado: ${v.name}`);
+                          }}
+                          title={v.desc}
+                        >
+                          {v.name}
+                        </Badge>
+                      )
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
