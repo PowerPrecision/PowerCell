@@ -252,6 +252,7 @@ const ProcessDetails = () => {
   const [selectedConsultores, setSelectedConsultores] = useState([]);  // Array para múltiplos
   const [selectedMediadores, setSelectedMediadores] = useState([]);    // Array para múltiplos
   const [selectedIndexacao, setSelectedIndexacao] = useState("");
+  const [selectedParceiro, setSelectedParceiro] = useState("");  // Parceiro (utilizador fantasma)
   const [savingAssignment, setSavingAssignment] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   
@@ -373,6 +374,7 @@ const ProcessDetails = () => {
       setSelectedMediadores(mediadorIds);
       
       setSelectedIndexacao(process.assigned_indexacao_id || "");
+      setSelectedParceiro(process.assigned_parceiro_id || "");  // Carregar parceiro atual
       
       // Abrir dialog e buscar utilizadores se necessário
       setShowAssignDialog(true);
@@ -392,6 +394,7 @@ const ProcessDetails = () => {
       // Enviar múltiplos intermediários separados por vírgula
       params.append("mediador_ids", selectedMediadores.filter(Boolean).join(","));
       params.append("indexacao_id", selectedIndexacao || "");
+      params.append("parceiro_id", selectedParceiro || "");  // Adicionar parceiro
       
       const response = await fetch(`${API_URL}/api/processes/${id}/assign?${params.toString()}`, {
         method: "POST",
@@ -3070,6 +3073,30 @@ const ProcessDetails = () => {
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Parceiro - Seleção Única (Utilizador Fantasma) */}
+              <div>
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  Parceiro
+                  <span className="text-xs text-muted-foreground font-normal">(Utilizador fantasma - sem acesso)</span>
+                </Label>
+                <Select value={selectedParceiro || "none"} onValueChange={(v) => setSelectedParceiro(v === "none" ? "" : v)}>
+                  <SelectTrigger className="mt-1" data-testid="parceiro-select">
+                    <SelectValue placeholder="Seleccionar parceiro..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum</SelectItem>
+                    {appUsers
+                      .filter(u => u.role === "parceiro")
+                      .map(u => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.name}
                         </SelectItem>
                       ))
                     }
