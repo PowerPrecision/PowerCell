@@ -376,10 +376,19 @@ const PDFAnnotationViewer = ({
         const page = await pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale });
 
-        // Limpar container
+        // ====================================================================
+        // NOTA: Manipulação direta da DOM para renderização de PDF
+        // ====================================================================
+        // PDF.js requer criação dinâmica de canvas elements e manipulação
+        // direta de style para suportar devicePixelRatio (displays Retina).
+        // Isto NÃO é uma violação do paradigma React - é a API necessária
+        // para bibliotecas de renderização baseadas em canvas.
+        // ====================================================================
+        
+        // Limpar container (necessário para re-renderizar páginas)
         container.innerHTML = "";
 
-        // Criar canvas
+        // Criar canvas dinamicamente (PDF.js requer isto)
         const canvas = document.createElement("canvas");
         const context = canvas.getContext("2d");
 
@@ -387,11 +396,13 @@ const PDFAnnotationViewer = ({
         const dpr = window.devicePixelRatio || 1;
         canvas.width = Math.floor(viewport.width * dpr);
         canvas.height = Math.floor(viewport.height * dpr);
+        // Style dimensions must match viewport (not scaled by DPR)
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
 
         context.scale(dpr, dpr);
 
+        // Container sizing for proper layout
         container.style.width = `${viewport.width}px`;
         container.style.height = `${viewport.height}px`;
         container.appendChild(canvas);

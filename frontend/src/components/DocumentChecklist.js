@@ -2,7 +2,7 @@
  * DocumentChecklist - Checklist de documentos do sistema de armazenamento
  * Verifica se os documentos esperados estão na pasta do cliente
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
@@ -83,6 +83,9 @@ const DocumentChecklist = ({ processId, clientName, onUpdate }) => {
   const [generating, setGenerating] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [filesInput, setFilesInput] = useState("");
+  
+  // Ref para o input de pasta (substitui document.getElementById)
+  const folderInputRef = useRef(null);
 
   // Carregar checklist existente
   const fetchChecklist = useCallback(async () => {
@@ -322,18 +325,18 @@ const DocumentChecklist = ({ processId, clientName, onUpdate }) => {
             <div>
               <label className="block">
                 <input
+                  ref={folderInputRef}
                   type="file"
                   webkitdirectory="true"
                   directory="true"
                   multiple
                   onChange={handleFolderSelect}
                   className="hidden"
-                  id="folder-input"
                 />
                 <Button
                   variant="outline"
                   className="w-full"
-                  onClick={() => document.getElementById("folder-input").click()}
+                  onClick={() => folderInputRef.current?.click()}
                 >
                   <FolderOpen className="h-4 w-4 mr-2" />
                   Seleccionar Pasta Local

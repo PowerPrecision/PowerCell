@@ -29,6 +29,9 @@ export const ThemeProvider = ({ children }) => {
 
   useEffect(() => {
     // Aplicar tema ao documento
+    // NOTA: Esta é a forma CORRETA de implementar dark mode com Tailwind CSS 'class' strategy.
+    // O Tailwind espera a classe 'dark' no elemento <html> (document.documentElement).
+    // Isto NÃO é uma violação do paradigma React - é a API recomendada pelo Tailwind.
     const root = document.documentElement;
     
     if (theme === "dark") {
