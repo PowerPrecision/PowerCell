@@ -28,6 +28,9 @@ from models.document import DocumentExpiryCreate, DocumentExpiryResponse
 from services.auth import get_current_user, require_roles
 from middleware.rate_limit import limiter
 
+# Importar verificação de permissões de processo
+from services.process_service import can_edit_process_data
+
 # Importar o novo serviço S3
 from services.s3_storage import s3_service, sanitize_folder_name
 
@@ -2323,6 +2326,12 @@ async def apply_ai_suggestions(
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    # SECURITY: Verificar permissão de edição antes de aplicar sugestões
+    can_edit, reason = can_edit_process_data(user, process)
+    if not can_edit:
+        logger.warning(f"IDOR attempt: User {user.get('id')} ({user.get('role')}) tried to apply AI suggestions on process {process_id}: {reason}")
+        raise HTTPException(status_code=403, detail=f"Não tem permissões para alterar este processo. {reason}")
     
     # Mapeamento de campos frontend para subdocumentos aninhados no backend
     # Cada entrada: (campo_frontend) → (subdocumento.campo_backend)
