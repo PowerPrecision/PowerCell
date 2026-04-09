@@ -465,6 +465,17 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+          {/* Botão de Criação Rápida de Cliente */}
+          {canCreateClient && (
+            <Button 
+              onClick={() => setShowCreateDialog(true)}
+              className="bg-teal-600 hover:bg-teal-700"
+              data-testid="btn-create-client"
+            >
+              <UserPlus className="h-4 w-4 mr-2" />
+              <span className="hidden sm:inline">Novo Cliente</span>
+            </Button>
+          )}
           {/* Toggle View Mode quando há pesquisa */}
           {searchTerm.length >= 2 && (
             <div className="flex gap-1 border rounded-md p-1">
