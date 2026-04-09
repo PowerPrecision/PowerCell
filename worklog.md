@@ -1,4 +1,48 @@
 ---
+Task ID: 10
+Agent: Main Agent
+Task: Resolver falha arquitetural CRÍTICA - Unbounded Arrays & I/O Degradation
+
+Problem Statement:
+O sistema estava a guardar histórico em arrays embebidos no documento principal (`"history": [...]` usando `$push`). Com o tempo, este array cresce infinitamente, causando:
+- MongoDB 16MB document limit crash
+- I/O degradation (reescrita de documento inteiro a cada alteração)
+- Memory bloat nas listagens
+- Performance degradation em operações de update
+
+Solution: Dedicated Collection Pattern
+- Histórico movido para coleção dedicada `history`
+- Cada entrada é um documento independente
+- Queries usam índice process_id + timestamp (instantâneas)
+- Documentos de processo mantêm-se pequenos e rápidos
+
+Work Log:
+- Analisado process_service.py: linha 266-272 criava array history embebido
+- Analisado process_kanban.py: linha 200 usava $push para history
+- Analisado services/history.py: já usava coleção dedicada (bom!)
+- Identificados outros locais com problema: leads.py, properties.py, ai_bulk.py
+- Removido array history embebido de process_service.py
+- Corrigido process_kanban.py para usar log_history (coleção dedicada)
+- Adicionados índices críticos em db_indexes.py:
+  - idx_history_process_time (process_id + created_at desc)
+  - idx_history_user_time (user_id + created_at desc)
+  - idx_history_action_time (action + created_at desc)
+  - idx_history_created_desc
+  - idx_history_field
+- Adicionado 'history' ao get_index_stats
+
+Stage Summary:
+- Ficheiros modificados: 3
+  - backend/services/process_service.py
+  - backend/services/process_kanban.py
+  - backend/services/db_indexes.py
+- Architecture Pattern: Dedicated Collection Pattern
+- Índices críticos para timeline queries instantâneas
+- Documentos de processo agora livres de arrays não limitados
+
+NOTA: Outros arrays embebidos em leads.py e properties.py ainda precisam de refatoração similar.
+
+---
 Task ID: 9
 Agent: Main Agent
 Task: Implementar templates HTML personalizados com todas as variáveis disponíveis
