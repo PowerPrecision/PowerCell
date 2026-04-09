@@ -23,6 +23,7 @@ DEFAULT_CATEGORIES = [
     "Financeiros", 
     "Imóvel",
     "Bancários",
+    "RGPD",
     "Outros"
 ]
 
