@@ -233,10 +233,11 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
   useEffect(() => {
     fetchKanbanData();
     
-    // Polling para atualizar dados a cada 10 segundos (sync com Trello)
+    // Polling para atualizar dados a cada 30 segundos (sync com Trello)
+    // Aumentado de 10s para 30s para reduzir carga no servidor
     const pollInterval = setInterval(() => {
       fetchKanbanData();
-    }, 10000);
+    }, 30000);
     
     return () => clearInterval(pollInterval);
   }, [fetchKanbanData]);

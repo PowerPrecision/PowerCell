@@ -52,8 +52,8 @@ const notificationColors = {
   default: "text-gray-500 bg-gray-50"
 };
 
-// Polling interval for real-time notifications (10 seconds)
-const POLLING_INTERVAL = 10000;
+// Polling interval for real-time notifications (30 seconds - increased to reduce server load)
+const POLLING_INTERVAL = 30000;
 
 const NotificationsDropdown = () => {
   const navigate = useNavigate();

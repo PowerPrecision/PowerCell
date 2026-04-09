@@ -68,23 +68,36 @@ def _get_client_ip(request: Request) -> str:
 
 def _get_rate_limit_key(request: Request) -> str:
     """
-    Gera chave única para rate limiting combinando IP e path.
-    Permite limites diferentes por endpoint.
-    """
-    client_ip = _get_client_ip(request)
-    # Normalizar path removendo IDs variáveis
-    path = request.url.path
-    # Simplificar paths com UUIDs ou IDs numéricos
-    import re
-    normalized_path = re.sub(r'/[a-f0-9-]{36}', '/{id}', path)  # UUIDs
-    normalized_path = re.sub(r'/\d+', '/{id}', normalized_path)  # IDs numéricos
+    Gera chave única para rate limiting.
     
-    return f"{client_ip}:{normalized_path}"
+    Para utilizadores autenticados: usa user_id (rate limit individual)
+    Para não autenticados: usa IP (rate limit por IP)
+    
+    Isto evita que múltiplos utilizadores na mesma rede partilhem o mesmo limite.
+    """
+    # Tentar obter user_id do header Authorization
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            import jwt
+            from config import JWT_SECRET, JWT_ALGORITHM
+            token = auth_header[7:]
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            user_id = payload.get("sub")
+            if user_id:
+                return f"user:{user_id}"
+        except:
+            pass
+    
+    # Fallback: usar IP para utilizadores não autenticados
+    client_ip = _get_client_ip(request)
+    return f"ip:{client_ip}"
 
 
 # Instância principal do limiter
+# Usa _get_rate_limit_key que diferencia utilizadores autenticados de IPs
 limiter = Limiter(
-    key_func=_get_client_ip,
+    key_func=_get_rate_limit_key,
     default_limits=[RATE_LIMITS["default"]],
     headers_enabled=True,  # Adiciona headers X-RateLimit-*
     strategy="fixed-window"  # Estratégia de janela fixa
