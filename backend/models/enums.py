@@ -96,11 +96,12 @@ class UserRoleEnum(str, Enum):
     DIRETOR = "diretor"
     CEO = "ceo"
     ADMIN = "admin"
+    PARCEIRO = "parceiro"
     
     @classmethod
     def staff_roles(cls) -> List[str]:
-        """Roles que são staff (não cliente)."""
-        return [r.value for r in cls if r != cls.CLIENTE]
+        """Roles que são staff (não cliente e não parceiro - utilizador fantasma)."""
+        return [r.value for r in cls if r not in [cls.CLIENTE, cls.PARCEIRO]]
     
     @classmethod
     def management_roles(cls) -> List[str]:
