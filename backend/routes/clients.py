@@ -30,7 +30,15 @@ from models.client import (
 )
 from services.auth import get_current_user, require_roles
 from models.auth import UserRole
-from services.encryption import encryption_service
+from services.encryption import (
+    encryption_service,
+    encrypt_client_data,
+    decrypt_client_data,
+    decrypt_clients_list,
+    generate_nif_hash,
+    generate_email_hash,
+    generate_telefone_hash,
+)
 from services.process_service import get_next_process_number
 from services.s3_storage import s3_service
 from utils.input_sanitization import (
@@ -183,77 +191,8 @@ def create_accent_insensitive_regex(search_term: str) -> dict:
     return {"$regex": pattern, "$options": ""}
 
 
-def encrypt_client_data(data: dict) -> dict:
-    """Encripta campos sensíveis de um cliente."""
-    if not encryption_service.is_available() or not data:
-        return data
-    
-    result = data.copy()
-    
-    # Encriptar dados_pessoais
-    if "dados_pessoais" in result and isinstance(result["dados_pessoais"], dict):
-        fields = ["nif", "documento_id", "morada_fiscal", "phone", "telefone"]
-        for field in fields:
-            if field in result["dados_pessoais"] and result["dados_pessoais"][field]:
-                result["dados_pessoais"][field] = encryption_service.encrypt(str(result["dados_pessoais"][field]))
-    
-    # Encriptar contacto
-    if "contacto" in result and isinstance(result["contacto"], dict):
-        fields = ["telefone", "telefone_secundario", "phone"]
-        for field in fields:
-            if field in result["contacto"] and result["contacto"][field]:
-                result["contacto"][field] = encryption_service.encrypt(str(result["contacto"][field]))
-    
-    return result
-
-
-def decrypt_client_data(data: dict) -> dict:
-    """Desencripta campos sensíveis de um cliente."""
-    if not data:
-        return data
-    
-    # Usar cópia profunda para evitar modificar o original
-    result = copy.deepcopy(data)
-    
-    # Função auxiliar para desencriptar campo
-    def decrypt_field(value):
-        if not value or not isinstance(value, str):
-            return value
-        if not value.startswith("ENC:"):
-            return value
-        # Tentar desencriptar mesmo se o serviço não estiver "disponível"
-        try:
-            decrypted = encryption_service.decrypt(value)
-            if decrypted and not decrypted.startswith("ENC:"):
-                return decrypted
-        except Exception as e:
-            logger.warning(f"Erro ao desencriptar valor: {e}")
-        return value
-    
-    # Desencriptar dados_pessoais
-    if "dados_pessoais" in result and isinstance(result["dados_pessoais"], dict):
-        fields = ["nif", "documento_id", "morada_fiscal", "phone", "telefone"]
-        for field in fields:
-            if field in result["dados_pessoais"] and result["dados_pessoais"][field]:
-                result["dados_pessoais"][field] = decrypt_field(result["dados_pessoais"][field])
-    
-    # Desencriptar contacto
-    if "contacto" in result and isinstance(result["contacto"], dict):
-        fields = ["telefone", "telefone_secundario", "phone"]
-        for field in fields:
-            if field in result["contacto"] and result["contacto"][field]:
-                result["contacto"][field] = decrypt_field(result["contacto"][field])
-    
-    # Desencriptar campo nif no nível raiz (se existir)
-    if "nif" in result and result["nif"]:
-        result["nif"] = decrypt_field(result["nif"])
-    
-    return result
-
-
-def decrypt_clients_list(clients: list) -> list:
-    """Desencripta uma lista de clientes."""
-    return [decrypt_client_data(c) for c in clients]
+# As funções de encriptação/desencriptação de clientes estão agora em services/encryption.py
+# e são importadas diretamente: encrypt_client_data, decrypt_client_data, decrypt_clients_list
 
 
 # ==============================================================================
@@ -296,16 +235,33 @@ async def list_registered_clients(
     
     # Construir query
     query = {"registration_completed": True}
-    
+
     # Filtro de pesquisa - ignora acentos no nome
+    # NOTA: Para NIF, usamos blind index (nif_hash) para pesquisa exata
+    # A pesquisa por regex em NIF plain text é mantida para compatibilidade com dados antigos
     if search:
         name_regex = create_accent_insensitive_regex(search)
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
-        query["$or"] = [
+
+        # Verificar se a pesquisa é um NIF válido (9 dígitos)
+        nif_clean = re.sub(r'[^\d]', '', search)
+        search_conditions = [
             {"nome": name_regex},
             {"contacto.email": simple_regex},
-            {"dados_pessoais.nif": simple_regex}
         ]
+
+        # Se parece um NIF, pesquisar também por blind index
+        if len(nif_clean) == 9:
+            nif_hash = generate_nif_hash(nif_clean)
+            if nif_hash:
+                search_conditions.append({"dados_pessoais.nif_hash": nif_hash})
+            # Manter pesquisa em plain text para dados antigos não migrados
+            search_conditions.append({"dados_pessoais.nif": simple_regex})
+        else:
+            # Não é um NIF válido, pesquisar apenas nome e email
+            search_conditions.append({"dados_pessoais.nif": simple_regex})
+
+        query["$or"] = search_conditions
     
     # Filtro por ter processo
     if has_process is not None:
@@ -466,6 +422,10 @@ async def assign_client_to_user(
     client = await db.clients.find_one({"id": client_id})
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    # Desencriptar dados sensíveis do cliente antes de copiar para o processo
+    # Isto evita dupla encriptação quando o processo for encriptado
+    client = decrypt_client_data(client)
     
     # Buscar utilizador de destino
     target_user = await db.users.find_one({"id": target_user_id})
@@ -557,7 +517,12 @@ async def assign_client_to_user(
             process_doc["consultor_name"] = target_user.get("name")
         elif target_role == "indexacao":
             process_doc["assigned_indexacao_id"] = target_user_id
-        
+
+        # Encriptar dados sensíveis do processo antes de inserir
+        # (o cliente já foi desencriptado acima, por isso os dados estão em plain text)
+        from services.process_service import encrypt_sensitive_data as encrypt_process_data
+        process_doc = encrypt_process_data(process_doc)
+
         # Inserir processo
         await db.processes.insert_one(process_doc)
     
@@ -943,14 +908,23 @@ async def create_client(
     
     sanitized_fonte = sanitize_string(client_data.fonte, max_length=100) if client_data.fonte else None
     sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas else None
-    
+
     # Verificar se já existe cliente com mesmo NIF ou email
+    # Usar blind index (nif_hash, email_hash) para pesquisa de dados encriptados
     existing_query = []
     if sanitized_nif:
+        nif_hash = generate_nif_hash(sanitized_nif)
+        if nif_hash:
+            existing_query.append({"dados_pessoais.nif_hash": nif_hash})
+        # Fallback para dados antigos não migrados
         existing_query.append({"dados_pessoais.nif": sanitized_nif})
     if sanitized_email:
-        existing_query.append({"contacto.email": sanitized_email})
-    
+        email_hash = generate_email_hash(sanitized_email)
+        if email_hash:
+            existing_query.append({"contacto.email_hash": email_hash})
+        # Fallback para dados antigos não migrados
+        existing_query.append({"contacto.email": sanitized_email.lower()})
+
     if existing_query:
         existing = await db.clients.find_one({"$or": existing_query})
         if existing:
@@ -1076,7 +1050,12 @@ async def update_client(
         update_dict["tags"] = client_data.tags
     if sanitized_notas is not None:
         update_dict["notas"] = sanitized_notas
-    
+
+    # RGPD: Encriptar dados sensíveis antes de atualizar
+    # Isto garante que NIFs, telefones e outros dados sensíveis
+    # são guardados encriptados, mesmo em atualizações
+    update_dict = encrypt_client_data(update_dict)
+
     await db.clients.update_one(
         {"id": client_id},
         {"$set": update_dict}
@@ -1373,20 +1352,32 @@ async def find_or_create_client(
         raise HTTPException(status_code=400, detail="NIF inválido. Deve ter 9 dígitos.")
     
     sanitized_telefone = sanitize_phone(telefone) if telefone else None
-    
-    # Tentar encontrar por NIF
+
+    # Tentar encontrar por NIF (usar blind index para dados encriptados)
     if sanitized_nif:
-        existing = await db.clients.find_one({"dados_pessoais.nif": sanitized_nif})
+        nif_hash = generate_nif_hash(sanitized_nif)
+        existing = None
+        if nif_hash:
+            existing = await db.clients.find_one({"dados_pessoais.nif_hash": nif_hash})
+        # Fallback para dados antigos não migrados
+        if not existing:
+            existing = await db.clients.find_one({"dados_pessoais.nif": sanitized_nif})
         if existing:
             return {
                 "found": True,
                 "client": existing,
                 "match_type": "nif"
             }
-    
-    # Tentar encontrar por email
+
+    # Tentar encontrar por email (usar blind index para dados encriptados)
     if sanitized_email:
-        existing = await db.clients.find_one({"contacto.email": sanitized_email})
+        email_hash = generate_email_hash(sanitized_email)
+        existing = None
+        if email_hash:
+            existing = await db.clients.find_one({"contacto.email_hash": email_hash})
+        # Fallback para dados antigos não migrados
+        if not existing:
+            existing = await db.clients.find_one({"contacto.email": sanitized_email.lower()})
         if existing:
             return {
                 "found": True,
