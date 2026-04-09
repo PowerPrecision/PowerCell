@@ -56,6 +56,7 @@ const ProfileSettingsPage = React.lazy(() => import("./pages/ProfileSettingsPage
 const FormManagementPage = React.lazy(() => import("./pages/FormManagementPage"));
 const AuditTrailPage = React.lazy(() => import("./pages/AuditTrailPage"));
 const FinanceDashboard = React.lazy(() => import("./pages/FinanceDashboard"));
+const RGPDMigrationPage = React.lazy(() => import("./pages/RGPDMigrationPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -516,6 +517,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <AuditTrailPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* RGPD Migration - Admin, CEO and Diretor */}
+          <Route
+            path="/admin/migracao-rgpd"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor"]}>
+                <RGPDMigrationPage />
               </ProtectedRoute>
             }
           />

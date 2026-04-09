@@ -31,6 +31,12 @@ from models.process import PublicClientRegistration
 from services.email import send_registration_confirmation, send_new_client_notification
 from services.alerts import notify_new_client_registration
 from services.process_service import get_next_process_number
+from services.encryption import (
+    encrypt_client_data,
+    decrypt_client_data,
+    generate_nif_hash,
+    generate_email_hash,
+)
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, log_sanitization_rejection
@@ -68,10 +74,19 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     
     # =========================================
     # VERIFICAR DUPLICADOS (EMAIL E NIF)
+    # Usar blind indexes para pesquisa de dados encriptados
     # =========================================
-    
+
     # Verificar se já existe cliente com o mesmo email
-    existing_by_email = await db.clients.find_one({"contacto.email": clean_email.lower()})
+    # Usar blind index (email_hash) para dados encriptados, fallback para plain text
+    email_hash = generate_email_hash(clean_email)
+    existing_by_email = None
+    if email_hash:
+        existing_by_email = await db.clients.find_one({"contacto.email_hash": email_hash})
+    if not existing_by_email:
+        # Fallback para dados antigos não migrados
+        existing_by_email = await db.clients.find_one({"contacto.email": clean_email.lower()})
+
     if existing_by_email:
         # Registar duplicado no system_error_logger para monitoring
         try:
@@ -95,12 +110,20 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
                 "message": "Já existe um registo com este email. A nossa equipa entrará em contacto consigo em breve."
             }
         )
-    
+
     # Verificar se já existe cliente com o mesmo NIF
     raw_nif = data.personal_data.nif if data.personal_data else None
     clean_nif = sanitize_nif(raw_nif) if raw_nif else None
     if clean_nif:
-        existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": clean_nif})
+        # Usar blind index (nif_hash) para dados encriptados, fallback para plain text
+        nif_hash = generate_nif_hash(clean_nif)
+        existing_by_nif = None
+        if nif_hash:
+            existing_by_nif = await db.clients.find_one({"dados_pessoais.nif_hash": nif_hash})
+        if not existing_by_nif:
+            # Fallback para dados antigos não migrados
+            existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": clean_nif})
+
         if existing_by_nif:
             # Registar duplicado no system_error_logger para monitoring
             try:
@@ -173,6 +196,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     
     # =========================================
     # CRIAR FICHA DE CLIENTE (tabela clients)
+    # RGPD: Encriptar dados sensíveis ANTES de inserir
     # =========================================
     client_doc = {
         "id": client_id,
@@ -197,15 +221,13 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         "assigned_at": None,
         "custom_fields": data.custom_fields if data.custom_fields else {},
     }
-    
-    await db.clients.insert_one(client_doc)
-    
-    # O5 - Encriptar dados sensíveis do cliente após inserção
+
+    # RGPD: Encriptar dados sensíveis ANTES de inserir na BD
+    # Isto garante que NIFs, telefones e outros dados sensíveis
+    # nunca são guardados em plain text
     try:
-        from services.encryption import encrypt_sensitive_data
-        encrypted = encrypt_sensitive_data(client_doc)
-        if encrypted != client_doc:
-            await db.clients.update_one({"id": client_id}, {"$set": encrypted})
+        client_doc = encrypt_client_data(client_doc)
+        logger.info(f"Dados do cliente {client_id} encriptados com sucesso (blind indexes incluídos)")
     except Exception as e:
         logger.warning(f"Falha ao encriptar dados do cliente {client_id}: {e}")
         try:
@@ -220,6 +242,8 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             )
         except Exception:
             pass
+
+    await db.clients.insert_one(client_doc)
     
     # =========================================
     # M3 - CRIAR PASTA S3 PARA O CLIENTE

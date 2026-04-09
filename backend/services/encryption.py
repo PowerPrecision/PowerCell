@@ -12,6 +12,12 @@ CAMPOS SENSÍVEIS:
 - Moradas fiscais (morada_fiscal)
 - Telefones (client_phone, titular2_data.phone)
 
+BLIND INDEXING (Pesquisa de dados encriptados):
+- nif_hash: SHA-256 do NIF para pesquisa de duplicados
+- telefone_hash: SHA-256 do telefone para pesquisa de duplicados
+- O hash é determinístico (mesmo valor = mesmo hash), permitindo pesquisa
+  sem expor o valor real em plain text
+
 IMPORTANTE: A chave de encriptação deve ser definida em variável de ambiente
 ENCRYPTION_KEY. Se não definida, uma chave é gerada (não persiste entre reinícios).
 ====================================================================
@@ -19,6 +25,9 @@ ENCRYPTION_KEY. Se não definida, uma chave é gerada (não persiste entre rein�
 import os
 import logging
 import base64
+import hashlib
+import re
+import copy
 from typing import Optional, Any, Dict, List
 from functools import wraps
 
@@ -307,3 +316,251 @@ def is_encrypted(value: str) -> bool:
     if not value or not isinstance(value, str):
         return False
     return value.startswith(EncryptionService.ENCRYPTION_PREFIX)
+
+
+# =====================================================================
+# BLIND INDEXING - HASH DETERMINÍSTICO PARA PESQUISA
+# =====================================================================
+# Permite pesquisar dados encriptados sem expor o valor real.
+# O hash é determinístico: mesmo valor = mesmo hash (mas não reversível)
+
+# Salt para blind index (DEVE ser diferente do salt de encriptação)
+BLIND_INDEX_SALT = os.environ.get("BLIND_INDEX_SALT", "creditoimo-blind-index-salt-2024").encode()
+
+
+def generate_blind_index(value: str, index_type: str = "general") -> str:
+    """
+    Gera um hash determinístico (blind index) para um valor sensível.
+    
+    Este hash permite pesquisar dados encriptados na base de dados:
+    - Mesmo valor = mesmo hash (determinístico)
+    - Não é reversível (não dá para obter o valor original)
+    - Usa salt específico para cada tipo de índice
+    
+    Args:
+        value: Valor a gerar hash (NIF, telefone, etc.)
+        index_type: Tipo de índice ("nif", "telefone", "email", "general")
+        
+    Returns:
+        Hash SHA-256 em formato hexadecimal (64 caracteres)
+    """
+    if not value:
+        return ""
+    
+    # Normalizar valor (remover espaços, caracteres especiais)
+    normalized = re.sub(r'[^\w]', '', str(value).lower().strip())
+    
+    if not normalized:
+        return ""
+    
+    # Salt específico por tipo de índice
+    type_salt = f"{BLIND_INDEX_SALT.decode()}:{index_type}".encode()
+    
+    # Gerar hash SHA-256 com salt
+    hash_input = f"{normalized}:{type_salt.hex()}".encode()
+    return hashlib.sha256(hash_input).hexdigest()
+
+
+def generate_nif_hash(nif: str) -> str:
+    """Gera hash determinístico para NIF português."""
+    if not nif:
+        return ""
+    # Limpar NIF (apenas dígitos)
+    clean_nif = re.sub(r'[^\d]', '', str(nif))
+    if len(clean_nif) != 9:
+        return ""
+    return generate_blind_index(clean_nif, "nif")
+
+
+def generate_telefone_hash(telefone: str) -> str:
+    """Gera hash determinístico para número de telefone."""
+    if not telefone:
+        return ""
+    # Limpar telefone (apenas dígitos)
+    clean_phone = re.sub(r'[^\d]', '', str(telefone))
+    if len(clean_phone) < 9:
+        return ""
+    return generate_blind_index(clean_phone, "telefone")
+
+
+def generate_email_hash(email: str) -> str:
+    """Gera hash determinístico para email."""
+    if not email:
+        return ""
+    return generate_blind_index(email.lower().strip(), "email")
+
+
+# =====================================================================
+# ENCRIPTAÇÃO DE CLIENTES (COLEÇÃO 'clients')
+# =====================================================================
+
+# Campos sensíveis na coleção 'clients'
+CLIENT_SENSITIVE_FIELDS = {
+    "dados_pessoais": ["nif", "documento_id", "morada_fiscal", "telefone", "phone"],
+    "contacto": ["telefone", "telefone_secundario", "phone"],
+    "titular2_data": ["nif", "documento_id", "telefone", "phone"],
+}
+
+
+def encrypt_client_data(data: dict) -> dict:
+    """
+    Encripta campos sensíveis de um cliente antes de guardar na BD.
+    
+    Inclui:
+    - Encriptação dos campos sensíveis (NIF, telefones, etc.)
+    - Geração de blind indexes (nif_hash, telefone_hash) para pesquisa
+    
+    Campos encriptados:
+    - dados_pessoais.nif, documento_id, morada_fiscal, telefone
+    - contacto.telefone, telefone_secundario
+    - titular2_data.nif, documento_id, telefone
+    
+    Blind indexes gerados:
+    - dados_pessoais.nif_hash (para pesquisa de NIF)
+    - contacto.telefone_hash (para pesquisa de telefone)
+    
+    Args:
+        data: Dicionário com dados do cliente
+        
+    Returns:
+        Dicionário com campos sensíveis encriptados e blind indexes
+    """
+    if not encryption_service.is_available() or not data:
+        # Mesmo sem encriptação, gerar blind indexes
+        result = data.copy()
+        _add_client_blind_indexes(result)
+        return result
+    
+    result = copy.deepcopy(data)
+    
+    # Gerar blind indexes ANTES de encriptar
+    _add_client_blind_indexes(result)
+    
+    # Encriptar dados_pessoais
+    if "dados_pessoais" in result and isinstance(result["dados_pessoais"], dict):
+        for field in CLIENT_SENSITIVE_FIELDS["dados_pessoais"]:
+            if field in result["dados_pessoais"] and result["dados_pessoais"][field]:
+                result["dados_pessoais"][field] = encryption_service.encrypt(
+                    str(result["dados_pessoais"][field])
+                )
+    
+    # Encriptar contacto
+    if "contacto" in result and isinstance(result["contacto"], dict):
+        for field in CLIENT_SENSITIVE_FIELDS["contacto"]:
+            if field in result["contacto"] and result["contacto"][field]:
+                result["contacto"][field] = encryption_service.encrypt(
+                    str(result["contacto"][field])
+                )
+    
+    # Encriptar titular2_data
+    if "titular2_data" in result and isinstance(result["titular2_data"], dict):
+        for field in CLIENT_SENSITIVE_FIELDS["titular2_data"]:
+            if field in result["titular2_data"] and result["titular2_data"][field]:
+                result["titular2_data"][field] = encryption_service.encrypt(
+                    str(result["titular2_data"][field])
+                )
+    
+    # Encriptar campo nif no nível raiz (se existir - compatibilidade)
+    if "nif" in result and result["nif"]:
+        result["nif"] = encryption_service.encrypt(str(result["nif"]))
+    
+    return result
+
+
+def _add_client_blind_indexes(data: dict) -> None:
+    """
+    Adiciona blind indexes ao documento do cliente (modifica in-place).
+    
+    Gera:
+    - dados_pessoais.nif_hash
+    - contacto.telefone_hash
+    - contacto.email_hash
+    """
+    # Hash do NIF
+    if "dados_pessoais" in data and isinstance(data["dados_pessoais"], dict):
+        nif = data["dados_pessoais"].get("nif")
+        if nif and not data["dados_pessoais"].get("nif_hash"):
+            nif_clean = re.sub(r'[^\d]', '', str(nif))
+            if len(nif_clean) == 9:
+                data["dados_pessoais"]["nif_hash"] = generate_nif_hash(nif_clean)
+    
+    # Hash do telefone
+    if "contacto" in data and isinstance(data["contacto"], dict):
+        telefone = data["contacto"].get("telefone")
+        if telefone and not data["contacto"].get("telefone_hash"):
+            data["contacto"]["telefone_hash"] = generate_telefone_hash(telefone)
+        
+        # Hash do email para pesquisa
+        email = data["contacto"].get("email")
+        if email and not data["contacto"].get("email_hash"):
+            data["contacto"]["email_hash"] = generate_email_hash(email)
+    
+    # Hash do NIF do titular2
+    if "titular2_data" in data and isinstance(data["titular2_data"], dict):
+        nif2 = data["titular2_data"].get("nif")
+        if nif2 and not data["titular2_data"].get("nif_hash"):
+            nif2_clean = re.sub(r'[^\d]', '', str(nif2))
+            if len(nif2_clean) == 9:
+                data["titular2_data"]["nif_hash"] = generate_nif_hash(nif2_clean)
+
+
+def decrypt_client_data(data: dict) -> dict:
+    """
+    Desencripta campos sensíveis de um cliente após ler da BD.
+    
+    NOTA: Os blind indexes (nif_hash, telefone_hash) NÃO são removidos,
+    pois são necessários para pesquisas futuras.
+    
+    Args:
+        data: Dicionário com dados encriptados
+        
+    Returns:
+        Dicionário com campos sensíveis desencriptados
+    """
+    if not data:
+        return data
+    
+    result = copy.deepcopy(data)
+    
+    # Função auxiliar para desencriptar
+    def decrypt_field(value):
+        if not value or not isinstance(value, str):
+            return value
+        if not value.startswith("ENC:"):
+            return value
+        try:
+            decrypted = encryption_service.decrypt(value)
+            if decrypted and not decrypted.startswith("ENC:"):
+                return decrypted
+        except Exception as e:
+            logger.warning(f"Erro ao desencriptar valor: {e}")
+        return value
+    
+    # Desencriptar dados_pessoais
+    if "dados_pessoais" in result and isinstance(result["dados_pessoais"], dict):
+        for field in CLIENT_SENSITIVE_FIELDS["dados_pessoais"]:
+            if field in result["dados_pessoais"] and result["dados_pessoais"][field]:
+                result["dados_pessoais"][field] = decrypt_field(result["dados_pessoais"][field])
+    
+    # Desencriptar contacto
+    if "contacto" in result and isinstance(result["contacto"], dict):
+        for field in CLIENT_SENSITIVE_FIELDS["contacto"]:
+            if field in result["contacto"] and result["contacto"][field]:
+                result["contacto"][field] = decrypt_field(result["contacto"][field])
+    
+    # Desencriptar titular2_data
+    if "titular2_data" in result and isinstance(result["titular2_data"], dict):
+        for field in CLIENT_SENSITIVE_FIELDS["titular2_data"]:
+            if field in result["titular2_data"] and result["titular2_data"][field]:
+                result["titular2_data"][field] = decrypt_field(result["titular2_data"][field])
+    
+    # Desencriptar campo nif no nível raiz (se existir)
+    if "nif" in result and result["nif"]:
+        result["nif"] = decrypt_field(result["nif"])
+    
+    return result
+
+
+def decrypt_clients_list(clients: list) -> list:
+    """Desencripta uma lista de clientes."""
+    return [decrypt_client_data(c) for c in clients]
