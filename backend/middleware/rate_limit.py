@@ -26,25 +26,25 @@ logger = logging.getLogger(__name__)
 # Limites por tipo de endpoint
 RATE_LIMITS = {
     # Autenticação - mais restritivo para prevenir brute force
-    "auth": os.environ.get("RATE_LIMIT_AUTH", "5/minute"),
+    "auth": os.environ.get("RATE_LIMIT_AUTH", "10/minute"),
     
     # Endpoints gerais de leitura
-    "read": os.environ.get("RATE_LIMIT_READ", "60/minute"),
+    "read": os.environ.get("RATE_LIMIT_READ", "120/minute"),
     
     # Endpoints de escrita/modificação
-    "write": os.environ.get("RATE_LIMIT_WRITE", "30/minute"),
+    "write": os.environ.get("RATE_LIMIT_WRITE", "60/minute"),
     
     # Endpoints de upload de ficheiros
-    "upload": os.environ.get("RATE_LIMIT_UPLOAD", "10/minute"),
+    "upload": os.environ.get("RATE_LIMIT_UPLOAD", "20/minute"),
     
     # Endpoints de exportação/relatórios
-    "export": os.environ.get("RATE_LIMIT_EXPORT", "5/minute"),
+    "export": os.environ.get("RATE_LIMIT_EXPORT", "10/minute"),
     
     # Endpoints de IA/processamento pesado
-    "ai": os.environ.get("RATE_LIMIT_AI", "10/minute"),
+    "ai": os.environ.get("RATE_LIMIT_AI", "20/minute"),
     
     # Limite global default
-    "default": os.environ.get("RATE_LIMIT_DEFAULT", "100/minute"),
+    "default": os.environ.get("RATE_LIMIT_DEFAULT", "200/minute"),
 }
 
 
