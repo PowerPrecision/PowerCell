@@ -1,231 +1,103 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { ScrollArea, ScrollBar } from "../components/ui/scroll-area";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Loader2, Search, Phone, Mail, User, Users, GripVertical, Eye, ChevronLeft, ChevronRight, AlertCircle, MapPin, Home, Euro, Calendar, ExternalLink, List, LayoutGrid, Plus, UserPlus, UserMinus, Wifi, WifiOff } from "lucide-react";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { toast } from "sonner";
-import { createClientProcess } from "../services/api";
-import { Skeleton } from "../components/ui/skeleton";
-import { useWebSocket, WSEventType } from "../hooks/useWebSocket";
+/**
+ * KanbanBoard Component (Orchestrator)
+ * 
+ * Componente principal do Quadro Kanban - agora um ORQUESTRADOR.
+ * 
+ * RESPONSABILIDADE ÚNICA (SRP):
+ * - Fazer fetch dos dados na montagem
+ * - Gerir estado global das colunas
+ * - Fornecer contexto de Drag & Drop
+ * - Renderizar lista de KanbanColumn
+ * 
+ * PERFORMANCE:
+ * - Estado dos formulários ISOLADO nos modais
+ * - React.memo nos cartões previne re-renders desnecessários
+ * - Projeção de dados para minimizar dados transferidos
+ * 
+ * ARQUITETURA:
+ * - KanbanBoard (orquestrador) → KanbanColumn → KanbanCard
+ * - Modals com estado isolado: ProcessDetailsModal, CreateClientModal, AssignUsersModal
+ */
+import { useState, useEffect, useCallback } from 'react';
+import { ScrollArea, ScrollBar } from './ui/scroll-area';
+import { toast } from 'sonner';
+import { useWebSocket, WSEventType } from '../hooks/useWebSocket';
+
+// Importar componentes refatorados
+import {
+  KanbanColumn,
+  KanbanHeader,
+  KanbanSkeleton,
+  SearchResultsList,
+  ProcessDetailsModal,
+  CreateClientModal,
+  AssignUsersModal,
+} from './kanban';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-// Função para abrir cliente de email com dados preenchidos
-const openEmailClient = (email, clientName) => {
-  if (!email) {
-    toast.error("Cliente não tem email registado");
-    return;
-  }
-  
-  const subject = encodeURIComponent(`Processo de Crédito - ${clientName}`);
-  const body = encodeURIComponent(`Olá ${clientName},\n\nEsperamos que esteja tudo bem.\n\n`);
-  
-  window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
-};
-
-const statusColors = {
-  yellow: "bg-yellow-100 border-yellow-300 text-yellow-900 dark:bg-yellow-900/40 dark:border-yellow-700 dark:text-yellow-100",
-  blue: "bg-blue-100 border-blue-300 dark:bg-blue-900/40 dark:border-blue-700",
-  purple: "bg-purple-100 border-purple-300 dark:bg-purple-900/40 dark:border-purple-700",
-  orange: "bg-orange-100 border-orange-300 dark:bg-orange-900/40 dark:border-orange-700",
-  green: "bg-green-100 border-green-300 dark:bg-green-900/40 dark:border-green-700",
-  red: "bg-red-100 border-red-300 dark:bg-red-900/40 dark:border-red-700",
-};
-
-const statusHeaderColors = {
-  yellow: "bg-yellow-500 text-yellow-900",
-  blue: "bg-blue-500",
-  purple: "bg-purple-500",
-  orange: "bg-orange-500",
-  green: "bg-green-500",
-  red: "bg-red-500",
-};
-
-const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "all", indexacaoFilter = "all" }) => {
-  const navigate = useNavigate();
+const KanbanBoard = ({ 
+  token, 
+  user, 
+  consultorFilter = 'all', 
+  mediadorFilter = 'all', 
+  indexacaoFilter = 'all' 
+}) => {
+  // === ESTADO GLOBAL DO BOARD ===
   const [loading, setLoading] = useState(true);
   const [kanbanData, setKanbanData] = useState({ columns: [], total_processes: 0 });
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [urgencyFilter, setUrgencyFilter] = useState('all');
+  const [viewMode, setViewMode] = useState('kanban');
+  const [scrollPosition, setScrollPosition] = useState(0);
+  
+  // === ESTADO DE DRAG & DROP ===
   const [draggingCard, setDraggingCard] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
-  const [scrollPosition, setScrollPosition] = useState(0);
+  
+  // === ESTADO DE COLUNAS COLAPSADAS ===
+  const [collapsedColumns, setCollapsedColumns] = useState(new Set());
+  
+  // === ESTADO DE MODALS (apenas flags de abertura) ===
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
-  const [collapsedColumns, setCollapsedColumns] = useState(new Set()); // Colunas colapsadas
-  
-  // O7 - Filtros do Kanban
-  const [dateFilter, setDateFilter] = useState("all"); // all, today, week, month
-  const [urgencyFilter, setUrgencyFilter] = useState("all"); // all, overdue, urgent, normal
-  
-  // Estado para criação de novo cliente
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newClient, setNewClient] = useState({
-    client_name: "",
-    client_email: "",
-    client_phone: "",
-    process_type: "credito_habitacao"
-  });
-  
-  // Estado para atribuição de processos
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [assigningProcess, setAssigningProcess] = useState(null);
-  const [appUsers, setAppUsers] = useState([]);
-  const [selectedConsultor, setSelectedConsultor] = useState("");
-  const [selectedMediador, setSelectedMediador] = useState("");
-  const [savingAssignment, setSavingAssignment] = useState(false);
   
   // Verificar se o utilizador pode criar clientes
-  const canCreateClient = user && ["intermediario", "mediador"].includes(user.role);
-  
-  const handleCreateClient = async () => {
-    if (!newClient.client_name.trim()) {
-      toast.error("Por favor, introduza o nome do cliente");
-      return;
-    }
-    
-    setCreating(true);
-    try {
-      await createClientProcess({
-        client_name: newClient.client_name,
-        client_email: newClient.client_email,
-        process_type: newClient.process_type,
-        personal_data: {
-          nome_completo: newClient.client_name,
-          email: newClient.client_email,
-          telefone: newClient.client_phone
-        }
-      });
-      
-      toast.success(`Cliente "${newClient.client_name}" criado com sucesso!`);
-      setShowCreateDialog(false);
-      setNewClient({
-        client_name: "",
-        client_email: "",
-        client_phone: "",
-        process_type: "credito_habitacao"
-      });
-      fetchKanbanData();
-    } catch (error) {
-      console.error("Erro ao criar cliente:", error);
-      toast.error(error.response?.data?.detail || "Erro ao criar cliente");
-    } finally {
-      setCreating(false);
-    }
-  };
+  const canCreateClient = user && ['intermediario', 'mediador'].includes(user.role);
 
-  // Buscar utilizadores da aplicação
-  const fetchUsers = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/admin/users`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const users = await response.json();
-        // Filtrar: ativos, não admin, não ceo
-        setAppUsers(users.filter(u => 
-          u.is_active !== false && 
-          u.role !== "admin" && 
-          u.role !== "ceo"
-        ));
-      }
-    } catch (error) {
-      console.error("Erro ao buscar utilizadores:", error);
-    }
-  };
-
-  // Abrir dialog de atribuição
-  const openAssignDialog = (process, e) => {
-    if (e) e.stopPropagation();
-    setAssigningProcess(process);
-    setSelectedConsultor(process.assigned_consultor_id || "");
-    setSelectedMediador(process.assigned_mediador_id || "");
-    setShowAssignDialog(true);
-    if (appUsers.length === 0) {
-      fetchUsers();
-    }
-  };
-
-  // Guardar atribuições
-  const handleSaveAssignment = async () => {
-    if (!assigningProcess) return;
-    
-    setSavingAssignment(true);
-    try {
-      // Construir query params
-      const params = new URLSearchParams();
-      params.append("consultor_id", selectedConsultor || "");
-      params.append("mediador_id", selectedMediador || "");
-      
-      const response = await fetch(`${API_URL}/api/processes/${assigningProcess.id}/assign?${params.toString()}`, {
-        method: "POST",
-        headers: { 
-          Authorization: `Bearer ${token}`
-        }
-      });
-      
-      if (response.ok) {
-        toast.success("Atribuições actualizadas com sucesso");
-        setShowAssignDialog(false);
-        fetchKanbanData();
-      } else {
-        const data = await response.json();
-        toast.error(data.detail || "Erro ao actualizar atribuições");
-      }
-    } catch (error) {
-      console.error("Erro ao guardar atribuições:", error);
-      toast.error("Erro ao guardar atribuições");
-    } finally {
-      setSavingAssignment(false);
-    }
-  };
-
+  // === DATA FETCHING ===
   const fetchKanbanData = useCallback(async () => {
     try {
-      // Construir URL com filtros
       const params = new URLSearchParams();
-      if (consultorFilter && consultorFilter !== "all") {
-        if (consultorFilter === "none") {
-          params.append("consultor_id", "none");
-        } else {
-          params.append("consultor_id", consultorFilter);
-        }
-      }
-      if (mediadorFilter && mediadorFilter !== "all") {
-        if (mediadorFilter === "none") {
-          params.append("mediador_id", "none");
-        } else {
-          params.append("mediador_id", mediadorFilter);
-        }
-      }
-      if (indexacaoFilter && indexacaoFilter !== "all") {
-        if (indexacaoFilter === "none") {
-          params.append("indexacao_id", "none");
-        } else {
-          params.append("indexacao_id", indexacaoFilter);
-        }
-      }
       
-      const url = params.toString() 
+      if (consultorFilter && consultorFilter !== 'all') {
+        params.append('consultor_id', consultorFilter === 'none' ? 'none' : consultorFilter);
+      }
+      if (mediadorFilter && mediadorFilter !== 'all') {
+        params.append('mediador_id', mediadorFilter === 'none' ? 'none' : mediadorFilter);
+      }
+      if (indexacaoFilter && indexacaoFilter !== 'all') {
+        params.append('indexacao_id', indexacaoFilter === 'none' ? 'none' : indexacaoFilter);
+      }
+
+      const url = params.toString()
         ? `${API_URL}/api/processes/kanban?${params.toString()}`
         : `${API_URL}/api/processes/kanban`;
-      
+
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error("Failed to fetch kanban data");
+
+      if (!response.ok) throw new Error('Failed to fetch kanban data');
       const data = await response.json();
       setKanbanData(data);
     } catch (error) {
-      console.error("Error fetching kanban:", error);
-      toast.error("Erro ao carregar dados do Kanban");
+      console.error('Error fetching kanban:', error);
+      toast.error('Erro ao carregar dados do Kanban');
     } finally {
       setLoading(false);
     }
@@ -233,30 +105,22 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
 
   useEffect(() => {
     fetchKanbanData();
-    
-    // REMOVED: Heavy polling was causing network/database overload
-    // WebSocket events now handle real-time updates
-    // Initial fetch only - subsequent updates via WebSocket
   }, [fetchKanbanData]);
 
   // === WEBSOCKET REAL-TIME UPDATES ===
-  // Handler for WebSocket process events - updates local state dynamically
   const handleProcessUpdate = useCallback((eventType, payload) => {
     if (!payload || !payload.process_id) return;
-    
-    const { process_id, status, old_status, client_name, process_number } = payload;
-    
+
     setKanbanData(prev => {
       const newColumns = prev.columns.map(col => ({ ...col, processes: [...col.processes] }));
-      
+
       switch (eventType) {
         case WSEventType.PROCESS_CREATED: {
-          // New process - add to appropriate column (first column by default or specific status)
-          const targetStatus = status || 'clientes_espera';
+          const targetStatus = payload.status || 'clientes_espera';
           const targetColIndex = newColumns.findIndex(col => col.name === targetStatus);
           if (targetColIndex >= 0) {
             const newProcess = {
-              id: process_id,
+              id: payload.process_id,
               process_number: payload.process_number,
               client_name: payload.client_name || 'Novo Cliente',
               status: targetStatus,
@@ -272,75 +136,52 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
           }
           break;
         }
-        
+
         case WSEventType.PROCESS_STATUS_CHANGED: {
-          // Process moved between columns
-          const sourceStatus = old_status;
-          const targetStatus = status;
-          
+          const sourceStatus = payload.old_status;
+          const targetStatus = payload.status;
           let movedProcess = null;
-          
-          // Remove from source column
+
           const sourceColIndex = newColumns.findIndex(col => col.name === sourceStatus);
           if (sourceColIndex >= 0) {
-            const processIndex = newColumns[sourceColIndex].processes.findIndex(p => p.id === process_id);
+            const processIndex = newColumns[sourceColIndex].processes.findIndex(p => p.id === payload.process_id);
             if (processIndex >= 0) {
               movedProcess = { ...newColumns[sourceColIndex].processes[processIndex], status: targetStatus };
               newColumns[sourceColIndex].processes.splice(processIndex, 1);
               newColumns[sourceColIndex].count -= 1;
             }
           }
-          
-          // Add to target column
+
           const targetColIndex = newColumns.findIndex(col => col.name === targetStatus);
           if (targetColIndex >= 0) {
             if (movedProcess) {
               newColumns[targetColIndex].processes.unshift(movedProcess);
               newColumns[targetColIndex].count += 1;
             } else {
-              // Process not found in source, create minimal entry
-              const newProcess = {
-                id: process_id,
+              newColumns[targetColIndex].processes.unshift({
+                id: payload.process_id,
                 process_number: payload.process_number,
                 client_name: payload.client_name || 'Cliente',
                 status: targetStatus,
                 updated_at: payload.updated_at,
-              };
-              newColumns[targetColIndex].processes.unshift(newProcess);
+              });
               newColumns[targetColIndex].count += 1;
             }
           }
           break;
         }
-        
-        case WSEventType.PROCESS_UPDATED: {
-          // Process data updated - find and update in place
-          for (const col of newColumns) {
-            const processIndex = col.processes.findIndex(p => p.id === process_id);
-            if (processIndex >= 0) {
-              col.processes[processIndex] = {
-                ...col.processes[processIndex],
-                client_name: payload.client_name || col.processes[processIndex].client_name,
-                priority: payload.priority || col.processes[processIndex].priority,
-                updated_at: payload.updated_at,
-              };
-              break;
-            }
-          }
-          break;
-        }
-        
+
+        case WSEventType.PROCESS_UPDATED:
         case WSEventType.PROCESS_ASSIGNED: {
-          // Process assignment changed - update in place
           for (const col of newColumns) {
-            const processIndex = col.processes.findIndex(p => p.id === process_id);
+            const processIndex = col.processes.findIndex(p => p.id === payload.process_id);
             if (processIndex >= 0) {
               col.processes[processIndex] = {
                 ...col.processes[processIndex],
-                consultor_names: payload.consultor_names || col.processes[processIndex].consultor_names,
-                mediador_names: payload.mediador_names || col.processes[processIndex].mediador_names,
-                assigned_consultor_ids: payload.assigned_consultor_ids || col.processes[processIndex].assigned_consultor_ids,
-                assigned_mediador_ids: payload.assigned_mediador_ids || col.processes[processIndex].assigned_mediador_ids,
+                ...(payload.client_name && { client_name: payload.client_name }),
+                ...(payload.priority && { priority: payload.priority }),
+                ...(payload.consultor_names && { consultor_names: payload.consultor_names }),
+                ...(payload.mediador_names && { mediador_names: payload.mediador_names }),
                 updated_at: payload.updated_at,
               };
               break;
@@ -348,22 +189,20 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
           }
           break;
         }
-        
+
         default:
           break;
       }
-      
+
       return { ...prev, columns: newColumns };
     });
   }, []);
 
-  // Connect to WebSocket and register event handlers
   const { isConnected, on, off } = useWebSocket({
     onProcessUpdate: handleProcessUpdate,
     autoConnect: true,
   });
 
-  // Register specific event type handlers
   useEffect(() => {
     const unsubscribers = [
       on(WSEventType.PROCESS_CREATED, (data) => handleProcessUpdate(WSEventType.PROCESS_CREATED, data)),
@@ -371,13 +210,13 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
       on(WSEventType.PROCESS_UPDATED, (data) => handleProcessUpdate(WSEventType.PROCESS_UPDATED, data)),
       on(WSEventType.PROCESS_ASSIGNED, (data) => handleProcessUpdate(WSEventType.PROCESS_ASSIGNED, data)),
     ];
-    
+
     return () => {
       unsubscribers.forEach(unsub => unsub?.());
     };
   }, [on, handleProcessUpdate]);
 
-  // Colapsar colunas vazias por defeito quando os dados são carregados
+  // === AUTO-COLLAPSE EMPTY COLUMNS ===
   useEffect(() => {
     if (kanbanData.columns.length > 0 && collapsedColumns.size === 0) {
       const emptyColumnIds = kanbanData.columns
@@ -387,32 +226,43 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
         setCollapsedColumns(new Set(emptyColumnIds));
       }
     }
-  }, [kanbanData.columns]);
+  }, [kanbanData.columns, collapsedColumns.size]);
 
-  const handleDragStart = (e, process, columnName) => {
+  // === DRAG & DROP HANDLERS ===
+  const handleDragStart = useCallback((e, process, columnName) => {
     setDraggingCard({ process, sourceColumn: columnName });
-    e.dataTransfer.effectAllowed = "move";
-  };
+    e.dataTransfer.effectAllowed = 'move';
+  }, []);
 
-  const handleDragOver = (e, columnName) => {
+  const handleDragOver = useCallback((e, columnName) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
+    e.dataTransfer.dropEffect = 'move';
     setDragOverColumn(columnName);
-  };
+  }, []);
 
-  const handleDragLeave = () => {
+  const handleDragLeave = useCallback(() => {
     setDragOverColumn(null);
-  };
+  }, []);
 
-  // Função para executar a movimentação do processo
-  const executeMoveProcess = async (process, targetColumn, sourceColumn) => {
+  const handleDrop = useCallback(async (e, targetColumn) => {
+    e.preventDefault();
+    setDragOverColumn(null);
+
+    if (!draggingCard || draggingCard.sourceColumn === targetColumn) {
+      setDraggingCard(null);
+      return;
+    }
+
+    const { process, sourceColumn } = draggingCard;
+    setDraggingCard(null);
+
     // Optimistic update
-    setKanbanData((prev) => {
-      const newColumns = prev.columns.map((col) => {
+    setKanbanData(prev => {
+      const newColumns = prev.columns.map(col => {
         if (col.name === sourceColumn) {
           return {
             ...col,
-            processes: col.processes.filter((p) => p.id !== process.id),
+            processes: col.processes.filter(p => p.id !== process.id),
             count: col.count - 1,
           };
         }
@@ -428,907 +278,207 @@ const KanbanBoard = ({ token, user, consultorFilter = "all", mediadorFilter = "a
       return { ...prev, columns: newColumns };
     });
 
-    // API call to move process
+    // API call
     try {
       const response = await fetch(
         `${API_URL}/api/processes/kanban/${process.id}/move?new_status=${targetColumn}`,
         {
-          method: "PUT",
+          method: 'PUT',
           headers: {
             Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
           },
         }
       );
 
-      if (!response.ok) {
-        throw new Error("Failed to move process");
-      }
-
-      toast.success("Processo movido com sucesso");
+      if (!response.ok) throw new Error('Failed to move process');
+      toast.success('Processo movido com sucesso');
     } catch (error) {
-      console.error("Error moving process:", error);
-      toast.error("Erro ao mover processo");
-      // Revert on error
-      fetchKanbanData();
+      console.error('Error moving process:', error);
+      toast.error('Erro ao mover processo');
+      fetchKanbanData(); // Revert on error
     }
-  };
+  }, [draggingCard, token, fetchKanbanData]);
 
-  const handleDrop = async (e, targetColumn) => {
-    e.preventDefault();
-    setDragOverColumn(null);
+  // === COLUMN COLLAPSE HANDLER ===
+  const handleToggleCollapse = useCallback((columnId) => {
+    setCollapsedColumns(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(columnId)) {
+        newSet.delete(columnId);
+      } else {
+        newSet.add(columnId);
+      }
+      return newSet;
+    });
+  }, []);
 
-    if (!draggingCard || draggingCard.sourceColumn === targetColumn) {
-      setDraggingCard(null);
-      return;
-    }
+  // === CARD CLICK HANDLER ===
+  const handleCardClick = useCallback((process) => {
+    setSelectedProcess(process);
+    setShowProcessDialog(true);
+  }, []);
 
-    const { process, sourceColumn } = draggingCard;
-    setDraggingCard(null);
-
-    await executeMoveProcess(process, targetColumn, sourceColumn);
-  };
-
-  const filteredColumns = kanbanData.columns.map((column) => ({
+  // === FILTERED DATA ===
+  const filteredColumns = kanbanData.columns.map(column => ({
     ...column,
-    processes: column.processes.filter((process) => {
+    processes: column.processes.filter(process => {
       // Text search filter
-      const matchesSearch = 
+      const matchesSearch =
         process.client_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         process.client_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         process.client_phone?.includes(searchTerm) ||
         process.consultor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         process.mediador_name?.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      // O7 - Date filter
+
+      // Date filter
       let matchesDate = true;
-      if (dateFilter !== "all" && process.created_at) {
+      if (dateFilter !== 'all' && process.created_at) {
         const created = new Date(process.created_at);
         const now = new Date();
-        if (dateFilter === "today") {
+        if (dateFilter === 'today') {
           matchesDate = created.toDateString() === now.toDateString();
-        } else if (dateFilter === "week") {
+        } else if (dateFilter === 'week') {
           const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
           matchesDate = created >= weekAgo;
-        } else if (dateFilter === "month") {
+        } else if (dateFilter === 'month') {
           const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
           matchesDate = created >= monthAgo;
         }
       }
-      
-      // O7 - Urgency filter (based on days since creation without update)
+
+      // Urgency filter
       let matchesUrgency = true;
-      if (urgencyFilter !== "all") {
+      if (urgencyFilter !== 'all') {
         const lastUpdate = process.updated_at || process.created_at;
         if (lastUpdate) {
           const daysSinceUpdate = Math.floor((Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24));
-          if (urgencyFilter === "overdue") {
+          if (urgencyFilter === 'overdue') {
             matchesUrgency = daysSinceUpdate > 14;
-          } else if (urgencyFilter === "urgent") {
+          } else if (urgencyFilter === 'urgent') {
             matchesUrgency = daysSinceUpdate > 7 && daysSinceUpdate <= 14;
-          } else if (urgencyFilter === "normal") {
+          } else if (urgencyFilter === 'normal') {
             matchesUrgency = daysSinceUpdate <= 7;
           }
         }
       }
-      
+
       return matchesSearch && matchesDate && matchesUrgency;
     }),
   }));
 
-  // Obter todos os processos filtrados para vista de lista
-  const allFilteredProcesses = searchTerm.length >= 2 
+  // Flattened processes for list view
+  const allFilteredProcesses = searchTerm.length >= 2
     ? filteredColumns.flatMap(col => col.processes.map(p => ({ ...p, columnLabel: col.label, columnColor: col.color })))
     : [];
 
-  const [viewMode, setViewMode] = useState("kanban"); // kanban ou list
-
-  const scrollContainer = (direction) => {
-    const container = document.getElementById("kanban-scroll-container");
+  // === SCROLL HANDLERS ===
+  const scrollContainer = useCallback((direction) => {
+    const container = document.getElementById('kanban-scroll-container');
     if (container) {
       const scrollAmount = 350;
-      const newPosition = direction === "left" 
-        ? scrollPosition - scrollAmount 
+      const newPosition = direction === 'left'
+        ? scrollPosition - scrollAmount
         : scrollPosition + scrollAmount;
-      container.scrollTo({ left: newPosition, behavior: "smooth" });
+      container.scrollTo({ left: newPosition, behavior: 'smooth' });
       setScrollPosition(newPosition);
     }
-  };
+  }, [scrollPosition]);
 
+  // === MODAL CALLBACKS ===
+  const handleCreateSuccess = useCallback(() => {
+    fetchKanbanData();
+  }, [fetchKanbanData]);
+
+  const handleAssignSuccess = useCallback(() => {
+    fetchKanbanData();
+  }, [fetchKanbanData]);
+
+  // === RENDER ===
   if (loading) {
-    return (
-      <div className="space-y-4" data-testid="kanban-loading">
-        {/* Header Skeleton */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <Skeleton className="h-7 w-[250px] mb-2" />
-            <Skeleton className="h-4 w-[180px]" />
-          </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Skeleton className="h-10 w-full sm:w-64" />
-            <Skeleton className="h-10 w-10" />
-            <Skeleton className="h-10 w-10" />
-          </div>
-        </div>
-        {/* Kanban Columns Skeleton */}
-        <div className="flex gap-4 overflow-hidden">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="flex-shrink-0 w-[320px]">
-              <Skeleton className="h-12 w-full rounded-t-lg" />
-              <div className="bg-muted/30 min-h-[60vh] rounded-b-lg p-2 space-y-2">
-                {[1, 2, 3].map((j) => (
-                  <Skeleton key={j} className="h-24 w-full rounded-lg" />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+    return <KanbanSkeleton />;
   }
 
   return (
     <div className="space-y-4" data-testid="kanban-board">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div>
-            <h2 className="text-xl font-bold">Quadro Geral de Processos</h2>
-            <p className="text-sm text-muted-foreground">
-              {kanbanData.total_processes} processos • Arraste para mover entre fases ou clique para ver detalhes
-            </p>
-          </div>
-          {/* WebSocket Connection Status Indicator */}
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs ${isConnected ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}`}>
-            {isConnected ? (
-              <>
-                <Wifi className="h-3 w-3" />
-                <span className="hidden sm:inline">Tempo real</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="h-3 w-3" />
-                <span className="hidden sm:inline">A reconectar...</span>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <div className="relative flex-1 sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Pesquisar cliente..."
-              className="pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          {/* Toggle View Mode quando há pesquisa */}
-          {searchTerm.length >= 2 && (
-            <div className="flex gap-1 border rounded-md p-1">
-              <Button 
-                variant={viewMode === "kanban" ? "default" : "ghost"} 
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setViewMode("kanban")}
-              >
-                <LayoutGrid className="h-4 w-4" />
-              </Button>
-              <Button 
-                variant={viewMode === "list" ? "default" : "ghost"} 
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setViewMode("list")}
-              >
-                <List className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
-          <div className="flex gap-1">
-            <Button variant="outline" size="icon" onClick={() => scrollContainer("left")} aria-label="Deslocar para a esquerda">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" onClick={() => scrollContainer("right")} aria-label="Deslocar para a direita">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* O7 - Kanban Filters */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="kanban-filters">
-        <Select value={dateFilter} onValueChange={setDateFilter}>
-          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-date-filter">
-            <Calendar className="h-3 w-3 mr-1" />
-            <SelectValue placeholder="Data" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas as datas</SelectItem>
-            <SelectItem value="today">Hoje</SelectItem>
-            <SelectItem value="week">Última semana</SelectItem>
-            <SelectItem value="month">Último mês</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={urgencyFilter} onValueChange={setUrgencyFilter}>
-          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-urgency-filter">
-            <AlertCircle className="h-3 w-3 mr-1" />
-            <SelectValue placeholder="Urgência" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
-            <SelectItem value="overdue">Atrasados (&gt;14d)</SelectItem>
-            <SelectItem value="urgent">Urgentes (7-14d)</SelectItem>
-            <SelectItem value="normal">Recentes (&lt;7d)</SelectItem>
-          </SelectContent>
-        </Select>
-        {(dateFilter !== "all" || urgencyFilter !== "all") && (
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="h-8 text-xs"
-            onClick={() => { setDateFilter("all"); setUrgencyFilter("all"); }}
-            data-testid="kanban-clear-filters"
-          >
-            Limpar filtros
-          </Button>
-        )}
-        <span className="text-xs text-muted-foreground ml-auto">
-          {filteredColumns.reduce((acc, col) => acc + col.processes.length, 0)} processos visíveis
-        </span>
-      </div>
+      <KanbanHeader
+        totalProcesses={kanbanData.total_processes}
+        visibleCount={filteredColumns.reduce((acc, col) => acc + col.processes.length, 0)}
+        isConnected={isConnected}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        showViewToggle={searchTerm.length >= 2}
+        dateFilter={dateFilter}
+        onDateFilterChange={setDateFilter}
+        urgencyFilter={urgencyFilter}
+        onUrgencyFilterChange={setUrgencyFilter}
+        onScrollLeft={() => scrollContainer('left')}
+        onScrollRight={() => scrollContainer('right')}
+      />
 
       {/* Search Results List View */}
-      {searchTerm.length >= 2 && viewMode === "list" && (
-        <Card className="border-border">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Search className="h-5 w-5" />
-              Resultados da Pesquisa
-              <Badge variant="secondary">{allFilteredProcesses.length}</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-[300px] sm:h-[500px]">
-              <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Contacto</TableHead>
-                    <TableHead>Fase</TableHead>
-                    <TableHead>Valor</TableHead>
-                    <TableHead>Consultor</TableHead>
-                    <TableHead>Intermediário</TableHead>
-                    <TableHead className="text-right">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allFilteredProcesses.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                        Nenhum resultado para &quot;{searchTerm}&quot;
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    allFilteredProcesses.map((process) => (
-                      <TableRow
-                        key={process.id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => navigate(`/process/${process.id}`)}
-                      >
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{process.client_name}</p>
-                            <p className="text-xs text-muted-foreground font-semibold">
-                              #{process.process_number || '—'}
-                            </p>
-                            {process.under_35 && (
-                              <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 mt-1">
-                                &lt;35 anos
-                              </Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="text-sm">
-                            <p className="flex items-center gap-1">
-                              <Phone className="h-3 w-3" />
-                              {process.client_phone || "-"}
-                            </p>
-                            <p className="text-muted-foreground text-xs truncate max-w-[150px]">
-                              {process.client_email}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge 
-                            className={`${statusColors[process.columnColor]} border text-xs`}
-                          >
-                            {process.columnLabel}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {process.property_value 
-                            ? `€${process.property_value.toLocaleString('pt-PT')}`
-                            : "-"
-                          }
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {process.consultor_name || "-"}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {process.mediador_name || "-"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/process/${process.id}`);
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+      {searchTerm.length >= 2 && viewMode === 'list' && (
+        <SearchResultsList
+          processes={allFilteredProcesses}
+          searchTerm={searchTerm}
+        />
       )}
 
-      {/* Kanban Board - Mostrar quando não há pesquisa ou viewMode é kanban */}
-      {(searchTerm.length < 2 || viewMode === "kanban") && (
-      <div className="relative">
-        <ScrollArea className="w-full whitespace-nowrap rounded-md">
-          <div
-            id="kanban-scroll-container"
-            className="flex gap-4 pb-4 min-h-[70vh]"
-            onScroll={(e) => setScrollPosition(e.currentTarget.scrollLeft)}
-          >
-            {filteredColumns.map((column) => {
-              const isCollapsed = collapsedColumns.has(column.id);
-              const isEmpty = column.count === 0;
-              
-              // Toggle collapse
-              const toggleCollapse = () => {
-                setCollapsedColumns(prev => {
-                  const newSet = new Set(prev);
-                  if (newSet.has(column.id)) {
-                    newSet.delete(column.id);
-                  } else {
-                    newSet.add(column.id);
-                  }
-                  return newSet;
-                });
-              };
-              
-              return (
-              <div
-                key={column.id}
-                className={`flex-shrink-0 ${isCollapsed ? 'w-[50px]' : 'w-[320px]'} rounded-lg border-2 transition-all ${
-                  dragOverColumn === column.name
-                    ? "border-primary border-dashed bg-primary/5"
-                    : "border-transparent"
-                }`}
-                onDragOver={(e) => handleDragOver(e, column.name)}
-                onDragLeave={handleDragLeave}
-                onDrop={(e) => handleDrop(e, column.name)}
-              >
-                {isCollapsed ? (
-                  /* Coluna Colapsada - Cor preenchendo toda a vertical */
-                  <div 
-                    className={`${statusHeaderColors[column.color] || "bg-gray-500"} min-h-[70vh] rounded-lg flex flex-col items-center justify-between py-4 cursor-pointer`}
-                    onClick={toggleCollapse}
-                    title="Clique para expandir"
-                  >
-                    <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30">
-                      {column.count}
-                    </Badge>
-                    <div className="flex-1 flex items-center justify-center px-1">
-                      <span
-                        className="text-white text-xs font-medium text-center overflow-hidden"
-                        style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
-                      >
-                        {column.order || ''} - {column.label}
-                      </span>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-white/70" />
-                  </div>
-                ) : (
-                  /* Coluna Expandida */
-                  <>
-                    {/* Column Header */}
-                    <div 
-                      className={`${statusHeaderColors[column.color] || "bg-gray-500"} rounded-t-lg px-4 py-3 cursor-pointer`}
-                      onClick={isEmpty ? toggleCollapse : undefined}
-                      title={isEmpty ? "Clique para minimizar" : ""}
-                    >
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-semibold text-white text-sm truncate">
-                          {column.order || ''} - {column.label}
-                        </h3>
-                        <div className="flex items-center gap-1">
-                          <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30">
-                            {column.count}
-                          </Badge>
-                          {isEmpty && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-white/70 hover:text-white hover:bg-white/20"
-                              onClick={(e) => { e.stopPropagation(); toggleCollapse(); }}
-                            >
-                              <ChevronLeft className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Column Content */}
-                    <div className={`${statusColors[column.color] || "bg-gray-100"} min-h-[60vh] rounded-b-lg p-2`}>
-                      <ScrollArea className="h-[60vh]">
-                        <div className="space-y-2 pr-2">
-                          {column.processes.length === 0 ? (
-                            <div className="text-center py-8 text-muted-foreground text-sm">
-                              <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                              <p>Nenhum processo</p>
-                            </div>
-                          ) : (
-                            column.processes.map((process) => (
-                              <Card
-                                key={process.id}
-                                className={`cursor-pointer hover:shadow-md transition-shadow ${
-                                  draggingCard?.process.id === process.id ? "opacity-50" : ""
-                                }`}
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, process, column.name)}
-                                onClick={(e) => {
-                                  // Não navegar se estiver arrastando
-                                  if (!draggingCard) {
-                                    setSelectedProcess(process);
-                                    setShowProcessDialog(true);
-                                  }
-                                }}
-                                data-testid={`process-card-${process.id}`}
-                              >
-                                <CardContent className="p-2">
-                                  {/* Layout com nome visível */}
-                                  <div className="space-y-1.5">
-                                    {/* Linha 1: Número do processo */}
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-1.5">
-                                        <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0 cursor-grab" />
-                                        <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                                          #{process.process_number || '—'}
-                                        </span>
-                                        {process.prioridade && (
-                                          <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4">!</Badge>
-                                        )}
-                                      </div>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-5 w-5 flex-shrink-0"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          navigate(`/process/${process.id}`);
-                                        }}
-                                        title="Ver processo"
-                                        data-testid={`view-process-${process.id}`}
-                                      >
-                                        <Eye className="h-3 w-3" />
-                                      </Button>
-                                    </div>
-                                    {/* Linha 2: Nome do cliente - SEMPRE VISÍVEL */}
-                                    <p 
-                                      className="font-semibold text-sm leading-snug break-words whitespace-normal min-w-0" 
-                                      style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
-                                      title={process.client_name}
-                                    >
-                                      {process.client_name}
-                                    </p>
-                                    {/* Linha 3: Consultor (se existir) */}
-                                    {process.consultor_name && (
-                                      <div className="flex items-center gap-1">
-                                        <User className="h-3 w-3 text-muted-foreground" />
-                                        <span className="text-[10px] text-muted-foreground truncate">
-                                          {process.consultor_name}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            ))
-                          )}
-                        </div>
-                      </ScrollArea>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-            })}
-          </div>
-          <ScrollBar orientation="horizontal" />
-        </ScrollArea>
-      </div>
+      {/* Kanban Board */}
+      {(searchTerm.length < 2 || viewMode === 'kanban') && (
+        <div className="relative">
+          <ScrollArea className="w-full whitespace-nowrap rounded-md">
+            <div
+              id="kanban-scroll-container"
+              className="flex gap-4 pb-4 min-h-[70vh]"
+              onScroll={(e) => setScrollPosition(e.currentTarget.scrollLeft)}
+            >
+              {filteredColumns.map(column => (
+                <KanbanColumn
+                  key={column.id}
+                  column={column}
+                  isCollapsed={collapsedColumns.has(column.id)}
+                  dragOverColumn={dragOverColumn}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onToggleCollapse={handleToggleCollapse}
+                  onDragStart={handleDragStart}
+                  onCardClick={handleCardClick}
+                  draggingCard={draggingCard}
+                />
+              ))}
+            </div>
+            <ScrollBar orientation="horizontal" />
+          </ScrollArea>
+        </div>
       )}
 
-      {/* Process Details Dialog */}
-      <Dialog open={showProcessDialog} onOpenChange={setShowProcessDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="process-dialog-description">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
-              <span>Detalhes do Processo</span>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => {
-                  setShowProcessDialog(false);
-                  navigate(`/process/${selectedProcess?.id}`);
-                }}
-              >
-                Abrir Página Completa
-              </Button>
-            </DialogTitle>
-            <DialogDescription id="process-dialog-description" className="sr-only">
-              Visualização resumida dos detalhes do processo do cliente
-            </DialogDescription>
-          </DialogHeader>
-          
-          {selectedProcess && (
-            <div className="space-y-6 mt-4">
-              {/* Cliente Info */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-lg flex items-center gap-2">
-                  <User className="h-5 w-5 text-primary" />
-                  Informações do Cliente
-                </h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Nome</p>
-                    <p className="font-medium">{selectedProcess.client_name}</p>
-                  </div>
-                  {selectedProcess.client_email && (
-                    <div>
-                      <p className="text-muted-foreground">Email</p>
-                      <p className="font-medium flex items-center gap-1">
-                        <Mail className="h-3 w-3" />
-                        {selectedProcess.client_email}
-                      </p>
-                    </div>
-                  )}
-                  {selectedProcess.client_phone && (
-                    <div>
-                      <p className="text-muted-foreground">Telefone</p>
-                      <p className="font-medium flex items-center gap-1">
-                        <Phone className="h-3 w-3" />
-                        {selectedProcess.client_phone}
-                      </p>
-                    </div>
-                  )}
-                  {selectedProcess.client_nif && (
-                    <div>
-                      <p className="text-muted-foreground">NIF</p>
-                      <p className="font-medium">{selectedProcess.client_nif}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
+      {/* Modals - Estado isolado dentro de cada componente */}
+      <ProcessDetailsModal
+        open={showProcessDialog}
+        onOpenChange={setShowProcessDialog}
+        process={selectedProcess}
+      />
 
-              {/* Imóvel Info */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-lg flex items-center gap-2">
-                  <Home className="h-5 w-5 text-primary" />
-                  Informações do Imóvel
-                </h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {selectedProcess.property_type && (
-                    <div>
-                      <p className="text-muted-foreground">Tipo</p>
-                      <p className="font-medium capitalize">{selectedProcess.property_type}</p>
-                    </div>
-                  )}
-                  {selectedProcess.property_location && (
-                    <div>
-                      <p className="text-muted-foreground">Localização</p>
-                      <p className="font-medium flex items-center gap-1">
-                        <MapPin className="h-3 w-3" />
-                        {selectedProcess.property_location}
-                      </p>
-                    </div>
-                  )}
-                  {selectedProcess.property_value && (
-                    <div>
-                      <p className="text-muted-foreground">Valor do Imóvel</p>
-                      <p className="font-medium text-emerald-600 flex items-center gap-1">
-                        <Euro className="h-3 w-3" />
-                        {selectedProcess.property_value.toLocaleString('pt-PT')}€
-                      </p>
-                    </div>
-                  )}
-                  {selectedProcess.loan_amount && (
-                    <div>
-                      <p className="text-muted-foreground">Valor Financiado</p>
-                      <p className="font-medium flex items-center gap-1">
-                        <Euro className="h-3 w-3" />
-                        {selectedProcess.loan_amount.toLocaleString('pt-PT')}€
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
+      {canCreateClient && (
+        <CreateClientModal
+          open={showCreateDialog}
+          onOpenChange={setShowCreateDialog}
+          onSuccess={handleCreateSuccess}
+        />
+      )}
 
-              {/* Status e Prioridade */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-lg">Estado e Prioridade</h3>
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="outline" className="capitalize">
-                    {selectedProcess.status?.replace(/_/g, ' ')}
-                  </Badge>
-                  {selectedProcess.priority && (
-                    <Badge 
-                      variant={selectedProcess.priority === 'high' ? 'destructive' : 'secondary'}
-                      className="capitalize"
-                    >
-                      {selectedProcess.priority === 'high' ? 'Alta' : selectedProcess.priority === 'medium' ? 'Média' : 'Baixa'}
-                    </Badge>
-                  )}
-                  {selectedProcess.service_type && (
-                    <Badge variant="outline" className="capitalize">
-                      {selectedProcess.service_type.replace(/_/g, ' ')}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-
-              {/* Atribuições */}
-              {(selectedProcess.assigned_consultor_name || selectedProcess.assigned_intermediario_name) && (
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-lg flex items-center gap-2">
-                    <Users className="h-5 w-5 text-primary" />
-                    Atribuições
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    {selectedProcess.assigned_consultor_name && (
-                      <div>
-                        <p className="text-muted-foreground">Consultor</p>
-                        <p className="font-medium">{selectedProcess.assigned_consultor_name}</p>
-                      </div>
-                    )}
-                    {selectedProcess.assigned_intermediario_name && (
-                      <div>
-                        <p className="text-muted-foreground">Intermediário</p>
-                        <p className="font-medium">{selectedProcess.assigned_intermediario_name}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Notas */}
-              {selectedProcess.notes && (
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-lg">Notas</h3>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedProcess.notes}</p>
-                </div>
-              )}
-
-              {/* Datas */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-lg flex items-center gap-2">
-                  <Calendar className="h-5 w-5 text-primary" />
-                  Datas
-                </h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  {selectedProcess.created_at && (
-                    <div>
-                      <p className="text-muted-foreground">Criado em</p>
-                      <p className="font-medium">{new Date(selectedProcess.created_at).toLocaleDateString('pt-PT')}</p>
-                    </div>
-                  )}
-                  {selectedProcess.updated_at && (
-                    <div>
-                      <p className="text-muted-foreground">Última atualização</p>
-                      <p className="font-medium">{new Date(selectedProcess.updated_at).toLocaleDateString('pt-PT')}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog para criar novo cliente */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-[500px]" aria-describedby="create-client-description">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5" />
-              Criar Novo Cliente
-            </DialogTitle>
-            <DialogDescription id="create-client-description">
-              Preencha os dados para criar um novo cliente no sistema.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="client_name">Nome do Cliente *</Label>
-              <Input
-                id="client_name"
-                placeholder="Nome completo do cliente"
-                value={newClient.client_name}
-                onChange={(e) => setNewClient({ ...newClient, client_name: e.target.value })}
-              />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="client_email">Email</Label>
-                <Input
-                  id="client_email"
-                  type="email"
-                  placeholder="email@exemplo.com"
-                  value={newClient.client_email}
-                  onChange={(e) => setNewClient({ ...newClient, client_email: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="client_phone">Telefone</Label>
-                <Input
-                  id="client_phone"
-                  placeholder="+351 000 000 000"
-                  value={newClient.client_phone}
-                  onChange={(e) => setNewClient({ ...newClient, client_phone: e.target.value })}
-                />
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="process_type">Tipo de Processo</Label>
-              <Select 
-                value={newClient.process_type} 
-                onValueChange={(v) => setNewClient({ ...newClient, process_type: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="credito_habitacao">Crédito Habitação</SelectItem>
-                  <SelectItem value="credito_pessoal">Crédito Pessoal</SelectItem>
-                  <SelectItem value="credito_consolidado">Crédito Consolidado</SelectItem>
-                  <SelectItem value="credito_automovel">Crédito Automóvel</SelectItem>
-                  <SelectItem value="transferencia_credito">Transferência de Crédito</SelectItem>
-                  <SelectItem value="imobiliario">Imobiliário</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
-              Cancelar
-            </Button>
-            <Button 
-              onClick={handleCreateClient} 
-              disabled={creating || !newClient.client_name.trim()}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
-              {creating ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  A criar...
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Criar Cliente
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog para atribuir utilizadores ao processo */}
-      <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
-        <DialogContent className="sm:max-w-[500px]" aria-describedby="assign-users-description">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-purple-600" />
-              Gerir Atribuições
-            </DialogTitle>
-            <DialogDescription id="assign-users-description">
-              Atribua consultores e mediadores a este processo.
-            </DialogDescription>
-          </DialogHeader>
-          
-          {assigningProcess && (
-            <div className="space-y-4">
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="font-medium">{assigningProcess.client_name}</p>
-                <p className="text-sm text-muted-foreground">
-                  #{assigningProcess.process_number || '—'}
-                </p>
-              </div>
-              
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-sm font-medium">Consultor</Label>
-                  <Select value={selectedConsultor || "none"} onValueChange={(v) => setSelectedConsultor(v === "none" ? "" : v)}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Seleccionar consultor..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhum</SelectItem>
-                      {appUsers
-                        .filter(u => ["consultor", "consultor_intermediario", "diretor", "admin", "ceo"].includes(u.role))
-                        .map(u => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.name} ({u.role})
-                          </SelectItem>
-                        ))
-                      }
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div>
-                  <Label className="text-sm font-medium">Intermediário / Mediador</Label>
-                  <Select value={selectedMediador || "none"} onValueChange={(v) => setSelectedMediador(v === "none" ? "" : v)}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Seleccionar intermediário..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhum</SelectItem>
-                      {appUsers
-                        .filter(u => ["mediador", "intermediario", "consultor_intermediario", "intermediario_credito", "diretor"].includes(u.role))
-                        .map(u => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.name} ({u.role})
-                          </SelectItem>
-                        ))
-                      }
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowAssignDialog(false)}>
-              Cancelar
-            </Button>
-            <Button 
-              onClick={handleSaveAssignment}
-              disabled={savingAssignment}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              {savingAssignment ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  A guardar...
-                </>
-              ) : (
-                "Guardar"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-
+      <AssignUsersModal
+        open={showAssignDialog}
+        onOpenChange={setShowAssignDialog}
+        process={assigningProcess}
+        token={token}
+        onSuccess={handleAssignSuccess}
+      />
     </div>
   );
 };
