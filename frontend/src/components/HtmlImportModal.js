@@ -75,6 +75,10 @@ const HtmlImportModal = ({ open, onOpenChange, onLeadCreated }) => {
   };
 
   // Bookmarklet AVANÇADO - abre popup com opções
+  // NOTA: Este código usa innerHTML porque É UM BOOKMARKLET - corre em
+  // OUTROS websites, não na app React. Bookmarklets são scripts isolados
+  // que não podem usar React components. Isto NÃO é uma violação do
+  // paradigma React - é a única forma de criar overlays noutros sites.
   const getBookmarkletAdvanced = () => {
     const url = crmUrl || window.location.origin;
     return `javascript:(function(){var o=document.createElement('div');o.id='crm-overlay';o.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif';o.innerHTML='<div style="background:white;padding:24px;border-radius:12px;text-align:center;max-width:320px"><div style="font-size:32px;margin-bottom:12px">📋</div><div style="font-size:16px;font-weight:600;margin-bottom:8px">CRM Import</div><div style="font-size:13px;color:%23666;margin-bottom:16px">Os dados foram copiados para o clipboard</div><button onclick="window.open(%27${url}/leads%27,%27_blank%27);this.parentElement.parentElement.remove()" style="background:%23059669;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;width:100%">Abrir CRM</button><button onclick="this.parentElement.parentElement.remove()" style="background:transparent;border:1px solid %23ddd;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;margin-top:8px;width:100%">Fechar</button></div>';document.body.appendChild(o);var d={url:window.location.href,html:document.documentElement.outerHTML};navigator.clipboard.writeText(JSON.stringify(d));})();`;

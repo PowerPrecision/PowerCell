@@ -18,7 +18,7 @@
  * - KanbanBoard (orquestrador) → KanbanColumn → KanbanCard
  * - Modals com estado isolado: ProcessDetailsModal, CreateClientModal, AssignUsersModal
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { toast } from 'sonner';
 import { useWebSocket, WSEventType } from '../hooks/useWebSocket';
@@ -58,6 +58,9 @@ const KanbanBoard = ({
   
   // === ESTADO DE COLUNAS COLAPSADAS ===
   const [collapsedColumns, setCollapsedColumns] = useState(new Set());
+  
+  // === REFS (React way em vez de document.getElementById) ===
+  const scrollContainerRef = useRef(null);
   
   // === ESTADO DE MODALS (apenas flags de abertura) ===
   const [selectedProcess, setSelectedProcess] = useState(null);
@@ -372,9 +375,9 @@ const KanbanBoard = ({
     ? filteredColumns.flatMap(col => col.processes.map(p => ({ ...p, columnLabel: col.label, columnColor: col.color })))
     : [];
 
-  // === SCROLL HANDLERS ===
+  // === SCROLL HANDLERS (usando useRef em vez de document.getElementById) ===
   const scrollContainer = useCallback((direction) => {
-    const container = document.getElementById('kanban-scroll-container');
+    const container = scrollContainerRef.current;
     if (container) {
       const scrollAmount = 350;
       const newPosition = direction === 'left'
@@ -432,7 +435,7 @@ const KanbanBoard = ({
         <div className="relative">
           <ScrollArea className="w-full whitespace-nowrap rounded-md">
             <div
-              id="kanban-scroll-container"
+              ref={scrollContainerRef}
               className="flex gap-4 pb-4 min-h-[70vh]"
               onScroll={(e) => setScrollPosition(e.currentTarget.scrollLeft)}
             >
