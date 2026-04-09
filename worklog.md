@@ -1,4 +1,24 @@
 ---
+Task ID: 9
+Agent: Main Agent
+Task: Implementar templates HTML personalizados com todas as variáveis disponíveis
+
+Work Log:
+- Criada função _extract_email_variables() para extrair todas as variáveis do processo
+- Atualizado processamento do template para usar todas as variáveis disponíveis
+- Adicionado template HTML profissional como predefinição no frontend
+- Criada lista completa de variáveis organizadas por categoria (1º Proponente, 2º Proponente, Crédito, Transferência, Remetente)
+- Variáveis agora são clicáveis para copiar (UX melhorada)
+- Template suporta HTML completo com estilos inline
+
+Stage Summary:
+- Commit 5a7a6bd: Implementar templates HTML personalizados com todas as variáveis disponíveis
+- Ficheiros: backend/routes/emails.py, frontend/src/components/DocumentRecipientsManager.js
+- 323 linhas adicionadas, 48 removidas
+- 37 variáveis disponíveis para uso em templates personalizados
+- Template predefinido inclui todas as secções (1º Proponente, 2º Proponente, Crédito Atual, Transferência Pretendida)
+
+---
 Task ID: 8
 Agent: Main Agent
 Task: Corrigir bug na eliminação de destinatários BCC nas configurações do sistema
