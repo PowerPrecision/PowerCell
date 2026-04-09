@@ -27,6 +27,7 @@ class ClientPersonalData(BaseModel):
     """Dados pessoais do cliente (imutáveis entre processos)."""
     nif: Optional[str] = None
     documento_id: Optional[str] = None
+    data_validade_cc: Optional[str] = None
     data_nascimento: Optional[str] = None
     naturalidade: Optional[str] = None
     nacionalidade: Optional[str] = None

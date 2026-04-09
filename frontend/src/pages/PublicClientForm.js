@@ -273,6 +273,7 @@ const PublicClientForm = ({ previewMode = false }) => {
       email: "",
       nif: "",
       documento_id: "",
+      data_validade_cc: "",
       naturalidade: "",
       nacionalidade: "Portuguesa",
       phone: "",
@@ -648,6 +649,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         personal_data: {
           nif: formData.nif,
           documento_id: formData.documento_id,
+          data_validade_cc: formData.data_validade_cc || null,
           naturalidade: formData.naturalidade,
           nacionalidade: formData.nacionalidade,
           morada_fiscal: formData.morada_fiscal,
@@ -913,6 +915,21 @@ const PublicClientForm = ({ previewMode = false }) => {
           />
           {fieldErrors.documento_id && <FieldError>{fieldErrors.documento_id}</FieldError>}
           <FieldHint>Número do documento de identificação válido.</FieldHint>
+        </div>
+        
+        <div className="space-y-2">
+          <Label htmlFor="data_validade_cc">
+            Data Validade CC
+            <span className="text-xs text-muted-foreground ml-1">(opcional)</span>
+          </Label>
+          <Input
+            id="data_validade_cc"
+            type="date"
+            value={formData.data_validade_cc}
+            onChange={(e) => updateField("data_validade_cc", e.target.value)}
+            data-testid="client-data-validade-cc"
+          />
+          <FieldHint>Data de validade do Cartão de Cidadão.</FieldHint>
         </div>
         
         <div className="space-y-2">
