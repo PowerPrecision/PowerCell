@@ -29,7 +29,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Textarea } from "../components/ui/textarea";
 import { toast } from "sonner";
 import {
   Users,
@@ -141,7 +140,6 @@ export default function ClientsPage() {
     email: "",
     telefone: "",
     nif: "",
-    notas: "",
   });
   const [newProcessType, setNewProcessType] = useState("credito_habitacao");
   
@@ -250,26 +248,41 @@ export default function ClientsPage() {
   };
 
   const handleCreateClient = async () => {
+    // Validação do nome (obrigatório)
     if (!newClient.nome.trim()) {
       toast.error("Nome é obrigatório");
       return;
     }
 
+    // Validação do NIF (opcional, mas se preenchido deve ter 9 dígitos)
+    const nifClean = newClient.nif ? newClient.nif.replace(/[^\d]/g, '') : '';
+    if (newClient.nif && nifClean.length !== 9) {
+      toast.error("NIF deve ter exatamente 9 dígitos");
+      return;
+    }
+
     try {
       const token = localStorage.getItem("token");
+      
+      // Construir payload apenas com campos preenchidos
+      const payload = { nome: newClient.nome.trim() };
+      if (newClient.email?.trim()) payload.email = newClient.email.trim();
+      if (newClient.telefone?.trim()) payload.telefone = newClient.telefone.trim();
+      if (nifClean) payload.nif = nifClean;
+      
       const response = await fetch(`${API_URL}/api/clients`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(newClient),
+        body: JSON.stringify(payload),
       });
 
       if (response.ok) {
         toast.success("Cliente criado com sucesso");
         setShowCreateDialog(false);
-        setNewClient({ nome: "", email: "", telefone: "", nif: "", notas: "" });
+        setNewClient({ nome: "", email: "", telefone: "", nif: "" });
         fetchClients();
       } else {
         const error = await response.json();
@@ -758,9 +771,12 @@ export default function ClientsPage() {
                 Preencha os dados para criar um novo cliente.
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-4">
+            <form onSubmit={(e) => { e.preventDefault(); handleCreateClient(); }} className="space-y-4 py-4">
+              {/* Campo Nome - Obrigatório */}
               <div className="space-y-2">
-                <Label htmlFor="nome">Nome *</Label>
+                <Label htmlFor="nome">
+                  Nome <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="nome"
                   value={newClient.nome}
@@ -768,12 +784,18 @@ export default function ClientsPage() {
                     setNewClient({ ...newClient, nome: e.target.value })
                   }
                   placeholder="Nome completo do cliente"
+                  required
+                  autoFocus
                   data-testid="new-client-name"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              
+              {/* Email e Telefone - Opcionais */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="email" className="text-muted-foreground">
+                    Email <span className="text-xs font-normal">(Opcional)</span>
+                  </Label>
                   <Input
                     id="email"
                     type="email"
@@ -786,7 +808,9 @@ export default function ClientsPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="telefone">Telefone</Label>
+                  <Label htmlFor="telefone" className="text-muted-foreground">
+                    Telefone <span className="text-xs font-normal">(Opcional)</span>
+                  </Label>
                   <Input
                     id="telefone"
                     value={newClient.telefone}
@@ -798,32 +822,29 @@ export default function ClientsPage() {
                   />
                 </div>
               </div>
+              
+              {/* NIF - Opcional mas com validação */}
               <div className="space-y-2">
-                <Label htmlFor="nif">NIF</Label>
+                <Label htmlFor="nif" className="text-muted-foreground">
+                  NIF <span className="text-xs font-normal">(Opcional)</span>
+                </Label>
                 <Input
                   id="nif"
                   value={newClient.nif}
-                  onChange={(e) =>
-                    setNewClient({ ...newClient, nif: e.target.value })
-                  }
+                  onChange={(e) => {
+                    // Permitir apenas dígitos
+                    const value = e.target.value.replace(/[^\d]/g, '');
+                    setNewClient({ ...newClient, nif: value });
+                  }}
                   placeholder="123456789"
                   maxLength={9}
                   data-testid="new-client-nif"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Se preenchido, deve conter exatamente 9 dígitos
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="notas">Notas</Label>
-                <Textarea
-                  id="notas"
-                  value={newClient.notas}
-                  onChange={(e) =>
-                    setNewClient({ ...newClient, notas: e.target.value })
-                  }
-                  placeholder="Observações sobre o cliente..."
-                  rows={3}
-                />
-              </div>
-            </div>
+            </form>
             <DialogFooter>
               <Button
                 variant="outline"
