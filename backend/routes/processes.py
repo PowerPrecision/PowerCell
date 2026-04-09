@@ -60,7 +60,10 @@ from services.process_service import (
     get_user_name,
     encrypt_sensitive_data,
     decrypt_sensitive_data,
-    decrypt_processes_list
+    decrypt_processes_list,
+    PROCESS_LIST_PROJECTION,
+    PROCESS_KANBAN_PROJECTION,
+    PROCESS_MY_CLIENTS_PROJECTION,
 )
 from services.process_assignment import (
     assign_both_to_process,
@@ -437,23 +440,40 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
 
 
 # ====================================================================
-# ENDPOINTS DE LISTAGEM
+# ENDPOINTS DE LISTAGEM - OTIMIZADOS COM PROJEÇÃO E PAGINAÇÃO
 # ====================================================================
 
-@router.get("", response_model=List[ProcessResponse])
-async def get_processes(user: dict = Depends(get_current_user)):
+@router.get("")
+async def get_processes(
+    page: int = Query(1, ge=1, description="Número da página"),
+    size: int = Query(20, ge=1, le=100, description="Itens por página"),
+    status: Optional[str] = Query(None, description="Filtrar por status"),
+    search: Optional[str] = Query(None, description="Pesquisar por nome/email"),
+    user: dict = Depends(get_current_user)
+):
     """
-    Listar processos com base no papel do utilizador.
+    Listar processos com paginação e projeção otimizada.
+    
+    OTIMIZAÇÕES APLICADAS:
+    - MongoDB Projection: Apenas campos necessários para a listagem
+    - Paginação nativa: Não carrega todos os documentos de uma vez
+    - Desencriptação seletiva: Só desencripta client_phone e client_nif
+    - Contagem otimizada: count_documents em vez de len(list)
     
     FILTRAGEM AUTOMÁTICA:
     - Admin/CEO: Todos os processos
     - Cliente: Apenas os próprios processos
     - Consultor: Processos atribuídos como consultor
     - Intermediário: Processos atribuídos como intermediário
-    - Misto: Ambos os tipos de atribuição
     
     Returns:
-        Lista de ProcessResponse
+        {
+            "items": [...],
+            "total": 150,
+            "page": 1,
+            "size": 20,
+            "pages": 8
+        }
     """
     role = user["role"]
     query = {}
@@ -462,31 +482,68 @@ async def get_processes(user: dict = Depends(get_current_user)):
     if role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
     elif role == UserRole.INDEXACAO:
-        # Indexação vê apenas os processos atribuídos a si
         query["$or"] = [
             {"assigned_indexacao_id": user["id"]},
             {"created_by": user.get("email", "")}
         ]
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
-        # Admin, CEO, Administrativo, Diretor vêem todos os processos
-        pass
+        pass  # Vêem todos
     elif role == UserRole.CONSULTOR:
-        # Suporte a múltiplos consultores: verificar no array ou campo único
         query["$or"] = [
             {"assigned_consultor_ids": user["id"]},
             {"assigned_consultor_id": user["id"]}
         ]
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
-        # Suporte a múltiplos intermediários: verificar no array ou campo único
         query["$or"] = [
             {"assigned_mediador_ids": user["id"]},
             {"assigned_mediador_id": user["id"]}
         ]
 
-    processes = await db.processes.find(query, {"_id": 0}).sort("client_name", 1).to_list(1000)
-    # Desencriptar dados sensíveis
-    processes = decrypt_processes_list(processes)
-    return [ProcessResponse(**p) for p in processes]
+    # Adicionar filtros
+    if status:
+        query["status"] = status
+    
+    if search:
+        name_regex = create_accent_insensitive_regex(search)
+        simple_regex = {"$regex": re.escape(search), "$options": "i"}
+        search_condition = {
+            "$or": [
+                {"client_name": name_regex},
+                {"client_email": simple_regex}
+            ]
+        }
+        if query:
+            query = {"$and": [query, search_condition]}
+        else:
+            query = search_condition
+
+    # Contar total de documentos (count_documents é mais eficiente que len(list))
+    total = await db.processes.count_documents(query)
+    
+    # Calcular offset
+    skip = (page - 1) * size
+    
+    # BUSCAR COM PROJEÇÃO OTIMIZADA
+    # Apenas campos necessários para a tabela de listagem
+    processes = await db.processes.find(
+        query, 
+        PROCESS_LIST_PROJECTION
+    ).sort("client_name", 1).skip(skip).limit(size).to_list(size)
+    
+    # Desencriptar apenas campos sensíveis necessários (client_phone, client_nif)
+    # NOTA: personal_data e financial_data NÃO são projetados, então não precisam de desencriptação
+    processes = decrypt_processes_list(processes, fields_to_decrypt=["client_phone", "client_nif"])
+    
+    # Calcular total de páginas
+    pages = (total + size - 1) // size if size > 0 else 0
+    
+    return {
+        "items": processes,
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": pages
+    }
 
 
 @router.get("/paginated")
@@ -501,6 +558,10 @@ async def get_processes_paginated(
 ):
     """
     Listar processos com paginação cursor-based (mais eficiente para grandes datasets).
+    
+    OTIMIZAÇÕES:
+    - Projeção MongoDB: Apenas campos necessários
+    - Desencriptação seletiva: Só campos sensíveis projetados
     
     Args:
         limit: Número de processos por página (máximo 100)
@@ -522,22 +583,18 @@ async def get_processes_paginated(
     if role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
     elif role == UserRole.INDEXACAO:
-        # Indexação vê apenas os processos atribuídos a si
         query["$or"] = [
             {"assigned_indexacao_id": user["id"]},
             {"created_by": user.get("email", "")}
         ]
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
-        # Admin, CEO, Administrativo, Diretor vêem todos os processos
         pass
     elif role == UserRole.CONSULTOR:
-        # Suporte a múltiplos consultores
         query["$or"] = [
             {"assigned_consultor_ids": user["id"]},
             {"assigned_consultor_id": user["id"]}
         ]
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
-        # Suporte a múltiplos intermediários
         query["$or"] = [
             {"assigned_mediador_ids": user["id"]},
             {"assigned_mediador_id": user["id"]}
@@ -564,13 +621,13 @@ async def get_processes_paginated(
     # Converter sort_order para int
     order = -1 if sort_order.lower() == "desc" else 1
     
-    # Usar paginador
+    # Usar paginador COM PROJEÇÃO OTIMIZADA
     paginator = CursorPaginator(
         collection=db.processes,
         default_limit=20,
         max_limit=100,
         default_sort_field="client_name",
-        default_sort_order=1  # Ordem ascendente (A-Z)
+        default_sort_order=1
     )
     
     result = await paginator.paginate(
@@ -578,11 +635,15 @@ async def get_processes_paginated(
         limit=limit,
         cursor=cursor,
         sort_field=sort_field,
-        sort_order=order
+        sort_order=order,
+        projection=PROCESS_LIST_PROJECTION  # PROJEÇÃO OTIMIZADA
     )
     
-    # Desencriptar dados sensíveis
-    result["items"] = decrypt_processes_list(result["items"])
+    # Desencriptar APENAS campos sensíveis projetados (não todo o documento)
+    result["items"] = decrypt_processes_list(
+        result["items"], 
+        fields_to_decrypt=["client_phone", "client_nif"]
+    )
     
     return {
         "processes": result["items"],
@@ -825,13 +886,21 @@ async def get_kanban_board(
 
 
 @router.get("/my-clients")
-async def get_my_clients(user: dict = Depends(require_roles([
+async def get_my_clients(
+    page: int = Query(1, ge=1, description="Número da página"),
+    size: int = Query(50, ge=1, le=100, description="Itens por página"),
+    user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     UserRole.INDEXACAO
 ]))):
     """
     Obter lista de clientes atribuídos ao utilizador atual.
+    
+    OTIMIZAÇÕES APLICADAS:
+    - MongoDB Projection: Apenas campos necessários
+    - Paginação: Não carrega todos os clientes de uma vez
+    - Desencriptação seletiva: Só client_phone e client_nif
     
     Retorna uma lista com:
     - Nome do cliente
@@ -851,7 +920,6 @@ async def get_my_clients(user: dict = Depends(require_roles([
     
     # Construir query baseada no papel do utilizador
     if role == UserRole.CONSULTOR:
-        # Suporte a múltiplos consultores
         query = {
             "$or": [
                 {"assigned_consultor_ids": user_id},
@@ -859,7 +927,6 @@ async def get_my_clients(user: dict = Depends(require_roles([
             ]
         }
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
-        # Intermediários vêem processos atribuídos a eles OU criados por eles
         query = {
             "$or": [
                 {"assigned_mediador_ids": user_id},
@@ -868,8 +935,6 @@ async def get_my_clients(user: dict = Depends(require_roles([
             ]
         }
     elif role == UserRole.INDEXACAO:
-        # Indexação vê apenas os processos atribuídos a si (assigned_indexacao_id)
-        # ou processos criados por si (created_by)
         query = {
             "$or": [
                 {"assigned_indexacao_id": user_id},
@@ -877,32 +942,25 @@ async def get_my_clients(user: dict = Depends(require_roles([
             ]
         }
     else:
-        # Admin/CEO/Diretor/Administrativo vêem todos
         query = {}
     
-    # Buscar processos com campos necessários
+    # Contar total
+    total = await db.processes.count_documents(query)
+    
+    # Calcular offset
+    skip = (page - 1) * size
+    
+    # Buscar processos COM PROJEÇÃO OTIMIZADA
     processes = await db.processes.find(
         query,
-        {
-            "_id": 0, 
-            "id": 1, 
-            "process_number": 1,
-            "client_name": 1, 
-            "client_email": 1,
-            "client_phone": 1,
-            "status": 1, 
-            "process_type": 1,
-            "assigned_consultor_id": 1,
-            "assigned_mediador_id": 1,
-            "created_at": 1,
-            "updated_at": 1,
-            "deed_date": 1,
-            "property_id": 1
-        }
-    ).sort("client_name", 1).to_list(500)
+        PROCESS_MY_CLIENTS_PROJECTION
+    ).sort("client_name", 1).skip(skip).limit(size).to_list(size)
     
-    # Desencriptar dados sensíveis (client_phone, client_nif)
-    processes = decrypt_processes_list(processes)
+    # Desencriptar APENAS campos sensíveis projetados
+    processes = decrypt_processes_list(
+        processes, 
+        fields_to_decrypt=["client_phone", "client_nif"]
+    )
     
     # Obter labels das fases do workflow ordenadas
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
@@ -917,7 +975,7 @@ async def get_my_clients(user: dict = Depends(require_roles([
     
     processes = sorted(processes, key=get_sort_key)
     
-    # Obter tarefas pendentes por processo
+    # Obter tarefas pendentes por processo (apenas IDs necessários)
     process_ids = [p["id"] for p in processes]
     tasks = await db.tasks.find(
         {
@@ -925,7 +983,7 @@ async def get_my_clients(user: dict = Depends(require_roles([
             "completed": {"$ne": True}
         },
         {"_id": 0, "id": 1, "process_id": 1, "title": 1, "priority": 1, "due_date": 1}
-    ).to_list(1000)
+    ).to_list(500)  # Reduzido de 1000 para 500
     
     # Agrupar tarefas por processo
     tasks_by_process = {}
@@ -997,9 +1055,15 @@ async def get_my_clients(user: dict = Depends(require_roles([
             "has_property": bool(p.get("property_id"))
         })
     
+    # Calcular total de páginas
+    pages = (total + size - 1) // size if size > 0 else 0
+    
     return {
         "clients": clients_list,
-        "total": len(clients_list),
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": pages,
         "user_id": user_id,
         "user_role": role
     }

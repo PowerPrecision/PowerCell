@@ -455,14 +455,124 @@ def decrypt_sensitive_data(data: dict) -> dict:
     return result
 
 
-def decrypt_processes_list(processes: list) -> list:
+def decrypt_processes_list(processes: list, fields_to_decrypt: list = None) -> list:
     """
     Desencripta uma lista de processos.
     
+    OTIMIZAÇÃO: Só desencripta os campos especificados.
+    Se fields_to_decrypt for None, desencripta todos (comportamento original).
+    Se fields_to_decrypt for [], NÃO desencripta nada (útil para listagens).
+    
     Args:
         processes: Lista de processos
+        fields_to_decrypt: Lista de campos a desencriptar (None = todos, [] = nenhum)
         
     Returns:
         Lista com processos desencriptados
     """
-    return [decrypt_sensitive_data(p) for p in processes]
+    # Se a lista de campos a desencriptar estiver vazia, saltar desencriptação
+    # Isto é útil quando a projeção já exclui campos sensíveis
+    if fields_to_decrypt is not None and len(fields_to_decrypt) == 0:
+        return processes
+    
+    # Se fields_to_decrypt for None, usar comportamento original (desencriptar tudo)
+    if fields_to_decrypt is None:
+        return [decrypt_sensitive_data(p) for p in processes]
+    
+    # Caso contrário, desencriptar apenas os campos especificados
+    result = []
+    for p in processes:
+        decrypted = p.copy()
+        for field in fields_to_decrypt:
+            if field in decrypted and decrypted[field]:
+                # Verificar se está encriptado
+                value = str(decrypted[field])
+                if value.startswith("ENC:"):
+                    try:
+                        decrypted[field] = encryption_service.decrypt(value)
+                    except Exception as e:
+                        logger.warning(f"Erro ao desencriptar {field}: {e}")
+        result.append(decrypted)
+    
+    return result
+
+
+# ==== PROJEÇÕES OTIMIZADAS PARA LISTAGENS ====
+
+# Campos necessários para a tabela de processos (listagem geral)
+PROCESS_LIST_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "process_number": 1,
+    "client_name": 1,
+    "client_email": 1,
+    "client_phone": 1,
+    "client_nif": 1,
+    "status": 1,
+    "priority": 1,
+    "process_type": 1,
+    "property_value": 1,
+    "property_location": 1,
+    "loan_amount": 1,
+    "assigned_consultor_id": 1,
+    "assigned_consultor_ids": 1,
+    "assigned_mediador_id": 1,
+    "assigned_mediador_ids": 1,
+    "assigned_indexacao_id": 1,
+    "created_at": 1,
+    "updated_at": 1,
+    "deed_date": 1,
+    "tags": 1,
+    # EXCLUIR explicitamente arrays pesados e dados sensíveis
+    "history": 0,
+    "activities": 0,
+    "personal_data": 0,  # Dados sensíveis
+    "titular2_data": 0,  # Dados sensíveis
+    "financial_data": 0, # Dados sensíveis
+    "real_estate_data": 0,
+    "credit_data": 0,
+    "documents": 0,
+}
+
+# Campos necessários para o Kanban (visualização em colunas)
+PROCESS_KANBAN_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "process_number": 1,
+    "client_name": 1,
+    "client_email": 1,
+    "client_phone": 1,
+    "status": 1,
+    "priority": 1,
+    "under_35": 1,
+    "process_type": 1,
+    "property_value": 1,
+    "assigned_consultor_id": 1,
+    "assigned_consultor_ids": 1,
+    "assigned_mediador_id": 1,
+    "assigned_mediador_ids": 1,
+    "assigned_indexacao_id": 1,
+    "assigned_parceiro_id": 1,
+    "created_at": 1,
+    "updated_at": 1,
+    "notes": 1,
+    "tags": 1,
+}
+
+# Campos necessários para "Os Meus Clientes"
+PROCESS_MY_CLIENTS_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "process_number": 1,
+    "client_name": 1,
+    "client_email": 1,
+    "client_phone": 1,
+    "status": 1,
+    "process_type": 1,
+    "assigned_consultor_id": 1,
+    "assigned_mediador_id": 1,
+    "created_at": 1,
+    "updated_at": 1,
+    "deed_date": 1,
+    "property_id": 1,
+}
