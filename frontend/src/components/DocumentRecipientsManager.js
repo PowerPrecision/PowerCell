@@ -162,7 +162,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
     setShowEditDialog(true);
   };
 
-  const handleSaveRecipient = () => {
+  const handleSaveRecipient = async () => {
     // Validações
     if (!formData.name.trim()) {
       toast.error("Nome é obrigatório");
@@ -183,16 +183,44 @@ const DocumentRecipientsManager = ({ token, user }) => {
       newRecipients = recipients.map((r, i) =>
         i === editingRecipient.index ? { ...formData } : r
       );
-      toast.success("Destinatário actualizado");
     } else {
       // Adicionar novo
       newRecipients = [...recipients, { ...formData }];
-      toast.success("Destinatário adicionado");
     }
 
-    setRecipients(newRecipients);
-    setHasChanges(true);
-    setShowEditDialog(false);
+    // Guardar automaticamente
+    try {
+      const response = await fetch(`${API_URL}/api/system-config/document_recipients`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          enabled,
+          recipients: JSON.stringify(newRecipients),
+          email_template: emailTemplate,
+          default_to: defaultTo,
+          default_to_name: defaultToName,
+          default_to_emails: JSON.stringify(defaultToEmails.filter(e => e && e.includes("@"))),
+        }),
+      });
+
+      if (response.ok) {
+        toast.success(editingRecipient ? "Destinatário actualizado com sucesso" : "Destinatário adicionado com sucesso");
+        setRecipients(newRecipients);
+        setHasChanges(false);
+        setShowEditDialog(false);
+        // Recarregar dados do servidor para confirmar
+        await loadConfig();
+      } else {
+        const data = await response.json();
+        toast.error(data.detail || "Erro ao guardar alterações");
+      }
+    } catch (error) {
+      console.error("Erro ao guardar:", error);
+      toast.error("Erro ao guardar destinatário");
+    }
   };
 
   // Remover destinatário
@@ -201,21 +229,88 @@ const DocumentRecipientsManager = ({ token, user }) => {
     setShowDeleteDialog(true);
   };
 
-  const handleDeleteRecipient = () => {
+  const handleDeleteRecipient = async () => {
     const newRecipients = recipients.filter((_, i) => i !== deletingRecipient.index);
     setRecipients(newRecipients);
-    setHasChanges(true);
     setShowDeleteDialog(false);
-    toast.success("Destinatário removido");
+    
+    // Guardar automaticamente após eliminar
+    try {
+      const response = await fetch(`${API_URL}/api/system-config/document_recipients`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          enabled,
+          recipients: JSON.stringify(newRecipients),
+          email_template: emailTemplate,
+          default_to: defaultTo,
+          default_to_name: defaultToName,
+          default_to_emails: JSON.stringify(defaultToEmails.filter(e => e && e.includes("@"))),
+        }),
+      });
+
+      if (response.ok) {
+        toast.success("Destinatário removido com sucesso");
+        setHasChanges(false);
+        // Recarregar dados do servidor para confirmar
+        await loadConfig();
+      } else {
+        const data = await response.json();
+        toast.error(data.detail || "Erro ao guardar alterações");
+        // Reverter localmente se falhou
+        setRecipients(recipients);
+      }
+    } catch (error) {
+      console.error("Erro ao eliminar:", error);
+      toast.error("Erro ao eliminar destinatário");
+      // Reverter localmente se falhou
+      setRecipients(recipients);
+    }
   };
 
   // Toggle activo
-  const toggleActive = (index) => {
+  const toggleActive = async (index) => {
     const newRecipients = recipients.map((r, i) =>
       i === index ? { ...r, active: !r.active } : r
     );
     setRecipients(newRecipients);
-    setHasChanges(true);
+
+    // Guardar automaticamente
+    try {
+      const response = await fetch(`${API_URL}/api/system-config/document_recipients`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          enabled,
+          recipients: JSON.stringify(newRecipients),
+          email_template: emailTemplate,
+          default_to: defaultTo,
+          default_to_name: defaultToName,
+          default_to_emails: JSON.stringify(defaultToEmails.filter(e => e && e.includes("@"))),
+        }),
+      });
+
+      if (response.ok) {
+        toast.success(newRecipients[index].active ? "Destinatário activado" : "Destinatário desactivado");
+        setHasChanges(false);
+      } else {
+        const data = await response.json();
+        toast.error(data.detail || "Erro ao guardar alterações");
+        // Reverter se falhou
+        setRecipients(recipients);
+      }
+    } catch (error) {
+      console.error("Erro ao togglear:", error);
+      toast.error("Erro ao actualizar destinatário");
+      // Reverter se falhou
+      setRecipients(recipients);
+    }
   };
 
   // Template padrão
