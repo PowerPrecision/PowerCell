@@ -280,98 +280,114 @@ const UsersManagementPage = () => {
                       <Input 
                         value={formData.name} 
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })} 
+                        required
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label>Email</Label>
-                      <Input 
-                        value={formData.email} 
-                        onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Password</Label>
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
+                    {/* Campos apenas para não-parceiros */}
+                    {formData.role !== "parceiro" && (
+                      <>
+                        <div className="space-y-2">
+                          <Label>Email</Label>
                           <Input 
-                            type={showPassword ? "text" : "password"} 
-                            value={formData.password} 
-                            onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
-                            className="pr-20"
+                            value={formData.email} 
+                            onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
+                            required
                           />
-                          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Password</Label>
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <Input 
+                                type={showPassword ? "text" : "password"} 
+                                value={formData.password} 
+                                onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
+                                className="pr-20"
+                                required
+                              />
+                              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                  title={showPassword ? "Ocultar password" : "Mostrar password"}
+                                >
+                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                                {formData.password && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    onClick={copyPassword}
+                                    title="Copiar password"
+                                  >
+                                    <Copy className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
                             <Button
                               type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => setShowPassword(!showPassword)}
-                              title={showPassword ? "Ocultar password" : "Mostrar password"}
+                              variant="outline"
+                              onClick={generatePassword}
+                              title="Gerar password aleatória"
                             >
-                              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              <RefreshCw className="h-4 w-4" />
                             </Button>
-                            {formData.password && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={copyPassword}
-                                title="Copiar password"
-                              >
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                            )}
                           </div>
+                          {generatedPassword && (
+                            <p className="text-xs text-green-600 font-medium">
+                              Password gerada. Copie e envie ao utilizador.
+                            </p>
+                          )}
+                          {/* O17 - Password strength indicator */}
+                          {formData.password && !generatedPassword && (() => {
+                            const pw = formData.password;
+                            let score = 0;
+                            if (pw.length >= 8) score++;
+                            if (pw.length >= 12) score++;
+                            if (/[A-Z]/.test(pw)) score++;
+                            if (/[0-9]/.test(pw)) score++;
+                            if (/[^A-Za-z0-9]/.test(pw)) score++;
+                            const levels = [
+                              { label: "Muito fraca", color: "bg-red-500", width: "w-1/5" },
+                              { label: "Fraca", color: "bg-orange-500", width: "w-2/5" },
+                              { label: "Razoável", color: "bg-yellow-500", width: "w-3/5" },
+                              { label: "Forte", color: "bg-green-500", width: "w-4/5" },
+                              { label: "Muito forte", color: "bg-emerald-600", width: "w-full" },
+                            ];
+                            const level = levels[Math.min(score, 4)];
+                            return (
+                              <div className="space-y-1">
+                                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                                  <div className={`h-full rounded-full transition-all ${level.color} ${level.width}`} />
+                                </div>
+                                <p className={`text-xs ${score >= 3 ? "text-green-600" : "text-orange-600"}`}>{level.label}</p>
+                              </div>
+                            );
+                          })()}
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={generatePassword}
-                          title="Gerar password aleatória"
-                        >
-                          <RefreshCw className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {generatedPassword && (
-                        <p className="text-xs text-green-600 font-medium">
-                          Password gerada. Copie e envie ao utilizador.
-                        </p>
-                      )}
-                      {/* O17 - Password strength indicator */}
-                      {formData.password && !generatedPassword && (() => {
-                        const pw = formData.password;
-                        let score = 0;
-                        if (pw.length >= 8) score++;
-                        if (pw.length >= 12) score++;
-                        if (/[A-Z]/.test(pw)) score++;
-                        if (/[0-9]/.test(pw)) score++;
-                        if (/[^A-Za-z0-9]/.test(pw)) score++;
-                        const levels = [
-                          { label: "Muito fraca", color: "bg-red-500", width: "w-1/5" },
-                          { label: "Fraca", color: "bg-orange-500", width: "w-2/5" },
-                          { label: "Razoável", color: "bg-yellow-500", width: "w-3/5" },
-                          { label: "Forte", color: "bg-green-500", width: "w-4/5" },
-                          { label: "Muito forte", color: "bg-emerald-600", width: "w-full" },
-                        ];
-                        const level = levels[Math.min(score, 4)];
-                        return (
-                          <div className="space-y-1">
-                            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                              <div className={`h-full rounded-full transition-all ${level.color} ${level.width}`} />
-                            </div>
-                            <p className={`text-xs ${score >= 3 ? "text-green-600" : "text-orange-600"}`}>{level.label}</p>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Telefone</Label>
-                      <Input 
-                        value={formData.phone} 
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
-                      />
-                    </div>
+                        <div className="space-y-2">
+                          <Label>Telefone</Label>
+                          <Input 
+                            value={formData.phone} 
+                            onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Pasta Drive</Label>
+                          <Input 
+                            value={formData.onedrive_folder} 
+                            onChange={(e) => setFormData({ ...formData, onedrive_folder: e.target.value })} 
+                            placeholder="Nome/caminho da pasta" 
+                          />
+                        </div>
+                      </>
+                    )}
                     <div className="space-y-2">
                       <Label>Perfil</Label>
                       <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
@@ -387,15 +403,11 @@ const UsersManagementPage = () => {
                           <SelectItem value="admin">Administrador</SelectItem>
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-muted-foreground">Nota: Clientes são processos, não utilizadores do sistema. Parceiros são utilizadores fantasma sem acesso à plataforma.</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Pasta Drive</Label>
-                      <Input 
-                        value={formData.onedrive_folder} 
-                        onChange={(e) => setFormData({ ...formData, onedrive_folder: e.target.value })} 
-                        placeholder="Nome/caminho da pasta" 
-                      />
+                      <p className="text-xs text-muted-foreground">
+                        {formData.role === "parceiro" 
+                          ? "Parceiros são utilizadores fantasma sem acesso à plataforma, usados apenas para tracking e atribuição."
+                          : "Nota: Clientes são processos, não utilizadores do sistema."}
+                      </p>
                     </div>
                     <DialogFooter>
                       <Button type="submit" disabled={formLoading}>
@@ -582,22 +594,54 @@ const UsersManagementPage = () => {
               <Input 
                 value={formData.name} 
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })} 
+                required
               />
             </div>
-            <div className="space-y-2">
-              <Label>Email</Label>
-              <Input 
-                value={formData.email || ""} 
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Telefone</Label>
-              <Input 
-                value={formData.phone} 
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
-              />
-            </div>
+            {/* Campos apenas para não-parceiros */}
+            {formData.role !== "parceiro" && (
+              <>
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <Input 
+                    value={formData.email || ""} 
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Telefone</Label>
+                  <Input 
+                    value={formData.phone} 
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })} 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Pasta Drive</Label>
+                  <Input 
+                    value={formData.onedrive_folder} 
+                    onChange={(e) => setFormData({ ...formData, onedrive_folder: e.target.value })} 
+                    placeholder="Nome/caminho da pasta" 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Nova Password (deixar em branco para manter)</Label>
+                  <div className="relative">
+                    <Input 
+                      type={showPassword ? "text" : "password"} 
+                      value={formData.password} 
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
+                      placeholder="Digite apenas se quiser alterar"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
             <div className="space-y-2">
               <Label>Perfil</Label>
               <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
@@ -613,32 +657,11 @@ const UsersManagementPage = () => {
                   <SelectItem value="admin">Administrador</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Pasta Drive</Label>
-              <Input 
-                value={formData.onedrive_folder} 
-                onChange={(e) => setFormData({ ...formData, onedrive_folder: e.target.value })} 
-                placeholder="Nome/caminho da pasta" 
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Nova Password (deixar em branco para manter)</Label>
-              <div className="relative">
-                <Input 
-                  type={showPassword ? "text" : "password"} 
-                  value={formData.password} 
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
-                  placeholder="Digite apenas se quiser alterar"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+              {formData.role === "parceiro" && (
+                <p className="text-xs text-muted-foreground">
+                  Parceiros são utilizadores fantasma sem acesso à plataforma, usados apenas para tracking e atribuição.
+                </p>
+              )}
             </div>
             <DialogFooter>
               <Button type="submit" disabled={formLoading}>
