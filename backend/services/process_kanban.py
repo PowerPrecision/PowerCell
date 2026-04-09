@@ -4,6 +4,14 @@ SERVIÇO KANBAN DE PROCESSOS - CREDITOIMO
 ====================================================================
 Lógica de negócio específica para visualização e movimentação
 no quadro Kanban.
+
+ARQUITETURA DE HISTÓRICO:
+- O histórico NÃO é guardado no documento do processo (array embebido)
+- O histórico é guardado na coleção dedicada 'history' via services/history.py
+- Isto previne:
+  - Limite de 16MB do documento MongoDB
+  - Degradação de I/O com arrays grandes
+  - Memory bloat nas listagens
 ====================================================================
 """
 import logging
@@ -13,6 +21,7 @@ from collections import defaultdict
 
 from database import db
 from services.process_service import build_query_filter, get_user_name
+from services.history import log_history  # Importar serviço de histórico dedicado
 
 logger = logging.getLogger(__name__)
 
@@ -184,25 +193,26 @@ async def move_process(
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     
-    # Adicionar entrada no histórico
-    history_entry = {
-        "action": "status_change",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "user_id": user.get("id"),
-        "user_name": user.get("name", "Sistema"),
-        "details": f"Movido de '{old_status}' para '{new_status}'"
-    }
+    # NOTA: O histórico agora é guardado na coleção dedicada 'history'
+    # NÃO usamos $push para o documento do processo (evita limite 16MB)
     
     result = await db.processes.update_one(
         {"id": process_id},
-        {
-            "$set": update_data,
-            "$push": {"history": history_entry}
-        }
+        {"$set": update_data}
     )
     
     if result.modified_count == 0:
         return False, {}, "Erro ao mover processo"
+    
+    # Registar no histórico dedicado (coleção separada)
+    await log_history(
+        process_id=process_id,
+        user=user,
+        action="status_change",
+        field="status",
+        old_value=old_status,
+        new_value=new_status
+    )
     
     # Obter nomes das colunas para mensagem
     old_name = next((c["name"] for c in KANBAN_COLUMNS if c["id"] == old_status), old_status)
