@@ -263,13 +263,13 @@ async def create_process_document(
         "created_by": user.get("id"),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "history": [{
-            "action": "created",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "user_id": user.get("id"),
-            "user_name": user.get("name", "Sistema"),
-            "details": f"Processo criado: {data.client_name}"
-        }],
+        # NOTA: history foi REMOVIDO do documento embebido
+        # O histórico agora é guardado na coleção dedicada 'history'
+        # através do serviço services/history.py
+        # Isto evita:
+        # - Limite de 16MB do documento MongoDB
+        # - Degradação de I/O com arrays grandes
+        # - Memory bloat nas listagens
         # Dados estruturados (inicialmente vazios)
         "personal_data": data.personal_data.model_dump() if data.personal_data else {},
         "titular2_data": data.titular2_data.model_dump() if data.titular2_data else {},

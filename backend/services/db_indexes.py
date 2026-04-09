@@ -479,6 +479,49 @@ async def create_indexes(db) -> dict:
                 results["errors"].append(f"processes.{idx['name']}: {str(e)}")
                 logger.error(f"Erro ao criar índice processes.{idx['name']}: {e}")
     
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'history' - HISTÓRICO DEDICADO
+    # ====================================================================
+    # CRÍTICO: Esta coleção armazena o histórico de processos de forma
+    # separada do documento principal (Padrão "Dedicated Collection").
+    # Isto evita o limite de 16MB do MongoDB e melhora a performance.
+    # ====================================================================
+    history_indexes = [
+        # ÍNDICE PRINCIPAL: process_id + timestamp (ordenado desc)
+        # Este é o índice MAIS CRÍTICO para queries de timeline
+        # Permite buscar histórico de um processo de forma instantânea
+        {"keys": [("process_id", 1), ("created_at", -1)], "name": "idx_history_process_time"},
+        
+        # Índice para queries por utilizador (atividade de um user)
+        {"keys": [("user_id", 1), ("created_at", -1)], "name": "idx_history_user_time", "sparse": True},
+        
+        # Índice para filtrar por tipo de ação
+        {"keys": [("action", 1), ("created_at", -1)], "name": "idx_history_action_time"},
+        
+        # Índice simples para timestamp (queries de data)
+        {"keys": [("created_at", -1)], "name": "idx_history_created_desc"},
+        
+        # Índice para queries por campo alterado
+        {"keys": [("field", 1)], "name": "idx_history_field", "sparse": True},
+    ]
+    
+    for idx in history_indexes:
+        try:
+            await db.history.create_index(
+                idx["keys"],
+                name=idx["name"],
+                sparse=idx.get("sparse", False),
+                background=True
+            )
+            results["created"].append(f"history.{idx['name']}")
+            logger.info(f"Índice criado: history.{idx['name']}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["skipped"].append(f"history.{idx['name']}")
+            else:
+                results["errors"].append(f"history.{idx['name']}: {str(e)}")
+                logger.error(f"Erro ao criar índice history.{idx['name']}: {e}")
+    
     # Resumo
     logger.info(
         f"Criação de índices concluída: "
@@ -496,7 +539,7 @@ async def get_index_stats(db) -> dict:
     """
     stats = {}
     
-    collections = ["processes", "clients", "users", "system_error_logs", "properties", "tasks", "chat_messages", "chat_groups"]
+    collections = ["processes", "clients", "users", "system_error_logs", "properties", "tasks", "chat_messages", "chat_groups", "history"]
     
     for collection_name in collections:
         try:
