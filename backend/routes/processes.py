@@ -52,6 +52,7 @@ from services.trello import trello_service, status_to_trello_list, build_card_de
 from services.process_service import (
     get_next_process_number,
     can_view_process,
+    can_edit_process_data,
     build_query_filter,
     create_process_document,
     update_process_document,
@@ -64,6 +65,11 @@ from services.process_service import (
     PROCESS_LIST_PROJECTION,
     PROCESS_KANBAN_PROJECTION,
     PROCESS_MY_CLIENTS_PROJECTION,
+)
+from services.encryption import (
+    encrypt_client_data,
+    generate_nif_hash,
+    generate_email_hash,
 )
 from services.process_assignment import (
     assign_both_to_process,
@@ -81,8 +87,69 @@ from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, sanitize_url, log_sanitization_rejection
 )
+from services.websocket_manager import manager, WSEventType, create_ws_message
 
 logger = logging.getLogger(__name__)
+
+
+# ====================================================================
+# WEBSOCKET BROADCAST HELPERS
+# ====================================================================
+
+async def broadcast_process_delta(
+    event_type: str,
+    process_id: str,
+    process_number: int = None,
+    client_name: str = None,
+    status: str = None,
+    old_status: str = None,
+    assigned_consultor_ids: list = None,
+    assigned_mediador_ids: list = None,
+    consultor_names: list = None,
+    mediador_names: list = None,
+    priority: str = None,
+    process_type: str = None,
+    updated_at: str = None
+):
+    """
+    Broadcast a lightweight process delta to all connected WebSocket clients.
+    
+    Only sends essential fields needed for Kanban update - no heavy arrays or sensitive data.
+    """
+    try:
+        delta = {
+            "process_id": process_id,
+        }
+        
+        # Only include non-None fields
+        if process_number is not None:
+            delta["process_number"] = process_number
+        if client_name is not None:
+            delta["client_name"] = client_name
+        if status is not None:
+            delta["status"] = status
+        if old_status is not None:
+            delta["old_status"] = old_status
+        if assigned_consultor_ids is not None:
+            delta["assigned_consultor_ids"] = assigned_consultor_ids
+        if assigned_mediador_ids is not None:
+            delta["assigned_mediador_ids"] = assigned_mediador_ids
+        if consultor_names is not None:
+            delta["consultor_names"] = consultor_names
+        if mediador_names is not None:
+            delta["mediador_names"] = mediador_names
+        if priority is not None:
+            delta["priority"] = priority
+        if process_type is not None:
+            delta["process_type"] = process_type
+        if updated_at is not None:
+            delta["updated_at"] = updated_at
+        
+        message = create_ws_message(event_type, delta)
+        await manager.broadcast(message)
+        logger.debug(f"Broadcast {event_type} for process {process_id}")
+    except Exception as e:
+        logger.error(f"Error broadcasting process delta: {e}")
 
 
 def _sanitize_dict_names(d: dict):
@@ -246,6 +313,17 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     # Registar no histórico
     await log_history(process_id, user, "Criou processo")
     
+    # === WEBSOCKET BROADCAST: Novo processo criado ===
+    await broadcast_process_delta(
+        event_type=WSEventType.PROCESS_CREATED,
+        process_id=process_id,
+        process_number=process_number,
+        client_name=sanitized_client_name,
+        status=initial_status,
+        process_type=data.process_type,
+        updated_at=now
+    )
+    
     # Notificar administradores e CEO (com verificação de preferências)
     await send_to_admins(
         "Novo Processo Criado",
@@ -331,18 +409,28 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     
     # ============================================================
     # VERIFICAR/CRIAR CLIENTE NA TABELA CLIENTS
+    # Usar blind indexes para pesquisa de dados encriptados
     # ============================================================
     existing_client = None
     client_id = None
-    
+
     # Procurar cliente existente por NIF ou email
+    # Usar blind indexes (nif_hash, email_hash) para dados encriptados
     if client_nif or client_email:
         query = []
         if client_nif:
+            nif_hash = generate_nif_hash(client_nif)
+            if nif_hash:
+                query.append({"dados_pessoais.nif_hash": nif_hash})
+            # Fallback para dados antigos não migrados
             query.append({"dados_pessoais.nif": client_nif})
         if client_email:
+            email_hash = generate_email_hash(client_email)
+            if email_hash:
+                query.append({"contacto.email_hash": email_hash})
+            # Fallback para dados antigos não migrados
             query.append({"contacto.email": client_email.lower()})
-        
+
         existing_client = await db.clients.find_one({"$or": query})
     
     if existing_client:
@@ -351,8 +439,9 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         logger.info(f"Cliente existente encontrado: {client_id} - {existing_client.get('nome')}")
     else:
         # Criar novo cliente
+        # RGPD: Encriptar dados sensíveis ANTES de inserir
         from models.client import Client, ClientContact, ClientPersonalData
-        
+
         client_id = str(uuid.uuid4())
         new_client = {
             "id": client_id,
@@ -372,7 +461,9 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
             "updated_at": now,
             "created_by": user.get("email")
         }
-        
+
+        # RGPD: Encriptar dados sensíveis antes de inserir
+        new_client = encrypt_client_data(new_client)
         await db.clients.insert_one(new_client)
         logger.info(f"Novo cliente criado: {client_id} - {client_name}")
     
@@ -427,6 +518,21 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     
     # Registar no histórico
     await log_history(process_id, user, f"Criou processo para cliente {client_name}")
+    
+    # === WEBSOCKET BROADCAST: Novo processo criado por staff ===
+    await broadcast_process_delta(
+        event_type=WSEventType.PROCESS_CREATED,
+        process_id=process_id,
+        process_number=process_number,
+        client_name=client_name,
+        status=initial_status,
+        process_type=data.process_type,
+        assigned_consultor_ids=process_doc.get("assigned_consultor_ids", []),
+        assigned_mediador_ids=process_doc.get("assigned_mediador_ids", []),
+        consultor_names=[user["name"]] if user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR] else [],
+        mediador_names=[user["name"]] if user["role"] in [UserRole.INTERMEDIARIO, UserRole.MEDIADOR] else [],
+        updated_at=now
+    )
     
     # Sincronizar com Trello (criar cartão)
     try:
@@ -1117,6 +1223,17 @@ async def move_process_kanban(
     # Log history
     await log_history(process_id, user, "Moveu processo", "status", old_status, new_status)
     
+    # === WEBSOCKET BROADCAST: Processo movido no Kanban ===
+    await broadcast_process_delta(
+        event_type=WSEventType.PROCESS_STATUS_CHANGED,
+        process_id=process_id,
+        process_number=process.get("process_number"),
+        client_name=process.get("client_name"),
+        status=new_status,
+        old_status=old_status,
+        updated_at=datetime.now(timezone.utc).isoformat()
+    )
+    
     # === ALERTAS AUTOMÁTICOS BASEADOS NA MUDANÇA DE ESTADO ===
     
     # 1. Ao mover para CH Aprovado - Verificar documentos do imóvel
@@ -1475,6 +1592,18 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
+    # === WEBSOCKET BROADCAST: Processo atualizado ===
+    await broadcast_process_delta(
+        event_type=WSEventType.PROCESS_UPDATED,
+        process_id=process_id,
+        process_number=updated.get("process_number"),
+        client_name=updated.get("client_name"),
+        status=updated.get("status"),
+        old_status=process.get("status") if data.status else None,
+        priority=updated.get("priority"),
+        updated_at=updated.get("updated_at")
+    )
+    
     # O22 - Executar regras de automação após atualização
     if data.status and can_update_status:
         try:
@@ -1684,6 +1813,22 @@ async def assign_process(
                 await log_history(process_id, user, "Atribuiu parceiro", "assigned_parceiro_id", old_name, parceiro_user["name"])
     
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    
+    # === WEBSOCKET BROADCAST: Atribuições atualizadas ===
+    updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    await broadcast_process_delta(
+        event_type=WSEventType.PROCESS_ASSIGNED,
+        process_id=process_id,
+        process_number=updated_process.get("process_number"),
+        client_name=updated_process.get("client_name"),
+        status=updated_process.get("status"),
+        assigned_consultor_ids=updated_process.get("assigned_consultor_ids", []),
+        assigned_mediador_ids=updated_process.get("assigned_mediador_ids", []),
+        consultor_names=updated_process.get("consultor_names", []),
+        mediador_names=updated_process.get("mediador_names", []),
+        updated_at=updated_process.get("updated_at")
+    )
+    
     return {"success": True, "message": "Atribuições actualizadas com sucesso"}
 
 
@@ -1860,6 +2005,12 @@ async def resolve_data_conflict(
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
     
+    # SECURITY: Verificar permissão de edição antes de processar
+    can_edit, reason = can_edit_process_data(user, process)
+    if not can_edit:
+        logger.warning(f"IDOR attempt: User {user.get('id')} ({user.get('role')}) tried to resolve conflict on process {process_id}: {reason}")
+        raise HTTPException(status_code=403, detail=f"Não tem permissões para alterar este processo. {reason}")
+    
     ai_suggestions = process.get("ai_suggestions", [])
     
     # Encontrar a sugestão para este campo
@@ -1969,6 +2120,12 @@ async def confirm_client_data(
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    # SECURITY: Verificar permissão de edição antes de processar
+    can_edit, reason = can_edit_process_data(user, process)
+    if not can_edit:
+        logger.warning(f"IDOR attempt: User {user.get('id')} ({user.get('role')}) tried to confirm data on process {process_id}: {reason}")
+        raise HTTPException(status_code=403, detail=f"Não tem permissões para alterar este processo. {reason}")
     
     # Verificar se há conflitos pendentes antes de confirmar
     ai_suggestions = process.get("ai_suggestions", [])

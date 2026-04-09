@@ -61,6 +61,7 @@ import {
   Shield,
   ClipboardList,
   DollarSign,
+  Lock,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import MobileBottomNav from "../components/layout/MobileBottomNav";
@@ -412,7 +413,12 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/auditoria",
               },
               {
-                label: "Diagnósticos",
+                label: "Migracao RGPD",
+                icon: Lock,
+                href: "/admin/migracao-rgpd",
+              },
+              {
+                label: "Diagnosticos",
                 icon: Activity,
                 href: "/diagnosticos",
               },
