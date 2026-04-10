@@ -619,6 +619,214 @@ async def check_upload_conflict(
     }
 
 
+# ====================================================================
+# DIRECT S3 UPLOAD - PRE-SIGNED URLs
+# ====================================================================
+
+@router.post("/generate-upload-url", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+async def generate_upload_url(
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Gera uma pre-signed URL para upload direto do frontend para o S3.
+    
+    Este endpoint permite que o frontend faça upload diretamente para o S3,
+    evitando que o ficheiro passe pelo backend (reduz consumo de RAM e previne timeouts).
+    
+    Fluxo:
+    1. Frontend chama este endpoint com nome e tipo do ficheiro
+    2. Backend gera URL assinada e devolve
+    3. Frontend faz PUT diretamente para o S3
+    4. Frontend chama /confirm-upload para registar na base de dados
+    
+    Body:
+    - process_id: ID do processo (obrigatório)
+    - filename: Nome original do ficheiro (obrigatório)
+    - content_type: MIME type do ficheiro (obrigatório, ex: "application/pdf")
+    - category: Categoria destino (default: "Outros")
+    - custom_filename: Nome personalizado para evitar conflitos (opcional)
+    
+    Returns:
+    - upload_url: URL assinada para PUT request
+    - file_key: Caminho S3 onde o ficheiro será armazenado
+    - expires_at: Timestamp de expiração da URL
+    - expires_in_seconds: Segundos até a URL expirar
+    """
+    process_id = data.get("process_id")
+    filename = data.get("filename")
+    content_type = data.get("content_type")
+    category = data.get("category", "Outros")
+    custom_filename = data.get("custom_filename")
+    
+    # Validações
+    if not process_id:
+        raise HTTPException(status_code=400, detail="process_id é obrigatório")
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename é obrigatório")
+    if not content_type:
+        raise HTTPException(status_code=400, detail="content_type é obrigatório")
+    
+    # Verificar se S3 está configurado
+    if not s3_service.is_configured():
+        raise HTTPException(
+            status_code=503, 
+            detail="Serviço de armazenamento S3 não configurado. Contacte o administrador."
+        )
+    
+    # Buscar processo
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    titular2 = process.get("titular2_data") or {}
+    second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
+    s3_folder = process.get("s3_folder")
+    
+    # Usar nome personalizado ou normalizar o original
+    if custom_filename:
+        normalized_filename = normalize_filename(custom_filename, category)
+    else:
+        normalized_filename = normalize_filename(filename, category)
+    
+    # Gerar pre-signed URL
+    result = s3_service.generate_upload_presigned_url(
+        client_id=process_id,
+        client_name=client_name,
+        category=category,
+        filename=normalized_filename,
+        content_type=content_type,
+        second_client_name=second_client_name,
+        s3_folder=s3_folder,
+        expiration=300  # 5 minutos
+    )
+    
+    if not result:
+        raise HTTPException(
+            status_code=500, 
+            detail="Erro ao gerar URL de upload. Por favor tente novamente."
+        )
+    
+    logger.info(f"[DIRECT-UPLOAD] URL gerada para {normalized_filename} por {user.get('email')}")
+    
+    return {
+        "success": True,
+        "upload_url": result["upload_url"],
+        "file_key": result["file_key"],
+        "normalized_filename": normalized_filename,
+        "original_filename": filename,
+        "expires_at": result["expires_at"],
+        "expires_in_seconds": result["expires_in_seconds"],
+        "method": "PUT",
+        "headers": {
+            "Content-Type": content_type
+        }
+    }
+
+
+@router.post("/confirm-upload", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+async def confirm_upload(
+    data: dict,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Confirma um upload direto para o S3 e regista metadados na base de dados.
+    
+    Este endpoint deve ser chamado pelo frontend APÓS o upload direto para o S3
+    ter sido concluído com sucesso (HTTP 200 do S3).
+    
+    Body:
+    - process_id: ID do processo (obrigatório)
+    - file_key: Caminho S3 do ficheiro (obrigatório, devolvido pelo /generate-upload-url)
+    - original_filename: Nome original do ficheiro (obrigatório)
+    - category: Categoria do documento (obrigatório)
+    - file_size: Tamanho do ficheiro em bytes (opcional)
+    - content_type: MIME type do ficheiro (opcional)
+    
+    Returns:
+    - success: True se registado com sucesso
+    - s3_path: Caminho S3 do ficheiro
+    - temporary_url: URL temporário para acesso imediato
+    """
+    process_id = data.get("process_id")
+    file_key = data.get("file_key")
+    original_filename = data.get("original_filename")
+    category = data.get("category", "Outros")
+    file_size = data.get("file_size")
+    content_type = data.get("content_type", "application/octet-stream")
+    
+    # Validações
+    if not process_id:
+        raise HTTPException(status_code=400, detail="process_id é obrigatório")
+    if not file_key:
+        raise HTTPException(status_code=400, detail="file_key é obrigatório")
+    if not original_filename:
+        raise HTTPException(status_code=400, detail="original_filename é obrigatório")
+    
+    # Buscar processo
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    
+    # Verificar se o ficheiro existe no S3
+    if not s3_service.file_exists(file_key):
+        raise HTTPException(
+            status_code=400, 
+            detail="Ficheiro não encontrado no S3. O upload pode ter falhado."
+        )
+    
+    # Extrair nome do ficheiro do path
+    normalized_filename = file_key.split("/")[-1] if "/" in file_key else file_key
+    
+    # Gerar URL temporário para acesso imediato
+    temporary_url = s3_service.get_presigned_url(file_key) or ""
+    
+    # Agendar categorização automática em background
+    try:
+        # Tentar obter conteúdo do ficheiro para categorização
+        file_content = s3_service.get_file_content(file_key)
+        if file_content:
+            background_tasks.add_task(
+                auto_categorize_document_background,
+                process_id=process_id,
+                client_name=client_name,
+                s3_path=file_key,
+                filename=normalized_filename,
+                file_content=file_content
+            )
+    except Exception as e:
+        logger.warning(f"[CONFIRM-UPLOAD] Erro ao agendar categorização: {e}")
+    
+    # Registar no histórico
+    try:
+        await log_history(
+            process_id=process_id,
+            user=user,
+            action="Carregou documento (upload direto)",
+            field="documento",
+            new_value=f"{normalized_filename} ({category})"
+        )
+    except Exception as e:
+        logger.warning(f"[CONFIRM-UPLOAD] Erro ao registar histórico: {e}")
+    
+    logger.info(f"[CONFIRM-UPLOAD] Upload confirmado: {normalized_filename}")
+    
+    return {
+        "success": True,
+        "s3_path": file_key,
+        "normalized_filename": normalized_filename,
+        "original_filename": original_filename,
+        "category": category,
+        "temporary_url": temporary_url,
+        "message": "Upload registado com sucesso",
+        "auto_categorization": "iniciada" if file_content else " indisponível"
+    }
+
+
 @router.post("/check-file", responses={400: HTTP_400_RESPONSE, 500: HTTP_500_RESPONSE})
 async def check_file_upload(
     file: UploadFile = File(...),
