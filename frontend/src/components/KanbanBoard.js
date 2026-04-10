@@ -41,7 +41,8 @@ const KanbanBoard = ({
   user, 
   consultorFilter = 'all', 
   mediadorFilter = 'all', 
-  indexacaoFilter = 'all' 
+  indexacaoFilter = 'all',
+  parceiroFilter = 'all' 
 }) => {
   // === ESTADO GLOBAL DO BOARD ===
   const [loading, setLoading] = useState(true);
@@ -87,6 +88,9 @@ const KanbanBoard = ({
       if (indexacaoFilter && indexacaoFilter !== 'all') {
         params.append('indexacao_id', indexacaoFilter === 'none' ? 'none' : indexacaoFilter);
       }
+      if (parceiroFilter && parceiroFilter !== 'all') {
+        params.append('parceiro_id', parceiroFilter === 'none' ? 'none' : parceiroFilter);
+      }
 
       const url = params.toString()
         ? `${API_URL}/api/processes/kanban?${params.toString()}`
@@ -105,7 +109,7 @@ const KanbanBoard = ({
     } finally {
       setLoading(false);
     }
-  }, [token, consultorFilter, mediadorFilter, indexacaoFilter]);
+  }, [token, consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter]);
 
   useEffect(() => {
     fetchKanbanData();

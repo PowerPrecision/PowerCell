@@ -196,6 +196,11 @@ class Titular2Data(BaseModel):
     morada_fiscal: Optional[str] = None
     birth_date: Optional[str] = None
     estado_civil: Optional[str] = None
+    # Credenciais dos Portais Oficiais (AT/SS) para o 2º Proponente
+    portal_financas_utilizador: Optional[str] = Field(None, max_length=100, description="Utilizador do Portal das Finanças (2º Proponente)")
+    portal_financas_senha: Optional[str] = Field(None, max_length=100, description="Senha de acesso ao Portal das Finanças (2º Proponente)")
+    seg_social_utilizador: Optional[str] = Field(None, max_length=100, description="Utilizador da Segurança Social Direta (2º Proponente)")
+    seg_social_senha: Optional[str] = Field(None, max_length=100, description="Senha de acesso à Segurança Social Direta (2º Proponente)")
     
     @field_validator('nif', mode='before')
     @classmethod
