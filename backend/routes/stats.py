@@ -31,25 +31,33 @@ async def get_stats(user: dict = Depends(get_current_user)):
     
     # Build query based on role
     process_query = {}
+    
+    # ====================================================================
+    # FILTRO DE INTEGRIDADE: is_deleted
+    # Processos eliminados NUNCA entram nas estatísticas
+    # ====================================================================
+    process_query["is_deleted"] = {"$ne": True}
 
     if role == UserRole.CLIENTE:
-        process_query = {"client_id": user_id}
+        process_query["client_id"] = user_id
     elif role == UserRole.CONSULTOR:
-        process_query = {"assigned_consultor_id": user_id}
+        process_query["assigned_consultor_id"] = user_id
     elif role == UserRole.INDEXACAO:
         # INDEXACAO vê apenas os processos atribuídos a ele
-        process_query = {"assigned_indexacao_id": user_id}
+        process_query["assigned_indexacao_id"] = user_id
     elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
-        process_query = {"assigned_mediador_id": user_id}
-    # Admin, CEO, Administrativo e Diretor see all (no filter)
+        process_query["assigned_mediador_id"] = user_id
+    # Admin, CEO, Administrativo e Diretor see all (no additional filter)
     
     # Process status breakdown
+    # NOTA: Estatísticas DEVEM incluir concluídos e desistências para métricas precisas
     concluded_statuses = ["concluidos"]
-    dropped_statuses = ["desistencias", "eliminados"]
+    dropped_statuses = ["desistencias"]  # NOTA: "eliminados" não conta como desistência para estatísticas
 
-    concluded_query = {**process_query, "status": {"$in": concluded_statuses}} if process_query else {"status": {"$in": concluded_statuses}}
-    dropped_query = {**process_query, "status": {"$in": dropped_statuses}} if process_query else {"status": {"$in": dropped_statuses}}
-    active_query = {**process_query, "status": {"$nin": concluded_statuses + dropped_statuses}} if process_query else {"status": {"$nin": concluded_statuses + dropped_statuses}}
+    # Queries para contagens separadas (todas excluem is_deleted via process_query base)
+    concluded_query = {**process_query, "status": {"$in": concluded_statuses}}
+    dropped_query = {**process_query, "status": {"$in": dropped_statuses}}
+    active_query = {**process_query, "status": {"$nin": concluded_statuses + dropped_statuses + ["eliminados"]}}
     no_indexacao_query = {**active_query, "assigned_indexacao_id": None}
     
     # ── BUSCA PARALELA: 4 contagens de processos + 1 contagem de tarefas ──
