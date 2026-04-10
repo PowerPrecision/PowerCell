@@ -517,5 +517,168 @@ export const updateRGPDTemplate = (content) => api.put("/rgpd/admin/template", {
 export const getTTLStatus = () => api.get("/diagnostics/ttl-status");
 export const migrateTTLFields = () => api.post("/diagnostics/migrate-ttl-fields");
 
+// ===== DIRECT S3 UPLOAD (Pre-signed URLs) =====
+/**
+ * Gera uma pre-signed URL para upload direto do frontend para o S3.
+ * 
+ * @param {Object} data - Dados do upload
+ * @param {string} data.process_id - ID do processo
+ * @param {string} data.filename - Nome original do ficheiro
+ * @param {string} data.content_type - MIME type do ficheiro (ex: "application/pdf")
+ * @param {string} [data.category="Outros"] - Categoria destino
+ * @param {string} [data.custom_filename] - Nome personalizado para evitar conflitos
+ * @returns {Promise} - { upload_url, file_key, expires_at, method, headers }
+ */
+export const generateUploadUrl = (data) => api.post("/documents/generate-upload-url", data);
+
+/**
+ * Confirma um upload direto para o S3 e regista metadados na base de dados.
+ * Deve ser chamado APÓS o upload direto para o S3 ter sido concluído com sucesso.
+ * 
+ * @param {Object} data - Dados da confirmação
+ * @param {string} data.process_id - ID do processo
+ * @param {string} data.file_key - Caminho S3 do ficheiro (devolvido pelo generateUploadUrl)
+ * @param {string} data.original_filename - Nome original do ficheiro
+ * @param {string} data.category - Categoria do documento
+ * @param {number} [data.file_size] - Tamanho do ficheiro em bytes
+ * @param {string} [data.content_type] - MIME type do ficheiro
+ * @returns {Promise} - { success, s3_path, temporary_url }
+ */
+export const confirmUpload = (data) => api.post("/documents/confirm-upload", data);
+
+/**
+ * Faz upload direto para o S3 usando uma pre-signed URL.
+ * 
+ * @param {string} uploadUrl - URL assinada devolvida pelo generateUploadUrl
+ * @param {File|Blob} file - Ficheiro a enviar
+ * @param {string} contentType - MIME type do ficheiro
+ * @param {Function} [onProgress] - Callback para progresso (progressEvent) => {}
+ * @returns {Promise} - { success: true } ou lança erro
+ */
+export const uploadDirectToS3 = async (uploadUrl, file, contentType, onProgress = null) => {
+  const response = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: file,
+    headers: {
+      'Content-Type': contentType,
+    },
+    // Usar XMLHttpRequest para suportar progress
+    ...(onProgress ? { signal: null } : {})
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => 'Unknown error');
+    throw new Error(`S3 upload failed: ${response.status} - ${errorText}`);
+  }
+  
+  return { success: true };
+};
+
+/**
+ * Faz upload direto para o S3 com suporte a progress.
+ * Versão que usa XMLHttpRequest para suportar onUploadProgress.
+ * 
+ * @param {string} uploadUrl - URL assinada devolvida pelo generateUploadUrl
+ * @param {File|Blob} file - Ficheiro a enviar
+ * @param {string} contentType - MIME type do ficheiro
+ * @param {Function} [onProgress] - Callback para progresso (percent) => {}
+ * @returns {Promise} - { success: true } ou lança erro
+ */
+export const uploadDirectToS3WithProgress = (uploadUrl, file, contentType, onProgress = null) => {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    
+    // Configurar progress callback
+    if (onProgress) {
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(percent);
+        }
+      });
+    }
+    
+    // Configurar completion
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve({ success: true });
+      } else {
+        reject(new Error(`S3 upload failed: ${xhr.status} - ${xhr.responseText}`));
+      }
+    });
+    
+    // Configurar error handling
+    xhr.addEventListener('error', () => {
+      reject(new Error('S3 upload failed: Network error'));
+    });
+    
+    xhr.addEventListener('abort', () => {
+      reject(new Error('S3 upload aborted'));
+    });
+    
+    // Iniciar upload
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', contentType);
+    xhr.send(file);
+  });
+};
+
+/**
+ * Fluxo completo de Direct S3 Upload com tratamento de erros.
+ * 
+ * @param {Object} options - Opções do upload
+ * @param {string} options.processId - ID do processo
+ * @param {File} options.file - Ficheiro a enviar
+ * @param {string} options.category - Categoria destino
+ * @param {string} [options.customFilename] - Nome personalizado
+ * @param {Function} [options.onProgress] - Callback para progresso (percent) => {}
+ * @returns {Promise} - { success, s3_path, temporary_url, normalized_filename }
+ */
+export const directS3Upload = async (options) => {
+  const { processId, file, category, customFilename, onProgress } = options;
+  
+  try {
+    // Passo 1: Obter pre-signed URL
+    const urlResponse = await generateUploadUrl({
+      process_id: processId,
+      filename: file.name,
+      content_type: file.type || 'application/octet-stream',
+      category: category || 'Outros',
+      custom_filename: customFilename,
+    });
+    
+    const { upload_url, file_key, normalized_filename } = urlResponse.data;
+    
+    // Passo 2: Fazer upload direto para S3
+    await uploadDirectToS3WithProgress(
+      upload_url, 
+      file, 
+      file.type || 'application/octet-stream',
+      onProgress
+    );
+    
+    // Passo 3: Confirmar upload no backend
+    const confirmResponse = await confirmUpload({
+      process_id: processId,
+      file_key: file_key,
+      original_filename: file.name,
+      category: category || 'Outros',
+      file_size: file.size,
+      content_type: file.type,
+    });
+    
+    return {
+      success: true,
+      s3_path: confirmResponse.data.s3_path,
+      temporary_url: confirmResponse.data.temporary_url,
+      normalized_filename: normalized_filename,
+    };
+    
+  } catch (error) {
+    console.error('[DirectS3Upload] Error:', error);
+    throw error;
+  }
+};
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
