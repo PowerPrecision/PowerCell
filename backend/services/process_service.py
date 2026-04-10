@@ -572,7 +572,11 @@ def decrypt_processes_list(processes: list, fields_to_decrypt: list = None) -> l
                 value = str(decrypted[field])
                 if value.startswith("ENC:"):
                     try:
-                        decrypted[field] = encryption_service.decrypt(value)
+                        decrypted_value = encryption_service.decrypt(value)
+                        if decrypted_value and not decrypted_value.startswith("ENC:"):
+                            decrypted[field] = decrypted_value
+                        else:
+                            logger.warning(f"Campo {field} não foi desencriptado - serviço pode não estar disponível")
                     except Exception as e:
                         logger.warning(f"Erro ao desencriptar {field}: {e}")
         result.append(decrypted)
