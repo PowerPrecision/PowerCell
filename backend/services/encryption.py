@@ -153,7 +153,9 @@ class EncryptionService:
         
         # Se o serviço não está disponível, tentar mesmo assim
         if not self._fernet:
-            logger.error("Tentativa de desencriptação mas Fernet não está inicializado!")
+            logger.error(f"DESENCRIPTAÇÃO FALHOU: Fernet não inicializado! Valor permanece encriptado: {value[:30]}...")
+            logger.error("CAUSA PROVÁVEL: ENCRYPTION_KEY não definida ou diferente da usada para encriptar")
+            logger.error("SOLUÇÃO: Configure ENCRYPTION_KEY nas variáveis de ambiente do Vercel")
             return value
         
         try:
@@ -163,6 +165,8 @@ class EncryptionService:
             return decrypted
         except Exception as e:
             logger.error(f"Erro ao desencriptar: {e}")
+            logger.error(f"CAUSA: Chave de encriptação pode ser diferente da usada para encriptar os dados")
+            logger.error(f"Valor problemático (primeiros 30 chars): {value[:30]}...")
             return value
     
     def encrypt_dict(self, data: dict, fields: List[str]) -> dict:
