@@ -487,7 +487,8 @@ const LeadsKanban = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setClients(data);
+        // O endpoint retorna {items: [...], total, page, size, pages} ou array direto
+        setClients(data?.items || data || []);
       }
     } catch (error) {
       console.error("Erro ao carregar clientes:", error);
@@ -502,7 +503,8 @@ const LeadsKanban = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setConsultores(data);
+        // Garantir que é um array
+        setConsultores(Array.isArray(data) ? data : (data?.items || []));
       }
     } catch (error) {
       console.error("Erro ao carregar consultores:", error);
@@ -831,7 +833,7 @@ const LeadsKanban = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos</SelectItem>
-                {consultores.map((c) => (
+                {(consultores || []).map((c) => (
                   <SelectItem key={c.id} value={c.id}>
                     {c.name || c.email}
                   </SelectItem>
