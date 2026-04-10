@@ -79,6 +79,10 @@ const KanbanBoard = ({
       setLoading(true); // Mostrar loading quando filtros mudam
       const params = new URLSearchParams();
       
+      // FILTRO DE ESTADO ATIVO: Por defeito, mostra apenas processos ativos
+      // O backend usa 'active_only' como default, mas enviamos explicitamente
+      params.append('view_mode', 'active_only');
+      
       if (consultorFilter && consultorFilter !== 'all') {
         params.append('consultor_id', consultorFilter === 'none' ? 'none' : consultorFilter);
       }
@@ -92,9 +96,7 @@ const KanbanBoard = ({
         params.append('parceiro_id', parceiroFilter === 'none' ? 'none' : parceiroFilter);
       }
 
-      const url = params.toString()
-        ? `${API_URL}/api/processes/kanban?${params.toString()}`
-        : `${API_URL}/api/processes/kanban`;
+      const url = `${API_URL}/api/processes/kanban?${params.toString()}`;
 
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
