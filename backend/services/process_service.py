@@ -448,7 +448,7 @@ def encrypt_sensitive_data(data: dict) -> dict:
     # Encriptar sub-dicionários
     sections = {
         "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
-        "titular2_data": ["nif", "documento_id", "phone", "telefone"],
+        "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_senha", "seg_social_senha"],
         "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
         "vendedor": ["nif", "documento_id", "phone", "telefone"],
         "mediador": ["nif", "phone", "telefone"],
@@ -513,7 +513,7 @@ def decrypt_sensitive_data(data: dict) -> dict:
     # Desencriptar sub-dicionários
     sections = {
         "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
-        "titular2_data": ["nif", "documento_id", "phone", "telefone"],
+        "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_senha", "seg_social_senha"],
         "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
         "vendedor": ["nif", "documento_id", "phone", "telefone"],
         "mediador": ["nif", "phone", "telefone"],
@@ -572,7 +572,11 @@ def decrypt_processes_list(processes: list, fields_to_decrypt: list = None) -> l
                 value = str(decrypted[field])
                 if value.startswith("ENC:"):
                     try:
-                        decrypted[field] = encryption_service.decrypt(value)
+                        decrypted_value = encryption_service.decrypt(value)
+                        if decrypted_value and not decrypted_value.startswith("ENC:"):
+                            decrypted[field] = decrypted_value
+                        else:
+                            logger.warning(f"Campo {field} não foi desencriptado - serviço pode não estar disponível")
                     except Exception as e:
                         logger.warning(f"Erro ao desencriptar {field}: {e}")
         result.append(decrypted)

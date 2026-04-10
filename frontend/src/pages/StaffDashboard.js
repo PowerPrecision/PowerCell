@@ -46,6 +46,7 @@ const StaffDashboard = () => {
   const [consultorFilter, setConsultorFilter] = useState(() => searchParams.get("consultor") || "all");
   const [mediadorFilter, setMediadorFilter] = useState(() => searchParams.get("mediador") || "all");
   const [indexacaoFilter, setIndexacaoFilter] = useState(() => searchParams.get("indexacao") || "all");
+  const [parceiroFilter, setParceiroFilter] = useState(() => searchParams.get("parceiro") || "all");
 
   // Atualizar filtros na URL
   const updateTab = useCallback((tab) => {
@@ -83,6 +84,15 @@ const StaffDashboard = () => {
       return prev;
     }, { replace: true });
   }, [setSearchParams]);
+
+  const updateParceiroFilter = useCallback((value) => {
+    setParceiroFilter(value);
+    setSearchParams(prev => {
+      if (value === "all") prev.delete("parceiro");
+      else prev.set("parceiro", value);
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
   
   // Estado para rascunhos automáticos
   const [drafts, setDrafts] = useState([]);
@@ -110,6 +120,7 @@ const StaffDashboard = () => {
   const consultors = useMemo(() => users.filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
   const intermediarios = useMemo(() => users.filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
   const indexacaoUsers = useMemo(() => users.filter(u => u.role === "indexacao"), [users]);
+  const parceiros = useMemo(() => users.filter(u => u.role === "parceiro"), [users]);
 
   useEffect(() => {
     fetchData();
@@ -470,11 +481,11 @@ const StaffDashboard = () => {
                   Quadro Geral de Processos
                 </CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  Filtre por consultor, intermediário ou indexação
+                  Filtre por consultor, intermediário, indexação ou parceiro
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                   <div className="space-y-2">
                     <Label>Filtrar por Consultor</Label>
                     <Select value={consultorFilter} onValueChange={updateConsultorFilter}>
@@ -508,6 +519,17 @@ const StaffDashboard = () => {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-2">
+                    <Label>Filtrar por Parceiro</Label>
+                    <Select value={parceiroFilter} onValueChange={updateParceiroFilter}>
+                      <SelectTrigger><SelectValue placeholder="Todos os parceiros" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos os Parceiros</SelectItem>
+                        <SelectItem value="none">Nenhum (sem parceiro)</SelectItem>
+                        {parceiros.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <KanbanBoard 
                   token={token} 
@@ -515,6 +537,7 @@ const StaffDashboard = () => {
                   consultorFilter={consultorFilter}
                   mediadorFilter={mediadorFilter}
                   indexacaoFilter={indexacaoFilter}
+                  parceiroFilter={parceiroFilter}
                 />
               </CardContent>
             </Card>
