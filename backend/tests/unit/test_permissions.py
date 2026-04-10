@@ -112,6 +112,7 @@ class TestCanViewAssignments:
     def test_frontend_assignments_button_logic(self):
         """Simula lógica do botão de atribuições."""
         def can_see_assignments(user_role: str) -> bool:
-        
+            return user_role != "cliente"
+
         assert can_see_assignments("admin") == True
         assert can_see_assignments("consultor") == True
