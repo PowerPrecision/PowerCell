@@ -1,12 +1,24 @@
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from database import db
 
+logger = logging.getLogger(__name__)
+
 
 async def log_history(process_id: str, user: dict, action: str, field: str = None, old_value: Any = None, new_value: Any = None):
     """Log a change to process history"""
+    # ================================================================
+    # INDEXAÇÃO - MODO FANTASMA (SEM HISTÓRICO)
+    # Utilizadores com role "indexacao" não registam ações no histórico
+    # Isto permite que possam trabalhar nos processos sem deixar rasto
+    # ================================================================
+    if user and user.get("role") == "indexacao":
+        logger.debug(f"[HISTORY] Modo fantasma: ignorando registo para indexacao - {action}")
+        return
+    
     try:
         history_doc = {
             "id": str(uuid.uuid4()),
