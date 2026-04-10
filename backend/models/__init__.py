@@ -10,3 +10,6 @@ from .deadline import DeadlineCreate, DeadlineUpdate, DeadlineResponse
 from .workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from .activity import ActivityCreate, ActivityResponse, HistoryResponse
 from .onedrive import OneDriveFile
+from .task_log import (
+    TaskStatus, TaskType, TaskLogCreate, TaskLogUpdate, TaskLogResponse, TaskLogListResponse
+)
