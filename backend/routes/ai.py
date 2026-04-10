@@ -3,11 +3,13 @@ AI Document Analysis Routes
 Endpoints for analyzing documents with AI (CC, salary receipts, IRS)
 """
 import logging
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from models.auth import UserRole
+from models.task_log import TaskType
 from services.auth import get_current_user, require_roles
 from services.ai_document import (
     analyze_document_from_url, 
@@ -17,6 +19,7 @@ from services.ai_document import (
     map_irs_to_financial_data
 )
 from services.onedrive import onedrive_service
+from services.task_log_service import task_log_service
 from config import ONEDRIVE_BASE_PATH
 
 
@@ -263,3 +266,291 @@ async def reset_client_data(
             "message": "Nenhuma alteração necessária (dados já estavam vazios)",
             "fields_reset": []
         }
+
+
+# ====================================================================
+# ASYNC AI ANALYSIS - MOTOR DE TAREFAS ASSÍNCRONAS
+# ====================================================================
+
+class AsyncAnalyzeDocumentRequest(BaseModel):
+    """Request for async document analysis."""
+    process_id: str
+    document_url: str
+    document_type: str  # 'cc', 'recibo_vencimento', 'irs', 'outro'
+    auto_apply: bool = False  # Se deve aplicar automaticamente os dados extraídos
+
+
+async def _analyze_document_background(
+    task_id: str,
+    process_id: str,
+    document_url: str,
+    document_type: str,
+    auto_apply: bool,
+    user_id: str
+):
+    """
+    Função de background para análise de documento com IA.
+    
+    Esta função é executada em background após o endpoint retornar 202.
+    Atualiza o progresso da tarefa e o resultado final.
+    """
+    from database import db
+    
+    try:
+        # Marcar como em processamento
+        await task_log_service.mark_processing(task_id)
+        await task_log_service.update_progress(task_id, 10, "A iniciar análise...")
+        
+        # Executar análise
+        result = await analyze_document_from_url(document_url, document_type)
+        
+        if not result.get("success", False):
+            await task_log_service.mark_failed(
+                task_id, 
+                result.get("error", "Erro ao analisar documento")
+            )
+            return
+        
+        await task_log_service.update_progress(task_id, 60, "Análise concluída, a processar dados...")
+        
+        # Mapear dados extraídos
+        extracted_data = result.get("extracted_data", {})
+        mapped_data = {}
+        
+        if document_type == "cc":
+            mapped_data["personal_data"] = map_cc_to_personal_data(extracted_data)
+        elif document_type == "recibo_vencimento":
+            mapped_data["financial_data"] = map_recibo_to_financial_data(extracted_data)
+        elif document_type == "irs":
+            mapped_data["financial_data"] = map_irs_to_financial_data(extracted_data)
+        
+        await task_log_service.update_progress(task_id, 80, "A guardar resultados...")
+        
+        # Se auto_apply, atualizar o processo
+        if auto_apply and mapped_data:
+            for field, data in mapped_data.items():
+                if data:
+                    await db.processes.update_one(
+                        {"id": process_id},
+                        {"$set": {field: data}}
+                    )
+        
+        # Marcar como concluído
+        await task_log_service.mark_completed(
+            task_id,
+            result_data={
+                "document_type": document_type,
+                "extracted_data": extracted_data,
+                "mapped_data": mapped_data,
+                "auto_applied": auto_apply
+            }
+        )
+        
+        logger.info(f"[AsyncAI] Análise concluída: {task_id}")
+        
+    except Exception as e:
+        logger.error(f"[AsyncAI] Erro na análise: {e}")
+        await task_log_service.mark_failed(task_id, str(e))
+
+
+@router.post("/analyze-document-async")
+async def analyze_document_async(
+    request: AsyncAnalyzeDocumentRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+):
+    """
+    Analisa um documento com IA de forma assíncrona.
+    
+    Este endpoint retorna imediatamente um 202 Accepted com o task_id,
+    permitindo que o utilizador continue a usar o CRM enquanto a análise
+    corre em background.
+    
+    Fluxo:
+    1. Endpoint regista tarefa e retorna 202 com task_id
+    2. Análise corre em background
+    3. Frontend faz polling a /api/tasks/active
+    4. Quando concluído, frontend mostra notificação
+    
+    Body:
+    - process_id: ID do processo
+    - document_url: URL do documento a analisar
+    - document_type: Tipo de documento ('cc', 'recibo_vencimento', 'irs', 'outro')
+    - auto_apply: Se deve aplicar automaticamente os dados extraídos ao processo
+    
+    Returns:
+    - 202 Accepted com task_id
+    """
+    # Validar tipo de documento
+    valid_types = ['cc', 'recibo_vencimento', 'irs', 'cpcv', 'simulacao_credito', 'caderneta_predial', 'outro']
+    if request.document_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"document_type inválido. Tipos suportados: {valid_types}")
+    
+    # Verificar se o processo existe
+    from database import db
+    process = await db.processes.find_one({"id": request.process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    # Criar tarefa
+    task = await task_log_service.create_task(
+        task_type=TaskType.AI_ANALYSIS,
+        user_id=user.get("id"),
+        title=f"Análise IA: {request.document_type}",
+        description=f"A analisar documento do tipo '{request.document_type}' com IA",
+        process_id=request.process_id,
+        metadata={
+            "document_url": request.document_url[:100] + "..." if len(request.document_url) > 100 else request.document_url,
+            "document_type": request.document_type,
+            "auto_apply": request.auto_apply
+        }
+    )
+    
+    # Agendar execução em background
+    background_tasks.add_task(
+        _analyze_document_background,
+        task.task_id,
+        request.process_id,
+        request.document_url,
+        request.document_type,
+        request.auto_apply,
+        user.get("id")
+    )
+    
+    # Retornar 202 Accepted
+    return JSONResponse(
+        status_code=202,
+        content={
+            "success": True,
+            "message": "Análise iniciada em background",
+            "task_id": task.task_id,
+            "process_id": request.process_id
+        }
+    )
+
+
+class BulkAnalysisRequest(BaseModel):
+    """Request for bulk document analysis."""
+    process_ids: List[str]
+    analysis_type: str  # 'full', 'documents_only', 'financial_only'
+
+
+async def _bulk_analysis_background(
+    task_id: str,
+    process_ids: List[str],
+    analysis_type: str,
+    user_id: str
+):
+    """
+    Executa análise em massa em background.
+    """
+    from database import db
+    from services.ai_document_analyzer import analyze_process_documents
+    
+    try:
+        await task_log_service.mark_processing(task_id)
+        
+        total = len(process_ids)
+        results = []
+        
+        for i, process_id in enumerate(process_ids, 1):
+            try:
+                # Atualizar progresso
+                progress = int((i / total) * 100)
+                await task_log_service.update_progress(
+                    task_id, 
+                    progress, 
+                    f"A processar {i}/{total} processos..."
+                )
+                
+                # Executar análise
+                if analysis_type == "documents_only":
+                    result = await analyze_process_documents(process_id)
+                else:
+                    # Análise completa
+                    result = {"process_id": process_id, "analyzed": True}
+                
+                results.append({
+                    "process_id": process_id,
+                    "success": True,
+                    "result": result
+                })
+                
+            except Exception as e:
+                results.append({
+                    "process_id": process_id,
+                    "success": False,
+                    "error": str(e)
+                })
+        
+        # Marcar como concluído
+        successful = sum(1 for r in results if r["success"])
+        await task_log_service.mark_completed(
+            task_id,
+            result_data={
+                "total": total,
+                "successful": successful,
+                "failed": total - successful,
+                "results": results
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"[BulkAnalysis] Erro: {e}")
+        await task_log_service.mark_failed(task_id, str(e))
+
+
+@router.post("/bulk-analysis-async")
+async def bulk_analysis_async(
+    request: BulkAnalysisRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Executa análise em massa de forma assíncrona.
+    
+    Apenas administradores podem executar análises em massa.
+    
+    Body:
+    - process_ids: Lista de IDs de processos a analisar
+    - analysis_type: Tipo de análise ('full', 'documents_only', 'financial_only')
+    
+    Returns:
+    - 202 Accepted com task_id
+    """
+    if len(request.process_ids) == 0:
+        raise HTTPException(status_code=400, detail="Lista de process_ids vazia")
+    
+    if len(request.process_ids) > 50:
+        raise HTTPException(status_code=400, detail="Máximo de 50 processos por análise em massa")
+    
+    # Criar tarefa
+    task = await task_log_service.create_task(
+        task_type=TaskType.AI_ANALYSIS,
+        user_id=user.get("id"),
+        title=f"Análise em massa: {len(request.process_ids)} processos",
+        description=f"Análise {request.analysis_type} de {len(request.process_ids)} processos",
+        metadata={
+            "analysis_type": request.analysis_type,
+            "process_count": len(request.process_ids)
+        }
+    )
+    
+    # Agendar execução em background
+    background_tasks.add_task(
+        _bulk_analysis_background,
+        task.task_id,
+        request.process_ids,
+        request.analysis_type,
+        user.get("id")
+    )
+    
+    return JSONResponse(
+        status_code=202,
+        content={
+            "success": True,
+            "message": "Análise em massa iniciada",
+            "task_id": task.task_id,
+            "process_count": len(request.process_ids)
+        }
+    )

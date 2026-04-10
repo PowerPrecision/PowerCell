@@ -3,6 +3,7 @@ import { Toaster } from "./components/ui/sonner";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { UploadProgressProvider } from "./contexts/UploadProgressContext";
+import { TasksProvider } from "./contexts/TasksContext";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import React, { Suspense, Component } from "react";
@@ -216,6 +217,7 @@ function App() {
     <ThemeProvider>
       <AuthProvider>
         <UploadProgressProvider>
+        <TasksProvider>
         <BrowserRouter>
         <Sentry.ErrorBoundary fallback={ErrorFallback}>
         <LazyChunkErrorBoundary>
@@ -628,6 +630,7 @@ function App() {
         <GlobalUploadProgress />
       </BrowserRouter>
       <Toaster position="bottom-right" richColors closeButton offset="20px" />
+      </TasksProvider>
       </UploadProgressProvider>
     </AuthProvider>
     </ThemeProvider>

@@ -64,6 +64,7 @@ import {
   Lock,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
+import TasksDropdown from "../components/TasksDropdown";
 import MobileBottomNav from "../components/layout/MobileBottomNav";
 import GlobalSearchModal from "../components/GlobalSearchModal";
 import ChatPanel from "../components/ChatPanel";
@@ -840,6 +841,8 @@ const DashboardLayout = ({ children, title }) => {
                   >
                     <MessageSquare className="h-4 w-4" />
                   </Button>
+                  {/* Centro de Operações - Tarefas Assíncronas */}
+                  <TasksDropdown compact={headerCollapsed} />
                   <NotificationsDropdown compact={headerCollapsed} />
                 </>
               )}
