@@ -11,10 +11,16 @@ NOTA RGPD: Campos encriptados (NIF, telefone, email) são armazenados
 encriptados com Fernet. Para pesquisa, usamos BLIND INDEXES (hashes
 determinísticos SHA-256). Os índices devem apontar para os campos
 de hash (_hash) e NÃO para os campos encriptados.
+
+DATA LIFECYCLE MANAGEMENT (TTL Indexes):
+- Índices TTL automatizam a purga de dados efémeros
+- Coleções com TTL: refresh_tokens, system_error_logs, email_drafts
+- IMPORTANTE: TTL requer campos datetime nativos (NÃO ISO strings)
 ====================================================================
 """
 import logging
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import OperationFailure
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +40,42 @@ DEPRECATED_INDEXES = {
     "clients": [
         # Índices em campos encriptados que possam ter sido criados anteriormente
         "idx_nif_plain",  # Se existir algum índice em dados_pessoais.nif plain text
-    ]
+    ],
+    "system_error_logs": [
+        "idx_ttl",  # Índice TTL antigo (90 dias) em campo ISO string - não funciona. Substituído por ttl_system_error_logs
+    ],
 }
+
+# ====================================================================
+# CONFIGURAÇÃO DE ÍNDICES TTL (DATA LIFECYCLE MANAGEMENT)
+# ====================================================================
+# Os índices TTL automatizam a purga de dados efémeros sem cron-jobs.
+# IMPORTANTE: O campo deve ser um BSON Date (datetime nativo), NÃO string ISO!
+# ====================================================================
+TTL_INDEXES = [
+    {
+        "collection": "refresh_tokens",
+        "field": "created_at_dt",  # Campo datetime nativo (não ISO string)
+        "seconds": 86400,  # 24 horas (sessões expiram após 1 dia)
+        "name": "ttl_refresh_tokens",
+        "description": "Purga refresh tokens após 24h (garantia extra ao expires_at)",
+    },
+    {
+        "collection": "system_error_logs",
+        "field": "timestamp_dt",  # Campo datetime nativo para TTL
+        "seconds": 2592000,  # 30 dias
+        "name": "ttl_system_error_logs",
+        "description": "Purga logs de erro antigos após 30 dias",
+    },
+    {
+        "collection": "emails",
+        "field": "updated_at_dt",  # Campo datetime nativo para TTL
+        "seconds": 604800,  # 7 dias
+        "name": "ttl_email_drafts",
+        "description": "Purga rascunhos de email antigos após 7 dias de inatividade",
+        "partial_filter": {"status": "draft"},  # Só aplica a rascunhos
+    },
+]
 
 
 async def cleanup_deprecated_indexes(db) -> dict:
@@ -212,8 +252,8 @@ async def create_indexes(db) -> dict:
         # Índice composto para queries frequentes
         {"keys": [("timestamp", -1), ("severity", 1)], "name": "idx_time_severity"},
         
-        # TTL index - auto-delete logs após 90 dias
-        {"keys": [("timestamp", 1)], "name": "idx_ttl", "expireAfterSeconds": 7776000},
+        # NOTA: TTL index movido para create_ttl_indexes() 
+        # O TTL requer campo datetime nativo (timestamp_dt), não ISO string
     ]
     
     for idx in log_indexes:
@@ -529,6 +569,130 @@ async def create_indexes(db) -> dict:
         f"{len(results['skipped'])} já existiam, "
         f"{len(results['errors'])} erros"
     )
+    
+    # ====================================================================
+    # CRIAR ÍNDICES TTL (DATA LIFECYCLE MANAGEMENT)
+    # ====================================================================
+    ttl_results = await create_ttl_indexes(db)
+    results["ttl"] = ttl_results
+    
+    return results
+
+
+async def create_ttl_indexes(db) -> dict:
+    """
+    Cria índices TTL para Data Lifecycle Management.
+    
+    Os índices TTL automatizam a purga de dados efémeros sem necessidade
+    de cron-jobs no backend.
+    
+    IMPORTANTE: TTL indexes requerem campos BSON Date (datetime nativo).
+    Se o campo for ISO string, o TTL NÃO funciona!
+    
+    Returns:
+        dict: Resumo dos índices TTL criados/erros
+    """
+    results = {
+        "created": [],
+        "skipped": [],
+        "errors": [],
+        "warnings": [],
+    }
+    
+    for config in TTL_INDEXES:
+        collection_name = config["collection"]
+        field = config["field"]
+        seconds = config["seconds"]
+        name = config["name"]
+        description = config.get("description", "")
+        partial_filter = config.get("partial_filter")
+        
+        try:
+            collection = db[collection_name]
+            
+            # Verificar se a coleção existe (tentando obter info)
+            try:
+                await collection.index_information()
+            except Exception:
+                logger.debug(f"Coleção {collection_name} ainda não existe, TTL será criado no primeiro insert")
+                results["skipped"].append(f"{collection_name}.{name} (coleção não existe)")
+                continue
+            
+            # Construir opções do índice
+            index_options = {
+                "name": name,
+                "expireAfterSeconds": seconds,
+                "background": True,
+            }
+            
+            # Adicionar partial filter expression se especificado
+            if partial_filter:
+                index_options["partialFilterExpression"] = partial_filter
+            
+            # Criar índice TTL
+            await collection.create_index(
+                [(field, 1)],
+                **index_options
+            )
+            
+            results["created"].append(f"{collection_name}.{name}")
+            logger.info(
+                f"⏱️ Índice TTL criado: {collection_name}.{name} "
+                f"(campo: {field}, TTL: {seconds}s / {seconds // 86400} dias) - {description}"
+            )
+            
+        except OperationFailure as e:
+            error_code = e.code
+            
+            # Código 85: Index already exists with different options
+            # Código 86: Index already exists with same name but different key
+            if error_code == 85 or error_code == 86:
+                # O índice já existe mas com parâmetros diferentes
+                logger.warning(
+                    f"⚠️ Índice TTL {collection_name}.{name} já existe com parâmetros diferentes. "
+                    f"Tentando remover e recriar..."
+                )
+                
+                try:
+                    # Remover índice antigo e recriar
+                    await collection.drop_index(name)
+                    logger.info(f"🗑️ Índice antigo removido: {collection_name}.{name}")
+                    
+                    # Recriar com novos parâmetros
+                    await collection.create_index(
+                        [(field, 1)],
+                        **index_options
+                    )
+                    results["created"].append(f"{collection_name}.{name} (recriado)")
+                    logger.info(f"✅ Índice TTL recriado: {collection_name}.{name}")
+                    
+                except Exception as retry_error:
+                    results["errors"].append(
+                        f"{collection_name}.{name}: Falha ao recriar: {str(retry_error)}"
+                    )
+                    logger.error(
+                        f"Erro ao recriar índice TTL {collection_name}.{name}: {retry_error}"
+                    )
+            elif "already exists" in str(e).lower():
+                results["skipped"].append(f"{collection_name}.{name}")
+            else:
+                results["errors"].append(f"{collection_name}.{name}: {str(e)}")
+                logger.error(f"Erro ao criar índice TTL {collection_name}.{name}: {e}")
+                
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["skipped"].append(f"{collection_name}.{name}")
+            else:
+                results["errors"].append(f"{collection_name}.{name}: {str(e)}")
+                logger.error(f"Erro ao criar índice TTL {collection_name}.{name}: {e}")
+    
+    # Resumo TTL
+    if results["created"]:
+        logger.info(
+            f"⏱️ TTL indexes: {len(results['created'])} criados, "
+            f"{len(results['skipped'])} já existiam, "
+            f"{len(results['errors'])} erros"
+        )
     
     return results
 
