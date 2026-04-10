@@ -36,9 +36,6 @@ class TestDocumentUpload:
     async def test_upload_oversized_file_rejected(self):
         """Ficheiro maior que limite deve ser rejeitado."""
         assert True
-    
-    @pytest.mark.asyncio
-        assert True
 
 
 class TestDocumentAnalysis:
@@ -62,15 +59,6 @@ class TestDocumentAnalysis:
 
 class TestDocumentPermissions:
     """Testes para permissões de documentos."""
-    
-    @pytest.mark.asyncio
-        assert True
-    
-    @pytest.mark.asyncio
-        assert True
-    
-    @pytest.mark.asyncio
-        assert True
 
 
 class TestDocumentExpiry:

@@ -297,6 +297,7 @@ class TestGestorDocumentosRestrictions:
             timeout=30
         )
         if response.status_code != 200:
+            raise AssertionError(f"Login failed for gestor_docs: {response.status_code}")
         return response.json()["access_token"]
     
         # First get a process ID

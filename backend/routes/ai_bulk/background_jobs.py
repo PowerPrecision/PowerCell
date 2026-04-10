@@ -100,7 +100,6 @@ async def finish_background_job_db(job_id: str, success: bool, message: str = No
 
 async def load_background_jobs_from_db():
     """Carregar jobs da DB para memória (chamado no startup)."""
-    global background_processes
     try:
         # Carregar apenas jobs recentes (últimos 7 dias)
         cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()

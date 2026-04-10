@@ -10,16 +10,21 @@ import pytest
 
 class TestRolePermissions:
     """Testes para verificar permissões por role."""
-    
+
+    def test_restricted_roles_are_valid(self):
+        """Roles restritas devem existir no sistema."""
         from models.enums import UserRoleEnum
-        
-        
+
+        restricted_roles = ["cliente"]
+
         for role in restricted_roles:
             assert role in UserRoleEnum.all_values()
             # Em produção, verificar que endpoint retorna 403
-    
+
+    def test_only_staff_can_create_processes(self):
+        """Apenas staff pode criar processos."""
         restricted_for_process_creation = ["cliente"]
-        
+
         for role in restricted_for_process_creation:
             # Em produção, endpoint POST /processes deve retornar 403
             assert role in ["cliente"]

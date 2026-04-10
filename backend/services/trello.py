@@ -354,8 +354,6 @@ async def init_trello_from_config():
     Inicializar o serviço Trello com configurações da base de dados.
     Deve ser chamado no startup do servidor.
     """
-    global trello_service
-    
     try:
         from services.system_config import get_system_config
         config = await get_system_config()

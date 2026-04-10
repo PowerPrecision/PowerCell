@@ -69,8 +69,6 @@ def cache_document_analysis(process_id: str, document_type: str, content: bytes,
 
 def clear_document_cache(process_id: str = None):
     """Limpar cache de documentos (para testes ou reset)."""
-    global document_hash_cache
-    
     if process_id:
         if process_id in document_hash_cache:
             del document_hash_cache[process_id]

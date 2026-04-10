@@ -57,7 +57,7 @@ def get_nif_cache_key(folder_name: str) -> str:
 
 async def _load_nif_cache_from_db():
     """Carregar mapeamentos NIF da base de dados para memória."""
-    global nif_session_cache, _nif_cache_loaded
+    global _nif_cache_loaded
     
     if _nif_cache_loaded:
         return
