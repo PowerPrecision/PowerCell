@@ -52,18 +52,18 @@ const AdminDashboard = () => {
   const [selectedDateForEvent, setSelectedDateForEvent] = useState(new Date());
 
   // Get staff users for assignment (excluindo admin e ceo)
-  const staffUsers = useMemo(() => users.filter(u => 
+  const staffUsers = useMemo(() => (users || []).filter(u => 
     u.role !== "cliente" && 
     u.role !== "admin" && 
     u.role !== "ceo"
   ), [users]);
-  const consultors = useMemo(() => users.filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
-  const intermediarios = useMemo(() => users.filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
-  const indexacaoUsers = useMemo(() => users.filter(u => u.role === "indexacao"), [users]);
+  const consultors = useMemo(() => (users || []).filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
+  const intermediarios = useMemo(() => (users || []).filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
+  const indexacaoUsers = useMemo(() => (users || []).filter(u => u.role === "indexacao"), [users]);
 
   // Filter processes
   const filteredProcesses = useMemo(() => {
-    return processes.filter(process => {
+    return (processes || []).filter(process => {
       const matchesConsultor = consultorFilter === "all" || 
         (consultorFilter === "none" && !process.assigned_consultor_id) ||
         process.assigned_consultor_id === consultorFilter;
@@ -97,7 +97,8 @@ const AdminDashboard = () => {
       ]);
       setStats(statsRes.data);
       setUsers(usersRes.data);
-      setProcesses(processesRes.data);
+      // O endpoint /api/processes retorna um objeto paginado {items: [...], total, page, size, pages}
+      setProcesses(processesRes.data?.items || processesRes.data || []);
       setWorkflowStatuses(statusesRes.data);
       setStorageStatus(storageRes);
       setUpcomingExpiries(expiriesRes.data);
