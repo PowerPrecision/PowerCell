@@ -317,20 +317,25 @@ async def upload_file_s3(
                 detail="Serviço de armazenamento S3 não configurado. Contacte o administrador para configurar as credenciais AWS."
             )
         
-        # Verificar se utilizador "indexacao" forneceu o NIF da empresa
-        if user.get("role") == "indexacao":
-            if not empresa_nif:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="O NIF da empresa é obrigatório para utilizadores de indexação. Por favor, insira o NIF da entidade empregadora do cliente."
-                )
-            # Validar formato do NIF (9 dígitos)
-            import re
-            if not re.match(r'^\d{9}$', empresa_nif):
-                raise HTTPException(
-                    status_code=400,
-                    detail="NIF da empresa inválido. Deve conter exatamente 9 dígitos."
-                )
+        # ================================================================
+        # VALIDAÇÃO DE NIF DA EMPRESA DESATIVADA TEMPORARIAMENTE
+        # Para reativar, descomentar o bloco abaixo
+        # ================================================================
+        # # Verificar se utilizador "indexacao" forneceu o NIF da empresa
+        # if user.get("role") == "indexacao":
+        #     if not empresa_nif:
+        #         raise HTTPException(
+        #             status_code=400, 
+        #             detail="O NIF da empresa é obrigatório para utilizadores de indexação. Por favor, insira o NIF da entidade empregadora do cliente."
+        #         )
+        #     # Validar formato do NIF (9 dígitos)
+        #     import re
+        #     if not re.match(r'^\d{9}$', empresa_nif):
+        #         raise HTTPException(
+        #             status_code=400,
+        #             detail="NIF da empresa inválido. Deve conter exatamente 9 dígitos."
+        #         )
+        # ================================================================
         
         process = await db.processes.find_one({"id": client_id})
         if not process:
@@ -3007,3 +3012,160 @@ async def check_employer_nif(
         "total_count": len(results),
         "processes": results
     }
+
+
+# ====================================================================
+# DOWNLOAD EM MASSA (ZIP)
+# ====================================================================
+
+@router.post("/bulk-download", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+async def bulk_download_documents(
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Faz download de múltiplos documentos empacotados num ficheiro ZIP.
+    
+    Body:
+    - document_ids: Lista de IDs de documentos (s3_paths) ou paths diretos
+    - process_id: ID do processo (opcional, para verificação de permissões)
+    
+    Returns:
+    - StreamingResponse com o ficheiro ZIP
+    """
+    import zipfile
+    from fastapi.responses import StreamingResponse
+    from botocore.exceptions import ClientError, BotoCoreError
+    import asyncio
+    
+    document_ids = data.get("document_ids", [])
+    process_id = data.get("process_id")
+    
+    if not document_ids or len(document_ids) == 0:
+        raise HTTPException(status_code=400, detail="Lista de documentos vazia")
+    
+    if len(document_ids) > 50:
+        raise HTTPException(status_code=400, detail="Máximo de 50 documentos por download")
+    
+    # Verificar permissões se process_id foi fornecido
+    if process_id:
+        process = await db.processes.find_one({"id": process_id})
+        if not process:
+            raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    if not s3_service.is_configured():
+        raise HTTPException(status_code=500, detail=ERROR_S3_NOT_CONFIGURED)
+    
+    # Função para obter ficheiro do S3
+    def get_s3_file_content(key):
+        """Obtém o conteúdo de um ficheiro do S3."""
+        try:
+            response = s3_service.s3_client.get_object(
+                Bucket=s3_service.bucket_name,
+                Key=key
+            )
+            return response['Body'].read(), response.get('ContentType', 'application/octet-stream')
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == 'NoSuchKey':
+                logger.warning(f"[BULK-DOWNLOAD] Ficheiro não encontrado: {key}")
+                return None, None
+            raise
+        except Exception as e:
+            logger.error(f"[BULK-DOWNLOAD] Erro ao obter ficheiro {key}: {e}")
+            return None, None
+    
+    # Criar ZIP em memória
+    zip_buffer = BytesIO()
+    files_added = []
+    errors = []
+    
+    loop = asyncio.get_event_loop()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for doc_path in document_ids:
+            try:
+                # Tentar variações de path (underscore <-> espaço)
+                path_variations = [doc_path]
+                if '_' in doc_path:
+                    path_variations.append(doc_path.replace('_', ' '))
+                if ' ' in doc_path:
+                    path_variations.append(doc_path.replace(' ', '_'))
+                
+                content = None
+                used_path = None
+                
+                for try_path in path_variations:
+                    result = await loop.run_in_executor(
+                        None, 
+                        lambda p=try_path: get_s3_file_content(p)
+                    )
+                    if result[0] is not None:
+                        content, content_type = result
+                        used_path = try_path
+                        break
+                
+                if content is None:
+                    errors.append({"path": doc_path, "error": "Ficheiro não encontrado"})
+                    continue
+                
+                # Extrair nome do ficheiro do path
+                filename = used_path.split('/')[-1] if '/' in used_path else used_path
+                
+                # Evitar nomes duplicados no ZIP
+                if filename in [f[0] for f in files_added]:
+                    base_name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
+                    counter = 2
+                    while f"{base_name}_{counter}.{ext}" in [f[0] for f in files_added]:
+                        counter += 1
+                    filename = f"{base_name}_{counter}.{ext}"
+                
+                # Adicionar ao ZIP
+                zip_file.writestr(filename, content)
+                files_added.append((filename, used_path))
+                logger.info(f"[BULK-DOWNLOAD] Adicionado ao ZIP: {filename}")
+                
+            except Exception as e:
+                logger.error(f"[BULK-DOWNLOAD] Erro ao processar {doc_path}: {e}")
+                errors.append({"path": doc_path, "error": str(e)})
+    
+    if not files_added:
+        raise HTTPException(status_code=404, detail="Nenhum documento encontrado para download")
+    
+    # Preparar resposta
+    zip_buffer.seek(0)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    zip_filename = f"documentos_{timestamp}.zip"
+    
+    # Registar no histórico se process_id foi fornecido
+    if process_id:
+        try:
+            await log_history(
+                process_id=process_id,
+                user=user,
+                action="Download em massa",
+                field="documentos",
+                new_value=f"{len(files_added)} documentos"
+            )
+        except Exception as e:
+            logger.warning(f"[BULK-DOWNLOAD] Erro ao registar histórico: {e}")
+    
+    logger.info(f"[BULK-DOWNLOAD] ZIP criado com {len(files_added)} ficheiros")
+    
+    # Criar generator para streaming
+    def iter_zip():
+        yield zip_buffer.getvalue()
+    
+    from urllib.parse import quote
+    encoded_filename = quote(zip_filename, safe='')
+    
+    headers = {
+        'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
+        'Content-Type': 'application/zip',
+    }
+    
+    return StreamingResponse(
+        iter_zip(),
+        media_type='application/zip',
+        headers=headers
+    )

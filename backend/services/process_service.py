@@ -448,7 +448,7 @@ def encrypt_sensitive_data(data: dict) -> dict:
     # Encriptar sub-dicionários
     sections = {
         "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
-        "titular2_data": ["nif", "documento_id", "phone", "telefone"],
+        "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_senha", "seg_social_senha"],
         "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
         "vendedor": ["nif", "documento_id", "phone", "telefone"],
         "mediador": ["nif", "phone", "telefone"],
@@ -513,7 +513,7 @@ def decrypt_sensitive_data(data: dict) -> dict:
     # Desencriptar sub-dicionários
     sections = {
         "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
-        "titular2_data": ["nif", "documento_id", "phone", "telefone"],
+        "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_senha", "seg_social_senha"],
         "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
         "vendedor": ["nif", "documento_id", "phone", "telefone"],
         "mediador": ["nif", "phone", "telefone"],
