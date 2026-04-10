@@ -144,7 +144,7 @@ const CreateEventDialog = ({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Nenhum (Evento Geral)</SelectItem>
-                {processes.slice(0, 50).map((process) => (
+                {(processes || []).slice(0, 50).map((process) => (
                   <SelectItem key={process.id} value={process.id}>
                     {process.client_name}
                   </SelectItem>
@@ -161,7 +161,7 @@ const CreateEventDialog = ({
                 size="sm"
                 className="h-7 text-xs"
                 onClick={() => {
-                  const allUserIds = staffUsers.map(u => u.id);
+                  const allUserIds = (staffUsers || []).map(u => u.id);
                   setFormData({ ...formData, assigned_user_ids: allUserIds });
                 }}
               >
@@ -169,7 +169,7 @@ const CreateEventDialog = ({
               </Button>
             </div>
             <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2">
-              {staffUsers.map((staffUser) => (
+              {(staffUsers || []).map((staffUser) => (
                 <div key={staffUser.id} className="flex items-center space-x-2">
                   <Checkbox
                     id={`user-${staffUser.id}`}
