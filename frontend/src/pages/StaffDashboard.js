@@ -518,6 +518,7 @@ const StaffDashboard = () => {
                         {indexacaoUsers.map((u) => (<SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>))}
                       </SelectContent>
                     </Select>
+                  </div>
                   <div className="space-y-2">
                     <Label>Filtrar por Parceiro</Label>
                     <Select value={parceiroFilter} onValueChange={updateParceiroFilter}>
