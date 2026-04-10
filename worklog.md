@@ -1,4 +1,51 @@
 ---
+Task ID: 15
+Agent: Main Agent (Full-Stack Architect)
+Task: Implementar Filtro de Estado Ativo para Processos
+
+Problem Statement:
+Garantir que o ruído de processos terminados não afete a produtividade diária, mas sem perder os dados para estatísticas.
+- Estados a ocultar: "Concluído" (completed), "Desistência" (withdrawn), "Eliminado" (deleted/is_deleted)
+- Sistema deve ser "limpo por defeito, mas completo sob pedido"
+
+Solution: Parâmetro view_mode com DEFAULT active_only
+
+Work Log:
+Backend (routes/processes.py):
+- Adicionado parâmetro view_mode aos endpoints GET /processes, /processes/paginated, /kanban
+- Valores: 'active_only' (DEFAULT), 'all', 'historical'
+- Definidas constantes INACTIVE_STATUSES e ARCHIVED_STATUSES
+- Adicionado filtro de integridade: is_deleted=True NUNCA aparece (exceto admin com view_mode='deleted')
+- 'active_only': Exclui concluídos, desistências, eliminados
+- 'historical': Apenas concluídos e desistências
+- 'all': Mostra tudo exceto is_deleted=True
+
+Backend (routes/stats.py):
+- Estatísticas SEMPRE incluem concluídos/desistências para métricas precisas
+- Adicionado filtro is_deleted: {"$ne": True} para não poluir estatísticas com dados de teste
+- "eliminados" NÃO conta como desistência para taxas de sucesso
+
+Frontend (ProcessesPage.js):
+- Toggle "Ocultar arquivo" / "Mostrando todos" com Switch
+- Estado inicial: showCompleted=false (active_only)
+- URL sincronizado com view_mode
+- Info banner quando em modo active_only
+
+Frontend (KanbanBoard.js):
+- Envia view_mode=active_only explicitamente
+- Kanban mostra apenas processos "em movimento"
+
+Stage Summary:
+- Commit: 99c46eac
+- Ficheiros modificados:
+  - backend/routes/processes.py (view_mode + is_deleted filter)
+  - backend/routes/stats.py (is_deleted filter para estatísticas)
+  - frontend/src/pages/ProcessesPage.js (UI toggle)
+  - frontend/src/components/KanbanBoard.js (view_mode param)
+- Comportamento: Limpo por defeito, completo sob pedido
+- Integridade: is_deleted=True nunca aparece em listagens nem estatísticas
+
+---
 Task ID: 14
 Agent: Main Agent
 Task: Correções de Build e Melhorias de Backend/Frontend
