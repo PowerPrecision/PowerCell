@@ -6,6 +6,7 @@ Endpoints WebSocket para comunicação em tempo real.
 ====================================================================
 """
 
+import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 import jwt  # CORREÇÃO: Usar PyJWT
@@ -77,7 +78,25 @@ async def websocket_notifications(
         
         while True:
             try:
-                data = await websocket.receive_json()
+                # receive_json() lança exceção se a conexão for fechada
+                # Precisamos verificar se é uma mensagem de texto (dados) ou de desconexão
+                message = await websocket.receive()
+                
+                # Verificar se é uma mensagem de desconexão
+                if message.get("type") == "websocket.disconnect":
+                    logger.info(f"Cliente solicitou desconexão: {user_id}")
+                    break
+                
+                # Verificar se é uma mensagem de texto
+                if message.get("type") == "websocket.receive":
+                    text = message.get("text")
+                    if text:
+                        data = json.loads(text)
+                    else:
+                        continue
+                else:
+                    continue
+                
                 msg_type = data.get("type")
                 
                 if msg_type == "ping":
@@ -108,8 +127,22 @@ async def websocket_notifications(
                         {"status": "success"}
                     ))
                 
+            except json.JSONDecodeError as e:
+                logger.warning(f"Mensagem JSON inválida de {user_id}: {e}")
+                continue
+            except WebSocketDisconnect:
+                logger.info(f"WebSocketDisconnect capturado no loop: {user_id}")
+                break
             except Exception as e:
+                # Verificar se é erro de conexão fechada
+                error_str = str(e)
+                if "disconnect" in error_str.lower() or "closed" in error_str.lower():
+                    logger.info(f"Conexão fechada pelo cliente: {user_id}")
+                    break
                 logger.error(f"Erro ao processar mensagem WebSocket: {e}")
+                # Continua o loop para tentar receber próximas mensagens
+                # a menos que seja erro de conexão
+                continue
     
     except WebSocketDisconnect:
         manager.disconnect(websocket)
