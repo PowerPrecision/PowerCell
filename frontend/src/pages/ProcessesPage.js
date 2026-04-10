@@ -5,11 +5,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import { Switch } from "../components/ui/switch";
+import { Label } from "../components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { 
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
-  User, Users
+  User, Users, Archive
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
@@ -29,6 +31,15 @@ const ProcessesPage = () => {
     pages: 0
   });
   
+  // ================================================================
+  // FILTRO DE ESTADO ATIVO
+  // Por defeito, mostra apenas processos ativos (view_mode=active_only)
+  // Quando showCompleted=true, mostra todos (view_mode=all)
+  // ================================================================
+  const [showCompleted, setShowCompleted] = useState(
+    searchParams.get("view_mode") === "all"
+  );
+  
   // Sync filters with URL
   const searchTerm = searchParams.get("search") || "";
   const setSearchTerm = (value) => {
@@ -42,7 +53,7 @@ const ProcessesPage = () => {
 
   useEffect(() => {
     fetchProcesses();
-  }, [pagination.page, pagination.size]);
+  }, [pagination.page, pagination.size, showCompleted]);
 
   const fetchProcesses = async () => {
     try {
@@ -50,7 +61,8 @@ const ProcessesPage = () => {
       const response = await getProcesses({
         page: pagination.page,
         size: pagination.size,
-        search: searchTerm || undefined
+        search: searchTerm || undefined,
+        view_mode: showCompleted ? "all" : "active_only"  // FILTRO DE ESTADO ATIVO
       });
       
       // Suporta novo formato paginado
@@ -75,6 +87,17 @@ const ProcessesPage = () => {
     } finally {
       setLoading(false);
     }
+  };
+  
+  // Handler para toggle de processos concluídos
+  const handleToggleCompleted = (checked) => {
+    setShowCompleted(checked);
+    setSearchParams(prev => {
+      if (checked) prev.set("view_mode", "all");
+      else prev.set("view_mode", "active_only");
+      prev.set("page", "1"); // Reset para página 1
+      return prev;
+    }, { replace: true });
   };
 
   // Debounced search
@@ -223,15 +246,40 @@ const ProcessesPage = () => {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Pesquisar por nome ou email..." 
-                className="pl-10" 
-                value={searchInput} 
-                onChange={(e) => setSearchInput(e.target.value)} 
-              />
+            <div className="flex flex-col sm:flex-row gap-4 mb-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input 
+                  placeholder="Pesquisar por nome ou email..." 
+                  className="pl-10" 
+                  value={searchInput} 
+                  onChange={(e) => setSearchInput(e.target.value)} 
+                />
+              </div>
+              
+              {/* Toggle para mostrar concluídos/desistências */}
+              <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-lg">
+                <Archive className="h-4 w-4 text-muted-foreground" />
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="show-completed"
+                    checked={showCompleted}
+                    onCheckedChange={handleToggleCompleted}
+                  />
+                  <Label htmlFor="show-completed" className="text-sm cursor-pointer">
+                    {showCompleted ? "Mostrando todos" : "Ocultar arquivo"}
+                  </Label>
+                </div>
+              </div>
             </div>
+            
+            {!showCompleted && (
+              <div className="mb-4 p-2 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800">
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  📋 Mostrando apenas processos ativos. Active "Ocultar arquivo" para ver concluídos e desistências.
+                </p>
+              </div>
+            )}
 
             <div className="rounded-md border overflow-x-auto">
               <Table>

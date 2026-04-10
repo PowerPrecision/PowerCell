@@ -548,6 +548,13 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
 # ====================================================================
 # ENDPOINTS DE LISTAGEM - OTIMIZADOS COM PROJEÇÃO E PAGINAÇÃO
 # ====================================================================
+# CONSTANTES DE FILTRO DE ESTADO ATIVO
+# ====================================================================
+# Status que representam processos terminados (não ativos)
+INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
+# Status de processos arquivados (para histórico)
+ARCHIVED_STATUSES = ["concluidos", "desistencias"]
+
 
 @router.get("")
 async def get_processes(
@@ -555,6 +562,7 @@ async def get_processes(
     size: int = Query(20, ge=1, le=100, description="Itens por página"),
     status: Optional[str] = Query(None, description="Filtrar por status"),
     search: Optional[str] = Query(None, description="Pesquisar por nome/email"),
+    view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all, historical"),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -566,11 +574,19 @@ async def get_processes(
     - Desencriptação seletiva: Só desencripta client_phone e client_nif
     - Contagem otimizada: count_documents em vez de len(list)
     
+    FILTRO DE ESTADO ATIVO (view_mode):
+    - 'active_only' (DEFAULT): Apenas processos em curso (exclui concluídos, desistências, eliminados)
+    - 'all': Todos os processos ativos e inativos (exceto is_deleted=True)
+    - 'historical': Apenas processos concluídos e desistências (para arquivo)
+    
     FILTRAGEM AUTOMÁTICA:
     - Admin/CEO: Todos os processos
     - Cliente: Apenas os próprios processos
     - Consultor: Processos atribuídos como consultor
     - Intermediário: Processos atribuídos como intermediário
+    
+    SEGURANÇA:
+    - Processos com is_deleted=True NUNCA aparecem (exceto para admins com view_mode explícito)
     
     Returns:
         {
@@ -578,11 +594,24 @@ async def get_processes(
             "total": 150,
             "page": 1,
             "size": 20,
-            "pages": 8
+            "pages": 8,
+            "view_mode": "active_only"
         }
     """
     role = user["role"]
     query = {}
+    
+    # ====================================================================
+    # FILTRO DE INTEGRIDADE: is_deleted
+    # Processos eliminados NUNCA aparecem nas listagens normais
+    # ====================================================================
+    is_admin = role in [UserRole.ADMIN, UserRole.CEO]
+    if not is_admin:
+        query["is_deleted"] = {"$ne": True}
+    else:
+        # Admins também não vêem eliminados por defeito (a menos que view_mode='deleted')
+        if view_mode != "deleted":
+            query["is_deleted"] = {"$ne": True}
 
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
@@ -605,7 +634,18 @@ async def get_processes(
             {"assigned_mediador_id": user["id"]}
         ]
 
-    # Adicionar filtros
+    # ====================================================================
+    # FILTRO DE ESTADO ATIVO (view_mode)
+    # ====================================================================
+    if view_mode == "active_only":
+        # DEFAULT: Apenas processos em curso
+        query["status"] = {"$nin": INACTIVE_STATUSES}
+    elif view_mode == "historical":
+        # Apenas processos arquivados (concluídos e desistências)
+        query["status"] = {"$in": ARCHIVED_STATUSES}
+    # view_mode == 'all': Não aplica filtro de status (mostra tudo exceto eliminados)
+
+    # Adicionar filtro de status explícito (sobrepõe-se ao view_mode)
     if status:
         query["status"] = status
     
@@ -648,7 +688,8 @@ async def get_processes(
         "total": total,
         "page": page,
         "size": size,
-        "pages": pages
+        "pages": pages,
+        "view_mode": view_mode
     }
 
 
@@ -660,6 +701,7 @@ async def get_processes_paginated(
     sort_order: str = Query("asc", description="Ordem: asc ou desc"),
     status: Optional[str] = None,
     search: Optional[str] = None,
+    view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all, historical"),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -669,6 +711,11 @@ async def get_processes_paginated(
     - Projeção MongoDB: Apenas campos necessários
     - Desencriptação seletiva: Só campos sensíveis projetados
     
+    FILTRO DE ESTADO ATIVO (view_mode):
+    - 'active_only' (DEFAULT): Apenas processos em curso
+    - 'all': Todos os processos ativos e inativos
+    - 'historical': Apenas processos concluídos e desistências
+    
     Args:
         limit: Número de processos por página (máximo 100)
         cursor: Cursor da página anterior
@@ -676,14 +723,25 @@ async def get_processes_paginated(
         sort_order: Direção (asc ou desc)
         status: Filtrar por status
         search: Pesquisar por nome/email
+        view_mode: Modo de visualização
     
     Returns:
-        {processes, next_cursor, has_more}
+        {processes, next_cursor, has_more, view_mode}
     """
     from services.cursor_pagination import CursorPaginator
 
     role = user["role"]
     query = {}
+    
+    # ====================================================================
+    # FILTRO DE INTEGRIDADE: is_deleted
+    # ====================================================================
+    is_admin = role in [UserRole.ADMIN, UserRole.CEO]
+    if not is_admin:
+        query["is_deleted"] = {"$ne": True}
+    else:
+        if view_mode != "deleted":
+            query["is_deleted"] = {"$ne": True}
 
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
@@ -705,6 +763,14 @@ async def get_processes_paginated(
             {"assigned_mediador_ids": user["id"]},
             {"assigned_mediador_id": user["id"]}
         ]
+
+    # ====================================================================
+    # FILTRO DE ESTADO ATIVO (view_mode)
+    # ====================================================================
+    if view_mode == "active_only":
+        query["status"] = {"$nin": INACTIVE_STATUSES}
+    elif view_mode == "historical":
+        query["status"] = {"$in": ARCHIVED_STATUSES}
 
     # Adicionar filtros opcionais
     if status:
@@ -755,7 +821,8 @@ async def get_processes_paginated(
         "processes": result["items"],
         "next_cursor": result["next_cursor"],
         "has_more": result["has_more"],
-        "limit": result["limit"]
+        "limit": result["limit"],
+        "view_mode": view_mode
     }
 
 
@@ -765,6 +832,7 @@ async def get_kanban_board(
     mediador_id: Optional[str] = None,
     indexacao_id: Optional[str] = None,
     parceiro_id: Optional[str] = None,
+    view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all"),
     user: dict = Depends(require_staff())
 ):
     """
@@ -772,10 +840,19 @@ async def get_kanban_board(
     Admin/CEO see all, others see only their assigned processes.
     Supports filtering by consultor_id, mediador_id, indexacao_id, and parceiro_id.
     Supports multiple consultants and intermediaries per process.
+    
+    FILTRO DE ESTADO ATIVO (view_mode):
+    - 'active_only' (DEFAULT): Apenas processos em curso (exclui concluídos, desistências)
+    - 'all': Todos os processos (incluindo arquivo)
     """
     role = user["role"]
     user_id = user["id"]
     query = {}
+    
+    # ====================================================================
+    # FILTRO DE INTEGRIDADE: is_deleted
+    # ====================================================================
+    query["is_deleted"] = {"$ne": True}
     
     # Filter by role (base visibility) - suporte a múltiplos
     if role == UserRole.CONSULTOR:
@@ -878,6 +955,21 @@ async def get_kanban_board(
                     query = filter_conditions[0]
                 else:
                     query = {"$and": filter_conditions}
+    
+    # ====================================================================
+    # FILTRO DE ESTADO ATIVO (view_mode) para Kanban
+    # Por defeito, o Kanban mostra apenas processos ativos (não arquivados)
+    # ====================================================================
+    if view_mode == "active_only":
+        # Excluir concluídos e desistências do Kanban normal
+        active_filter = {"status": {"$nin": INACTIVE_STATUSES}}
+        if "$and" in query:
+            query["$and"].append(active_filter)
+        elif query:
+            query = {"$and": [query, active_filter]}
+        else:
+            query = active_filter
+    # view_mode == 'all': Mostra todos os processos (incluindo arquivo)
     
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
