@@ -81,6 +81,7 @@ class TestCanCreateProcess:
     def test_frontend_permission_check_logic(self):
         """Simula lógica de verificação do frontend."""
         def can_create_process(user_role: str) -> bool:
+            return user_role != "cliente"
         
         assert can_create_process("admin") == True
         assert can_create_process("consultor") == True
@@ -88,6 +89,7 @@ class TestCanCreateProcess:
     def test_frontend_permission_check_clients(self):
         """Simula lógica de criação de clientes."""
         def can_create_clients(user_role: str) -> bool:
+            return user_role != "cliente"
         
         assert can_create_clients("admin") == True
         assert can_create_clients("consultor") == True
