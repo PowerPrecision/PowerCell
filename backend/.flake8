@@ -1,0 +1,38 @@
+[flake8]
+max-line-length = 127
+max-complexity = 10
+exclude = 
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    node_modules,
+    .eggs,
+    *.egg,
+    build,
+    dist,
+    migrations,
+    skills,
+    backup_test,
+    tests/e2e,
+    tests/integration/test_iteration*.py,
+    tests/test_iteration*.py
+
+# Ignorar certos erros/warnings
+ignore = 
+    E501,  # line too long (deixamos o black tratar disso)
+    W503,  # line break before binary operator
+    W504,  # line break after binary operator
+    E203,  # whitespace before ':'
+    E402,  # module level import not at top of file
+    C901,  # too complex (já temos max-complexity)
+    F401,  # imported but unused (pode haver imports para type hints)
+    F403,  # star import
+    F405,  # star import usage
+
+# Mostrar source para erros críticos
+show-source = True
+
+# Contar erros
+count = True

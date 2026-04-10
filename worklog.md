@@ -1,4 +1,36 @@
-# Worklog - Motor de Tarefas Assíncronas
+# Worklog - PowerCell CRM
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Implementar Pipeline CI/CD com GitHub Actions
+
+Work Log:
+- Criado .github/workflows/main.yml com pipeline completo
+- Job 1 - Frontend CI (React + Vite):
+  - Setup Node.js 20
+  - npm ci --prefer-offline
+  - ESLint checking
+  - Vite build (gatekeeper crítico)
+  - Verificação de output dist/
+- Job 2 - Backend CI (Python + FastAPI):
+  - Setup Python 3.11
+  - pip install requirements.txt
+  - Flake8 linting (E9,F63,F7,F82 - erros críticos)
+  - Pytest com variáveis dummy
+  - Coverage report
+- Job 3 - Notify on Failure (preparado para Slack/Teams)
+- Criado backend/.flake8 com configuração
+- Atualizado conftest.py com DUMMY_ENV_VARS
+  - Variáveis dummy para evitar crash em CI
+  - SECRET_KEY, MONGO_URI, SMTP, AWS, etc.
+- Configurado concurrency para cancelar jobs em push novo
+
+Stage Summary:
+- CI Pipeline: Proteção contra código partido em produção
+- Frontend: Build Vite como gatekeeper rigoroso
+- Backend: Linting + Testes com env vars dummy
+- GitHub: Triggers em push/PR para main
 
 ---
 Task ID: 2
