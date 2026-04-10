@@ -546,51 +546,93 @@ const RGPDTemplateTab = () => {
         </CardContent>
       </Card>
 
-      {/* Editor */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileEdit className="h-5 w-5" />
-            Texto do Formulário RGPD
-          </CardTitle>
-          <CardDescription>
-            Edite o texto legal do formulário de consentimento RGPD. As variáveis como {"{{NOME}}"}, {"{{CONTRIBUINTE}}"} e {"{{MORADA}}"} serão substituídas automaticamente pelos dados do cliente.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Textarea
-            value={templateContent}
-            onChange={(e) => setTemplateContent(e.target.value)}
-            rows={20}
-            className="font-mono text-sm leading-relaxed"
-            placeholder="Introduza o texto do template RGPD..."
-            disabled={!isAdminOrCEO}
-          />
+      {/* Editor + Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Editor */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileEdit className="h-5 w-5" />
+              Texto do Formulário RGPD
+            </CardTitle>
+            <CardDescription>
+              Edite o texto legal do formulário de consentimento RGPD.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Textarea
+              value={templateContent}
+              onChange={(e) => setTemplateContent(e.target.value)}
+              rows={20}
+              className="font-mono text-sm leading-relaxed"
+              placeholder="Introduza o texto do template RGPD..."
+              disabled={!isAdminOrCEO}
+            />
 
-          {/* Variáveis disponíveis */}
-          <div className="bg-muted/50 rounded-lg p-3">
-            <p className="text-sm font-medium mb-2">Variáveis disponíveis:</p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                "{{NOME}}",
-                "{{CONTRIBUINTE}}",
-                "{{MORADA}}",
-                "{{CODIGO_POSTAL}}",
-                "{{TIPO_DOCUMENTO}}",
-                "{{NUMERO_DOCUMENTO}}",
-                "{{VALIDADE_DOCUMENTO}}",
-                "{{DATA_ASSINATURA}}",
-              ].map((variable) => (
-                <Badge key={variable} variant="secondary" className="font-mono text-xs">
-                  {variable}
-                </Badge>
-              ))}
+            {/* Variáveis disponíveis */}
+            <div className="bg-muted/50 rounded-lg p-3">
+              <p className="text-sm font-medium mb-2">Variáveis disponíveis:</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  "{{NOME}}",
+                  "{{CONTRIBUINTE}}",
+                  "{{MORADA}}",
+                  "{{CODIGO_POSTAL}}",
+                  "{{TIPO_DOCUMENTO}}",
+                  "{{NUMERO_DOCUMENTO}}",
+                  "{{VALIDADE_DOCUMENTO}}",
+                  "{{DATA_ASSINATURA}}",
+                ].map((variable) => (
+                  <Badge key={variable} variant="secondary" className="font-mono text-xs">
+                    {variable}
+                  </Badge>
+                ))}
+              </div>
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Actions */}
-          {isAdminOrCEO ? (
-            <div className="flex items-center justify-between pt-2 border-t">
+        {/* Preview */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Preview do Documento
+            </CardTitle>
+            <CardDescription>
+              Como o cliente vai visualizar o formulário.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="bg-white dark:bg-gray-900 border rounded-lg p-4 min-h-[400px] overflow-auto">
+              <div 
+                className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap text-sm leading-relaxed"
+                dangerouslySetInnerHTML={{
+                  __html: templateContent
+                    .replace(/\{\{NOME\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
+                    .replace(/\{\{CONTRIBUINTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">123456789</span>')
+                    .replace(/\{\{MORADA\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">Rua das Flores, 123</span>')
+                    .replace(/\{\{CODIGO_POSTAL\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">1000-001</span>')
+                    .replace(/\{\{TIPO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">Cartão de Cidadão</span>')
+                    .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">12345678</span>')
+                    .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">31/12/2030</span>')
+                    .replace(/\{\{DATA_ASSINATURA\}\}/g, '<span class="bg-green-100 dark:bg-green-900 px-1 rounded font-medium text-green-800 dark:text-green-200">15/01/2025</span>')
+                    .replace(/\n/g, '<br/>')
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Os valores destacados em <span className="bg-blue-100 dark:bg-blue-900 px-1 rounded text-blue-800 dark:text-blue-200">azul</span> são exemplos de como os dados do cliente aparecerão.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Actions */}
+      {isAdminOrCEO && (
+        <Card>
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between">
               <Button
                 variant="outline"
                 onClick={handleReset}
@@ -615,13 +657,15 @@ const RGPDTemplateTab = () => {
                 </Button>
               </div>
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground pt-2 border-t">
-              Apenas utilizadores Admin ou CEO podem editar o template RGPD.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
+      
+      {!isAdminOrCEO && (
+        <p className="text-sm text-muted-foreground text-center py-4">
+          Apenas utilizadores Admin ou CEO podem editar o template RGPD.
+        </p>
+      )}
     </div>
   );
 };
