@@ -2208,20 +2208,67 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 {selectedFilesForAI.length > 0 && (
                   <div className="bg-blue-50 dark:bg-blue-950/50 px-2 py-1.5 text-[10px] text-blue-700 dark:text-blue-300 flex items-center justify-between border-t">
                     <span>{selectedFilesForAI.length} ficheiro(s) selecionado(s)</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-5 text-[10px] bg-purple-50 hover:bg-purple-100 border-purple-200 px-2"
-                      onClick={handleAIAnalysis}
-                      disabled={aiAnalyzing}
-                    >
-                      {aiAnalyzing ? (
-                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                      ) : (
-                        <Brain className="h-3 w-3 mr-1" />
-                      )}
-                      Analisar
-                    </Button>
+                    <div className="flex gap-1">
+                      {/* Botão Download em Massa */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-5 text-[10px] bg-emerald-50 hover:bg-emerald-100 border-emerald-200 px-2"
+                        onClick={async () => {
+                          try {
+                            const response = await fetch(`${API_URL}/api/documents/bulk-download`, {
+                              method: 'POST',
+                              headers: {
+                                Authorization: `Bearer ${token}`,
+                                'Content-Type': 'application/json'
+                              },
+                              body: JSON.stringify({
+                                document_ids: selectedFilesForAI.map(f => f.path),
+                                process_id: processId
+                              })
+                            });
+                            
+                            if (response.ok) {
+                              const blob = await response.blob();
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `documentos_${new Date().toISOString().slice(0,10)}.zip`;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              URL.revokeObjectURL(url);
+                              toast.success(`${selectedFilesForAI.length} documento(s) descarregado(s)`);
+                              setSelectedFilesForAI([]);
+                            } else {
+                              const error = await response.json();
+                              toast.error(error.detail || "Erro ao descarregar documentos");
+                            }
+                          } catch (error) {
+                            console.error("Erro no download em massa:", error);
+                            toast.error("Erro ao descarregar documentos");
+                          }
+                        }}
+                      >
+                        <Download className="h-3 w-3 mr-1" />
+                        Download
+                      </Button>
+                      {/* Botão Análise IA */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-5 text-[10px] bg-purple-50 hover:bg-purple-100 border-purple-200 px-2"
+                        onClick={handleAIAnalysis}
+                        disabled={aiAnalyzing}
+                      >
+                        {aiAnalyzing ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <Brain className="h-3 w-3 mr-1" />
+                        )}
+                        Analisar
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
