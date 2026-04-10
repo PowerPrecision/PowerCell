@@ -677,37 +677,4 @@ function ErrorFallback({ error, componentStack, resetError, eventId }) {
   );
 }
 
-// Error Boundary fallback - mostrado quando React crasha
-function ErrorFallback({ error, componentStack, resetError, eventId }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-4">
-      <div className="max-w-md w-full text-center space-y-4">
-        <div className="mx-auto w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
-          <svg className="w-8 h-8 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        </div>
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Algo correu mal</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          Ocorreu um erro inesperado. O nosso equipa foi notificada automaticamente.
-        </p>
-        <div className="flex gap-3 justify-center">
-          <button
-            onClick={resetError}
-            className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm font-medium"
-          >
-            Tentar novamente
-          </button>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-          >
-            Recarregar página
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default App;
