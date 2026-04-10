@@ -205,7 +205,7 @@ async def create_missing_doc_draft(
         body = draft_content.get("body", f"Caro(a) {client_name},\n\nPrecisamos do documento: {doc_label}.")
 
         # 6. Guardar rascunho na BD
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
         draft_id = str(uuid.uuid4())
 
         draft_doc = {
@@ -220,8 +220,12 @@ async def create_missing_doc_draft(
             "is_auto_draft": True,
             "auto_draft_doc_type": missing_doc_type.lower(),
             "auto_draft_doc_label": doc_label,
-            "created_at": now,
-            "updated_at": now,
+            # Campos ISO string (compatibilidade com código existente)
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            # Campos datetime nativo (para TTL indexes)
+            "created_at_dt": now,  # BSON Date
+            "updated_at_dt": now,  # BSON Date - TTL index usa este campo
             "is_important": False,
             "is_read": True,
             "is_starred": False,
@@ -356,8 +360,12 @@ async def update_draft(draft_id: str, update_data: Dict[str, Any]) -> Dict[str, 
         return {"success": False, "error": "Rascunho não encontrado"}
 
     allowed_fields = {"subject", "body", "to_emails", "cc_emails"}
+    now = datetime.now(timezone.utc)
     updates = {k: v for k, v in update_data.items() if k in allowed_fields}
-    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    # Campos ISO string (compatibilidade)
+    updates["updated_at"] = now.isoformat()
+    # Campo datetime nativo (para TTL index)
+    updates["updated_at_dt"] = now
 
     if updates:
         await db.emails.update_one(

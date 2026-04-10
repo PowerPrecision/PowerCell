@@ -1,4 +1,48 @@
 ---
+Task ID: 16
+Agent: Main Agent (Database Architect & Backend Engineer)
+Task: Implementar Data Lifecycle Management com Índices TTL do MongoDB
+
+Problem Statement:
+Automatizar a purga de dados efémeros (logs, sessões, rascunhos) para evitar o crescimento infinito da base de dados e reduzir custos de armazenamento, sem necessidade de cron-jobs no backend.
+
+Solution: Índices TTL nativos do MongoDB com tratamento de exceções OperationFailure
+
+Work Log:
+1. Análise do código existente:
+   - Identificado que campos de data estavam como ISO strings (.isoformat())
+   - TTL indexes requerem BSON Date (datetime nativo), NÃO strings!
+   - system_error_logs já tinha TTL de 90 dias mas em campo ISO string (não funcionava)
+
+2. Implementação em db_indexes.py:
+   - Adicionado TTL_INDEXES config com 3 coleções:
+     * refresh_tokens: TTL 24h (campo created_at_dt)
+     * system_error_logs: TTL 30 dias (campo timestamp_dt)
+     * emails (drafts): TTL 7 dias (campo updated_at_dt, partial filter status=draft)
+   - Criada função create_ttl_indexes() com tratamento OperationFailure
+   - Se índice existe com parâmetros diferentes: drop + recriar automaticamente
+   - Removido índice TTL antigo (idx_ttl) de system_error_logs
+
+3. Atualização dos serviços para usar datetime nativo:
+   - refresh_token_service.py: adicionado created_at_dt e expires_at_dt
+   - system_error_logger.py: adicionado timestamp_dt e created_at_dt
+   - email_draft_service.py: adicionado created_at_dt e updated_at_dt
+
+4. Integração no startup:
+   - create_ttl_indexes() chamado automaticamente em create_indexes()
+   - create_indexes() já é chamado no @app.on_event("startup") do server.py
+
+Stage Summary:
+- Ficheiros modificados: 4
+  - backend/services/db_indexes.py (TTL_INDEXES + create_ttl_indexes)
+  - backend/services/refresh_token_service.py (campos datetime nativos)
+  - backend/services/system_error_logger.py (campos datetime nativos)
+  - backend/services/email_draft_service.py (campos datetime nativos)
+- TTL automático: sem cron-jobs, MongoDB gere a purga
+- Backward compatible: campos ISO string mantidos + novos campos datetime
+- Resiliente: tratamento de OperationFailure com drop/recreate
+
+---
 Task ID: 15
 Agent: Main Agent (Full-Stack Architect)
 Task: Implementar Filtro de Estado Ativo para Processos
