@@ -75,6 +75,7 @@ const KanbanBoard = ({
   // === DATA FETCHING ===
   const fetchKanbanData = useCallback(async () => {
     try {
+      setLoading(true); // Mostrar loading quando filtros mudam
       const params = new URLSearchParams();
       
       if (consultorFilter && consultorFilter !== 'all') {
