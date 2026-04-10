@@ -41,6 +41,31 @@ async def verify_websocket_token(token: str) -> dict:
         return None
 
 
+def is_disconnect_error(error: Exception) -> bool:
+    """Verifica se o erro indica desconexão do cliente."""
+    error_str = str(error).lower()
+    error_type = type(error).__name__
+    
+    disconnect_indicators = [
+        "disconnect",
+        "closed",
+        "connection reset",
+        "broken pipe",
+        "cannot call receive",
+    ]
+    
+    # Verificar por string
+    for indicator in disconnect_indicators:
+        if indicator in error_str:
+            return True
+    
+    # Verificar por tipo de erro
+    if error_type in ["WebSocketDisconnect", "ConnectionClosed", "RuntimeError"]:
+        return True
+    
+    return False
+
+
 @router.websocket("/ws/notifications")
 async def websocket_notifications(
     websocket: WebSocket,
@@ -53,6 +78,7 @@ async def websocket_notifications(
         return
     
     user_id = user["id"]
+    connected = True  # Flag para controlar o loop
     
     try:
         await manager.connect(websocket, user_id)
@@ -76,34 +102,43 @@ async def websocket_notifications(
                 exclude_user=user_id
             )
         
-        while True:
+        while connected:
             try:
-                # receive_json() lança exceção se a conexão for fechada
-                # Precisamos verificar se é uma mensagem de texto (dados) ou de desconexão
+                # Usar receive() para podermos verificar o tipo de mensagem
                 message = await websocket.receive()
                 
                 # Verificar se é uma mensagem de desconexão
                 if message.get("type") == "websocket.disconnect":
-                    logger.info(f"Cliente solicitou desconexão: {user_id}")
+                    logger.debug(f"Cliente {user_id} desconectou normalmente")
+                    connected = False
                     break
                 
                 # Verificar se é uma mensagem de texto
                 if message.get("type") == "websocket.receive":
                     text = message.get("text")
                     if text:
-                        data = json.loads(text)
+                        try:
+                            data = json.loads(text)
+                        except json.JSONDecodeError:
+                            logger.warning(f"JSON inválido de {user_id}")
+                            continue
                     else:
                         continue
                 else:
+                    # Outro tipo de mensagem (bytes, etc.)
                     continue
                 
                 msg_type = data.get("type")
                 
                 if msg_type == "ping":
-                    await websocket.send_json(create_ws_message(
-                        WSEventType.HEARTBEAT,
-                        {"status": "pong"}
-                    ))
+                    try:
+                        await websocket.send_json(create_ws_message(
+                            WSEventType.HEARTBEAT,
+                            {"status": "pong"}
+                        ))
+                    except Exception:
+                        connected = False
+                        break
                 
                 elif msg_type == "mark_notification_read":
                     notification_id = data.get("notification_id")
@@ -112,53 +147,79 @@ async def websocket_notifications(
                             {"id": notification_id, "user_id": user_id},
                             {"$set": {"read": True}}
                         )
-                        await websocket.send_json(create_ws_message(
-                            WSEventType.NOTIFICATION_READ,
-                            {"notification_id": notification_id}
-                        ))
+                        try:
+                            await websocket.send_json(create_ws_message(
+                                WSEventType.NOTIFICATION_READ,
+                                {"notification_id": notification_id}
+                            ))
+                        except Exception:
+                            connected = False
+                            break
                 
                 elif msg_type == "mark_all_read":
                     await db.notifications.update_many(
                         {"user_id": user_id, "read": False},
                         {"$set": {"read": True}}
                     )
-                    await websocket.send_json(create_ws_message(
-                        WSEventType.ALL_NOTIFICATIONS_READ,
-                        {"status": "success"}
-                    ))
+                    try:
+                        await websocket.send_json(create_ws_message(
+                            WSEventType.ALL_NOTIFICATIONS_READ,
+                            {"status": "success"}
+                        ))
+                    except Exception:
+                        connected = False
+                        break
                 
-            except json.JSONDecodeError as e:
-                logger.warning(f"Mensagem JSON inválida de {user_id}: {e}")
-                continue
             except WebSocketDisconnect:
-                logger.info(f"WebSocketDisconnect capturado no loop: {user_id}")
+                logger.debug(f"WebSocketDisconnect: {user_id}")
+                connected = False
                 break
-            except Exception as e:
-                # Verificar se é erro de conexão fechada
-                error_str = str(e)
-                if "disconnect" in error_str.lower() or "closed" in error_str.lower():
-                    logger.info(f"Conexão fechada pelo cliente: {user_id}")
+            
+            except RuntimeError as e:
+                # Erro específico: "Cannot call receive once a disconnect message has been received"
+                if is_disconnect_error(e):
+                    logger.debug(f"Conexão fechada (RuntimeError): {user_id}")
+                    connected = False
                     break
-                logger.error(f"Erro ao processar mensagem WebSocket: {e}")
-                # Continua o loop para tentar receber próximas mensagens
-                # a menos que seja erro de conexão
-                continue
+                # Outros RuntimeErrors - logar e continuar
+                logger.warning(f"RuntimeError inesperado WebSocket {user_id}: {e}")
+                connected = False
+                break
+            
+            except Exception as e:
+                if is_disconnect_error(e):
+                    logger.debug(f"Conexão fechada: {user_id}")
+                    connected = False
+                    break
+                # Logar outros erros mas NÃO continuar o loop para evitar spam
+                logger.warning(f"Erro WebSocket {user_id}: {type(e).__name__}: {e}")
+                connected = False
+                break
     
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        logger.info(f"WebSocket desconectado: {user_id}")
-        if user.get("role") in ["admin", "ceo"]:
-            await manager.broadcast(
-                create_ws_message(
-                    WSEventType.USER_OFFLINE,
-                    {"user_id": user_id, "user_name": user.get("name", "")}
-                ),
-                exclude_user=user_id
-            )
+        logger.debug(f"WebSocket desconectado (outer): {user_id}")
     
     except Exception as e:
-        logger.error(f"Erro WebSocket: {e}")
+        # Só logar se não for erro de desconexão
+        if not is_disconnect_error(e):
+            logger.error(f"Erro WebSocket (outer) {user_id}: {type(e).__name__}: {e}")
+    
+    finally:
+        # Sempre limpar a conexão
         manager.disconnect(websocket)
+        
+        # Notificar outros utilizadores se for admin/ceo
+        if user.get("role") in ["admin", "ceo"]:
+            try:
+                await manager.broadcast(
+                    create_ws_message(
+                        WSEventType.USER_OFFLINE,
+                        {"user_id": user_id, "user_name": user.get("name", "")}
+                    ),
+                    exclude_user=user_id
+                )
+            except Exception:
+                pass  # Ignorar erros ao notificar
 
 
 @router.get("/ws/status")
