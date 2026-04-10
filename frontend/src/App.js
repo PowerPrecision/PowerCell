@@ -5,21 +5,33 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { UploadProgressProvider } from "./contexts/UploadProgressContext";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
-import React, { Suspense } from "react";
+import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";
 
 // ====================================================================
-// PÁGINAS COM CARREGAMENTO IMEDIATO (críticas para UX)
+// PÁGINAS COM CARREGAMENTO IMEDIATO (críticas para UX inicial)
 // ====================================================================
+// Estas páginas são carregadas imediatamente porque:
+// 1. LoginPage - ecrã de entrada, deve aparecer instantaneamente
+// 2. PublicClientForm - landing page pública, SEO e primeira impressão
+// 3. RGPDPage, TempLinkUploadPage, TempLinkDownloadPage - páginas públicas
 import LoginPage from "./pages/LoginPage";
 import PublicClientForm from "./pages/PublicClientForm";
-import StaffDashboard from "./pages/StaffDashboard";
-import KanbanPage from "./pages/KanbanPage";
-import ProcessDetails from "./pages/ProcessDetails";
 import RGPDPage from "./pages/RGPDPage";
 import TempLinkUploadPage from "./pages/TempLinkUploadPage";
 import TempLinkDownloadPage from "./pages/TempLinkDownloadPage";
+
+// ====================================================================
+// PÁGINAS PESADAS COM CODE SPLITTING (lazy loading)
+// ====================================================================
+// Páginas lazy-loaded para reduzir o bundle inicial:
+// - StaffDashboard: 44KB (gráficos e estatísticas)
+// - KanbanPage: importa bibliotecas de drag-drop (@dnd-kit)
+// - ProcessDetails: 164KB (o maior componente da aplicação!)
+const StaffDashboard = React.lazy(() => import("./pages/StaffDashboard"));
+const KanbanPage = React.lazy(() => import("./pages/KanbanPage"));
+const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
 
 // ====================================================================
 // PÁGINAS COM CODE SPLITTING (lazy loading)
@@ -66,6 +78,60 @@ const PageLoadingSkeleton = () => (
     <FullPageSkeleton />
   </div>
 );
+
+// ====================================================================
+// ERROR BOUNDARY PARA ERROS DE CHUNK (Lazy Loading)
+// ====================================================================
+// Quando o Vite divide o código em chunks, se uma nova versão for
+// deployada enquanto um utilizador tem a aba aberta, o browser pode
+// tentar carregar um chunk que já não existe.
+// Este Error Boundary deteta esse erro e faz reload suavemente.
+// ====================================================================
+class LazyChunkErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    // Verifica se é um erro de chunk loading
+    const isChunkError =
+      error?.name === "ChunkLoadError" ||
+      error?.code === "MODULE_NOT_FOUND" ||
+      error?.message?.includes("Failed to fetch dynamically imported module") ||
+      error?.message?.includes("Loading chunk") ||
+      error?.message?.includes("Loading CSS chunk");
+
+    if (isChunkError) {
+      console.warn("[LazyChunkErrorBoundary] Erro de chunk detetado, a recarregar página...");
+      // Limpa a cache do Vite se existir
+      if (typeof window !== "undefined" && window.__vite__ && window.__vite__.clearCache) {
+        window.__vite__.clearCache();
+      }
+      // Força reload limpo
+      window.location.reload();
+      return { hasError: true, error };
+    }
+
+    // Para outros erros, deixa propagar para o Sentry
+    return { hasError: false, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    // Se não for erro de chunk, reporta ao Sentry
+    if (!this.state.hasError) {
+      Sentry.captureException(error, { contexts: { react: { componentStack: errorInfo.componentStack } } });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // Enquanto recarrega, mostra loading
+      return <PageLoadingSkeleton />;
+    }
+    return this.props.children;
+  }
+}
 
 // IdealistaImportPage movido para modal na página de Leads
 import "./App.css";
@@ -152,6 +218,7 @@ function App() {
         <UploadProgressProvider>
         <BrowserRouter>
         <Sentry.ErrorBoundary fallback={ErrorFallback}>
+        <LazyChunkErrorBoundary>
         <Suspense fallback={<PageLoadingSkeleton />}>
         <Routes>
           {/* Root redirect - shows form or redirects to dashboard based on auth */}
@@ -555,6 +622,7 @@ function App() {
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         </Suspense>
+        </LazyChunkErrorBoundary>
         </Sentry.ErrorBoundary>
         <ImpersonateBanner />
         <GlobalUploadProgress />
