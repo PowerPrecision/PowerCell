@@ -1797,20 +1797,23 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 <FileDown className="h-3.5 w-3.5 text-emerald-600 sm:mr-1" />
                 <span className="hidden sm:inline">Gerar</span> Minuta
               </Button>
-              <Button
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                data-testid="upload-file-btn"
-                className="whitespace-nowrap h-8 px-2 sm:px-3"
-              >
-                {uploading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin sm:mr-1" />
-                ) : (
-                  <Upload className="h-3.5 w-3.5 sm:mr-1" />
-                )}
-                <span className="hidden xs:inline">Upload</span>
-              </Button>
+              {/* INDEXAÇÃO READ-ONLY: Ocultar botão de upload */}
+              {!isIndexacao && (
+                <Button
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  data-testid="upload-file-btn"
+                  className="whitespace-nowrap h-8 px-2 sm:px-3"
+                >
+                  {uploading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin sm:mr-1" />
+                  ) : (
+                    <Upload className="h-3.5 w-3.5 sm:mr-1" />
+                  )}
+                  <span className="hidden xs:inline">Upload</span>
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -2172,15 +2175,18 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             >
                               <Pencil className="h-3 w-3" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-5 w-5 flex-shrink-0 text-red-500 hover:text-red-600" 
-                              onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
-                              title="Eliminar"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                            {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar */}
+                            {!isIndexacao && (
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-5 w-5 flex-shrink-0 text-red-500 hover:text-red-600" 
+                                onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
+                                title="Eliminar"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
                           </div>
                         </div>
                       );
@@ -2310,15 +2316,18 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       >
                         <Pencil className="h-3 w-3" />
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 w-6 p-0 text-red-500 hover:text-red-600"
-                        onClick={() => setDeleteDialog({ open: true, file: previewFile })}
-                        title="Eliminar"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
+                      {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar */}
+                      {!isIndexacao && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 w-6 p-0 text-red-500 hover:text-red-600"
+                          onClick={() => setDeleteDialog({ open: true, file: previewFile })}
+                          title="Eliminar"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2431,15 +2440,18 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                 >
                                   <Download className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 text-red-500 hover:text-red-600"
-                                  onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
-                                  title="Eliminar"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
+                                {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar */}
+                                {!isIndexacao && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-red-500 hover:text-red-600"
+                                    onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
+                                    title="Eliminar"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
                               </div>
                             </div>
                             {/* Clickable file name - duas linhas com letra pequena */}
@@ -2521,16 +2533,19 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                   >
                                     <Download className="h-3.5 w-3.5" />
                                   </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 text-red-500 hover:text-red-600"
-                                    onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
-                                    title="Eliminar"
-                                    data-testid={`delete-btn-${idx}`}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </Button>
+                                  {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar */}
+                                  {!isIndexacao && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-red-500 hover:text-red-600"
+                                      onClick={(e) => { e.stopPropagation(); setDeleteDialog({ open: true, file }); }}
+                                      title="Eliminar"
+                                      data-testid={`delete-btn-${idx}`}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                               {/* Clickable file name - duas linhas com letra pequena */}

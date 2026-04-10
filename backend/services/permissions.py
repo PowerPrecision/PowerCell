@@ -143,6 +143,7 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
     "indexacao": {
         # INDEXACAO tem acesso apenas ao essencial para o seu fluxo de trabalho
         # Removido "dashboard" e "my_clients" para consolidar a informação
+        # READ-ONLY: Não pode fazer upload/delete de documentos, apenas visualizar
         "pages": [
             "kanban",        # Quadro Geral
             "processes",     # Os Meus Processos
@@ -151,9 +152,8 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
             "notifications"
         ],
         "actions": [
-            "upload_docs", "delete_docs", "download_docs",
-            "assign_clients", "manage_tasks", "use_chat",
-            "assign_process_users", "view_financials"
+            "download_docs", "assign_clients", "manage_tasks", "use_chat",
+            "assign_process_users", "view_financials", "create_client", "edit_client"
         ],
     },
     "cliente": {
