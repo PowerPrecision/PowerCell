@@ -606,15 +606,6 @@ PROCESS_LIST_PROJECTION = {
     "updated_at": 1,
     "deed_date": 1,
     "tags": 1,
-    # EXCLUIR explicitamente arrays pesados e dados sensíveis
-    "history": 0,
-    "activities": 0,
-    "personal_data": 0,  # Dados sensíveis
-    "titular2_data": 0,  # Dados sensíveis
-    "financial_data": 0, # Dados sensíveis
-    "real_estate_data": 0,
-    "credit_data": 0,
-    "documents": 0,
 }
 
 # Campos necessários para o Kanban (visualização em colunas)
