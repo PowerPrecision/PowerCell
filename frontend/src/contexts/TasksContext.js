@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import api from "../services/api";
+import { useAuth } from "./AuthContext"; // <-- 1. Importar o hook de autenticação
 
 const TasksContext = createContext(null);
 
@@ -60,6 +61,8 @@ const TaskTypeLabels = {
  * Provider para o contexto de tarefas assíncronas
  */
 export const TasksProvider = ({ children }) => {
+  const { user } = useAuth(); // <-- 2. Consumir o estado do utilizador logado
+
   // Estado das tarefas
   const [tasks, setTasks] = useState([]);
   const [activeCount, setActiveCount] = useState(0);
@@ -76,6 +79,8 @@ export const TasksProvider = ({ children }) => {
    * Buscar tarefas ativas do backend
    */
   const fetchActiveTasks = useCallback(async () => {
+    if (!user) return; // <-- 3. Abortar a requisição se não estiver logado
+
     try {
       setIsLoading(true);
       const response = await api.get("/tasks/active");
@@ -92,11 +97,6 @@ export const TasksProvider = ({ children }) => {
         const isNowFailed = task.status === TaskStatus.FAILED;
         const isUnacknowledged = !task.acknowledged_at;
         
-        // Mostrar toast apenas se:
-        // 1. A tarefa estava ativa antes (pending/processing)
-        // 2. Agora está concluída ou falhada
-        // 3. Ainda não foi confirmada
-        // 4. Não mostrámos toast recentemente para esta tarefa
         if (wasActive && isUnacknowledged) {
           const now = Date.now();
           const lastToast = lastToastTimeRef.current[task.task_id] || 0;
@@ -132,11 +132,10 @@ export const TasksProvider = ({ children }) => {
       
     } catch (error) {
       console.error("[TasksContext] Erro ao buscar tarefas:", error);
-      // Não mostrar toast de erro para evitar spam
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [user]); // <-- 4. Adicionar "user" como dependência
   
   /**
    * Confirmar visualização de uma tarefa
@@ -144,11 +143,8 @@ export const TasksProvider = ({ children }) => {
   const acknowledgeTask = useCallback(async (taskId) => {
     try {
       await api.post(`/tasks/${taskId}/acknowledge`);
-      
-      // Atualizar estado local
       setTasks(prev => prev.filter(t => t.task_id !== taskId));
       setCompletedUnacknowledged(prev => Math.max(0, prev - 1));
-      
     } catch (error) {
       console.error("[TasksContext] Erro ao confirmar tarefa:", error);
     }
@@ -160,13 +156,9 @@ export const TasksProvider = ({ children }) => {
   const cancelTask = useCallback(async (taskId) => {
     try {
       await api.delete(`/tasks/${taskId}/cancel`);
-      
-      // Atualizar estado local
       setTasks(prev => prev.filter(t => t.task_id !== taskId));
       setActiveCount(prev => Math.max(0, prev - 1));
-      
       toast.info("Tarefa cancelada");
-      
     } catch (error) {
       console.error("[TasksContext] Erro ao cancelar tarefa:", error);
       toast.error("Não foi possível cancelar a tarefa");
@@ -190,39 +182,42 @@ export const TasksProvider = ({ children }) => {
    * Iniciar polling inteligente
    */
   useEffect(() => {
-    // Buscar tarefas imediatamente
+    // <-- 5. Se não houver sessão ativa, limpar qualquer polling existente e não fazer nada
+    if (!user) {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+      return;
+    }
+
+    // Buscar tarefas imediatamente (pois o utilizador está validado)
     fetchActiveTasks();
     
-    // Configurar polling adaptativo
     const setupPolling = () => {
-      // Limpar intervalo anterior
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
       }
       
-      // Escolher intervalo baseado no estado
       const interval = activeCount > 0 ? BASE_POLLING_INTERVAL : IDLE_POLLING_INTERVAL;
-      
       pollingIntervalRef.current = setInterval(fetchActiveTasks, interval);
     };
     
     setupPolling();
     
-    // Reconfigurar quando o número de tarefas ativas muda
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
       }
     };
-  }, [fetchActiveTasks, activeCount]);
+  }, [fetchActiveTasks, activeCount, user]); // <-- 6. Adicionar "user" como dependência
   
   /**
-   * Listener para visibilidade da página (pausar polling quando tab não está ativa)
+   * Listener para visibilidade da página
    */
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        // Buscar tarefas imediatamente quando a página fica visível
+      // <-- 7. Adicionar verificação do user aqui também
+      if (document.visibilityState === "visible" && user) {
         fetchActiveTasks();
       }
     };
@@ -232,23 +227,18 @@ export const TasksProvider = ({ children }) => {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [fetchActiveTasks]);
+  }, [fetchActiveTasks, user]); // <-- 8. Adicionar "user" como dependência
   
   const value = {
-    // Estado
     tasks,
     activeCount,
     completedUnacknowledged,
     isLoading,
     lastFetchTime,
-    
-    // Ações
     fetchActiveTasks,
     acknowledgeTask,
     cancelTask,
     getTaskDetails,
-    
-    // Helpers
     TaskTypes,
     TaskStatus,
     TaskTypeLabels,
@@ -261,9 +251,6 @@ export const TasksProvider = ({ children }) => {
   );
 };
 
-/**
- * Hook para aceder ao contexto de tarefas
- */
 export const useTasks = () => {
   const context = useContext(TasksContext);
   if (!context) {
