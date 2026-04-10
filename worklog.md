@@ -1,4 +1,37 @@
 ---
+Task ID: 17
+Agent: Main Agent (Database Architect & Backend Engineer)
+Task: Adicionar botão de migração TTL na UI de Admin
+
+Problem Statement:
+Criar um botão na interface de administração para correr a migração TTL que popula os campos datetime nativos nos documentos existentes.
+
+Solution: Endpoint de migração + secção na página de Diagnósticos
+
+Work Log:
+1. Backend (routes/diagnostics.py):
+   - Adicionado endpoint GET /diagnostics/ttl-status
+   - Adicionado endpoint POST /diagnostics/migrate-ttl-fields
+   - Endpoint retorna detalhes de cada coleção migrada
+
+2. Frontend (services/api.js):
+   - Adicionadas funções getTTLStatus() e migrateTTLFields()
+
+3. Frontend (pages/DiagnosticsPage.js):
+   - Adicionada secção "Gestão de Ciclo de Vida de Dados (TTL)"
+   - Lista estado de cada coleção TTL (documentos migrados/pendentes)
+   - Botão "Correr Migração TTL" com loading state
+   - Mostra resultado da migração com detalhes
+
+Stage Summary:
+- Ficheiros modificados: 3
+  - backend/routes/diagnostics.py (endpoints TTL)
+  - frontend/src/services/api.js (funções API)
+  - frontend/src/pages/DiagnosticsPage.js (UI)
+- UI mostra estado TTL em tempo real
+- Botão executa migração com feedback visual
+
+---
 Task ID: 16
 Agent: Main Agent (Database Architect & Backend Engineer)
 Task: Implementar Data Lifecycle Management com Índices TTL do MongoDB

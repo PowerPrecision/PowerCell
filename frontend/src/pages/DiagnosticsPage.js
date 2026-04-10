@@ -18,9 +18,14 @@ import {
   Database,
   Bell,
   ChevronRight,
-  Clock
+  Clock,
+  Timer,
+  Play,
+  Loader2
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { getTTLStatus, migrateTTLFields } from "../services/api";
+import { toast } from "../hooks/use-toast";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -132,6 +137,10 @@ const DiagnosticsPage = () => {
   const [diagnostics, setDiagnostics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [ttlStatus, setTTLStatus] = useState(null);
+  const [ttlLoading, setTTLLoading] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [migrationResult, setMigrationResult] = useState(null);
   const { token } = useAuth();
   const navigate = useNavigate();
 
@@ -157,8 +166,65 @@ const DiagnosticsPage = () => {
     }
   };
 
+  const fetchTTLStatus = async () => {
+    setTTLLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/diagnostics/ttl-status`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setTTLStatus(data);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar estado TTL:", err);
+    } finally {
+      setTTLLoading(false);
+    }
+  };
+
+  const handleMigrateTTL = async () => {
+    setMigrating(true);
+    setMigrationResult(null);
+    
+    try {
+      const response = await fetch(`${API_URL}/api/diagnostics/migrate-ttl-fields`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) throw new Error("Erro na migração");
+      
+      const data = await response.json();
+      setMigrationResult(data);
+      
+      toast({
+        title: "Migração Concluída",
+        description: data.message,
+        variant: data.total_migrated > 0 ? "default" : "default",
+      });
+      
+      // Refrescar estado TTL
+      await fetchTTLStatus();
+    } catch (err) {
+      toast({
+        title: "Erro na Migração",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setMigrating(false);
+    }
+  };
+
   useEffect(() => {
     fetchDiagnostics();
+    fetchTTLStatus();
   }, [token]);
 
   const handleConfigure = (service) => {
@@ -282,6 +348,129 @@ const DiagnosticsPage = () => {
               </CardContent>
             </Card>
           )}
+
+          {/* Gestão de Ciclo de Vida de Dados (TTL) */}
+          <Card className="border-t-4 border-t-purple-500">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-purple-100 text-purple-700">
+                    <Timer className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Gestão de Ciclo de Vida de Dados (TTL)</CardTitle>
+                    <CardDescription>
+                      Purga automática de dados efémeros (sessões, logs, rascunhos)
+                    </CardDescription>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchTTLStatus}
+                  disabled={ttlLoading}
+                >
+                  <RefreshCw className={`h-4 w-4 ${ttlLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Estado das coleções TTL */}
+              {ttlStatus && ttlStatus.collections && (
+                <div className="space-y-3">
+                  {ttlStatus.collections.map((col, i) => (
+                    <div key={i} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-1.5 rounded ${
+                          col.status === "ok" ? "bg-green-100 text-green-600" :
+                          col.status === "needs_migration" ? "bg-yellow-100 text-yellow-600" :
+                          "bg-red-100 text-red-600"
+                        }`}>
+                          <Database className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <div className="font-medium text-sm">{col.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            TTL: {col.ttl_description} ({col.ttl_field})
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <div className="text-right">
+                          <div className="font-medium">{col.with_datetime_field}/{col.total_documents}</div>
+                          <div className="text-xs text-muted-foreground">migrados</div>
+                        </div>
+                        {col.pending_migration > 0 && (
+                          <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300">
+                            {col.pending_migration} pendentes
+                          </Badge>
+                        )}
+                        {col.status === "ok" && (
+                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            OK
+                          </Badge>
+                        )}
+                        {col.ttl_index_exists && (
+                          <Badge variant="outline" className="text-purple-700 border-purple-300">
+                            Índice TTL ativo
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Resultado da migração */}
+              {migrationResult && (
+                <Alert className={migrationResult.total_migrated > 0 ? "border-green-500 bg-green-50" : ""}>
+                  <CheckCircle className="h-4 w-4" />
+                  <AlertTitle>Migração Concluída</AlertTitle>
+                  <AlertDescription>
+                    {migrationResult.message}
+                    {migrationResult.results && (
+                      <div className="mt-2 text-sm space-y-1">
+                        {migrationResult.results.map((r, i) => (
+                          <div key={i} className="flex justify-between">
+                            <span>{r.collection}:</span>
+                            <span>
+                              {r.migrated} migrados, {r.already_migrated} já estavam migrados
+                              {r.errors > 0 && <span className="text-red-600 ml-2">({r.errors} erros)</span>}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Botão de migração */}
+              <div className="flex items-center gap-3 pt-2">
+                <Button
+                  onClick={handleMigrateTTL}
+                  disabled={migrating}
+                  className="gap-2"
+                >
+                  {migrating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      A migrar...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4" />
+                      Correr Migração TTL
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Popula campos datetime nativos para que os índices TTL funcionem.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Timestamp */}
           <div className="text-xs text-muted-foreground text-right">
