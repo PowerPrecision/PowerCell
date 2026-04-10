@@ -1,4 +1,35 @@
 ---
+Task ID: 14
+Agent: Main Agent
+Task: Correções de Build e Melhorias de Backend/Frontend
+
+Problem Statement:
+1. Erro de build no Vercel: tags JSX desalinhadas em StaffDashboard.js
+2. Bug do telefone encriptado (ENC:xxxxx) a aparecer no Kanban/Lista
+3. Falta de UI para credenciais do 2º Proponente nos Portais Oficiais
+
+Work Log:
+- Corrigido erro JSX em StaffDashboard.js: adicionado `</div>` em falta após filtro Indexação
+- Melhorados logs de erro na desencriptação (encryption.py, process_service.py)
+- Adicionados campos de credenciais para 2º Titular: Portal Finanças e Segurança Social
+- Atualizada lista de campos encriptados em titular2_data para incluir utilizadores e senhas
+- Verificado que bulk-download, modo fantasma indexação e criação livre de clientes já estão implementados
+
+Stage Summary:
+- Commits: 3 (9d775a2b, 8712a753, 7b9ee188)
+- Ficheiros modificados:
+  - frontend/src/pages/StaffDashboard.js (erro JSX)
+  - backend/services/encryption.py (logs de diagnóstico)
+  - backend/services/process_service.py (logs + novos campos encriptados)
+  - frontend/src/pages/ProcessDetails.js (UI credenciais 2º proponente)
+- Tarefas confirmadas como já implementadas:
+  - Endpoint bulk-download de documentos (ZIP)
+  - Validação NIF empresa desativada
+  - Modo fantasma para Indexação (sem histórico)
+  - Criação de clientes livre para todos os utilizadores
+- AÇÃO NECESSÁRIA: Configurar ENCRYPTION_KEY no Vercel para resolver bug do telefone encriptado
+
+---
 Task ID: 13
 Agent: Main Agent (Frontend Architect)
 Task: Resolver violação CRÍTICA do paradigma declarativo do React (Manipulação Direta da DOM)
