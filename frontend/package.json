@@ -50,7 +50,7 @@
     "pdfjs-dist": "^3.11.174",
     "quill": "^2.0.3",
     "react": "^19.0.0",
-    "react-day-picker": "8.10.1",
+    "react-day-picker": "^9.4.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.56.2",
     "react-quill-new": "^3.8.3",
