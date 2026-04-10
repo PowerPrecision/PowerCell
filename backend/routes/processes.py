@@ -909,10 +909,12 @@ async def get_kanban_board(
     }
     processes = await db.processes.find(query, kanban_projection).to_list(1000)
     
-    # NOTA: Não chamamos decrypt_processes_list() aqui porque:
-    # 1. A projeção já exclui campos sensíveis (personal_data, financial_data, etc.)
-    # 2. client_name/client_email/client_phone vêm desencriptados do serviço de criação
-    # 3. Isto elimina o deepcopy + decrypt de centenas de processos
+    # Desencriptar campos sensíveis que estão na projeção (client_phone)
+    # A projeção exclui personal_data, financial_data, etc. mas inclui client_phone
+    processes = decrypt_processes_list(
+        processes, 
+        fields_to_decrypt=["client_phone"]
+    )
     
     # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
