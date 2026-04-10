@@ -1,6 +1,52 @@
 # Worklog - Motor de Tarefas Assíncronas
 
 ---
+Task ID: 2
+Agent: Main Agent
+Task: Refatoração para TanStack Query (React Query v5)
+
+Work Log:
+- Instalado @tanstack/react-query e @tanstack/react-query-devtools
+- Criado lib/queryClient.js com configuração otimizada para CRM:
+  - staleTime: 1 minuto (evita fetches excessivos)
+  - gcTime: 5 minutos (garbage collection)
+  - refetchOnWindowFocus: true (crítico para CRM)
+  - Retry inteligente para erros de rede
+- Criado sistema de Query Keys Factory para type-safety:
+  - queryKeys.processes.kanban(filters)
+  - queryKeys.processes.detail(id)
+  - queryKeys.history.byProcess(id)
+  - queryKeys.activities.byProcess(id)
+- Criados hooks de Queries (hooks/queries/):
+  - useKanbanQuery: Fetch do Kanban com caching
+  - useProcessQuery: Detalhes do processo
+  - useProcessHistoryQuery: Histórico/Timeline
+  - useProcessActivitiesQuery: Atividades/Comentários
+  - useProcessFullData: Hook combinado
+- Criados hooks de Mutations (hooks/mutations/):
+  - useMoveProcessMutation: Drag & Drop com optimistic update
+  - useUpdateProcessMutation: Atualização de processo
+  - useAssignProcessMutation: Atribuição de consultor/mediador
+  - useAddActivityMutation: Adicionar atividade com invalidação
+- Criado useKanbanRealtime para integração WebSocket + React Query:
+  - setQueryData para updates em tempo real (sem refetch pesado)
+  - Handlers: PROCESS_CREATED, PROCESS_STATUS_CHANGED, PROCESS_UPDATED
+  - Invalidação seletiva de detalhes do processo
+- Atualizado App.js com QueryClientProvider e DevTools
+- Refatorado KanbanBoard.js:
+  - Eliminado useEffect/useState "esparguete"
+  - Estados de loading/error derivados do React Query
+  - WebSocket integrado com cache management
+
+Stage Summary:
+- Infraestrutura: TanStack Query configurado com padrões CRM
+- Queries: Custom hooks para todas as operações de leitura
+- Mutations: Optimistic updates e invalidação automática
+- WebSocket: Integração com setQueryData para tempo real
+- DevTools: Disponível em desenvolvimento
+- Código: Reduzido ~100 linhas de boilerplate no KanbanBoard
+
+---
 Task ID: 1
 Agent: Main Agent
 Task: Implementar Motor de Tarefas Assíncronas e Centro de Operações Global
