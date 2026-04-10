@@ -57,6 +57,9 @@ class SystemErrorLogger:
             
         Returns:
             ID do erro registado
+            
+        NOTA: Os campos timestamp_dt e created_at_dt são datetime nativos
+        para compatibilidade com índices TTL do MongoDB.
         """
         db = await self._get_db()
         
@@ -72,7 +75,11 @@ class SystemErrorLogger:
             "severity": severity,
             "user_id": user_id,
             "request_path": request_path,
+            # Campos ISO string (compatibilidade com código existente)
             "timestamp": now.isoformat(),
+            # Campos datetime nativo (para TTL indexes)
+            "timestamp_dt": now,  # BSON Date - TTL index usa este campo
+            "created_at_dt": now,
             "date": now.strftime("%Y-%m-%d"),
             "hour": now.hour,
             "read": False,

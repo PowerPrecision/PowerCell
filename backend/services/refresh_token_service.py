@@ -72,6 +72,9 @@ async def create_refresh_token_db(
     """
     Cria e armazena novo refresh token na BD.
     Retorna (token_id, token_raw).
+    
+    NOTA: Os campos created_at_dt e expires_at_dt são datetime nativos
+    para compatibilidade com índices TTL do MongoDB.
     """
     token_id = str(uuid.uuid4())
     token_raw = generate_refresh_token()
@@ -85,8 +88,12 @@ async def create_refresh_token_db(
         "token_hash": token_hash,
         "device_info": device_info,
         "ip_address": ip_address,
+        # Campos ISO string (compatibilidade com código existente)
         "created_at": now.isoformat(),
         "expires_at": expires_at.isoformat(),
+        # Campos datetime nativo (para TTL indexes)
+        "created_at_dt": now,  # BSON Date - TTL index usa este campo
+        "expires_at_dt": expires_at,
         "revoked": False,
         "revoked_at": None,
         "replaced_by": None,

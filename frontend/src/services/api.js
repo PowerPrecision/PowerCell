@@ -513,5 +513,9 @@ export const updateFinanceConfig = (config) => api.put("/finance/config", config
 export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
 export const updateRGPDTemplate = (content) => api.put("/rgpd/admin/template", { content });
 
+// ===== TTL MIGRATION (Data Lifecycle Management) =====
+export const getTTLStatus = () => api.get("/diagnostics/ttl-status");
+export const migrateTTLFields = () => api.post("/diagnostics/migrate-ttl-fields");
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
