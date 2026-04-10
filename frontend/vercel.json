@@ -17,38 +17,31 @@
       "headers": [
         {
           "key": "Strict-Transport-Security",
-          "value": "max-age=63072000; includeSubDomains; preload",
-          "description": "HSTS: Força HTTPS durante 2 anos, inclui subdomínios e permite preload"
+          "value": "max-age=63072000; includeSubDomains; preload"
         },
         {
           "key": "X-Frame-Options",
-          "value": "DENY",
-          "description": "Previne Clickjacking: impede que a página seja embedada em iframes"
+          "value": "DENY"
         },
         {
           "key": "X-Content-Type-Options",
-          "value": "nosniff",
-          "description": "Previne MIME Sniffing: browser respeita o Content-Type declarado"
+          "value": "nosniff"
         },
         {
           "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin",
-          "description": "Controla informação de referrer enviada em requests cross-origin"
+          "value": "strict-origin-when-cross-origin"
         },
         {
           "key": "Content-Security-Policy",
-          "value": "frame-ancestors 'none';",
-          "description": "CSP: Complementa X-Frame-Options com proteção moderna contra iframes"
+          "value": "frame-ancestors 'none';"
         },
         {
           "key": "X-XSS-Protection",
-          "value": "1; mode=block",
-          "description": "Legacy XSS protection: ativa filtro XSS do browser (deprecated mas útil para browsers antigos)"
+          "value": "1; mode=block"
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=(), interest-cohort=()",
-          "description": "Permissions Policy: desabilita APIs sensíveis não utilizadas e FLoC"
+          "value": "camera=(), microphone=(), geolocation=(), interest-cohort=()"
         }
       ]
     }
