@@ -795,12 +795,14 @@ async def get_kanban_board(
     # Admin, CEO, Administrativo, Diretor, Indexação see all (no base filter)
 
     # Apply additional filters (only for roles that can see all)
+    # Usar uma lista de condições para combinar filtros corretamente
+    filter_conditions = []
+    
     if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
         if consultor_id:
             if consultor_id == "none":
                 # Sem consultor atribuído
-                query["$and"] = query.get("$and", [])
-                query["$and"].append({
+                filter_conditions.append({
                     "$or": [
                         {"assigned_consultor_ids": {"$in": [None, [], ""]}},
                         {"assigned_consultor_ids": {"$exists": False}},
@@ -811,17 +813,17 @@ async def get_kanban_board(
                 })
             else:
                 # Filtro por consultor específico - verificar no array ou campo único
-                query["$or"] = [
-                    {"assigned_consultor_ids": consultor_id},
-                    {"assigned_consultor_id": consultor_id}
-                ]
+                filter_conditions.append({
+                    "$or": [
+                        {"assigned_consultor_ids": consultor_id},
+                        {"assigned_consultor_id": consultor_id}
+                    ]
+                })
         
         if mediador_id:
             if mediador_id == "none":
                 # Sem mediador atribuído
-                if "$and" not in query:
-                    query["$and"] = []
-                query["$and"].append({
+                filter_conditions.append({
                     "$or": [
                         {"assigned_mediador_ids": {"$in": [None, [], ""]}},
                         {"assigned_mediador_ids": {"$exists": False}},
@@ -832,29 +834,17 @@ async def get_kanban_board(
                 })
             else:
                 # Filtro por mediador específico - verificar no array ou campo único
-                if "$or" in query and "assigned_consultor" in str(query["$or"]):
-                    # Já tem filtro de consultor, combinar com AND
-                    query = {
-                        "$and": [
-                            query,
-                            {"$or": [
-                                {"assigned_mediador_ids": mediador_id},
-                                {"assigned_mediador_id": mediador_id}
-                            ]}
-                        ]
-                    }
-                else:
-                    query["$or"] = [
+                filter_conditions.append({
+                    "$or": [
                         {"assigned_mediador_ids": mediador_id},
                         {"assigned_mediador_id": mediador_id}
                     ]
+                })
         
         if indexacao_id:
             if indexacao_id == "none":
                 # Sem indexação atribuído
-                if "$and" not in query:
-                    query["$and"] = []
-                query["$and"].append({
+                filter_conditions.append({
                     "$or": [
                         {"assigned_indexacao_id": {"$in": [None, ""]}},
                         {"assigned_indexacao_id": {"$exists": False}}
@@ -862,19 +852,12 @@ async def get_kanban_board(
                 })
             else:
                 # Filtro por indexação específico
-                indexacao_filter = {"assigned_indexacao_id": indexacao_id}
-                if "$or" in query:
-                    # Já tem filtros, combinar com AND
-                    query = {"$and": [query, indexacao_filter]}
-                else:
-                    query = indexacao_filter
+                filter_conditions.append({"assigned_indexacao_id": indexacao_id})
         
         if parceiro_id:
             if parceiro_id == "none":
                 # Sem parceiro atribuído
-                if "$and" not in query:
-                    query["$and"] = []
-                query["$and"].append({
+                filter_conditions.append({
                     "$or": [
                         {"assigned_parceiro_id": {"$in": [None, ""]}},
                         {"assigned_parceiro_id": {"$exists": False}}
@@ -882,12 +865,19 @@ async def get_kanban_board(
                 })
             else:
                 # Filtro por parceiro específico
-                parceiro_filter = {"assigned_parceiro_id": parceiro_id}
-                if "$or" in query or "$and" in query:
-                    # Já tem filtros, combinar com AND
-                    query = {"$and": [query, parceiro_filter]}
+                filter_conditions.append({"assigned_parceiro_id": parceiro_id})
+        
+        # Combinar todas as condições com AND
+        if filter_conditions:
+            if query:
+                # Se já existe uma query base (por role), combinar com os filtros
+                query = {"$and": [query] + filter_conditions}
+            else:
+                # Se não há query base, usar os filtros diretamente
+                if len(filter_conditions) == 1:
+                    query = filter_conditions[0]
                 else:
-                    query = parceiro_filter
+                    query = {"$and": filter_conditions}
     
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
