@@ -863,6 +863,176 @@ class S3Service:
             logger.error(f"Erro ao renomear ficheiro S3: {e}")
             return False
 
+    # ====================================================================
+    # DIRECT S3 UPLOAD - PRE-SIGNED URLs
+    # ====================================================================
+    
+    def generate_upload_presigned_url(
+        self,
+        client_id: str,
+        client_name: str,
+        category: str,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        second_client_name: str = None,
+        s3_folder: str = None,
+        expiration: int = 300
+    ) -> Optional[Dict]:
+        """
+        Gera uma pre-signed URL para upload direto do frontend para o S3.
+        
+        Isto permite que o frontend faça upload diretamente para o S3,
+        evitando que o ficheiro passe pelo backend (reduz RAM e timeouts).
+        
+        Args:
+            client_id: ID do processo/cliente
+            client_name: Nome do cliente
+            category: Categoria (ex: "Financeiros", "Documentos Pessoais")
+            filename: Nome do ficheiro
+            content_type: MIME type do ficheiro
+            second_client_name: Nome do segundo titular (opcional)
+            s3_folder: Pasta S3 configurada manualmente (prioridade máxima)
+            expiration: Tempo de validade em segundos (default: 5 minutos)
+            
+        Returns:
+            Dict com:
+            - upload_url: URL assinada para PUT request
+            - file_key: Caminho S3 onde o ficheiro será armazenado
+            - expires_at: Timestamp de expiração
+            Ou None se falhar
+        """
+        if not self.is_configured():
+            logger.error("S3 não configurado")
+            return None
+        
+        # Usar s3_folder configurado se existir, senão usar path automático
+        if s3_folder:
+            base_path = s3_folder.rstrip('/')
+        else:
+            base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
+        
+        # Categoria "all" deve ser tratada como "Outros"
+        if category.lower() == "all":
+            category = "Outros"
+        
+        safe_category = sanitize_folder_name(category)
+        file_key = f"{base_path}/{safe_category}/{filename}"
+        
+        try:
+            # Gerar pre-signed URL para PUT object
+            upload_url = self.s3_client.generate_presigned_url(
+                'put_object',
+                Params={
+                    'Bucket': self.bucket_name,
+                    'Key': file_key,
+                    'ContentType': content_type
+                },
+                ExpiresIn=expiration,
+                HttpMethod='PUT'
+            )
+            
+            from datetime import datetime, timezone, timedelta
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expiration)
+            
+            logger.info(f"Pre-signed URL gerada para upload: {file_key}")
+            
+            return {
+                "upload_url": upload_url,
+                "file_key": file_key,
+                "expires_at": expires_at.isoformat(),
+                "expires_in_seconds": expiration,
+                "bucket": self.bucket_name
+            }
+            
+        except ClientError as e:
+            logger.error(f"Erro ao gerar pre-signed URL para upload: {e}")
+            return None
+    
+    def generate_upload_presigned_post(
+        self,
+        client_id: str,
+        client_name: str,
+        category: str,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        second_client_name: str = None,
+        s3_folder: str = None,
+        expiration: int = 300,
+        max_size: int = 100 * 1024 * 1024  # 100MB default
+    ) -> Optional[Dict]:
+        """
+        Gera uma pre-signed POST para upload direto via FormData.
+        
+        Alternativa ao generate_upload_presigned_url que usa POST em vez de PUT.
+        Útil para uploads via FormData em browsers mais antigos.
+        
+        Args:
+            client_id: ID do processo/cliente
+            client_name: Nome do cliente
+            category: Categoria (ex: "Financeiros", "Documentos Pessoais")
+            filename: Nome do ficheiro
+            content_type: MIME type do ficheiro
+            second_client_name: Nome do segundo titular (opcional)
+            s3_folder: Pasta S3 configurada manualmente (prioridade máxima)
+            expiration: Tempo de validade em segundos (default: 5 minutos)
+            max_size: Tamanho máximo do ficheiro em bytes (default: 100MB)
+            
+        Returns:
+            Dict com:
+            - url: URL do endpoint POST
+            - fields: Campos a incluir no FormData
+            - file_key: Caminho S3 onde o ficheiro será armazenado
+            Ou None se falhar
+        """
+        if not self.is_configured():
+            logger.error("S3 não configurado")
+            return None
+        
+        # Usar s3_folder configurado se existir, senão usar path automático
+        if s3_folder:
+            base_path = s3_folder.rstrip('/')
+        else:
+            base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
+        
+        # Categoria "all" deve ser tratada como "Outros"
+        if category.lower() == "all":
+            category = "Outros"
+        
+        safe_category = sanitize_folder_name(category)
+        file_key = f"{base_path}/{safe_category}/{filename}"
+        
+        try:
+            # Gerar pre-signed POST
+            response = self.s3_client.generate_presigned_post(
+                Bucket=self.bucket_name,
+                Key=file_key,
+                Fields={
+                    'Content-Type': content_type
+                },
+                Conditions=[
+                    {'Content-Type': content_type},
+                    ['content-length-range', 0, max_size]
+                ],
+                ExpiresIn=expiration
+            )
+            
+            from datetime import datetime, timezone, timedelta
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expiration)
+            
+            logger.info(f"Pre-signed POST gerada para upload: {file_key}")
+            
+            return {
+                "url": response['url'],
+                "fields": response['fields'],
+                "file_key": file_key,
+                "expires_at": expires_at.isoformat(),
+                "expires_in_seconds": expiration
+            }
+            
+        except ClientError as e:
+            logger.error(f"Erro ao gerar pre-signed POST para upload: {e}")
+            return None
+
 
 # Instância global
 s3_service = S3Service()
