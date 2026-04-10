@@ -8,7 +8,8 @@ import { Badge } from "../components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { 
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
+  User, Users
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
@@ -196,7 +197,7 @@ const ProcessesPage = () => {
               </div>
             </CardHeader>
             <CardContent>
-              <TableSkeleton rows={8} columns={7} />
+              <TableSkeleton rows={8} columns={8} />
             </CardContent>
           </Card>
         </div>
@@ -240,6 +241,7 @@ const ProcessesPage = () => {
                     <TableHead>Contacto</TableHead>
                     <TableHead>Localização</TableHead>
                     <TableHead>Valor</TableHead>
+                    <TableHead>Equipa</TableHead>
                     <TableHead>Prioridade</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
@@ -248,13 +250,29 @@ const ProcessesPage = () => {
                 <TableBody>
                   {processes.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         {searchTerm ? `Nenhum processo encontrado com "${searchTerm}"` : "Nenhum processo encontrado"}
                       </TableCell>
                     </TableRow>
                   ) : (
                     processes.map((process) => {
                       const priorityBadge = getPriorityBadge(process.priority);
+                      
+                      // Construir lista de equipa
+                      const teamMembers = [];
+                      if (process.consultor_name || process.assigned_consultor_ids?.length > 0) {
+                        teamMembers.push({ role: "Consultor", name: process.consultor_name || `${process.assigned_consultor_ids?.length || 1} atribuído(s)`, color: "bg-blue-100 text-blue-800" });
+                      }
+                      if (process.mediador_name || process.assigned_mediador_ids?.length > 0) {
+                        teamMembers.push({ role: "Intermediário", name: process.mediador_name || `${process.assigned_mediador_ids?.length || 1} atribuído(s)`, color: "bg-teal-100 text-teal-800" });
+                      }
+                      if (process.indexacao_name || process.assigned_indexacao_id) {
+                        teamMembers.push({ role: "Indexação", name: process.indexacao_name || "Atribuído", color: "bg-gray-100 text-gray-800" });
+                      }
+                      if (process.parceiro_name || process.assigned_parceiro_id) {
+                        teamMembers.push({ role: "Parceiro", name: process.parceiro_name || "Atribuído", color: "bg-purple-100 text-purple-800" });
+                      }
+                      
                       return (
                         <TableRow 
                           key={process.id} 
@@ -310,6 +328,24 @@ const ProcessesPage = () => {
                               </div>
                             ) : (
                               "-"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {teamMembers.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {teamMembers.slice(0, 3).map((member, idx) => (
+                                  <Badge key={idx} className={`${member.color} text-[10px] px-1.5 py-0.5`} title={`${member.role}: ${member.name}`}>
+                                    {member.name.split(' ')[0]}
+                                  </Badge>
+                                ))}
+                                {teamMembers.length > 3 && (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0.5" title={teamMembers.slice(3).map(m => m.name).join(', ')}>
+                                    +{teamMembers.length - 3}
+                                  </Badge>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
                             )}
                           </TableCell>
                           <TableCell>
