@@ -1804,6 +1804,65 @@ const ProcessDetails = () => {
                                   placeholder="Rua, número, código postal"
                                 />
                               </div>
+                              
+                              {/* Credenciais Portais - 2º Titular */}
+                              <div className="col-span-2 mt-2 pt-2 border-t border-border">
+                                <h5 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                                  <Lock className="h-3 w-3" />
+                                  Credenciais Portais Oficiais
+                                </h5>
+                                <div className="grid grid-cols-2 gap-3">
+                                  {/* Portal das Finanças - Utilizador */}
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">Finanças - Utilizador</Label>
+                                    <Input
+                                      value={titular2Data.portal_financas_utilizador || ""}
+                                      onChange={(e) => setTitular2Data({ ...titular2Data, portal_financas_utilizador: e.target.value })}
+                                      disabled={!canEditPersonal}
+                                      className="h-9"
+                                      placeholder="NIF ou utilizador"
+                                    />
+                                  </div>
+                                  
+                                  {/* Portal das Finanças - Senha */}
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">Finanças - Senha</Label>
+                                    <Input
+                                      type="password"
+                                      value={titular2Data.portal_financas_senha || ""}
+                                      onChange={(e) => setTitular2Data({ ...titular2Data, portal_financas_senha: e.target.value })}
+                                      disabled={!canEditPersonal}
+                                      className="h-9"
+                                      placeholder="••••••••"
+                                    />
+                                  </div>
+                                  
+                                  {/* Segurança Social - Utilizador */}
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">Seg. Social - Utilizador</Label>
+                                    <Input
+                                      value={titular2Data.seg_social_utilizador || ""}
+                                      onChange={(e) => setTitular2Data({ ...titular2Data, seg_social_utilizador: e.target.value })}
+                                      disabled={!canEditPersonal}
+                                      className="h-9"
+                                      placeholder="NISS ou utilizador"
+                                    />
+                                  </div>
+                                  
+                                  {/* Segurança Social - Senha */}
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">Seg. Social - Senha</Label>
+                                    <Input
+                                      type="password"
+                                      value={titular2Data.seg_social_senha || ""}
+                                      onChange={(e) => setTitular2Data({ ...titular2Data, seg_social_senha: e.target.value })}
+                                      disabled={!canEditPersonal}
+                                      className="h-9"
+                                      placeholder="••••••••"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </CardContent>
                         </Card>
