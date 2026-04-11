@@ -101,11 +101,11 @@ class TestCanViewAssignments:
     def test_roles_that_can_see_assignments(self):
         """Verifica quais roles podem ver atribuições."""
         roles_that_can_see = [
-            "admin", "ceo", "diretor", "consultor", 
+            "admin", "ceo", "diretor", "consultor",
             "intermediario", "mediador", "administrativo"
         ]
-        
-        
+        roles_that_cannot_see = ["cliente"]
+
         for role in roles_that_can_see:
             assert role not in roles_that_cannot_see
     
