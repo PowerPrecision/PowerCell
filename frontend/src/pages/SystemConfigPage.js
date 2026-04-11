@@ -235,12 +235,13 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
       return (
         <div className="space-y-2">
           <Label htmlFor={field.key}>{field.label}</Label>
-          <Textarea
-            id={field.key}
+          <RichTextEditor
             value={value || ""}
-            onChange={(e) => onChange(field.key, e.target.value)}
+            onChange={(val) => onChange(field.key, val)}
             placeholder={field.placeholder}
-            className="min-h-[100px] font-mono text-sm"
+            advanced
+            minHeight={200}
+            className="min-h-[200px]"
           />
           {field.help_text && (
             <p className="text-xs text-muted-foreground">{field.help_text}</p>
@@ -1285,13 +1286,13 @@ const SystemConfigPage = () => {
               onChange={setTemplateContent}
               placeholder="Introduza o texto do template RGPD..."
               readOnly={!isAdminOrCEO}
-              className="min-h-[300px]"
+              className="min-h-[300px] mb-4"
             />
 
             {/* Pré-visualização */}
             <div className="space-y-2">
               <p className="text-sm font-medium text-muted-foreground">Pré-visualização</p>
-              <div className="bg-muted/50 rounded-lg p-4 mt-1">
+              <div className="overflow-y-auto max-h-64 whitespace-pre-wrap break-words p-4 bg-gray-50 dark:bg-gray-900 border rounded-md">
                 <RichTextViewer
                   html={templateContent || "<p className=\"text-muted-foreground\">Nenhum conteúdo para pré-visualizar.</p>"}
                 />
