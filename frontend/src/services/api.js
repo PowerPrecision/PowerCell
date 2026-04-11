@@ -350,8 +350,12 @@ export const deleteUser = (id) => api.delete(`/admin/users/${id}`);
 export const getStats = () => api.get("/stats");
 
 // Activities/Comments
-export const getActivities = (processId) => 
-  api.get("/activities", { params: { process_id: processId } });
+export const getActivities = (processId, limit = 50) => {
+  const params = {};
+  if (processId) params.process_id = processId;
+  params.limit = limit;
+  return api.get("/activities", { params });
+};
 export const createActivity = (data) => api.post("/activities", data);
 export const deleteActivity = (id) => api.delete(`/activities/${id}`);
 
