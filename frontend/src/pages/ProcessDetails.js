@@ -3001,7 +3001,9 @@ const ProcessDetails = () => {
 
                 {!isViewMode && (
                 <div className="flex flex-wrap justify-end gap-2">
-                  {/* Botão Simular Preenchimento — preenche o form, não guarda */}
+                  {/* Botões de simulação — exclusivos admin/ceo */}
+                  {(userRole === "admin" || userRole === "ceo") && (
+                    <>
                   <Button
                     variant="outline"
                     onClick={handleSimulateFill}
@@ -3017,7 +3019,6 @@ const ProcessDetails = () => {
                     )}
                     <span className="hidden sm:inline">Simular Preenchimento</span>
                   </Button>
-                  {/* Botão Testar Submissão — preenche + envia ao backend para validar */}
                   <Button
                     variant="outline"
                     onClick={handleSimulateAndTestSubmit}
@@ -3033,6 +3034,8 @@ const ProcessDetails = () => {
                     )}
                     <span className="hidden sm:inline">Testar Submissão</span>
                   </Button>
+                    </>
+                  )}
                   {/* Botão Guardar normal */}
                   <Button onClick={handleSave} disabled={saving} data-testid="save-process-btn">
                     {saving ? (

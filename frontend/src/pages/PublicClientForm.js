@@ -2322,55 +2322,20 @@ const PublicClientForm = ({ previewMode = false }) => {
             />
             
             {/* Auto-save indicator + Simulate button */}
-            {!previewMode && (
+            {previewMode && (
             <div className="flex justify-between items-center mb-4">
-              <div className="flex gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground hover:text-violet-600 gap-1.5 text-xs"
-                  onClick={simulateFill}
-                  data-testid="simulate-fill-btn"
-                  title="Preencher todos os campos com dados de teste"
-                >
-                  <FlaskConical className="h-3.5 w-3.5" />
-                  Simular Preenchimento
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground hover:text-emerald-600 gap-1.5 text-xs"
-                  onClick={() => {
-                    simulateFill();
-                    // Após preencher, avançar ao passo 6 e submeter
-                    setTimeout(async () => {
-                      setStep(6);
-                      // Validar formulário
-                      const errors = validateForm();
-                      if (Object.keys(errors).length > 0) {
-                        toast.error(
-                          <div>
-                            <strong>❌ Validação falhou com {Object.keys(errors).length} erro(s):</strong>
-                            <ul style={{margin: '8px 0 0 0', paddingLeft: '16px'}}>
-                              {Object.entries(errors).map(([field, msg]) => <li key={field}>{field}: {msg}</li>)}
-                            </ul>
-                          </div>,
-                          { duration: 6000 }
-                        );
-                        return;
-                      }
-                      toast.success("✅ Validação OK! Todos os campos obrigatórios estão preenchidos.", { duration: 4000 });
-                    }, 500);
-                  }}
-                  data-testid="test-submit-btn"
-                  title="Preencher e testar validação de todos os campos"
-                >
-                  <Play className="h-3.5 w-3.5" />
-                  Testar Submissão
-                </Button>
-              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-violet-600 gap-1.5 text-xs"
+                onClick={simulateFill}
+                data-testid="simulate-fill-btn"
+                title="Preencher todos os campos com dados de teste"
+              >
+                <FlaskConical className="h-3.5 w-3.5" />
+                Simular Preenchimento
+              </Button>
               <AutoSaveIndicator lastSaved={lastSaved} isSaving={isSaving} />
             </div>
             )}
