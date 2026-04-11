@@ -15,6 +15,7 @@ import { Switch } from "../components/ui/switch";
 import { Textarea } from "../components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import DocumentRecipientsManager from "../components/DocumentRecipientsManager";
+import RichTextEditor, { RichTextViewer } from "../components/ui/RichTextEditor";
 import {
   Select,
   SelectContent,
@@ -1279,14 +1280,23 @@ const SystemConfigPage = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Textarea
+            <RichTextEditor
               value={templateContent}
-              onChange={(e) => setTemplateContent(e.target.value)}
-              rows={20}
-              className="font-mono text-sm leading-relaxed"
+              onChange={setTemplateContent}
               placeholder="Introduza o texto do template RGPD..."
-              disabled={!isAdminOrCEO}
+              readOnly={!isAdminOrCEO}
+              className="min-h-[300px]"
             />
+
+            {/* Pré-visualização */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-muted-foreground">Pré-visualização</p>
+              <div className="bg-muted/50 rounded-lg p-4 mt-1">
+                <RichTextViewer
+                  html={templateContent || "<p className=\"text-muted-foreground\">Nenhum conteúdo para pré-visualizar.</p>"}
+                />
+              </div>
+            </div>
 
             {/* Variáveis disponíveis */}
             <div className="bg-muted/50 rounded-lg p-3">

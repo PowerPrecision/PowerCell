@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import DashboardLayout from "../layouts/DashboardLayout";
 import {
   Card,
   CardContent,
@@ -215,7 +216,8 @@ const AuditTrailPage = () => {
   };
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
+    <DashboardLayout title="Auditoria">
+    <div className="space-y-6">
       {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -505,6 +507,7 @@ const AuditTrailPage = () => {
         </CardContent>
       </Card>
     </div>
+    </DashboardLayout>
   );
 };
 

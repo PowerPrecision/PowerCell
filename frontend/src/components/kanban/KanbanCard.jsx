@@ -19,7 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { GripVertical, Eye, User, Phone, Mail, Lock } from 'lucide-react';
+import { GripVertical, Eye, User, Phone, Mail, Lock, Users } from 'lucide-react';
 
 // Comparador customizado para React.memo
 // Só re-renderiza se o processo ou estado de drag mudar
@@ -50,6 +50,13 @@ const KanbanCard = memo(({
 }) => {
   const navigate = useNavigate();
 
+  // Check if process has a 2nd proponent
+  const hasSecondProponent = 
+    (process.co_buyers && process.co_buyers.length > 0) ||
+    (process.compradores && process.compradores.length > 1) ||
+    !!process.comprador2 ||
+    !!process.segundo_proponente;
+
   // Handlers memoizados para prevenir re-criação
   const handleDragStart = useCallback((e) => {
     onDragStart?.(e, process, columnName);
@@ -73,7 +80,7 @@ const KanbanCard = memo(({
     <Card
       className={`cursor-pointer hover:shadow-md transition-shadow relative ${
         isCurrentlyDragging ? "opacity-50" : ""
-      }`}
+      } ${hasSecondProponent ? "border-l-4 border-indigo-400" : ""}`}
       draggable
       onDragStart={handleDragStart}
       onClick={handleClick}
@@ -145,6 +152,12 @@ const KanbanCard = memo(({
           
           {/* Linha 5: Badges e indicadores */}
           <div className="flex items-center gap-1 flex-wrap">
+            {hasSecondProponent && (
+              <Badge variant="outline" className="text-[9px] bg-indigo-50 text-indigo-700 border-indigo-200 px-1 py-0 h-4">
+                <Users className="h-2.5 w-2.5 mr-0.5" />
+                2º Proponente
+              </Badge>
+            )}
             {process.under_35 && (
               <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 px-1 py-0 h-4">
                 &lt;35

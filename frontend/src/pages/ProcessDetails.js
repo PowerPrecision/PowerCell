@@ -51,6 +51,7 @@ import {
   getS3DownloadUrl,
   deleteClient,
 } from "../services/api";
+import { generateMagicLink, sendMagicLinkEmail } from "../services/api";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
 import ProcessSummaryCard from "../components/ProcessSummaryCard";
@@ -88,6 +89,7 @@ import {
   Download,
   ChevronRight,
   ExternalLink,
+  Link as LinkIcon,
   Users,
   Sparkles,
   Mail,
@@ -320,6 +322,10 @@ const ProcessDetails = () => {
   const handleRequestRgpd = async () => {
     if (!process?.client_email) {
       toast.error("O cliente não tem email definido");
+      return;
+    }
+
+    if (!window.confirm("Tem a certeza que deseja enviar o email de RGPD para este cliente?")) {
       return;
     }
     
@@ -1257,6 +1263,63 @@ const ProcessDetails = () => {
                   clientName={process?.client_name}
                   clientEmail={process?.client_email}
                 />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-teal-600 border-teal-200 hover:bg-teal-50 h-8 px-2 sm:px-3"
+                      title="Portal do Cliente - Magic Link"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 sm:mr-1" />
+                      <span className="hidden sm:inline">Portal do Cliente</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56" align="start">
+                    <div className="space-y-1">
+                      <h4 className="font-medium text-sm">Portal do Cliente</h4>
+                      <p className="text-xs text-muted-foreground mb-2">Gerar link mágico de acesso ao portal.</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start gap-2 text-sm"
+                        onClick={async () => {
+                          try {
+                            const res = await generateMagicLink(id);
+                            const link = res.data?.magic_link || res.data?.link || res.data?.url;
+                            if (link) {
+                              await navigator.clipboard.writeText(link);
+                              toast.success("Link copiado!");
+                            } else {
+                              toast.error("Não foi possível gerar o link");
+                            }
+                          } catch (error) {
+                            toast.error("Erro ao gerar link");
+                          }
+                        }}
+                      >
+                        <LinkIcon className="h-4 w-4" />
+                        Copiar Link
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start gap-2 text-sm"
+                        onClick={async () => {
+                          try {
+                            await sendMagicLinkEmail(id);
+                            toast.success("Email enviado com o link do portal!");
+                          } catch (error) {
+                            toast.error("Erro ao enviar email");
+                          }
+                        }}
+                      >
+                        <Mail className="h-4 w-4" />
+                        Enviar por Email
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 <DSTICalculator
                   trigger={
                     <Button
@@ -2732,25 +2795,6 @@ const ProcessDetails = () => {
                 )}
               </CardContent>
             </Card>
-
-            {/* Tarefas - visível se tem manage_tasks */}
-            {canManageTasks && (
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Check className="h-5 w-5" />
-                  Tarefas
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <TasksPanel
-                  processId={id}
-                  processName={process?.client_name}
-                  compact={false}
-                />
-              </CardContent>
-            </Card>
-            )}
           </div>
 
           {/* Sidebar - Organizada com Accordions */}
@@ -2809,6 +2853,25 @@ const ProcessDetails = () => {
                     </div>
                   </ScrollArea>
                 </div>
+              </CardContent>
+            </Card>
+            )}
+
+            {/* Tarefas - visível se tem manage_tasks */}
+            {canManageTasks && (
+            <Card className="border-border">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Check className="h-5 w-5" />
+                  Tarefas
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TasksPanel
+                  processId={id}
+                  processName={process?.client_name}
+                  compact={false}
+                />
               </CardContent>
             </Card>
             )}

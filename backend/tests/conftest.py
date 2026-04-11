@@ -177,14 +177,14 @@ async def ensure_workflow_statuses_exist():
         print(f"Warning: Could not ensure workflow statuses exist: {e}")
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def _setup_test_data(event_loop_policy):
+@pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
+async def _setup_test_data():
     """
     Setup de dados de teste — executa UMA VEZ por sessão.
     Garante que os users e workflow statuses existem antes dos testes.
     
-    NOTA: event_loop_policy é injetado automaticamente pelo pytest-asyncio 0.24+
-    quando asyncio_default_fixture_loop_scope = session.
+    Usa loop_scope="session" para manter o seu próprio event loop,
+    independente dos loops de cada teste (function scope).
     """
     from database import reset_db_connection
     reset_db_connection()

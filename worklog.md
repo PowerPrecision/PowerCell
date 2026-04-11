@@ -143,3 +143,20 @@ Stage Summary:
 - Backend now broadcasts granular move events with user info
 - Frontend can send lock/unlock events via WebSocket
 - All broadcasts exclude the originating user to prevent duplicates
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Fix CI pytest --ignore=tests/e2e parsing error
+
+Work Log:
+- Identified root cause: pytest.ini addopts used backslash line continuation
+- iniconfig (pytest's INI parser) was not handling the multiline correctly
+- --ignore=tests/e2e was being parsed as a file path instead of a pytest flag
+- Put all addopts on a single line to eliminate the parsing ambiguity
+- Committed and pushed as 9de712b
+
+Stage Summary:
+- File changed: backend/pytest.ini (1 insertion, 8 deletions)
+- Root cause: iniconfig multiline value parsing with backslash continuation
+- Fix: Single-line addopts eliminates all line continuation ambiguity
