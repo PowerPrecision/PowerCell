@@ -16,7 +16,7 @@
  * ====================================================================
  */
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
 import { useWebSocket, WSEventType } from '../useWebSocket';
@@ -27,16 +27,20 @@ import { useWebSocket, WSEventType } from '../useWebSocket';
  * @param {Object} options - Opções do hook
  * @param {Object} options.filters - Filtros ativos do Kanban
  * @param {Function} options.onNotification - Callback para notificações
+ * @param {string|number} options.userId - ID do utilizador atual (para sender exclusion)
  * @returns {Object} Estado de conexão e funções de controle
  */
 export function useKanbanRealtime(options = {}) {
   const {
     filters = {},
     onNotification,
+    userId,
   } = options;
 
   const queryClient = useQueryClient();
   const filtersRef = useRef(filters);
+  const pendingMovesRef = useRef(new Set());
+  const [lockedProcesses, setLockedProcesses] = useState({});
   
   // Manter filters atualizados no ref
   useEffect(() => {
@@ -220,7 +224,7 @@ export function useKanbanRealtime(options = {}) {
   }, [handleProcessCreated, handleProcessStatusChanged, handleProcessUpdated, handleProcessAssigned]);
 
   // Conectar ao WebSocket
-  const { isConnected, on, off } = useWebSocket({
+  const { isConnected, on, off, sendMessage } = useWebSocket({
     onProcessUpdate: handleProcessUpdate,
     autoConnect: true,
   });
@@ -232,21 +236,108 @@ export function useKanbanRealtime(options = {}) {
       on(WSEventType.PROCESS_STATUS_CHANGED, (data) => handleProcessUpdate(WSEventType.PROCESS_STATUS_CHANGED, data)),
       on(WSEventType.PROCESS_UPDATED, (data) => handleProcessUpdate(WSEventType.PROCESS_UPDATED, data)),
       on(WSEventType.PROCESS_ASSIGNED, (data) => handleProcessUpdate(WSEventType.PROCESS_ASSIGNED, data)),
+
+      // Listen for PROCESS_MOVED from other users (real-time sync)
+      // This is idempotent — safe if PROCESS_STATUS_CHANGED already processed the same move
+      on(WSEventType.PROCESS_MOVED, (payload) => {
+          // Skip if this move was initiated by the current user (optimistic update handles it)
+          if (payload.user_id === userId) return;
+
+          queryClient.setQueryData(
+              queryKeys.processes.kanban(filtersRef.current),
+              (oldData) => {
+                  if (!oldData?.columns) return oldData;
+
+                  return {
+                      ...oldData,
+                      columns: oldData.columns.map((col) => {
+                          // Remove from old column (only if still present — idempotent)
+                          if (col.name === payload.old_status) {
+                              const stillExists = col.processes.some((p) => p.id === payload.process_id);
+                              if (!stillExists) return col; // Already removed by PROCESS_STATUS_CHANGED
+                              return {
+                                  ...col,
+                                  processes: col.processes.filter((p) => p.id !== payload.process_id),
+                                  count: Math.max(0, col.count - 1),
+                              };
+                          }
+                          // Add to new column (avoid duplicates — idempotent)
+                          if (col.name === payload.new_status) {
+                              const alreadyExists = col.processes.some((p) => p.id === payload.process_id);
+                              if (alreadyExists) {
+                                  // Just update fields, don't change count
+                                  return {
+                                      ...col,
+                                      processes: col.processes.map((p) =>
+                                          p.id === payload.process_id
+                                              ? { ...p, status: payload.new_status, updated_at: new Date().toISOString() }
+                                              : p
+                                      ),
+                                  };
+                              }
+                              // Find process data from old column
+                              const oldColumn = oldData.columns.find((c) => c.name === payload.old_status);
+                              const processData = oldColumn?.processes.find((p) => p.id === payload.process_id);
+                              return {
+                                  ...col,
+                                  processes: [
+                                      {
+                                          ...(processData || { id: payload.process_id }),
+                                          status: payload.new_status,
+                                          client_name: payload.client_name,
+                                          process_number: payload.process_number,
+                                          updated_at: new Date().toISOString(),
+                                      },
+                                      ...col.processes,
+                                  ],
+                                  count: col.count + 1,
+                              };
+                          }
+                          return col;
+                      }),
+                  };
+              }
+          );
+      }),
+
+      // Listen for PROCESS_LOCKED from other users
+      on(WSEventType.PROCESS_LOCKED, (payload) => {
+          if (payload.user_id === userId) return; // Don't lock for self
+          setLockedProcesses((prev) => ({
+              ...prev,
+              [payload.process_id]: { user_name: payload.user_name, user_id: payload.user_id },
+          }));
+      }),
+
+      // Listen for PROCESS_UNLOCKED
+      on(WSEventType.PROCESS_UNLOCKED, (payload) => {
+          setLockedProcesses((prev) => {
+              const next = { ...prev };
+              delete next[payload.process_id];
+              return next;
+          });
+      }),
     ];
 
     return () => {
       unsubscribers.forEach(unsub => unsub?.());
     };
-  }, [on, handleProcessUpdate]);
+  }, [on, handleProcessUpdate, userId, queryClient]);
 
   return {
     isConnected,
+    lockedProcesses,
+    sendMessage,
     // Função para forçar invalidação manual
     invalidateKanban: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.processes.kanban(filtersRef.current),
       });
     },
+    // Pending move tracking for optimistic updates
+    addPendingMove: (processId) => pendingMovesRef.current.add(processId),
+    removePendingMove: (processId) => pendingMovesRef.current.delete(processId),
+    isPendingMove: (processId) => pendingMovesRef.current.has(processId),
   };
 }
 

@@ -19,7 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { GripVertical, Eye, User, Phone, Mail } from 'lucide-react';
+import { GripVertical, Eye, User, Phone, Mail, Lock } from 'lucide-react';
 
 // Comparador customizado para React.memo
 // Só re-renderiza se o processo ou estado de drag mudar
@@ -32,7 +32,9 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.mediador_name === nextProps.process.mediador_name &&
     prevProps.process.prioridade === nextProps.process.prioridade &&
     prevProps.process.under_35 === nextProps.process.under_35 &&
-    prevProps.isDragging === nextProps.isDragging
+    prevProps.isDragging === nextProps.isDragging &&
+    prevProps.isLocked === nextProps.isLocked &&
+    prevProps.lockedBy === nextProps.lockedBy
   );
 };
 
@@ -42,7 +44,9 @@ const KanbanCard = memo(({
   isDragging, 
   onDragStart, 
   onCardClick,
-  draggingCard
+  draggingCard,
+  isLocked = false,
+  lockedBy,
 }) => {
   const navigate = useNavigate();
 
@@ -67,7 +71,7 @@ const KanbanCard = memo(({
 
   return (
     <Card
-      className={`cursor-pointer hover:shadow-md transition-shadow ${
+      className={`cursor-pointer hover:shadow-md transition-shadow relative ${
         isCurrentlyDragging ? "opacity-50" : ""
       }`}
       draggable
@@ -75,6 +79,16 @@ const KanbanCard = memo(({
       onClick={handleClick}
       data-testid={`process-card-${process.id}`}
     >
+      {/* Lock indicator badge */}
+      {isLocked && (
+        <div
+          className="absolute top-1.5 right-1.5 flex items-center gap-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium z-10"
+          title={`Em edição por ${lockedBy}`}
+        >
+          <Lock className="h-2.5 w-2.5" />
+          <span className="hidden sm:inline max-w-[80px] truncate">{lockedBy}</span>
+        </div>
+      )}
       <CardContent className="p-2">
         <div className="space-y-1.5">
           {/* Linha 1: Número do processo + Badge de prioridade */}

@@ -20,12 +20,15 @@ import { moveProcessKanban, updateProcess, assignProcess, createActivity } from 
 /**
  * Hook para mover processo no Kanban (Drag & Drop)
  * 
+ * @param {Function} addPendingMove - Callback para adicionar processo à lista de moves pendentes
+ * @param {Function} removePendingMove - Callback para remover processo da lista de moves pendentes
  * @param {Object} options - Opções do hook
+ * @param {Object} options.filters - Filtros ativos do Kanban para invalidação correta
  * @returns {Object} Mutation object com mutate, isPending, etc.
  */
-export function useMoveProcessMutation(options = {}) {
+export function useMoveProcessMutation(addPendingMove, removePendingMove, options = {}) {
   const queryClient = useQueryClient();
-  const { onSuccess, onError } = options;
+  const { onSuccess, onError, filters = {} } = options;
 
   return useMutation({
     mutationFn: async ({ processId, newStatus, oldStatus }) => {
@@ -38,11 +41,14 @@ export function useMoveProcessMutation(options = {}) {
       // Cancelar queries em flight para evitar race conditions
       await queryClient.cancelQueries({ queryKey: queryKeys.processes.all });
       
+      // Track pending move for real-time sync exclusion
+      addPendingMove?.(processId);
+      
       // Snapshot do estado anterior para rollback
-      const previousKanban = queryClient.getQueryData(queryKeys.processes.kanban({}));
+      const previousKanban = queryClient.getQueryData(queryKeys.processes.kanban(filters));
       
       // Optimistic update
-      queryClient.setQueryData(queryKeys.processes.kanban({}), (oldData) => {
+      queryClient.setQueryData(queryKeys.processes.kanban(filters), (oldData) => {
         if (!oldData) return oldData;
         
         const newColumns = oldData.columns.map(col => {
@@ -84,15 +90,17 @@ export function useMoveProcessMutation(options = {}) {
     onError: (error, variables, context) => {
       // Rollback para o estado anterior
       if (context?.previousKanban) {
-        queryClient.setQueryData(queryKeys.processes.kanban({}), context.previousKanban);
+        queryClient.setQueryData(queryKeys.processes.kanban(filters), context.previousKanban);
       }
       toast.error('Erro ao mover processo');
       onError?.(error, variables, context);
     },
     
     // Sempre invalidar para garantir sincronização
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanban({}) });
+    onSettled: (_data, _error, variables) => {
+      // Remove from pending moves after settled
+      removePendingMove?.(variables.processId);
+      queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanban(filters) });
     },
   });
 }

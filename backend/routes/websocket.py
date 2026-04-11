@@ -170,6 +170,30 @@ async def websocket_notifications(
                         connected = False
                         break
                 
+                elif data.get("type") == "process_locked":
+                    # Broadcast lock event to other users
+                    lock_message = create_ws_message(
+                        WSEventType.PROCESS_LOCKED,
+                        {
+                            "process_id": data.get("process_id"),
+                            "user_id": str(user.get("id", "")),
+                            "user_name": user.get("name", "Unknown"),
+                        }
+                    )
+                    await manager.broadcast(lock_message, exclude_user=str(user.get("id", "")))
+
+                elif data.get("type") == "process_unlocked":
+                    # Broadcast unlock event to other users
+                    unlock_message = create_ws_message(
+                        WSEventType.PROCESS_UNLOCKED,
+                        {
+                            "process_id": data.get("process_id"),
+                            "user_id": str(user.get("id", "")),
+                            "user_name": user.get("name", "Unknown"),
+                        }
+                    )
+                    await manager.broadcast(unlock_message, exclude_user=str(user.get("id", "")))
+                
             except WebSocketDisconnect:
                 logger.debug(f"WebSocketDisconnect: {user_id}")
                 connected = False

@@ -1318,6 +1318,22 @@ async def move_process_kanban(
         updated_at=datetime.now(timezone.utc).isoformat()
     )
     
+    # Broadcast granular move event (for real-time Kanban sync)
+    moved_message = create_ws_message(
+        WSEventType.PROCESS_MOVED,
+        {
+            "process_id": str(process_id),
+            "process_number": process.get("process_number"),
+            "client_name": process.get("client_name"),
+            "new_status": new_status,
+            "old_status": old_status,
+            "user_id": str(user.get("id", "")),
+            "user_name": user.get("name", "Unknown"),
+        }
+    )
+    # Exclude the user who made the move to avoid duplicate updates
+    await manager.broadcast(moved_message, exclude_user=str(user.get("id", "")))
+    
     # === ALERTAS AUTOMÁTICOS BASEADOS NA MUDANÇA DE ESTADO ===
     
     # 1. Ao mover para CH Aprovado - Verificar documentos do imóvel

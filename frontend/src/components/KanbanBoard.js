@@ -87,8 +87,15 @@ const KanbanBoard = ({
   });
 
   // === REACT QUERY - WEBSOCKET REAL-TIME ===
-  const { isConnected } = useKanbanRealtime({
+  const {
+    isConnected,
+    lockedProcesses,
+    sendMessage,
+    addPendingMove,
+    removePendingMove,
+  } = useKanbanRealtime({
     filters,
+    userId: user?.id,
     onNotification: ({ type, message }) => {
       if (type === 'info') {
         toast.info(message);
@@ -97,7 +104,7 @@ const KanbanBoard = ({
   });
 
   // === REACT QUERY - MUTATIONS ===
-  const moveProcessMutation = useMoveProcessMutation();
+  const moveProcessMutation = useMoveProcessMutation(addPendingMove, removePendingMove, { filters });
 
   // === AUTO-COLLAPSE EMPTY COLUMNS ===
   // Este efeito é local, não precisa de React Query
@@ -165,7 +172,22 @@ const KanbanBoard = ({
   const handleCardClick = useCallback((process) => {
     setSelectedProcess(process);
     setShowProcessDialog(true);
-  }, []);
+    // Send lock event via WebSocket
+    if (sendMessage) {
+      sendMessage('process_locked', { process_id: process.id });
+    }
+  }, [sendMessage]);
+
+  // === DIALOG CLOSE HANDLER ===
+  const handleDialogClose = useCallback((open) => {
+    if (!open && selectedProcess && sendMessage) {
+      sendMessage('process_unlocked', { process_id: selectedProcess.id });
+    }
+    if (!open) {
+      setSelectedProcess(null);
+    }
+    setShowProcessDialog(open);
+  }, [selectedProcess, sendMessage]);
 
   // === FILTERED DATA ===
   const filteredColumns = columns.map(column => ({
@@ -298,8 +320,9 @@ const KanbanBoard = ({
                   onDragStart={handleDragStart}
                   onCardClick={handleCardClick}
                   draggingCard={draggingCard}
+                  lockedProcesses={lockedProcesses}
                 />
-              ))}
+              ))
             </div>
             <ScrollBar orientation="horizontal" />
           </ScrollArea>
@@ -309,8 +332,10 @@ const KanbanBoard = ({
       {/* Modals */}
       <ProcessDetailsModal
         open={showProcessDialog}
-        onOpenChange={setShowProcessDialog}
+        onOpenChange={handleDialogClose}
         process={selectedProcess}
+        isLockedByOther={selectedProcess ? !!lockedProcesses[selectedProcess.id] && lockedProcesses[selectedProcess.id]?.user_id !== user?.id : false}
+        lockedBy={selectedProcess ? lockedProcesses[selectedProcess.id]?.user_name : undefined}
       />
 
       {canCreateClient && (

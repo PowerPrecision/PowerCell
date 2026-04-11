@@ -128,3 +128,18 @@ Stage Summary:
 - UI: Integração na Navbar com badge e drawer
 - Exemplo: Endpoints de AI demonstram o padrão
 - Build: Compilado com sucesso (9.89s)
+
+---
+Task ID: 2
+Agent: Backend WebSocket Agent
+Task: Add PROCESS_MOVED, PROCESS_LOCKED, PROCESS_UNLOCKED WebSocket events
+
+Work Log:
+- Added PROCESS_MOVED, PROCESS_LOCKED, PROCESS_UNLOCKED to WSEventType
+- Added sender-excluded PROCESS_MOVED broadcast in kanban move endpoint
+- Added inbound LOCK/UNLOCK message handling in websocket route
+
+Stage Summary:
+- Backend now broadcasts granular move events with user info
+- Frontend can send lock/unlock events via WebSocket
+- All broadcasts exclude the originating user to prevent duplicates
