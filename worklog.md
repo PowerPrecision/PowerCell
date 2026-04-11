@@ -1,6 +1,30 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: 8
+Agent: Main Agent
+Task: Botões Simular Preenchimento + Testar Submissão em formulários
+
+Work Log:
+- **ProcessDetails.js (`4afe7fc`)**: Adicionados SIMULATE_DATA (5 state objects) + 2 botões:
+  - `handleSimulateFill()`: preenche personal, titular2, financial, realEstate, credit com dados de teste
+  - `handleSimulateAndTestSubmit()`: preenche + envia PUT ao backend para validar Pydantic
+  - Botão "Simular Preenchimento" (ícone FlaskConical, cor amber) — preenche sem guardar
+  - Botão "Testar Submissão" (ícone Play, cor emerald) — preenche + submete + mostra erros traduzidos
+  - Após test submit com falha, mostra lista de erros Pydantic traduzidos em português
+  - Após test submit, faz refetch para reverter dados ao estado original do servidor
+  - Ambos desabilitados quando `saving`, `simulating` ou `isProcessLocked`
+- **PublicClientForm.js (`4afe7fc`)**: Adicionado botão "Testar Submissão" ao lado de "Simular Preenchimento"
+  - Usa `validateForm()` existente para validação client-side
+  - Mostra lista de erros ou toast de sucesso
+- Commits: `4afe7fc` (pushed to `dev`)
+
+Stage Summary:
+- 2 ficheiros alterados: `ProcessDetails.js` (+283 linhas), `PublicClientForm.js` (+27 linhas)
+- Teste de submissão cobre validação client-side (PublicClientForm) e backend Pydantic (ProcessDetails)
+- Dados de teste incluem NIF válido (checksum OK), datas reais, e todos os campos opcionais preenchidos
+
+---
 Task ID: 7
 Agent: Main Agent
 Task: Fix Vercel MIME type crash and MyClientsPage JSX errors
