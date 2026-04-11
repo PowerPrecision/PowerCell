@@ -626,7 +626,7 @@ const DashboardLayout = ({ children, title }) => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed ${impersonateOffset} left-0 z-50 w-64 bg-slate-900 text-white border-r border-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        className={`fixed ${impersonateOffset} left-0 z-50 w-64 h-screen bg-slate-900 text-white border-r border-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
         style={isImpersonating ? { height: 'calc(100vh - 48px)', top: '48px' } : {}}
