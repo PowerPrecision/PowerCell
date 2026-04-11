@@ -23,7 +23,7 @@ class TestIteration29:
     def setup(self):
         """Login before tests"""
         if not TestIteration29.token:
-            response = requests.post(f"{BASE_URL}/api/auth/login", json={
+            response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
                 "email": "admin@admin.com",
                 "password": "admin"
             })
@@ -39,7 +39,7 @@ class TestIteration29:
     # ===================
     def test_01_login_admin(self):
         """Test login with admin@admin.com / admin"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })

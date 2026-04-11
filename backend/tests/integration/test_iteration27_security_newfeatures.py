@@ -31,7 +31,7 @@ def get_auth_session():
         # Add delay to avoid rate limiting
         time.sleep(0.5)
         login_response = _session.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         if login_response.status_code == 200:
@@ -41,7 +41,7 @@ def get_auth_session():
             # Wait and retry
             time.sleep(2)
             login_response = _session.post(
-                f"{BASE_URL}/api/auth/login",
+                f"{BASE_URL}/api/auth/login-v2",
                 json={"email": "admin@admin.com", "password": "admin"}
             )
             if login_response.status_code == 200:

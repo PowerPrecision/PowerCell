@@ -348,7 +348,7 @@ class TestDiagnoseClientEndpoint:
     def auth_headers(self):
         """Get authentication headers"""
         login_response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin2026"}
         )
         if login_response.status_code == 200:
@@ -412,7 +412,7 @@ class TestUpdateClientData:
     def auth_headers(self):
         """Get authentication headers"""
         login_response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin2026"}
         )
         if login_response.status_code == 200:

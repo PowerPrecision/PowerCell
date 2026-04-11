@@ -27,7 +27,7 @@ class TestHealthAndAuth:
     
     def test_admin_login(self, api_client):
         """Test admin login with credentials"""
-        response = api_client.post(f"{BASE_URL}/api/auth/login", json={
+        response = api_client.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -253,7 +253,7 @@ def api_client():
 @pytest.fixture
 def auth_token(api_client):
     """Get authentication token"""
-    response = api_client.post(f"{BASE_URL}/api/auth/login", json={
+    response = api_client.post(f"{BASE_URL}/api/auth/login-v2", json={
         "email": "admin@sistema.pt",
         "password": "admin"
     })

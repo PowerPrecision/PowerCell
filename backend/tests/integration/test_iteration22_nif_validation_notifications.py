@@ -22,7 +22,7 @@ class TestAuth:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -32,7 +32,7 @@ class TestAuth:
     @pytest.fixture
     def consultor_token(self):
         """Get consultor authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "consultor@sistema.pt",
             "password": "consultor123"
         })
@@ -51,7 +51,7 @@ class TestNIFValidation:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -145,7 +145,7 @@ class TestEmailPhoneCoercion:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -196,7 +196,7 @@ class TestValidationErrorMessages:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -249,7 +249,7 @@ class TestNotificationPreferencesEndpoint:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -319,7 +319,7 @@ class TestNotificationServicePreferenceCheck:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -395,7 +395,7 @@ class TestTitular2NIFValidation:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -444,7 +444,7 @@ class TestErrorFormatterIntegration:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })

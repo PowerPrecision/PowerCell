@@ -26,7 +26,7 @@ class TestSetup:
     def admin_token(self):
         """Login as admin and get token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin2026"},
             timeout=30
         )
@@ -34,7 +34,7 @@ class TestSetup:
             return response.json().get("access_token")
         # Try with old password
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin123"},
             timeout=30
         )
@@ -46,7 +46,7 @@ class TestSetup:
     def consultor_token(self):
         """Login as consultor and get token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "consultor@sistema.pt", "password": "consultor123"},
             timeout=30
         )
@@ -58,7 +58,7 @@ class TestSetup:
     def intermediario_token(self):
         """Login as intermediario and get token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "intermediario@sistema.pt", "password": "intermediario123"},
             timeout=30
         )

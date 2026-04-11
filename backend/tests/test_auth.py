@@ -14,13 +14,14 @@ async def test_health_check(client):
 @pytest.mark.asyncio
 async def test_login_success(client):
     """Test successful login"""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "admin@sistema.pt",
         "password": "admin123"
     })
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
+    assert "refresh_token" in data
     assert data["user"]["role"] == "admin"
     assert data["user"]["email"] == "admin@sistema.pt"
 
@@ -28,7 +29,7 @@ async def test_login_success(client):
 @pytest.mark.asyncio
 async def test_login_invalid_credentials(client):
     """Test login with wrong password"""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "admin@sistema.pt",
         "password": "wrongpassword"
     })
@@ -39,7 +40,7 @@ async def test_login_invalid_credentials(client):
 @pytest.mark.asyncio
 async def test_login_nonexistent_user(client):
     """Test login with non-existent email"""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "notexists@sistema.pt",
         "password": "password123"
     })
@@ -80,7 +81,7 @@ async def test_get_me_invalid_token(client):
 @pytest.mark.asyncio
 async def test_consultor_login(client):
     """Test consultor can login"""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "consultor@sistema.pt",
         "password": "consultor123"
     })
@@ -91,7 +92,7 @@ async def test_consultor_login(client):
 @pytest.mark.asyncio
 async def test_mediador_login(client):
     """Test mediador can login"""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "mediador@sistema.pt",
         "password": "mediador123"
     })

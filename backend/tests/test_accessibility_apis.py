@@ -21,7 +21,7 @@ class TestHealthAndAuth:
     
     def test_login_admin(self):
         """Test admin login"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -38,7 +38,7 @@ class TestAIImportLogsAPI:
     @pytest.fixture
     def auth_token(self):
         """Get authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -85,7 +85,7 @@ class TestDocumentsAPI:
     @pytest.fixture
     def auth_token(self):
         """Get authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -121,7 +121,7 @@ class TestSystemLogsNavigation:
     @pytest.fixture
     def auth_token(self):
         """Get authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })

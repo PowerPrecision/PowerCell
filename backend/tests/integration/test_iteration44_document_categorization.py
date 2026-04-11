@@ -32,7 +32,7 @@ def get_auth_token():
     
     time.sleep(0.5)  # Rate limit avoidance
     response = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        f"{BASE_URL}/api/auth/login-v2",
         json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
     )
     if response.status_code == 200:

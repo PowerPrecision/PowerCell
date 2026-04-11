@@ -30,7 +30,7 @@ class TestConsultorAuth:
     def auth_token(self):
         """Get authentication token for consultor."""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         if response.status_code == 200:
@@ -50,7 +50,7 @@ class TestLeads:
     def auth_token(self):
         """Get authentication token."""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         if response.status_code == 200:
@@ -107,7 +107,7 @@ class TestProcessUpdate:
     def auth_token(self):
         """Get authentication token."""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         if response.status_code == 200:
@@ -253,7 +253,7 @@ class TestWorkflowStatuses:
     def auth_token(self):
         """Get authentication token."""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         if response.status_code == 200:
@@ -300,7 +300,7 @@ class TestKanbanIntegration:
     def auth_token(self):
         """Get authentication token."""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         if response.status_code == 200:
@@ -344,7 +344,7 @@ class TestProcessGet:
     def auth_token(self):
         """Get authentication token."""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         if response.status_code == 200:

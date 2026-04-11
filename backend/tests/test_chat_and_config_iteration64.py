@@ -35,7 +35,7 @@ class TestHealthAndAuth:
     def test_admin_login(self):
         """Test admin login returns token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         assert response.status_code == 200
@@ -52,7 +52,7 @@ class TestChatAPI:
     def setup(self):
         """Get auth token before each test"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         self.token = response.json().get("access_token")
@@ -121,7 +121,7 @@ class TestCreditServicesConfig:
     def setup(self):
         """Get auth token before each test"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         self.token = response.json().get("access_token")
@@ -184,7 +184,7 @@ class TestProcessAPI:
     def setup(self):
         """Get auth token before each test"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         self.token = response.json().get("access_token")

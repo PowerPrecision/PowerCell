@@ -21,7 +21,7 @@ TEST_PASSWORD = "admin"
 def auth_token():
     """Authenticate and get token"""
     response = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        f"{BASE_URL}/api/auth/login-v2",
         json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
     )
     if response.status_code == 200:

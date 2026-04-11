@@ -22,14 +22,14 @@ class TestAdminLogin:
     def test_admin_login_success(self):
         """Test login with admin credentials"""
         # Tenta password do seed.py primeiro
-        response = client.post("/api/auth/login", json={
+        response = client.post("/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
         
         # Fallback para outra password se falhar
         if response.status_code != 200:
-            response = client.post("/api/auth/login", json={
+            response = client.post("/api/auth/login-v2", json={
                 "email": "admin@sistema.pt",
                 "password": "admin2026"
             })
@@ -44,9 +44,9 @@ class TestLeadsEndpoints:
     
     def get_auth_token(self):
         # Helper para login
-        res = client.post("/api/auth/login", json={"email": "admin@sistema.pt", "password": "admin123"})
+        res = client.post("/api/auth/login-v2", json={"email": "admin@sistema.pt", "password": "admin123"})
         if res.status_code != 200:
-             res = client.post("/api/auth/login", json={"email": "admin@sistema.pt", "password": "admin2026"})
+             res = client.post("/api/auth/login-v2", json={"email": "admin@sistema.pt", "password": "admin2026"})
         return res.json().get("access_token")
     
     def test_leads_list_endpoint(self):
@@ -73,9 +73,9 @@ class TestLeadsEndpoints:
 class TestNavigationEndpoints:
     
     def get_auth_token(self):
-        res = client.post("/api/auth/login", json={"email": "admin@sistema.pt", "password": "admin123"})
+        res = client.post("/api/auth/login-v2", json={"email": "admin@sistema.pt", "password": "admin123"})
         if res.status_code != 200:
-             res = client.post("/api/auth/login", json={"email": "admin@sistema.pt", "password": "admin2026"})
+             res = client.post("/api/auth/login-v2", json={"email": "admin@sistema.pt", "password": "admin2026"})
         return res.json().get("access_token")
 
     def test_users_list_endpoint(self):

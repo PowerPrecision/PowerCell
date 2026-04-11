@@ -204,7 +204,7 @@ async def client():
 @pytest_asyncio.fixture
 async def admin_token(client):
     """Obter token de admin."""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "admin@sistema.pt",
         "password": "admin123"
     })
@@ -216,7 +216,7 @@ async def admin_token(client):
 @pytest_asyncio.fixture
 async def consultor_token(client):
     """Obter token de consultor."""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "consultor@sistema.pt",
         "password": "consultor123"
     })
@@ -227,7 +227,7 @@ async def consultor_token(client):
 @pytest_asyncio.fixture
 async def mediador_token(client):
     """Obter token de mediador."""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "mediador@sistema.pt",
         "password": "mediador123"
     })
@@ -256,7 +256,7 @@ def test_credentials():
 @pytest_asyncio.fixture
 async def auth_headers(client, test_credentials):
     """Headers de autenticação com token de admin."""
-    response = await client.post("/auth/login", json=test_credentials["admin"])
+    response = await client.post("/auth/login-v2", json=test_credentials["admin"])
     
     if response.status_code == 200:
         token = response.json().get("access_token") or response.json().get("token")
@@ -269,7 +269,7 @@ async def auth_headers(client, test_credentials):
 @pytest_asyncio.fixture
 async def gestor_headers(client):
     """Headers de autenticação para gestor de documentos."""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "powerprecision@sistema.pt",
         "password": "PowerCell"
     })

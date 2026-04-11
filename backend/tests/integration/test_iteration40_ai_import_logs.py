@@ -20,7 +20,7 @@ class TestAdminAuth:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -31,7 +31,7 @@ class TestAdminAuth:
     def test_admin_login_success(self):
         """Test admin login works"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200
@@ -47,7 +47,7 @@ class TestSystemLogs:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         return response.json().get("access_token")
@@ -106,7 +106,7 @@ class TestAIImportLogs:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         return response.json().get("access_token")
@@ -181,7 +181,7 @@ class TestAIImportLogsGrouped:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         return response.json().get("access_token")
@@ -244,7 +244,7 @@ class TestBulkResolveAIImportLogs:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         return response.json().get("access_token")
@@ -286,7 +286,7 @@ class TestSingleLogResolve:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         return response.json().get("access_token")

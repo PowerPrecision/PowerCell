@@ -25,7 +25,7 @@ class TestAuthentication:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
         )
         if response.status_code == 200:
@@ -46,7 +46,7 @@ class TestS3ProxyEndpoint:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
         )
         if response.status_code == 200:
@@ -98,7 +98,7 @@ class TestClientS3Mappings:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
         )
         if response.status_code == 200:
@@ -233,7 +233,7 @@ class TestAutoMapEndpoint:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
         )
         if response.status_code == 200:
@@ -275,7 +275,7 @@ class TestClientStatusFilter:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
         )
         if response.status_code == 200:

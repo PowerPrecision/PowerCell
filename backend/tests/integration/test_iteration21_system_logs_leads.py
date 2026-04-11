@@ -23,7 +23,7 @@ class TestAdminLogin:
     
     def test_admin_login_success(self):
         """Test login with admin credentials"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -39,7 +39,7 @@ class TestProcessUpdateStringFields:
     
     @pytest.fixture
     def admin_token(self):
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -109,7 +109,7 @@ class TestLeadsFromURL:
     
     @pytest.fixture
     def admin_token(self):
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -180,7 +180,7 @@ class TestSystemErrorLogs:
     
     @pytest.fixture
     def admin_token(self):
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         })
@@ -348,7 +348,7 @@ class TestSystemLogsAccess:
     def test_system_logs_requires_admin_role(self):
         """Test that non-admin users cannot access system logs"""
         # Login as consultor
-        login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        login_response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "consultor@sistema.pt",
             "password": "consultor123"
         })

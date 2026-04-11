@@ -36,7 +36,7 @@ class TestSetup:
     @staticmethod
     def get_auth_token():
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })

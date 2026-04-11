@@ -23,7 +23,7 @@ class TestAuth:
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Login and get token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_EMAIL,
             "password": TEST_PASSWORD
         })
@@ -39,7 +39,7 @@ class TestAuth:
     
     def test_login_success(self):
         """Test admin login"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_EMAIL,
             "password": TEST_PASSWORD
         })
@@ -56,7 +56,7 @@ class TestGlobalSearch:
     @pytest.fixture(scope="class")
     def auth_headers(self):
         """Get auth headers"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_EMAIL,
             "password": TEST_PASSWORD
         })
@@ -124,7 +124,7 @@ class TestBulkS3Mappings:
     @pytest.fixture(scope="class")
     def auth_headers(self):
         """Get auth headers"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_EMAIL,
             "password": TEST_PASSWORD
         })
@@ -176,7 +176,7 @@ class TestAIDocumentAnalyze:
     @pytest.fixture(scope="class")
     def auth_headers(self):
         """Get auth headers"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_EMAIL,
             "password": TEST_PASSWORD
         })
@@ -230,7 +230,7 @@ class TestHomeButtonNavigation:
     @pytest.fixture(scope="class")
     def auth_headers(self):
         """Get auth headers"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_EMAIL,
             "password": TEST_PASSWORD
         })

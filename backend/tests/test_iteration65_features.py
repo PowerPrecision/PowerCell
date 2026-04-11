@@ -16,7 +16,7 @@ class TestAuthLogin:
     
     def test_login_success(self):
         """Test admin login"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -30,7 +30,7 @@ class TestAuthLogin:
 
 def get_auth_token():
     """Helper function to get auth token"""
-    response = requests.post(f"{BASE_URL}/api/auth/login", json={
+    response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
         "email": "admin@sistema.pt",
         "password": "admin"
     })

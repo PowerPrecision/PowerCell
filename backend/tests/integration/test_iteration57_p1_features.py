@@ -30,7 +30,7 @@ class TestBackendP1Features:
         """Setup authentication for tests"""
         # Login as admin
         login_response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin"}
         )
         assert login_response.status_code == 200, f"Login failed: {login_response.text}"

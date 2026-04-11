@@ -19,7 +19,7 @@ class TestLeadCreationFieldMapping:
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })
@@ -34,7 +34,7 @@ class TestLeadCreationFieldMapping:
 
     def test_admin_login(self):
         """Test admin login works"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })
@@ -150,7 +150,7 @@ class TestIdealistaImportAPI:
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })
@@ -207,7 +207,7 @@ class TestDuplicateLeadHandling:
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })

@@ -23,7 +23,7 @@ class TestAdminLogin:
     
     def test_admin_login_success(self):
         """Admin login com credenciais corretas"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -42,7 +42,7 @@ class TestImpersonation:
     @pytest.fixture
     def admin_token(self):
         """Get admin authentication token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -163,7 +163,7 @@ class TestConsultorClientVisibility:
     @pytest.fixture
     def admin_token(self):
         """Get admin token for impersonation"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -225,7 +225,7 @@ class TestLeadsAccess:
     @pytest.fixture
     def admin_token(self):
         """Get admin token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -258,7 +258,7 @@ class TestBulkUploadAPI:
     @pytest.fixture
     def admin_token(self):
         """Get admin token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })

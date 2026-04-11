@@ -30,7 +30,7 @@ CEO_PASSWORD = "power2026"
 def admin_token():
     """Get admin authentication token"""
     response = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        f"{BASE_URL}/api/auth/login-v2",
         json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     )
     if response.status_code == 200:
@@ -42,7 +42,7 @@ def admin_token():
 def ceo_token():
     """Get CEO authentication token"""
     response = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        f"{BASE_URL}/api/auth/login-v2",
         json={"email": CEO_EMAIL, "password": CEO_PASSWORD}
     )
     if response.status_code == 200:
@@ -441,7 +441,7 @@ class TestHealthAndAuth:
     def test_admin_login(self):
         """POST /api/auth/login - Admin login"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         assert response.status_code == 200
@@ -453,7 +453,7 @@ class TestHealthAndAuth:
     def test_ceo_login(self):
         """POST /api/auth/login - CEO login"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CEO_EMAIL, "password": CEO_PASSWORD}
         )
         assert response.status_code == 200

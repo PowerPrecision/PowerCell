@@ -30,7 +30,7 @@ class TestWebSocketStatus:
     def auth_token(self):
         """Get admin auth token."""
         import requests
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD
         })
@@ -160,7 +160,7 @@ class TestWebSocketIntegration:
         """Get admin auth token."""
         import requests
         try:
-            response = requests.post(f"{BASE_URL}/api/auth/login", json={
+            response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
                 "email": TEST_ADMIN_EMAIL,
                 "password": TEST_ADMIN_PASSWORD
             }, timeout=5)

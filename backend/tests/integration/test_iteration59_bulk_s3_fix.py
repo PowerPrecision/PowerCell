@@ -22,7 +22,7 @@ class TestBulkS3MappingsFix:
     def auth_token(self):
         """Login and get admin token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -132,7 +132,7 @@ class TestDocumentExpiryAlerts:
     def auth_token(self):
         """Login and get admin token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -195,7 +195,7 @@ class TestJobsHealthEndpoint:
     def auth_token(self):
         """Login and get admin token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
