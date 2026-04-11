@@ -271,7 +271,6 @@ const MyClientsPage = () => {
                 A mostrar todos os processos, incluindo concluídos e desistências
               </p>
             )}
-            </div>
           </CardContent>
         </Card>
 
