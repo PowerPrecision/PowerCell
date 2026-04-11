@@ -35,7 +35,7 @@ async def test_public_client_registration(client):
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert "process_id" in data
+        assert "client_id" in data
         assert "Registo criado com sucesso" in data["message"]
     except (ServerSelectionTimeoutError, ConnectionFailure) as e:
         pytest.skip(f"MongoDB não disponível: {type(e).__name__}")

@@ -179,10 +179,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Run ALL tests with coverage (parallel)
+      - name: Run ALL tests with coverage
         run: |
           pytest --tb=short -v \
-            -n auto \
             --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=0 \
             --ignore=tests/e2e \
             --ignore-glob="tests/test_iteration*.py" \
