@@ -118,9 +118,7 @@ jobs:
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
       
       - name: Run unit tests (fast, no coverage)
-        run: |
-          pytest tests/unit/ --tb=short -q --no-header \
-            --ignore-glob="tests/unit/test_iteration*.py"
+        run: pytest tests/unit/ --tb=short -q --no-header
         env:
           TESTING: "true"
           SECRET_KEY: "test_secret_key_for_ci_pipeline"
