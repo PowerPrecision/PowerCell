@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import api from "../services/api";
-import { useAuth } from "./AuthContext"; // <-- 1. Importar o hook de autenticação
+import { useAuth } from "./AuthContext";
 
 const TasksContext = createContext(null);
 
@@ -11,6 +11,10 @@ const BASE_POLLING_INTERVAL = 5000;
 const IDLE_POLLING_INTERVAL = 30000;
 // Tempo mínimo entre toasts para a mesma tarefa
 const TOAST_DEBOUNCE_MS = 1000;
+// Circuit breaker: número de falhas consecutivas antes de parar polling
+const MAX_CONSECUTIVE_FAILURES = 3;
+// Circuit breaker: tempo de espera antes de retomar polling após circuit breaker (60s)
+const CIRCUIT_BREAKER_COOLDOWN = 60000;
 
 /**
  * Tipos de tarefas assíncronas
@@ -59,9 +63,12 @@ const TaskTypeLabels = {
 
 /**
  * Provider para o contexto de tarefas assíncronas
+ * 
+ * Inclui circuit breaker para parar polling quando o endpoint
+ * retorna erros persistentes (404, 500, etc.), evitando spam de console.
  */
 export const TasksProvider = ({ children }) => {
-  const { user } = useAuth(); // <-- 2. Consumir o estado do utilizador logado
+  const { user } = useAuth();
 
   // Estado das tarefas
   const [tasks, setTasks] = useState([]);
@@ -74,17 +81,62 @@ export const TasksProvider = ({ children }) => {
   const pollingIntervalRef = useRef(null);
   const lastToastTimeRef = useRef({});
   const previousTaskIdsRef = useRef(new Set());
-  
+  const consecutiveFailuresRef = useRef(0);
+  const circuitBreakerActiveRef = useRef(false);
+  const circuitBreakerTimeoutRef = useRef(null);
+
+  /**
+   * Parar polling (limpa intervalo e circuit breaker timeout)
+   */
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    if (circuitBreakerTimeoutRef.current) {
+      clearTimeout(circuitBreakerTimeoutRef.current);
+      circuitBreakerTimeoutRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Ativar circuit breaker: parar polling e agendar retomada
+   */
+  const activateCircuitBreaker = useCallback(() => {
+    circuitBreakerActiveRef.current = true;
+    stopPolling();
+    console.warn(
+      `[TasksContext] Circuit breaker ativado após ${MAX_CONSECUTIVE_FAILURES} falhas consecutivas. ` +
+      `Polling pausado por ${CIRCUIT_BREAKER_COOLDOWN / 1000}s.`
+    );
+
+    // Agendar retomada automática do polling
+    circuitBreakerTimeoutRef.current = setTimeout(() => {
+      console.log("[TasksContext] Circuit breaker resetado, retomando polling...");
+      circuitBreakerActiveRef.current = false;
+      consecutiveFailuresRef.current = 0;
+      // Retomar polling será feito pelo useEffect
+    }, CIRCUIT_BREAKER_COOLDOWN);
+  }, [stopPolling]);
+
   /**
    * Buscar tarefas ativas do backend
    */
   const fetchActiveTasks = useCallback(async () => {
-    if (!user) return; // <-- 3. Abortar a requisição se não estiver logado
+    if (!user) return;
+
+    // Respeitar circuit breaker
+    if (circuitBreakerActiveRef.current) return;
 
     try {
       setIsLoading(true);
       const response = await api.get("/tasks/active");
       const data = response.data;
+      
+      // Reset circuit breaker em sucesso
+      if (consecutiveFailuresRef.current > 0) {
+        consecutiveFailuresRef.current = 0;
+      }
       
       // Detectar tarefas que mudaram de estado
       const previousTaskIds = previousTaskIdsRef.current;
@@ -131,11 +183,20 @@ export const TasksProvider = ({ children }) => {
       previousTaskIdsRef.current = currentTaskIds;
       
     } catch (error) {
-      console.error("[TasksContext] Erro ao buscar tarefas:", error);
+      consecutiveFailuresRef.current++;
+
+      // Log apenas na primeira falha e quando o circuit breaker ativar
+      if (consecutiveFailuresRef.current === 1) {
+        console.error("[TasksContext] Erro ao buscar tarefas:", error);
+      }
+
+      if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
+        activateCircuitBreaker();
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [user]); // <-- 4. Adicionar "user" como dependência
+  }, [user, activateCircuitBreaker]);
   
   /**
    * Confirmar visualização de uma tarefa
@@ -179,24 +240,24 @@ export const TasksProvider = ({ children }) => {
   }, []);
   
   /**
-   * Iniciar polling inteligente
+   * Iniciar polling inteligente com circuit breaker
    */
   useEffect(() => {
-    // <-- 5. Se não houver sessão ativa, limpar qualquer polling existente e não fazer nada
     if (!user) {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
+      stopPolling();
       return;
     }
 
-    // Buscar tarefas imediatamente (pois o utilizador está validado)
+    // Não iniciar polling se circuit breaker está ativo
+    if (circuitBreakerActiveRef.current) {
+      return;
+    }
+
+    // Buscar tarefas imediatamente
     fetchActiveTasks();
     
     const setupPolling = () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
+      stopPolling();
       
       const interval = activeCount > 0 ? BASE_POLLING_INTERVAL : IDLE_POLLING_INTERVAL;
       pollingIntervalRef.current = setInterval(fetchActiveTasks, interval);
@@ -205,18 +266,15 @@ export const TasksProvider = ({ children }) => {
     setupPolling();
     
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
+      stopPolling();
     };
-  }, [fetchActiveTasks, activeCount, user]); // <-- 6. Adicionar "user" como dependência
+  }, [fetchActiveTasks, activeCount, user, stopPolling]);
   
   /**
    * Listener para visibilidade da página
    */
   useEffect(() => {
     const handleVisibilityChange = () => {
-      // <-- 7. Adicionar verificação do user aqui também
       if (document.visibilityState === "visible" && user) {
         fetchActiveTasks();
       }
@@ -227,7 +285,7 @@ export const TasksProvider = ({ children }) => {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [fetchActiveTasks, user]); // <-- 8. Adicionar "user" como dependência
+  }, [fetchActiveTasks, user]);
   
   const value = {
     tasks,
