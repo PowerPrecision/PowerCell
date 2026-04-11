@@ -1,39 +1,80 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: 7
+Agent: Main Agent
+Task: Fix Vercel MIME type crash and MyClientsPage JSX errors
+
+Work Log:
+- **Vercel MIME type crash (`dbfab8a`)**: Analisado erro `'text/html' is not a valid JavaScript MIME type` no ProtectedRoute. Causa: `vercel.json` rewrite `"/(.*)"` interceptava pedidos a chunks JS (`/assets/StaffDashboard-*.js`) e retornava `index.html`. Corrigido com negative lookahead: `/((?!assets|_next|favicon\.ico|robots\.txt|manifest\.json|sw\.js|workbox-|icon-.*\.png).*)`.
+- **LazyChunkErrorBoundary updated (`dbfab8a`)**: Adicionados 4 patterns ao error detector: `text/html`, `MIME type`, `Unexpected token`, `Script error`. Agora stale deployments causam reload automático em vez de crash.
+- **MyClientsPage JSX error (`fd84f29`)**: Analisado Vercel build errors — 5 erros cascata de JSX tag mismatch. Causa: `</div>` orfão na linha 274 (dentro do Card de filtros). Removida a tag extra. Estrutura corrigida: `Card > CardContent > div.flex > conditional p > /CardContent > /Card`.
+- Commits: `dbfab8a`, `fd84f29` (pushed to `dev`)
+
+Stage Summary:
+- 2 ficheiros alterados: `frontend/vercel.json`, `frontend/src/App.js`, `frontend/src/pages/MyClientsPage.js`
+- Vercel build deve passar — rewrites não interceptam assets, JSX válido
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Fix 429 rate limiting cascade and StatisticsPage crash
+
+Work Log:
+- **API Interceptor retry (`4268eec`)**: Adicionado retry com exponential backoff no `api.js`:
+  - 3 tentativas para 429 responses
+  - Delays: 2s → 4s → 8s + jitter (±500ms)
+  - Respeita header `Retry-After` se presente
+  - Suprime toast de erro durante retries
+  - Retry-ID header para tracking
+- **NotificationsDropdown backoff (`4268eec`)**: Polling com backoff adaptativo:
+  - 30s → 60s → 120s → 300s (max) em caso de 429
+  - Reset após 3 sucessos consecutivos
+- **StatisticsPage crash (`97bfed9`)**: `X.filter is not a function`:
+  - API retorna `{'items': [], 'total': 0}` (paginado) mas frontend chamava `.filter()` no objeto
+  - Adicionados `Array.isArray()` guards em `processes`, `leadsStats.funnel_data`, `leads_by_source`, `top_consultors`
+  - `getStats()` faz fallback para `{}`
+- Commits: `4268eec`, `97bfed9` (pushed to `dev`)
+
+Stage Summary:
+- 2 ficheiros alterados: `frontend/src/services/api.js`, `frontend/src/pages/StatisticsPage.js`
+- Resiliência a 429 em 2 níveis (interceptor + polling)
+- StatisticsPage defensivo contra respostas não-array
+
+---
 Task ID: 5
 Agent: Main Agent
 Task: 4 áreas de melhorias de UX no frontend
 
 Work Log:
-- **TASK 1a - AuditTrailPage DashboardLayout**: Adicionado import de DashboardLayout e envolvido o conteúdo com `<DashboardLayout title="Auditoria">`. Removido padding duplicado (DashboardLayout já fornece padding).
-- **TASK 1b - Sidebar accordion fix**: 
-  - Corrigido `onOpenChange` do Collapsible para usar `e.stopPropagation()` nos links internos, impedindo que o clique num item feche o grupo acordeão.
-  - Adicionadas rotas em falta ao `getInitialOpenSections()`: `/workflow-estados`, `/automation`, `/configuracoes-perfis`, `/gestao-formulario`, `/admin/migracao-rgpd`, `/diagnosticos`.
-- **TASK 2 - Rich Text Editor RGPD**:
-  - Importado `RichTextEditor` e `RichTextViewer` do componente UI existente.
-  - Substituído `<Textarea>` por `<RichTextEditor>` com suporte a `readOnly` baseado em permissões.
-  - Adicionada secção de "Pré-visualização" abaixo do editor com `bg-muted/50 rounded-lg p-4` usando `RichTextViewer`.
-- **TASK 3 - Kanban 2nd Proponent Indicator**:
-  - Adicionada detecção de 2º proponente: `co_buyers`, `compradores` (length > 1), `comprador2`, `segundo_proponente`.
-  - Adicionado `border-l-4 border-indigo-400` ao Card quando existe 2º proponente.
-  - Adicionado badge "2º Proponente" com ícone Users nos indicadores do cartão.
-- **TASK 4a - Move Tasks to right column**:
-  - Movido o bloco TasksPanel (Tarefas) da coluna esquerda (lg:col-span-2) para a coluna direita (sidebar).
-  - Posicionado logo abaixo da secção de Atividade (comments).
-- **TASK 4b - RGPD confirmation dialog**:
-  - Adicionado `window.confirm("Tem a certeza que deseja enviar o email de RGPD para este cliente?")` antes da chamada API no `handleRequestRgpd`.
-- **TASK 4c - Magic Link Portal Button**:
-  - Adicionado botão "Portal do Cliente" com Popover na área de action buttons.
-  - Opção "Copiar Link": chama `generateMagicLink`, copia para clipboard, mostra toast.
-  - Opção "Enviar por Email": chama `sendMagicLinkEmail`, mostra toast de confirmação.
-  - Adicionadas funções `generateMagicLink` e `sendMagicLinkEmail` ao `services/api.js`.
-  - Importado `Link as LinkIcon` dos lucide-react para evitar conflito com react-router-dom.
+- **TASK 1a - AuditTrailPage DashboardLayout**: Adicionado import de DashboardLayout e envolvido o conteúdo com `<DashboardLayout title="Auditoria">`. Removido padding duplicado.
+- **TASK 1b - Sidebar accordion fix**: Corrigido `onOpenChange` com `e.stopPropagation()`. Adicionadas rotas em falta ao `getInitialOpenSections()`.
+- **TASK 2 - Rich Text Editor RGPD**: Substituído `<Textarea>` por `<RichTextEditor>` com `readOnly`. Pré-visualização com `RichTextViewer`.
+- **TASK 3 - Kanban 2nd Proponent Indicator**: Detecção de 2º proponente, borda lateral, badge.
+- **TASK 4a - Tasks Panel reposicionado**: Movido para coluna direita (sidebar).
+- **TASK 4b - RGPD confirmation dialog**: `window.confirm()` antes de enviar email.
+- **TASK 4c - Magic Link Portal Button**: Popover com copiar link / enviar por email.
+- Commit: `abd988e`
 
 Stage Summary:
 - 7 ficheiros alterados, 147 inserções, 30 remoções
-- Commit: abd988e "feat: melhorias de UX, correções na sidebar e editor HTML"
 - Files: AuditTrailPage.js, DashboardLayout.js, SystemConfigPage.js, KanbanCard.jsx, ProcessDetails.js, api.js
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Fix CI pipeline issues (pytest, submodules, Node.js)
+
+Work Log:
+- **pytest.ini multiline**: Removida continuação com backslash que causava parsing error. Commit: `9de712b`
+- **Ghost submodule**: Removido `PowerCell` submodule fantasma do git index. Commit: `2e232ad`
+- **Node.js 24**: Re-habilitado nos GitHub Actions. Commit: `6c6cb65`
+- **Backend tests**: Adaptados para resposta paginada `{'items': [], 'total': 0}`. Commit: `1e63fac`
+- **Async loop**: Resolvido `Future attached to a different loop`. Commit: `f84765d`
+
+Stage Summary:
+- CI pipeline estável com Node.js 24 + Python 3.11
+- Todos os testes passam sem MongoDB
 
 ---
 Task ID: 3
@@ -41,31 +82,17 @@ Agent: Main Agent
 Task: Implementar Pipeline CI/CD com GitHub Actions
 
 Work Log:
-- Criado .github/workflows/main.yml com pipeline completo
-- Job 1 - Frontend CI (React + Vite):
-  - Setup Node.js 20
-  - npm ci --prefer-offline
-  - ESLint checking
-  - Vite build (gatekeeper crítico)
-  - Verificação de output dist/
-- Job 2 - Backend CI (Python + FastAPI):
-  - Setup Python 3.11
-  - pip install requirements.txt
-  - Flake8 linting (E9,F63,F7,F82 - erros críticos)
-  - Pytest com variáveis dummy
-  - Coverage report
+- Criado `.github/workflows/ci.yml` com pipeline completo
+- Job 1 - Frontend CI (React + Vite): ESLint + Vite build
+- Job 2 - Backend CI (Python + FastAPI): Flake8 + Pytest
 - Job 3 - Notify on Failure (preparado para Slack/Teams)
 - Criado backend/.flake8 com configuração
 - Atualizado conftest.py com DUMMY_ENV_VARS
-  - Variáveis dummy para evitar crash em CI
-  - SECRET_KEY, MONGO_URI, SMTP, AWS, etc.
-- Configurado concurrency para cancelar jobs em push novo
 
 Stage Summary:
 - CI Pipeline: Proteção contra código partido em produção
 - Frontend: Build Vite como gatekeeper rigoroso
 - Backend: Linting + Testes com env vars dummy
-- GitHub: Triggers em push/PR para main
 
 ---
 Task ID: 2
@@ -74,44 +101,18 @@ Task: Refatoração para TanStack Query (React Query v5)
 
 Work Log:
 - Instalado @tanstack/react-query e @tanstack/react-query-devtools
-- Criado lib/queryClient.js com configuração otimizada para CRM:
-  - staleTime: 1 minuto (evita fetches excessivos)
-  - gcTime: 5 minutos (garbage collection)
-  - refetchOnWindowFocus: true (crítico para CRM)
-  - Retry inteligente para erros de rede
-- Criado sistema de Query Keys Factory para type-safety:
-  - queryKeys.processes.kanban(filters)
-  - queryKeys.processes.detail(id)
-  - queryKeys.history.byProcess(id)
-  - queryKeys.activities.byProcess(id)
-- Criados hooks de Queries (hooks/queries/):
-  - useKanbanQuery: Fetch do Kanban com caching
-  - useProcessQuery: Detalhes do processo
-  - useProcessHistoryQuery: Histórico/Timeline
-  - useProcessActivitiesQuery: Atividades/Comentários
-  - useProcessFullData: Hook combinado
-- Criados hooks de Mutations (hooks/mutations/):
-  - useMoveProcessMutation: Drag & Drop com optimistic update
-  - useUpdateProcessMutation: Atualização de processo
-  - useAssignProcessMutation: Atribuição de consultor/mediador
-  - useAddActivityMutation: Adicionar atividade com invalidação
-- Criado useKanbanRealtime para integração WebSocket + React Query:
-  - setQueryData para updates em tempo real (sem refetch pesado)
-  - Handlers: PROCESS_CREATED, PROCESS_STATUS_CHANGED, PROCESS_UPDATED
-  - Invalidação seletiva de detalhes do processo
-- Atualizado App.js com QueryClientProvider e DevTools
-- Refatorado KanbanBoard.js:
-  - Eliminado useEffect/useState "esparguete"
-  - Estados de loading/error derivados do React Query
-  - WebSocket integrado com cache management
+- Criado `lib/queryClient.js` com configuração otimizada
+- Criado sistema de Query Keys Factory
+- Criados hooks de Queries (useKanbanQuery, useProcessQuery, etc.)
+- Criados hooks de Mutations (useMoveProcessMutation com optimistic update)
+- Criado useKanbanRealtime para WebSocket + React Query
+- Atualizado App.js com QueryClientProvider
+- Refatorado KanbanBoard.js: eliminado useEffect/useState esparguete
 
 Stage Summary:
-- Infraestrutura: TanStack Query configurado com padrões CRM
-- Queries: Custom hooks para todas as operações de leitura
-- Mutations: Optimistic updates e invalidação automática
-- WebSocket: Integração com setQueryData para tempo real
-- DevTools: Disponível em desenvolvimento
-- Código: Reduzido ~100 linhas de boilerplate no KanbanBoard
+- TanStack Query configurado com padrões CRM
+- Optimistic updates e invalidação automática
+- WebSocket integrado com setQueryData
 
 ---
 Task ID: 1
@@ -119,50 +120,18 @@ Agent: Main Agent
 Task: Implementar Motor de Tarefas Assíncronas e Centro de Operações Global
 
 Work Log:
-- Analisada estrutura atual do projeto (React + FastAPI + MongoDB)
-- Criado modelo TaskLog no MongoDB (models/task_log.py)
-  - TaskStatus enum (pending, processing, completed, failed, cancelled)
-  - TaskType enum (PDF_GEN, AI_ANALYSIS, EMAIL_SEND, etc.)
-  - TaskLogCreate, TaskLogUpdate, TaskLogResponse schemas
-- Criado serviço de gestão de tarefas (services/task_log_service.py)
-  - create_task, update_task, get_task, get_active_tasks
-  - mark_processing, mark_completed, mark_failed
-  - update_progress, acknowledge_task, cancel_task
-  - cleanup_old_tasks para manutenção
-- Criadas rotas API (routes/task_logs.py)
-  - GET /api/tasks/active - Lista tarefas ativas do utilizador
-  - GET /api/tasks/:task_id - Detalhes de uma tarefa
-  - POST /api/tasks/:task_id/acknowledge - Confirma visualização
-  - DELETE /api/tasks/:task_id/cancel - Cancela tarefa pendente
-  - GET /api/tasks - Lista todas as tarefas com filtros
-  - DELETE /api/tasks/:task_id - Elimina tarefa do histórico
-- Refatorado endpoint de AI (routes/ai.py)
-  - POST /api/ai/analyze-document-async - Análise assíncrona de documentos
-  - POST /api/ai/bulk-analysis-async - Análise em massa assíncrona
-  - Background tasks com atualização de progresso
-  - Retorna 202 Accepted com task_id
-- Criado contexto React (contexts/TasksContext.js)
-  - TasksProvider com estado global
-  - Polling inteligente (5s com tarefas, 30s sem)
-  - Detecção de mudanças de estado
-  - Toasts automáticos para conclusões
-  - acknowledgeTask, cancelTask, getTaskDetails
-- Criado componente TasksDropdown (components/TasksDropdown.js)
-  - Badge com contador de tarefas ativas
-  - Sheet/Drawer para lista de tarefas
-  - Barras de progresso para tarefas em execução
-  - Agrupamento por status (ativas/concluídas)
-  - Ações: confirmar, cancelar, ver resultado
+- Criado modelo TaskLog no MongoDB
+- Criado serviço de gestão de tarefas (CRUD completo)
+- Criadas rotas API (5 endpoints REST)
+- Refatorado endpoint de AI para análise assíncrona (202 Accepted)
+- Criado contexto React (TasksContext) com polling inteligente
+- Criado componente TasksDropdown com badge e drawer
 - Integrado no App.js e DashboardLayout.js
-  - TasksProvider adicionado à árvore de providers
-  - TasksDropdown adicionado à Navbar
 
 Stage Summary:
-- Backend: Motor de tarefas assíncronas completo com MongoDB
-- Frontend: Centro de Operações com polling inteligente
-- UI: Integração na Navbar com badge e drawer
-- Exemplo: Endpoints de AI demonstram o padrão
-- Build: Compilado com sucesso (9.89s)
+- Backend: Motor de tarefas assíncronas completo
+- Frontend: Centro de Operações com polling
+- Build compilado com sucesso
 
 ---
 Task ID: 2
@@ -175,23 +144,5 @@ Work Log:
 - Added inbound LOCK/UNLOCK message handling in websocket route
 
 Stage Summary:
-- Backend now broadcasts granular move events with user info
+- Backend broadcasts granular move events with user info
 - Frontend can send lock/unlock events via WebSocket
-- All broadcasts exclude the originating user to prevent duplicates
-
----
-Task ID: 4
-Agent: Main Agent
-Task: Fix CI pytest --ignore=tests/e2e parsing error
-
-Work Log:
-- Identified root cause: pytest.ini addopts used backslash line continuation
-- iniconfig (pytest's INI parser) was not handling the multiline correctly
-- --ignore=tests/e2e was being parsed as a file path instead of a pytest flag
-- Put all addopts on a single line to eliminate the parsing ambiguity
-- Committed and pushed as 9de712b
-
-Stage Summary:
-- File changed: backend/pytest.ini (1 insertion, 8 deletions)
-- Root cause: iniconfig multiline value parsing with backslash continuation
-- Fix: Single-line addopts eliminates all line continuation ambiguity

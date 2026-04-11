@@ -168,9 +168,9 @@ const AdminDashboard = () => {
       
       // Fetch recent activities (latest 20 across all processes)
       try {
-        const activitiesRes = await getActivities(null);
+        const activitiesRes = await getActivities(undefined, 20);
         const allActivities = activitiesRes.data || [];
-        setRecentActivities(Array.isArray(allActivities) ? allActivities.slice(0, 20) : []);
+        setRecentActivities(Array.isArray(allActivities) ? allActivities : []);
       } catch { /* silent */ }
     } catch (error) {
       console.error("Error fetching data:", error);

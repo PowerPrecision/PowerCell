@@ -14,7 +14,7 @@ import {
 } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
-import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye } from "lucide-react";
+import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye, FlaskConical } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 import * as Sentry from "@sentry/react";
@@ -214,6 +214,74 @@ const REQUIRED_FIELDS = [
   "tipo_imovel", "localizacao", "profissao", "tipo_contrato"
 ];
 
+// Dados de simulação para testar o formulário
+const MOCK_DATA = {
+  // Step 1 - Dados Pessoais
+  name: "João Pedro da Silva Santos",
+  email: "joao.santos.teste@email.pt",
+  phone: "+351912345678",
+  nif: "291654738", // NIF válido (checksum OK)
+  documento_id: "00123456",
+  data_validade_cc: "2030-06-15",
+  naturalidade: "Lisboa",
+  nacionalidade: "Portuguesa",
+  morada_fiscal: "Rua Augusta, 123, 4º Esq, 1100-053 Lisboa",
+  birth_date: "1992-03-15",
+  estado_civil: "solteiro",
+  compra_tipo: "individual",
+  menor_35_anos: false,
+  // Step 2 - 2º Titular (vazio, compra individual)
+  titular2_name: "",
+  titular2_email: "",
+  titular2_nif: "",
+  titular2_documento_id: "",
+  titular2_naturalidade: "",
+  titular2_nacionalidade: "",
+  titular2_phone: "",
+  titular2_morada_fiscal: "",
+  titular2_birth_date: "",
+  titular2_estado_civil: "",
+  // Step 3 - Imóvel
+  finalidade: "compra_imovel",
+  tipo_imovel: "apartamento",
+  num_quartos: "T3",
+  localizacao: "Lisboa, zona do Parque das Nações",
+  caracteristicas: ["elevador", "garagem", "transportes"],
+  outras_caracteristicas: "",
+  area_pretendida: "120",
+  valor_maximo_imovel: "350000",
+  ja_tem_casa_escolhida: true,
+  proprietario_nome: "Carlos Ferreira",
+  proprietario_contacto: "+351911111111",
+  caracteristicas_imovel: "Apartamento com vista rio, 2 casas de banho",
+  // Step 4 - Profissional + Financeira
+  employment_type: "efetivo",
+  employment_duration: "3",
+  employer_name: "Tech Solutions Lda.",
+  employer_nif: "516253487",
+  trabalha_estrangeiro: "nao",
+  acesso_portal_financas: "sim",
+  chave_movel_digital: "sim",
+  salario_liquido: "1850",
+  renda_habitacao_atual: "800",
+  precisa_vender_casa: "nao",
+  efetivo: "30000",
+  fiador: "nao",
+  // Step 5 - Bancos
+  bancos_creditos: ["CGD", "Santander Totta"],
+  bancos_simulacoes: ["Millennium bcp", "Novo Banco"],
+  tempo_restante_credito: "240",
+  capital_proprio: "70000",
+  valor_financiado: "280000",
+  prazo_pretendido: "30",
+  valor_transferencia: "",
+  valor_extra: "",
+  // Step 6 - Outras
+  outras_informacoes: "Teste de simulação — dados fictícios",
+  consent_data: true,
+  consent_contact: true,
+};
+
 const PublicClientForm = ({ previewMode = false }) => {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
@@ -291,7 +359,19 @@ const PublicClientForm = ({ previewMode = false }) => {
     setHasDraft(false);
     setLastSaved(null);
   }, []);
-  
+
+  // Simular preenchimento completo do formulário (apenas para testes)
+  const simulateFill = useCallback(() => {
+    setFormData(prev => ({ ...prev, ...MOCK_DATA }));
+    setStep(1);
+    setFieldErrors({});
+    clearDraft();
+    toast.success("Formulário preenchido com dados de teste — navegue pelos passos para rever", {
+      duration: 4000,
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [clearDraft]);
+
   const [formData, setFormData] = useState(() => {
     const defaults = {
       // Dados Pessoais - Titular
@@ -2241,9 +2321,20 @@ const PublicClientForm = ({ previewMode = false }) => {
               totalFields={progress.total}
             />
             
-            {/* Auto-save indicator */}
+            {/* Auto-save indicator + Simulate button */}
             {!previewMode && (
-            <div className="flex justify-end mb-4">
+            <div className="flex justify-between items-center mb-4">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-violet-600 gap-1.5 text-xs"
+                onClick={simulateFill}
+                data-testid="simulate-fill-btn"
+              >
+                <FlaskConical className="h-3.5 w-3.5" />
+                Simular Preenchimento
+              </Button>
               <AutoSaveIndicator lastSaved={lastSaved} isSaving={isSaving} />
             </div>
             )}

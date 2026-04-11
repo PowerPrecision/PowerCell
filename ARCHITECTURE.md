@@ -14,6 +14,7 @@ graph TB
         User["Utilizador"]
         Portal["Portal do Cliente<br/>(Magic Link)"]
         PublicForm["Formulário Público<br/>/registo"]
+        RGPDForm["Página RGPD<br/>/rgpd/:token"]
     end
 
     subgraph Frontend["⚛️ Frontend — React 19 + Vite"]
@@ -22,34 +23,38 @@ graph TB
         TasksCtx["TasksContext<br/>(Polling + Circuit Breaker)"]
         UploadCtx["UploadProgressContext"]
         ThemeCtx["ThemeContext<br/>(Light/Dark)"]
-        API_SVC["api.js<br/>(Axios + Interceptors)"]
+        API_SVC["api.js<br/>(Axios + 429 Retry)"]
         WSClient["useWebSocket<br/>(Singleton + Backoff)"]
         TanStack["TanStack Query<br/>(Cache + Mutations)"]
-        Pages["Páginas<br/>(Lazy Loading)"]
+        LazyChunk["LazyChunkErrorBoundary<br/>(Stale Deploy Recovery)"]
+        Pages["Páginas<br/>(~50, Lazy Loaded)"]
     end
 
-    subgraph API["🐍 Backend API — FastAPI (Python)"]
+    subgraph API["🐍 Backend API — FastAPI (Python 3.11)"]
         CORS["CORS Middleware<br/>(Fail-Secure)"]
-        RateLimit["Rate Limiting<br/>(Por role)"]
+        RateLimit["Rate Limiting<br/>(Por role: slowapi)"]
         SecurityHeaders["Security Headers<br/>(HSTS, CSP, X-Frame)"]
         SentryMW["Sentry Integration"]
+        InputSanitize["Input Sanitization"]
 
         subgraph Rotas["Rotas da API (/api)"]
             AuthR["/auth<br/>(Login, JWT, Refresh)"]
-            ProcessesR["/processes<br/>(CRUD, Kanban, Atribuição)"]
-            DocumentsR["/documents<br/>(Upload, S3, Expiry)"]
+            ProcessesR["/processes<br/>(CRUD, Kanban, Paginated)"]
+            DocumentsR["/documents<br/>(Upload, S3 Proxy, Expiry)"]
             TasksR["/tasks<br/>(CRUD, Tarefas)"]
-            ClientsR["/clients<br/>(CRUD)"]
+            ClientsR["/clients<br/>(CRUD, Cursor Pagination)"]
             LeadsR["/leads<br/>(Scraping, Pipeline)"]
-            EmailsR["/emails<br/>(Gmail, Rascunhos AI)"]
-            FinanceR["/finance<br/>(Comissões, Resumo)"]
-            AIR["/ai<br/>(Análise de Docs)"]
+            EmailsR["/emails<br/>(Gmail, Send-to-Banks, AI Drafts)"]
+            FinanceR["/finance<br/>(Comissões, Dashboard)"]
+            AIR["/ai<br/>(Análise de Docs, Confiança)"]
             AIBulkR["/ai-bulk<br/>(Importação em Massa)"]
             RGPD_R["/rgpd<br/>(Consentimento, Anonimização)"]
+            TempLinksR["/upload, /download<br/>(Links Temporários)"]
             WSR["/ws<br/>(WebSocket Endpoint)"]
             AdminR["/admin<br/>(Utilizadores, Impersonate)"]
             AuditR["/audit<br/>(Trilha de Auditoria)"]
             BackupR["/backup<br/>(Backups Automáticos)"]
+            SystemConfigR["/system-config<br/>(RGPD, DSTI, Emails)"]
             OtherR["+30 rotas adicionais"]
         end
 
@@ -59,13 +64,15 @@ graph TB
             WSManager["WebSocketManager<br/>(ConnectionManager)"]
             RedisCache["RedisCache<br/>(Cache + Queue)"]
             EmailSvc["EmailService<br/>(SendGrid/Resend)"]
-            EncryptionSvc["EncryptionService<br/>(Campos sensíveis)"]
+            EncryptionSvc["EncryptionService<br/>(Fernet + Blind Indexing)"]
             AuditCDC["AuditCDC<br/>(Change Data Capture)"]
             NotificationSvc["NotificationService"]
             TaskQueue["TaskQueue (ARQ)"]
             S3Storage["S3Storage<br/>(Pre-signed URLs)"]
             WorkflowEngine["WorkflowEngine"]
             ScraperSvc["PropertyScraper<br/>(Idealista)"]
+            AIConfidence["Confidence Scorer<br/>(Score por campo)"]
+            OrganizerSvc["Document Organizer<br/>(Categorização automática)"]
         end
 
         subgraph Middleware_Backend["Middleware"]
@@ -76,11 +83,12 @@ graph TB
 
     subgraph Infra["📦 Infraestrutura"]
         MongoDB[("MongoDB Atlas - Base de Dados")]
-        Redis[("Redis - Cache + Task Queue")]
+        Redis[("Redis (Upstash) - Cache + Task Queue")]
         S3[("AWS S3 - Armazenamento")]
         Sentry["Sentry<br/>(Observabilidade)"]
         SendGrid["SendGrid/Resend<br/>(Email Transacional)"]
-        OpenAI["OpenAI / Gemini<br/>(Modelos de IA)"]
+        OpenAI["OpenAI GPT-4o<br/>(Análise de Documentos)"]
+        Gemini["Gemini Flash<br/>(Análise de Documentos)"]
         TrelloAPI["Trello API<br/>(Integração)"]
         GmailAPI["Gmail API<br/>(Sincronização Email)"]
     end
@@ -92,7 +100,7 @@ graph TB
     end
 
     subgraph Deploy["🚀 Deploy"]
-        Vercel["Vercel<br/>(Frontend)"]
+        Vercel["Vercel<br/>(Frontend CDN)"]
         Render["Render<br/>(Backend API)"]
         GHA["GitHub Actions<br/>(CI/CD Pipeline)"]
     end
@@ -101,6 +109,7 @@ graph TB
     User --> Router
     Portal --> Router
     PublicForm --> Router
+    RGPDForm --> Router
 
     %% Frontend Interno
     Router --> AuthCtx
@@ -109,6 +118,7 @@ graph TB
     Pages --> TanStack
     Pages --> WSClient
     WSClient --> AuthCtx
+    LazyChunk --> Pages
 
     %% Frontend → Backend
     API_SVC -->|HTTPS + JWT| CORS
@@ -117,17 +127,21 @@ graph TB
     %% Backend Pipeline
     CORS --> RateLimitMW
     RateLimitMW --> SecurityHeaders
-    SecurityHeaders --> Rotas
+    SecurityHeaders --> InputSanitize
+    InputSanitize --> Rotas
     Rotas --> Servicos
 
     %% Serviços → Infraestrutura
     ProcessSvc --> MongoDB
     AI_DocSvc --> OpenAI
+    AI_DocSvc --> Gemini
     AI_DocSvc --> MongoDB
+    AIConfidence --> AI_DocSvc
     RedisCache --> Redis
     TaskQueue --> Redis
     EmailSvc --> SendGrid
     S3Storage --> S3
+    OrganizerSvc --> S3Storage
     ScraperSvc -->|Scraping| ExternalSites["Sites Externos<br/>(Idealista)"]
     EmailsR --> GmailAPI
     TrelloAPI -.->|Opcional| OtherR
@@ -147,7 +161,7 @@ graph TB
     %% Deploy
     GHA -->|Deploy| Vercel
     GHA -->|Deploy| Render
-    Vercel -->|CDN| User
+    Vercel -->|CDN + SPA Rewrite| User
     Render -->|API| API_SVC
 
     %% Estilos
@@ -171,7 +185,7 @@ graph TB
 ```mermaid
 sequenceDiagram
     actor U as Utilizador
-    participant F as Frontend (React)
+    participant F as Frontend (React 19)
     participant A as API (FastAPI)
     participant S as Serviço
     participant DB as MongoDB
@@ -182,9 +196,9 @@ sequenceDiagram
     %% Autenticação
     U->>F: Login (email + password)
     F->>A: POST /api/auth/login
-    A->>DB: Verificar credenciais
+    A->>DB: Verificar credenciais (passlib)
     DB-->>A: Utilizador + role
-    A-->>F: JWT Token
+    A-->>F: JWT Token (24h) + Refresh (7d)
     F->>F: Guardar token (localStorage)
     F->>WS: Ligar WebSocket (token)
     WS-->>F: connection_status: connected
@@ -197,7 +211,7 @@ sequenceDiagram
     DB-->>S: Processos por coluna
     S-->>A: Board data
     A-->>F: Kanban board (JSON)
-    F->>F: Render colunas + drag-drop
+    F->>F: Render colunas + drag-drop (@dnd-kit)
 
     %% Mover Processo no Kanban
     U->>F: Drag processo para nova coluna
@@ -206,7 +220,7 @@ sequenceDiagram
     S->>DB: Actualizar status + histórico
     S->>WS: Broadcast process_moved
     WS-->>F: Notificar outros utilizadores
-    WS-->>F: Atualizar board em tempo real
+    WS-->>F: Atualizar board via TanStack Query setQueryData
 
     %% Upload e Análise de Documento com IA
     U->>F: Upload documento
@@ -223,7 +237,7 @@ sequenceDiagram
     %% Análise AI (Background)
     A->>W: Enqueue analyze_document_task (ARQ)
     W->>AI: Enviar documento para análise
-    AI-->>W: Dados extraídos (NIF, nome, rendimento...)
+    AI-->>W: Dados extraídos + confiança por campo
     W->>DB: Actualizar processo com dados extraídos
     W->>WS: Notificar conclusão
     WS-->>F: document_uploaded + process_updated
@@ -245,7 +259,7 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     Login["POST /api/auth/login"]
-    Login --> Validar["Validar credenciais<br/>(bcrypt + MongoDB)"]
+    Login --> Validar["Validar credenciais<br/>(passlib bcrypt + MongoDB)"]
     Validar -->|Sucesso| GerarJWT["Gerar JWT<br/>(HS256, 24h)"]
     Validar -->|Falha| Erro401["401 Unauthorized"]
     GerarJWT --> RefreshToken["Gerar Refresh Token<br/>(7 dias, MongoDB)"]
@@ -256,8 +270,9 @@ flowchart TD
         Request --> Extract["Middleware extrai user_id + role do JWT"]
         Extract --> RateCheck["Rate Limit<br/>(admin: 1000/min<br/>consultor: 200/min<br/>cliente: 100/min)"]
         RateCheck -->|Permitido| Route["Rota da API"]
-        RateCheck -->|Excedido| Err429["429 Too Many Requests"]
-        Route --> RoleCheck["Verificar role requerido"]
+        RateCheck -->|Excedido| RetryBackoff["429 → Retry com backoff<br/>(frontend: 3x, 2s→4s→8s)"]
+        Route --> Sanitize["Input Sanitization"]
+        Sanitize --> RoleCheck["Verificar role requerido"]
         RoleCheck -->|Autorizado| Exec["Executar handler"]
         RoleCheck -->|Não autorizado| Err403["403 Forbidden"]
     end
@@ -292,6 +307,7 @@ erDiagram
         string password_hash
         string role
         boolean active
+        object permissions
         datetime created_at
         datetime updated_at
     }
@@ -308,6 +324,7 @@ erDiagram
         object real_estate_data
         array co_buyers
         string workflow_status
+        string s3_folder
         datetime created_at
         datetime updated_at
     }
@@ -320,6 +337,7 @@ erDiagram
         string category
         string content_type
         int file_size
+        string ai_confidence
         datetime uploaded_at
         datetime expiry_date
     }
@@ -342,6 +360,8 @@ erDiagram
         string email
         string phone
         string nif
+        string nif_hash
+        string email_hash
         object address
         string source
         datetime created_at
@@ -367,6 +387,39 @@ erDiagram
         datetime created_at
     }
 
+    HISTORY {
+        string id PK
+        string process_id FK
+        string user_id FK
+        string action
+        string field
+        string old_value
+        string new_value
+        datetime created_at
+    }
+
+    AUDIT_TRAIL {
+        string id PK
+        string process_id FK
+        string user_id FK
+        string action
+        string origin
+        string ip_address
+        object changes
+        datetime created_at
+    }
+
+    RGPD_CONSENTS {
+        string id PK
+        string process_id FK
+        string client_name
+        string client_email
+        string token
+        string status
+        datetime signed_at
+        string ip_address
+    }
+
     EMAILS {
         string id PK
         string process_id FK
@@ -378,10 +431,21 @@ erDiagram
         boolean monitored
     }
 
+    AI_CONFIG {
+        string id PK
+        string default_model
+        object confidence_thresholds
+        int total_calls
+        datetime last_execution
+    }
+
     PROCESSES ||--o{ DOCUMENTS : "tem"
     PROCESSES ||--o{ TASKS : "tem"
     PROCESSES ||--o{ ACTIVITIES : "tem"
+    PROCESSES ||--o{ HISTORY : "registos"
     PROCESSES ||--o{ EMAILS : "tem"
+    PROCESSES ||--o{ AUDIT_TRAIL : "auditado"
+    PROCESSES ||--o| RGPD_CONSENTS : "consentimento"
     USERS ||--o{ PROCESSES : "consultor de"
     USERS ||--o{ TASKS : "responsável por"
     USERS ||--o{ ACTIVITIES : "criou"
@@ -395,54 +459,23 @@ erDiagram
 
 | Camada | Tecnologia | Finalidade |
 |--------|-----------|------------|
-| **Frontend** | React 19 + Vite | SPA com code splitting e lazy loading |
-| **Estado** | Zustand + TanStack Query | Estado local + cache de servidor |
-| **UI** | shadcn/ui + Tailwind CSS 4 | Componentes e estilização |
+| **Frontend** | React 19 + Vite 6 | SPA com code splitting e lazy loading |
+| **Estado Cliente** | Zustand | Estado local leve |
+| **Estado Servidor** | TanStack Query v5 | Cache, mutations, optimistic updates |
+| **UI** | shadcn/ui (New York) + Tailwind CSS 4 | Componentes e estilização |
+| **Drag-Drop** | @dnd-kit/core | Kanban board interativo |
 | **Backend** | FastAPI (Python 3.11+) | API REST async com Pydantic |
 | **Base de Dados** | MongoDB Atlas | Persistência de dados (Motor async) |
-| **Cache** | Redis | Cache de sessões e fila de tarefas |
+| **Cache** | Upstash Redis | Cache de sessões e fila de tarefas |
 | **Armazenamento** | AWS S3 | Ficheiros com pre-signed URLs |
 | **Filas** | ARQ (Redis-based) | Tarefas em background (análise IA) |
 | **WebSocket** | FastAPI WebSocket | Notificações em tempo real |
-| **IA** | OpenAI GPT-4o + Gemini Flash | Análise de documentos e extração de dados |
+| **IA** | OpenAI GPT-4o + Gemini Flash | Análise de documentos e extração |
 | **Email** | SendGrid / Resend | Email transacional e rascunhos automáticos |
 | **Observabilidade** | Sentry | Monitoring de erros e performance |
 | **CI/CD** | GitHub Actions | Pipeline de testes e deploy |
-| **Hosting** | Vercel (FE) + Render (BE) | Deploy automatizado |
-
----
-
-## Estrutura de Pastas (Resumo)
-
-```
-powercell/
-├── backend/
-│   ├── server.py              # Entry point FastAPI + middleware
-│   ├── config.py              # Variáveis de ambiente e validação
-│   ├── database.py            # Ligação MongoDB (Motor, singleton lazy)
-│   ├── models/                # Esquemas Pydantic + modelos de dados
-│   ├── routes/                # Rotas da API (~45 ficheiros)
-│   ├── services/              # Lógica de negócio (~60 ficheiros)
-│   ├── middleware/             # Rate limiting
-│   ├── worker/                # ARQ background worker
-│   ├── utils/                 # Validação e sanitização
-│   └── tests/                 # Unit + Integration + E2E tests
-│
-├── frontend/
-│   └── src/
-│       ├── App.js             # Router principal + providers
-│       ├── pages/             # ~50 páginas (lazy loaded)
-│       ├── components/        # Componentes reutilizáveis
-│       ├── contexts/          # React Context providers
-│       ├── hooks/             # Custom hooks (WebSocket, queries)
-│       ├── services/          # API client (Axios)
-│       └── utils/             # Utilitários (sanitize, errors)
-│
-├── .github/workflows/
-│   └── ci.yml                 # CI/CD pipeline
-│
-└── ARCHITECTURE.md            # Este ficheiro
-```
+| **Hosting FE** | Vercel | CDN + SPA rewrites |
+| **Hosting BE** | Render | Docker container + auto-deploy |
 
 ---
 
@@ -451,16 +484,59 @@ powercell/
 | Padrão | Onde é aplicado |
 |--------|----------------|
 | **Singleton** | `DatabaseProxy` (MongoDB), `WebSocketManager`, `useWebSocket` (frontend) |
-| **Circuit Breaker** | `TasksContext` — para polling de tarefas com falhas consecutivas |
+| **Circuit Breaker** | `TasksContext` — polling de tarefas com falhas consecutivas |
 | **Reference Counting** | `useWebSocket` — uma ligação partilhada entre componentes |
-| **Exponential Backoff** | `useWebSocket` — reconexão (1s → 2s → 4s → ... → 30s) |
+| **Exponential Backoff** | `useWebSocket` (1s→30s), API interceptor 429 retry (2s→4s→8s), Notifications polling (30s→5min) |
+| **Retry with Jitter** | API interceptor — 3 retries com jitter ±500ms para evitar thundering herd |
+| **Lazy Loading** | 50+ páginas com `React.lazy()` + `Suspense` |
+| **Chunk Error Recovery** | `LazyChunkErrorBoundary` — deteta stale deployments e faz reload automático |
 | **Proxy (Lazy)** | `DatabaseProxy`, `ClientProxy` — ligação on-demand |
 | **Repository** | `services/*` — abstracção sobre acesso à base de dados |
-| **Middleware Chain** | Security Headers → Rate Limiting → CORS → Route Handler |
+| **Middleware Chain** | CORS → Rate Limiting → Security Headers → Input Sanitization → Route Handler |
 | **Observer (Pub/Sub)** | WebSocket events — `broadcast()` para notificações em tempo real |
 | **Change Data Capture** | `AuditCDC` — monitoriza alterações via MongoDB Change Stream |
 | **Strategy** | `AI_CONFIG_DEFAULTS` — seleção de modelo IA por tipo de tarefa |
 | **Pre-signed URL** | `S3Storage` — upload directo do frontend para S3 sem passar pelo backend |
+| **Blind Indexing** | `EncryptionService` — HMAC-SHA256 para pesquisa em campos encriptados |
+| **Dedicated Collection** | `history`, `audit_trail` — colecções separadas para evitar 16MB limit |
+| **Confidence Scoring** | `AIDocumentService` — score 0.0-1.0 por campo extraído, alertas para < 0.8 |
+
+---
+
+## Estratégia de Resiliência
+
+```mermaid
+flowchart TD
+    Error["Erro na API"] --> TypeCheck{"Tipo de erro?"}
+
+    TypeCheck -->|"429 Rate Limit"| Retry["API Interceptor Retry<br/>(3x, backoff 2s→8s+jitter)"]
+    Retry -->|Tentativas esgotadas| Toast429["Toast de erro"]
+
+    TypeCheck -->|"Chunk Load Error"| ChunkEB["LazyChunkErrorBoundary"]
+    ChunkEB --> Reload["Reload automático"]
+    Reload --> Success["Página carregada"]
+
+    TypeCheck -->|"401 Unauthorized"| Refresh["Tentar refresh token"]
+    Refresh -->|Sucesso| RetryRequest["Repetir pedido original"]
+    Refresh -->|Falha| Logout["Redirect para login"]
+
+    TypeCheck -->|"Network Error"| TanStackRetry["TanStack Query<br/>(3 retries, exponential backoff)"]
+
+    TypeCheck -->|"Outro erro"| Sentry["Reportar ao Sentry"]
+
+    subgraph Polling["Polling Resiliência"]
+        NotifPoll["Notifications Polling"] --> Poll429["429 detetado"]
+        Poll429 --> Backoff["Backoff: 30s→60s→120s→300s"]
+        Backoff --> PollSuccess["3 sucessos → reset"]
+    end
+
+    subgraph WebSocketRes["WebSocket Resiliência"]
+        WSConn["WebSocket Connection"] --> WSError["Erro de ligação"]
+        WSError --> WSBackoff["Backoff: 1s→2s→4s→...→30s"]
+        WSBackoff --> WSPoll["Fallback: HTTP Polling"]
+        WSPoll --> WSReconnect["Reconexão automática"]
+    end
+```
 
 ---
 
@@ -470,7 +546,14 @@ powercell/
 - **JWT com Validação Robusta**: Secret validado para entropia mínima, tokens com 24h de validade
 - **Refresh Tokens**: Tokens de refresh de 7 dias, revogáveis via MongoDB
 - **Rate Limiting por Role**: Limites diferenciados (admin: 1000, consultor: 200, cliente: 100 req/min)
-- **Security Headers**: HSTS, CSP, X-Frame-Options, X-Content-Type-Options em todas as respostas
-- **Encriptação de Campos**: Campos sensíveis (NIF, rendimentos) encriptados na base de dados
-- **Impersonate Control**: Admin pode visualizar como outro utilizador, com restauro automático de sessão
+- **Security Headers**: HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy em todas as respostas
+- **Encriptação de Campos**: Campos sensíveis (NIF, rendimentos) encriptados com Fernet (AES-128-CBC)
+- **Blind Indexing**: Hashes HMAC-SHA256 para pesquisa em campos encriptados
+- **Input Sanitization**: Todas as rotas da API sanitizam inputs (strings, emails, nomes)
+- **MIME Validation**: Validação por magic bytes para uploads de documentos
+- **DOMPurify**: Sanitização XSS no frontend para rich text
+- **Password Strength**: Validação com passlib bcrypt
+- **Impersonate Control**: Admin pode visualizar como outro utilizador, com restauro automático
 - **OpenAI PII Opt-out**: Configuração de opt-out de treino de dados na conta OpenAI
+- **Prompt Injection Protection**: Mitigação de prompt injection em análise de PDFs
+- **SPA Rewrite Security**: Vercel rewrites excluem `/assets/` para evitar MIME type attacks

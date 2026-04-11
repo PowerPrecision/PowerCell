@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from database import db
 from models.auth import UserRole
@@ -46,16 +46,28 @@ async def create_activity(data: ActivityCreate, user: dict = Depends(get_current
 
 
 @router.get("/activities", response_model=List[ActivityResponse])
-async def get_activities(process_id: str, user: dict = Depends(get_current_user)):
-    """Get all activities for a process"""
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    if user["role"] == UserRole.CLIENTE and process["client_id"] != user["id"]:
-        raise HTTPException(status_code=403, detail="Acesso negado")
-    
-    activities = await db.activities.find({"process_id": process_id}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+async def get_activities(
+    process_id: Optional[str] = Query(None, description="If provided, filter by process. If omitted, return recent global activities."),
+    limit: int = Query(50, ge=1, le=200, description="Max number of activities to return"),
+    user: dict = Depends(get_current_user)
+):
+    """Get activities for a process or recent global activities"""
+    if process_id:
+        # Filter by specific process
+        process = await db.processes.find_one({"id": process_id})
+        if not process:
+            raise HTTPException(status_code=404, detail="Processo não encontrado")
+        
+        if user["role"] == UserRole.CLIENTE and process.get("client_id") != user["id"]:
+            raise HTTPException(status_code=403, detail="Acesso negado")
+        
+        activities = await db.activities.find({"process_id": process_id}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    else:
+        # Return recent activities across all processes (admin/staff only)
+        if user["role"] == UserRole.CLIENTE:
+            raise HTTPException(status_code=403, detail="Acesso negado")
+        
+        activities = await db.activities.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
     
     # Filtrar atividades com dados válidos (podem existir registos antigos incompletos)
     valid_activities = []
