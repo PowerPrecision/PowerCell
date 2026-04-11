@@ -80,7 +80,7 @@ const KanbanCard = memo(({
     <Card
       className={`cursor-pointer hover:shadow-md transition-shadow relative ${
         isCurrentlyDragging ? "opacity-50" : ""
-      } ${hasSecondProponent ? "border-l-4 border-indigo-400" : ""}`}
+      } ${hasSecondProponent ? "border-l-4 border-blue-600" : ""}`}
       draggable
       onDragStart={handleDragStart}
       onClick={handleClick}
@@ -153,10 +153,9 @@ const KanbanCard = memo(({
           {/* Linha 5: Badges e indicadores */}
           <div className="flex items-center gap-1 flex-wrap">
             {hasSecondProponent && (
-              <Badge variant="outline" className="text-[9px] bg-indigo-50 text-indigo-700 border-indigo-200 px-1 py-0 h-4">
-                <Users className="h-2.5 w-2.5 mr-0.5" />
-                2º Proponente
-              </Badge>
+              <span className="text-[9px] bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium whitespace-nowrap">
+                👥 2 Proponentes
+              </span>
             )}
             {process.under_35 && (
               <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 px-1 py-0 h-4">

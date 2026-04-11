@@ -161,6 +161,7 @@ const RichTextEditor = ({
   minHeight = 200,
   error = false,
   toolbarOptions = null,
+  advanced = false,
 }) => {
   
   // Configuração padrão da toolbar
@@ -175,6 +176,21 @@ const RichTextEditor = ({
     ['clean'],
   ], []);
 
+  // Toolbar completa para templates de email
+  const advancedToolbar = useMemo(() => [
+    [{ 'header': [1, 2, 3, false] }],
+    [{ 'font': [] }],
+    [{ 'size': ['small', false, 'large', 'huge'] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ 'color': [] }, { 'background': [] }],
+    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+    [{ 'indent': '-1' }, { 'indent': '+1' }],
+    [{ 'align': [] }],
+    ['link', 'image'],
+    ['blockquote', 'code-block'],
+    ['clean'],
+  ], []);
+
   // Handlers
   const handleChange = useCallback((content) => {
     if (onChange) {
@@ -184,19 +200,19 @@ const RichTextEditor = ({
 
   // Módulos do Quill
   const modules = useMemo(() => ({
-    toolbar: toolbarOptions || defaultToolbar,
+    toolbar: toolbarOptions || (advanced ? advancedToolbar : defaultToolbar),
     clipboard: {
       // Permitir colagem de HTML formatado
       matchVisual: false,
     },
-  }), [toolbarOptions, defaultToolbar]);
+  }), [toolbarOptions, defaultToolbar, advancedToolbar, advanced]);
 
   // Formatos permitidos
   const formats = useMemo(() => [
     'header', 'font', 'size',
     'bold', 'italic', 'underline', 'strike',
     'color', 'background',
-    'list', 'bullet', 'indent',
+    'list', 'indent',
     'align',
     'link',
     'image',
@@ -207,6 +223,7 @@ const RichTextEditor = ({
     rich-text-editor
     ${readOnly ? 'readonly' : ''}
     ${error ? 'error' : ''}
+    ${advanced ? 'prose max-w-none' : ''}
     ${className}
   `.trim();
 
