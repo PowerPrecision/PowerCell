@@ -25,6 +25,7 @@ import PublicClientForm from "./pages/PublicClientForm";
 import RGPDPage from "./pages/RGPDPage";
 import TempLinkUploadPage from "./pages/TempLinkUploadPage";
 import TempLinkDownloadPage from "./pages/TempLinkDownloadPage";
+import ClientPortal from "./pages/ClientPortal";
 
 // ====================================================================
 // PÁGINAS PESADAS COM CODE SPLITTING (lazy loading)
@@ -242,6 +243,9 @@ function App() {
           
           {/* Temporary Link Download - for client document download */}
           <Route path="/download/:token" element={<TempLinkDownloadPage />} />
+          
+          {/* Client Portal - Magic Link (passwordless, no auth required) */}
+          <Route path="/portal/:token" element={<ClientPortal />} />
           
           {/* Staff login */}
           <Route path="/login" element={<LoginPage />} />

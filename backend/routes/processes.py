@@ -16,6 +16,7 @@ WORKFLOW DE 14 FASES:
 Autor: PowerCell Development Team
 ====================================================================
 """
+import os
 import uuid
 import logging
 import re
@@ -38,6 +39,7 @@ from services.notification_service import (
 )
 from services.history import log_history, log_data_changes
 from services.audit_trail_service import log_audit_event
+from services.audit_cdc import inject_cdc_context
 from services.alerts import (
     get_process_alerts,
     check_property_documents,
@@ -89,6 +91,9 @@ from utils.input_sanitization import (
 )
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
+
+# Portal imports
+from services.portal_security import create_client_magic_token, PORTAL_TOKEN_VALIDITY_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +242,56 @@ router = APIRouter(prefix="/processes", tags=["Processes"])
 # ====================================================================
 # ENDPOINTS DE CRIAÇÃO
 # ====================================================================
+
+@router.post("/{process_id}/generate-magic-link")
+async def generate_magic_link(
+    process_id: str,
+    user: dict = Depends(require_staff())
+):
+    """
+    Gera um Magic Link para o Portal do Cliente.
+
+    Permite que um consultor/admin gere um link seguro para o cliente
+    acompanhar o seu processo e submeter documentos, sem necessidade
+    de registo ou password.
+
+    O link é um JWT com validade de 90 dias que contém:
+    - role: "client_portal" (isolado de staff)
+    - process_id: ID do processo
+
+    Returns:
+    - magic_link: URL completa para enviar ao cliente
+    - token: JWT token (para debug/teste)
+    - expires_in_days: Validade do link
+    """
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    # Gerar magic link JWT
+    token = create_client_magic_token(process_id)
+
+    # Construir URL completa
+    frontend_url = os.environ.get("FRONTEND_URL", "https://app.powercell.pt")
+    magic_link = f"{frontend_url}/portal/{token}"
+
+    logger.info(
+        f"Magic link gerado por {user.get('email')} para processo {process_id} "
+        f"(cliente: {process.get('client_name', 'N/A')})"
+    )
+
+    return {
+        "magic_link": magic_link,
+        "token": token,
+        "process_id": process_id,
+        "client_name": process.get("client_name", ""),
+        "client_email": process.get("client_email", ""),
+        "expires_in_days": PORTAL_TOKEN_VALIDITY_DAYS,
+    }
+
 
 @router.post("", response_model=ProcessResponse)
 async def create_process(data: ProcessCreate, user: dict = Depends(get_current_user)):
@@ -1302,13 +1357,15 @@ async def move_process_kanban(
     is_active = new_status not in inactive_statuses
     
     # Update process
+    move_update_data = {
+        "status": new_status, 
+        "is_active": is_active,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    inject_cdc_context(move_update_data, user)
     await db.processes.update_one(
         {"id": process_id},
-        {"$set": {
-            "status": new_status, 
-            "is_active": is_active,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }}
+        {"$set": move_update_data}
     )
     
     # === CACHE INVALIDATION: Mover processo altera KPIs (concluídos/ativos/desistências) ===
@@ -1368,9 +1425,11 @@ async def move_process_kanban(
     if new_status == "fase_bancaria" and old_status != "fase_bancaria":
         # Guardar data de aprovação se ainda não existir
         if not process.get("credit_data", {}).get("bank_approval_date"):
+            bank_approval_data = {"credit_data.bank_approval_date": datetime.now().strftime("%Y-%m-%d")}
+            inject_cdc_context(bank_approval_data, user)
             await db.processes.update_one(
                 {"id": process_id},
-                {"$set": {"credit_data.bank_approval_date": datetime.now().strftime("%Y-%m-%d")}}
+                {"$set": bank_approval_data}
             )
         # Notificar sobre o countdown
         updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
@@ -1698,7 +1757,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     
     # Encriptar campos sensíveis antes de guardar
     update_data = encrypt_sensitive_data(update_data)
-    
+    inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
@@ -1927,6 +1986,7 @@ async def assign_process(
                     old_name = old_user.get("name") if old_user else None
                 await log_history(process_id, user, "Atribuiu parceiro", "assigned_parceiro_id", old_name, parceiro_user["name"])
     
+    inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     
     # === CACHE INVALIDATION: Atribuição altera KPIs dos users envolvidos ===
@@ -2013,6 +2073,7 @@ async def assign_me_to_process(
     else:
         raise HTTPException(status_code=403, detail="O seu papel não permite atribuir-se a processos")
     
+    inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     await log_history(process_id, user, f"Atribuiu-se como {assignment_type}", f"assigned_{assignment_type}_ids", None, user_name)
     
@@ -2083,6 +2144,7 @@ async def unassign_me_from_process(
     if not removed_from:
         raise HTTPException(status_code=400, detail="Não está atribuído a este processo")
     
+    inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     
     return {
@@ -2206,6 +2268,7 @@ async def resolve_data_conflict(
     ai_suggestions.pop(suggestion_index)
     update_data["ai_suggestions"] = ai_suggestions
     
+    inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     
     return {
@@ -2254,14 +2317,16 @@ async def confirm_client_data(
         )
     
     now = datetime.now(timezone.utc).isoformat()
+    confirm_update_data = {
+        "is_data_confirmed": confirmed,
+        "data_confirmed_at": now if confirmed else None,
+        "data_confirmed_by": user["id"] if confirmed else None,
+        "updated_at": now
+    }
+    inject_cdc_context(confirm_update_data, user)
     await db.processes.update_one(
         {"id": process_id},
-        {"$set": {
-            "is_data_confirmed": confirmed,
-            "data_confirmed_at": now if confirmed else None,
-            "data_confirmed_by": user["id"] if confirmed else None,
-            "updated_at": now
-        }}
+        {"$set": confirm_update_data}
     )
     
     action = "confirmou" if confirmed else "desbloqueou"
@@ -2345,6 +2410,7 @@ async def add_client_to_process(
                 "phone": client.get("contacto", {}).get("telefone")
             }
     
+    inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     
     # Atualizar process_ids do cliente
@@ -2430,6 +2496,7 @@ async def remove_client_from_process(
     else:
         update_data["titular2_data"] = None
     
+    inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     
     # Remover process_ids do cliente

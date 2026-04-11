@@ -88,6 +88,7 @@ from routes.annotations import router as annotations_router
 from routes.finance import router as finance_router
 from routes.admin_migration import router as admin_migration_router
 from routes.task_logs import router as task_logs_router
+from routes.portal import router as portal_router
 
 # Configuração Sentry
 if SENTRY_DSN:
@@ -452,6 +453,7 @@ app.include_router(annotations_router, prefix="/api")
 app.include_router(finance_router, prefix="/api")
 app.include_router(admin_migration_router, prefix="/api")
 app.include_router(task_logs_router, prefix="/api")
+app.include_router(portal_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
@@ -651,6 +653,19 @@ async def startup():
         logger.info("💾 Backup scheduler iniciado - backup diário às 03:00 UTC")
     except (IOError, OSError, ValueError, ImportError) as backup_err:
         logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
+
+    # Iniciar CDC Audit Listener (Change Data Capture para compliance)
+    # Monitoriza alterações em processes/document_metadata via Change Stream
+    # e regista eventos na coleção compliance_audit_logs.
+    # Roles em modo fantasma (ex: indexacao) são automaticamente excluídas.
+    try:
+        from services.audit_cdc import cdc_listener
+        cdc_task = asyncio.create_task(cdc_listener.start())
+        _background_tasks.add(cdc_task)
+        cdc_task.add_done_callback(_background_tasks.discard)
+        logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
+    except (IOError, OSError, ValueError, ImportError) as cdc_err:
+        logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
