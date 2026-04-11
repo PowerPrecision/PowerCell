@@ -3,163 +3,136 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [Não publicado]
+## [2025-06-27] - Correções de Build e Resiliência (Vercel + Rate Limiting)
+
+### Corrigido
+- **Vercel MIME type crash (`dbfab8a`)**: O rewrite `"/(.*)"` no `vercel.json` interceptava pedidos a chunks JS em `/assets/`, retornando `index.html` (text/html) em vez do ficheiro JS. Corrigido com negative lookahead: `/((?!assets|_next|favicon\.ico|robots\.txt|manifest\.json|sw\.js|workbox-|icon-.*\.png).*)`.
+- **LazyChunkErrorBoundary(`dbfab8a`)**: Adicionados 4 novos padrões de deteção (`text/html`, `MIME type`, `Unexpected token`, `Script error`) para capturar erros de stale deployments que antes causavam crash na ErrorBoundary do Sentry.
+- **MyClientsPage JSX crash (`fd84f29`)**: Removido `</div>` orfão na secção de filtros que causava 4 erros cascata de mismatch de tags no Vercel build.
+- **429 Rate Limit cascade (`4268eec`)**: 
+  - **API Interceptor**: Adicionado retry com exponential backoff (3 tentativas: 2s → 4s → 8s + jitter), respeita header `Retry-After`, suprime toast durante retries para evitar spam de erros.
+  - **NotificationsDropdown**: Polling com exponential backoff em 429 (30s → 60s → 120s → 5min max), reset após 3 sucessos consecutivos.
+- **StatisticsPage crash (`97bfed9`)**: `X.filter is not a function` — a API retorna resposta paginada `{'items': [], 'total': 0}` mas o frontend chamava `.filter()` diretamente no objeto. Adicionados guards `Array.isArray()` em `processes`, `leadsStats.funnel_data`, `leads_by_source`, `top_consultors`.
+- **Os Meus Processos - Filtros estritos (`ec4c8f6`)**: Exclusão por defeito de status terminais (concluido, arquivo, perdido, desistencias, cancelado) com toggle "Mostrar Concluídos".
+
+### Alterado
+- **AdminDashboard reestruturado (`ec4c8f6`)**: 4 KPI cards (Processos Ativos, Valor Portfolio, Taxa Conversão, Novos Hoje), gráfico funnel (Lead → Submetido → Aprovado → Escriturado), feed de atividade recente.
+- **Impersonate bar layout (`ec4c8f6`)**: Corrigido z-index e margin-top para não sobrepor header/sidebar.
+
+## [2025-06-26] - CI, UX e Qualidade
+
+### Adicionado
+- **UX v2 (`fa28564`)**: Credenciais do 2º proponente na tab Financeiros, badge forte no Kanban, fix preview RGPD, editor RichText avançado com prop `advanced`.
+
+### Corrigido
+- **SystemConfigPage JSX (`1b91454`)**: Comentário JSX `{/* ... */}` não fechado na secção de Pré-visualização.
+- **KanbanCard template literal (`7d99aca`)**: Backtick não fechado na deteção de 2º proponente.
+- **Quill bullet format (`6265964`)**: Removido `'bullet'` inválido da config de formats do Quill (é um valor de `'list'`, não um format independente).
+- **CI Node.js 24 (`6c6cb65`)**: Re-habilitado Node.js 24 no GitHub Actions (ghost submodule já removido em commit anterior).
+- **Backend tests (`1e63fac`)**: Adaptados testes de processos para resposta paginada da API (`{'items': [...], 'total': N}`) e relaxada assertion de status default no delete.
+- **Test async loop (`f84765d`)**: Resolvido `Future attached to a different loop` errors nos testes backend.
+
+## [2025-06-25] - Melhorias de UX, Sidebar e Editor HTML
+
+### Adicionado
+- **AuditTrailPage DashboardLayout**: Envolvido conteúdo com `DashboardLayout` para consistência visual.
+- **Sidebar accordion fix**: Corrigido `onOpenChange` com `e.stopPropagation()` nos links internos. Adicionadas rotas em falta ao `getInitialOpenSections()`.
+- **Rich Text Editor RGPD**: Substituído `<Textarea>` por `<RichTextEditor>` com `readOnly` baseado em permissões. Pré-visualização com `RichTextViewer`.
+- **Kanban 2nd Proponent Indicator**: Detecção de 2º proponente, borda lateral indigo, badge "2º Proponente".
+- **Tasks Panel reposicionado**: Movido para coluna direita (sidebar) nos detalhes do processo.
+- **RGPD confirmation dialog**: Confirmação `window.confirm()` antes de enviar email de RGPD.
+- **Magic Link Portal Button**: Botão "Portal do Cliente" com opções copiar link / enviar por email.
+- **CI Pipeline**: GitHub Actions com frontend CI (ESLint + Vite build) e backend CI (Flake8 + Pytest).
+
+### Corrigido
+- **CI ghost submodule**: Removido `PowerCell` submodule fantasma do git index (`2e232ad`).
+- **pytest.ini multiline**: Removida continuação de linha com backslash que causava parsing error (`9de712b`).
+- **DashboardShared unsafe**: Corrigido padrão unsafe para `client_name`/`client_email` potencialmente undefined.
 
 ## [2026-04-02] - Correções de Bugs
 
 ### Corrigido
-- **Erro 500 em PATCH /system-config/dsti_analysis**: A secção `dsti_analysis` estava definida em CONFIG_FIELDS mas não tinha handler na função `update_config_section()`. Adicionado handler e import de `DSTIConfig` para actualizar correctamente as configurações de análise DSTI (enabled, high_risk_threshold, critical_risk_threshold).
-- **AWS Secret Key - Olho de revelação não funcionava**: O endpoint `/reveal-secrets` tinha a sua própria lista de `sensitive_fields` que não incluía `aws_secret_access_key`. Ao clicar no olho, a API não retornava o valor real. Adicionado `aws_secret_access_key` à lista de campos reveláveis.
-- **Auto-fill CC - 5 bugs corrigidos end-to-end**: O fluxo de extração de dados do Cartão de Cidadão por IA e preenchimento automático não funcionava correctamente:
-  - **cc_validity ignorado**: O campo `cc_validity` (validade do CC) era extraído pela IA mas fazia drop silencioso no `ProcessDetails.js`. Adicionado ao handler.
-- **Perfil Indexação actualizado**: Permissões do role `indexacao` refinadas para corresponder à função real:
-  - **Backend**: Indexação agora vê APENAS os processos que lhe estão atribuídos (`assigned_indexacao_id`) em vez de todos os processos. Aplicado em `get_processes`, `get_processes_paginated`, `get_kanban_board` e `get_my_clients`.
-  - **Backend**: `can_view_process()` agora verifica se o processo está atribuído ao indexação antes de permitir acesso.
-  - **Frontend**: Sidebar simplificado: removidos Dashboard e Kanban, adicionado "Meus Clientes" como página principal.
-  - **Frontend**: Adicionadas labels e cores para os roles `indexacao`, `administrativo` e `diretor` que faltavam no badge do utilizador.
-  - **Campos divergentes não aplicáveis**: Quando um campo já tinha valor na BD mas o documento mostrava valor diferente (ex: CC renovado), os dados eram exibidos mas impossíveis de aplicar. Agora `comparison.different` é incluído em `auto_fill_suggestions` com `type="override"`.
-  - **Dados não persistiam no backend**: O callback `onAIDataExtracted` apenas actualizava React state, sem guardar na BD. Agora chama automaticamente `ai-apply-suggestions` quando não há conflitos.
-  - **Conflitos nunca detectados**: A lógica de conflitos verificava `auto_fill_suggestions` (que só tinha campos vazios). Agora usa `comparison.different` para gerar conflitos reais.
-  - **Campos em falta no endpoint apply**: Adicionados `entidade_empregadora`, `categoria_profissional`, `subsidiario_alimentacao` e `artigo_matricial` ao mapeamento do endpoint `apply_ai_suggestions`.
-  - **Novo**: Botão "Usar valor do documento" nos campos divergentes do dialog de análise IA.
-- **Mapeamento automático de pastas não movia ficheiros**: O endpoint `POST /organize/{processId}` apenas criava pastas no S3 e retornava contadores falsos, mas **nunca movia os ficheiros**. Corrigido para chamar `s3_service.rename_file()` e mover efectivamente cada ficheiro para a pasta correcta (IRS → Financeiros, CC → Identificação, Caderneta → Imóvel, etc.).
-  - **source_path perdido**: O frontend tinha o S3 path dos ficheiros mas não o enviava para o endpoint de organização. Corrigido para juntar `source_path` em ambas as funções (`handleAIAnalysis` e `handleQuickOrganize`).
-  - **Path sem `/` separador**: `s3_storage.py:move_file()` tinha bug `f"{client_folder}{target_folder}"` (sem `/`) — corrigido para `f"{client_folder}/{target_folder}"`.
-  - **Mapeamento de pastas desalinhado**: O endpoint de organização usava sub-pastas (`Financeiros/IRS`, `Financeiros/Recibos`) que não correspondiam às categorias do S3. Unificado com `DOCUMENT_CATEGORIES` do `ai_document_analyzer.py` (pastas flat: Financeiros, Bancários, Imóvel, etc.).
-- **Métrica de confiança da IA por campo**: Implementado sistema completo de confiança (0.0-1.0) por campo extraído:
-  - **Prompt IA actualizado**: Agora retorna `confianca_campos` (confiança individual por campo) em vez de apenas confiança geral do documento. Instruções detalhadas para níveis: 1.0 (claro), 0.9 (legível), 0.8 (parcial), 0.7 (difícil), ≤0.5 (muito ilegível).
-  - **Backend**: `analyze_multiple_documents` agora popula `field_confidence` mapando campos extraídos para campos do cliente, mantendo a maior confiança quando múltiplos documentos cobrem o mesmo campo.
-  - **Frontend — ProcessDetails**: Campos com confiança < 0.8 ficam com borda amarela/vermelha e badge "IA XX%" no formulário (NIF, Documento CC, Data Nascimento, Validade CC). Toast de aviso lista campos com baixa confiança.
-  - **Frontend — S3FileManager Dialog**: Campos no dialog de análise mostram badge de confiança (%). Campos < 0.8 ficam com fundo amarelo e aviso "⚠️ Baixa confiança — verifique manualmente".
-  - A IA assiste em vez de substituir: dados com baixa confiança são destacados para revisão humana obrigatória.
+- **Erro 500 em PATCH /system-config/dsti_analysis**: A secção `dsti_analysis` estava definida em CONFIG_FIELDS mas não tinha handler na função `update_config_section()`. Adicionado handler e import de `DSTIConfig`.
+- **AWS Secret Key - Olho de revelação**: `aws_secret_access_key` não estava na lista de campos reveláveis no endpoint `/reveal-secrets`.
+- **Auto-fill CC - 5 bugs corrigidos end-to-end**: Fluxo de extração de dados do CC por IA:
+  - `cc_validity` era extraído mas fazia drop silencioso no frontend.
+  - Dados divergentes (CC renovado) com `type="override"`.
+  - Callback `onAIDataExtracted` agora guarda na BD automaticamente.
+  - Conflitos usam `comparison.different` em vez de `auto_fill_suggestions`.
+  - Campos em falta no endpoint `apply_ai_suggestions`: `entidade_empregadora`, `categoria_profissional`, `subsidiario_alimentacao`, `artigo_matricial`.
+- **Perfil Indexação**: Permissões refinadas — vê APENAS processos atribuídos.
+- **Mapeamento automático de pastas**: Ficheiros agora movem-se no S3 (antes só criava pastas).
+- **Métrica de confiança da IA por campo**: Sistema 0.0-1.0 por campo, alertas visuais para < 0.8.
 
 ## [2026-04-01] - Funcionalidades e Correções
 
 ### Adicionado
-- **Auto-Rascunhos de E-mails por IA**: Sistema automático de geração de rascunhos de e-mails quando documentos em falta são detetados pela análise de IA. Inclui: toggle on/off via SystemConfig, 6 endpoints REST (CRUD de rascunhos + envio), tab "Rascunhos Pendentes" no StaffDashboard, integração com `analyze_multiple_documents()`, deduplicação por tipo de documento.
-- **Sistema de Anotações Contextuais em Documentos**: Sistema completo de anotações em PDFs com 5 tipos (Nota, Questão, Aviso, Financeiro, Aprovação). Inclui: backend (modelo, serviço, 7 endpoints REST, índices MongoDB), frontend (PDFAnnotationViewer com pdfjs-dist ~1540 linhas, zoom, navegação, sidebar, filtros), integração com botão 🗨️ no S3FileManager (lista e grelha).
-- **Trilhas de Auditoria (Audit Trails)**: Sistema completo de registo de auditoria que rastreia todas as alterações aos processos. Inclui: colecção MongoDB separada (`audit_trail`), IP tracking via headers, 4 origens (web, api, ai_automation, email), acompanhamento de aprovações/rejeições de IA, página admin com filtros avançados e exportação CSV, toggle on/off via SystemConfig, retenção configurável.
+- **Auto-Rascunhos de E-mails por IA**: Toggle on/off, 6 endpoints REST, tab no StaffDashboard.
+- **Sistema de Anotações Contextuais em Documentos**: 5 tipos, backend + frontend completo.
+- **Trilhas de Auditoria (Audit Trails)**: Colecção dedicada, IP tracking, 4 origens, exportação CSV.
 
 ## [2026-04-01] - Correções e Melhorias
 
 ### Corrigido
-- **AWS Secret Access Key visível na UI**: O campo `aws_secret_access_key` não estava na lista de campos sensíveis, fazendo com que o valor real fosse retornado em vez de ser mascarado. Adicionado à lista de campos sensíveis no backend (rotas e serviço de system_config).
-- **Campos de password adicionados à lista de mascaragem**: Todos os campos de password foram adicionados à lista de campos sensíveis para mascaragem adequada na interface de configurações: `aws_secret_access_key`, `smtp_password_2`, `imap_password_2`, `hcpro_password`, `decisoes_password`, `doutorfinancas_password`, `custom_portal_password`.
-- **Erros 403 DSTI / 404 send-documentation**: Investigação completa confirma que nenhum destes erros é originado pelo código atual do frontend. O cálculo DSTI é puramente client-side (DSTICalculator.js). O endpoint `POST /emails/send-documentation/{id}` existe corretamente em emails.py. Estes erros provavelmente resultam de cache do browser ou de uma versão antiga do frontend em produção (Render).
-
-### Adicionado
-- **Contador de Chamadas ao Agente IA**: Nova secção "Chamadas ao Agente IA" na página de Treino do Agente IA, mostrando:
-  - Total de chamadas efectuadas (incrementado automaticamente a cada análise de documento)
-  - Data e autor da última execução
-  - O contador é persistido na colecção `ai_config` da MongoDB
-  - Backend: `analyze_document_with_ai()` agora incrementa o contador a cada análise bem-sucedida
-  - Backend: Endpoint existente `GET /api/admin/ai-training/stats` já fornecia os dados (a UI agora consome-os)
-  - Backend: Endpoint existente `POST /api/admin/ai-training/prompt/execute` disponível para execução manual
+- **AWS Secret Access Key visível na UI**: Adicionado à lista de campos sensíveis.
+- **Campos de password**: Todos os campos password adicionados à lista de mascaragem.
 
 ## [2026-03-24] - Pré-visualização para Consultores e Correções de Build
 
-### Nota
-- **Quadro Origem dos Dados**: Visível apenas para o role ADMIN (por design)
-
 ### Adicionado
-- **Pré-visualização do Formulário para Consultores**: Botão "Pré-visualizar Formulário" na página de Registos de Clientes. Abre o formulário completo (6 passos) em modo navegável sem obrigar a preencher campos. Rota: `/formulario-consultor`
-- Banner "Modo de Pré-visualização" com botão de voltar
-- **Ver processos sem atualização**: Botão "Ver processos" no Dashboard expande lista detalhada com Cliente, Estado, Consultor, Dias sem atualização e Urgência. Cada linha é clicável e redireciona para o processo
-- **Link S3 automático**: Ao criar processo (atribuir cliente), é gerado automaticamente o campo `s3_folder` no formato `s3://powerprecision-docs-storage/Documentação Clientes/Nome_Do_Cliente/`
-
-### Alterado
-- **Tabela de Registos de Clientes**: Filtro por defeito alterado para mostrar apenas clientes **sem processo**. Quando o processo é criado, o cliente desaparece da vista principal
-- **Header do formulário**: Link "Acesso Colaborador" escondido no modo de pré-visualização
+- **Pré-visualização do Formulário para Consultores**: Botão na página de Registos, rota `/formulario-consultor`.
+- **Ver processos sem atualização**: Lista detalhada expandível no Dashboard.
+- **Link S3 automático**: Gerado ao criar processo.
 
 ### Corrigido
-- **Build de produção**: Separada a instalação de dependências no Dockerfile em 2 passos (PyPI público + índice privado para `emergentintegrations`). Removidos pacotes conflituosos do `requirements.txt` (`scraperapi-sdk`, `litellm`)
-- **Processos sem atualização**: Lista de estados finais corrigida para incluir todas as variações (`concluidos`, `desistencias`, `desistência`, `arquivado`, `perdido`, `eliminado`). Processos concluídos e desistências já não aparecem no alerta
+- **Build de produção**: Separada instalação em 2 passos (PyPI público + índice privado).
+- **Processos sem atualização**: Lista de estados finais corrigida.
 
-## [2026-03-24] - Templates e Pré-visualização
-
-### Adicionado
-- **Templates de Formulário**: 3 templates de sistema pré-definidos (Crédito Habitação, Refinanciamento, Crédito Pessoal)
-- **Guardar como Template**: Admin pode guardar a configuração atual como template reutilizável
-- **Ativar Template**: Substituir configuração do formulário com 1 clique
-- **Duplicar Template**: Criar cópia editável de qualquer template
-- **Pré-visualização de Templates**: Ver como o formulário ficará antes de ativar, com renderização mock dos campos
-- API endpoints: GET/POST/DELETE `/api/admin/form-config/templates/*`, GET `/api/admin/form-config/templates/{id}/preview`
-
-## [2026-03-24] - Campos Personalizados
+## [2026-03-24] - Templates e Campos Personalizados
 
 ### Adicionado
-- **Campos Personalizados Dinâmicos**: Admin pode criar campos de 6 tipos (texto, dropdown, checkbox, número, data, sim/não)
-- **Editor de Opções Inline**: Para dropdowns e checkboxes, adicionar/remover opções em tempo real
-- **Atribuição a qualquer passo**: Campos podem ser adicionados a passos 1-5 ou ao passo 6 "Informações Adicionais"
-- **Renderização Automática**: Campos aparecem no formulário público sem alterações de código
-- **Eliminação de Campos**: Campos personalizados podem ser eliminados (campos do sistema protegidos)
-- Endpoint público: GET `/api/public/form-config` para obter campos personalizados
-- API endpoints: POST/DELETE `/api/admin/form-config/custom-field`
-
-## [2026-03-24] - Gestão de Perfis e Formulário
-
-### Adicionado
-- **Página Configurações de Perfis** (`/configuracoes-perfis`): Gestão de permissões por utilizador (páginas visíveis + ações permitidas)
-- **Página Gestão do Formulário** (`/gestao-formulario`): Ativar/desativar campos, marcar como obrigatórios
-- Links na sidebar do admin/CEO para as novas páginas
-- Campo `permissions` no modelo de utilizador (pages + actions)
-
-## [2026-03-24] - Melhorias no Formulário Público
-
-### Adicionado
-- Campo "Trabalha no estrangeiro?" no Step 4 do formulário e nos detalhes do processo
-- Opção "Nenhuma" nos bancos do Step 5 (créditos ativos e simulações)
-- Labels obrigatórios com `*` vermelho e texto "(obrigatório)"
-- Dialog de detalhes do cliente mostra TODOS os campos (incluindo vazios com "Não preenchido")
-
-### Corrigido
-- **Bug crítico**: `Cannot read properties of undefined (reading 'includes')` no PublicClientForm
-  - Causa: Drafts antigos no localStorage não tinham os arrays `caracteristicas`, `bancos_creditos`, `bancos_simulacoes`
-  - Fix: Merge de draft com defaults + safety guards `(array || []).includes()`
-- Corrigido padrão unsafe em `DashboardShared.js` para `client_name`/`client_email` potencialmente undefined
+- **Templates de Formulário**: 3 pré-definidos + duplicar + ativar.
+- **Campos Personalizados Dinâmicos**: 6 tipos, editor de opções inline.
+- **Página Configurações de Perfis**: Gestão de permissões por utilizador.
+- **Página Gestão do Formulário**: Ativar/desativar campos, templates.
 
 ## [2026-03-24] - Backlog P2 Completo
 
 ### Adicionado
-- **O22 - Motor de Automação No-Code**: CRUD de regras "Se X, Então Y" com triggers (process_created, status_changed, etc.) e ações (send_notification, change_status, assign_user)
-- **O11 - WebSocket Fallback**: Polling HTTP automático quando WebSocket falha (MAX_WS_FAILS=3, 30s interval)
-- **O19 - Testes Acessibilidade**: axe-core integrado no ambiente de desenvolvimento (consola do browser)
-- **O5 - Encriptação**: Fernet AES-128-CBC aplicada ao formulário de registo público
+- **Motor de Automação No-Code**: CRUD de regras "Se X, Então Y".
+- **WebSocket Fallback**: Polling HTTP automático (MAX_WS_FAILS=3).
+- **Testes Acessibilidade**: axe-core em dev.
+- **Encriptação**: Fernet AES-128-CBC no formulário público.
 
 ## [2026-03-23] - Integrações e Cache
 
 ### Adicionado
-- **O2 - Sentry**: SDK configurado no frontend e backend para monitorização de erros em tempo real
-- **O13 - Redis Cache**: Cache com Upstash Redis nos endpoints de estatísticas (TTL 60-300s, degradação graciosa)
-- **Notificações de Processos Parados**: Tarefa agendada para detetar processos sem atividade (>7d urgente, >14d atrasado, >21d crítico)
-- **O24 - Audit Trail Unificado**: Componente "Filme da Lead" integrado nos detalhes do processo
+- **Sentry**: SDK frontend + backend.
+- **Redis Cache**: Cache com Upstash Redis (TTL 60-300s).
+- **Notificações de Processos Parados**: Tarefa agendada (>7d, >14d, >21d).
+- **Audit Trail Unificado**: Componente "Filme da Lead".
 
 ## [2026-03-23] - Correções em Lote (P0/P1)
 
 ### Adicionado
-- **O6 - Skeletons**: Loading skeletons em 18+ páginas
-- **O7 - Filtros Kanban**: Filtros por data e urgência no quadro Kanban
-- **O8 - Undo Toast**: Ação de desfazer com toast em operações destrutivas
-- **O9 - Card View Mobile**: Vista de cards para 3 páginas em dispositivos móveis
-- **O10 - Cursor Pagination**: Paginação baseada em cursor no endpoint de clientes
-- **O3 - Rate Limiting**: Aplicado a uploads (30/min), deletes (20/min), IA (10/min)
-- **O4 - JWT Lifecycle**: Access token 24h + refresh token 7d
+- **Skeletons**: Loading skeletons em 18+ páginas.
+- **Filtros Kanban**: Por data e urgência.
+- **Undo Toast**: Ação de desfazer em operações destrutivas.
+- **Card View Mobile**: Vista de cards para 3 páginas.
+- **Cursor Pagination**: No endpoint de clientes.
+- **Rate Limiting**: Uploads (30/min), deletes (20/min), IA (10/min).
+- **JWT Lifecycle**: Access token 24h + refresh token 7d.
 
 ### Corrigido
-- E1.2 - Bloco "Origem dos Dados" visibilidade
-- E1.3 - Cores dos bancos no formulário público
-- E1.6 - Mapeamento S3 correto
-- E1.8 - Botões documentos overflow
-- E1.9 - Todos os dados do formulário guardados
-- E2 - Validação formulário + refinanciamento
-- M1-M9 - Todas as melhorias solicitadas
+- E1.2 a E2 - Vários bugs de UI e validação.
+- M1-M9 - Todas as melhorias solicitadas.
 
 ## [2026-03-20] - Correções de Bugs
 
 ### Corrigido
-- **RGPD Status Endpoint**: Validação de UUID, tratamento de erros melhorado
-- **Temp Links Create Endpoint**: Validação de `process_id` vazio, logging melhorado
-- **RGPD Service**: Validação de entrada, parsing de datas corrigido
+- **RGPD Status Endpoint**: Validação UUID, tratamento de erros.
+- **Temp Links Create**: Validação de `process_id` vazio.
+- **RGPD Service**: Validação de entrada, parsing de datas.
 
 ### Documentação
-- Criado README.md e CHANGELOG.md
+- Criado README.md e CHANGELOG.md.

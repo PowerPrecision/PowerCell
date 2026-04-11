@@ -1,70 +1,50 @@
-# Getting Started with Create React App
+# PowerCell Frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+## Tech Stack
 
-## Available Scripts
+- **React 19** + **Vite 6** (build tool)
+- **Tailwind CSS 4** + **shadcn/ui** (New York style)
+- **TanStack Query v5** (server state cache + mutations)
+- **@dnd-kit** (drag-drop Kanban)
+- **React Router v6** (routing + code splitting)
+- **Zustand** (client state)
+- **Lucide React** (icons)
+- **Sonner** (toast notifications)
+- **Recharts** (charts)
+- **React Quill** (rich text editor)
+- **date-fns** (date formatting, pt locale)
+- **Sentry** (error monitoring)
+- **pdfjs-dist** (PDF viewer + annotations)
 
-In the project directory, you can run:
+## Development
 
-### `npm start`
+```bash
+yarn install        # Install dependencies
+yarn dev            # Start dev server (Vite)
+yarn build          # Production build
+yarn lint           # ESLint check
+```
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Architecture
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- **`src/App.js`** — Router principal com 50+ rotas lazy-loaded, providers, error boundaries
+- **`src/pages/`** — ~50 páginas com lazy loading (`React.lazy()`)
+- **`src/components/ui/`** — Componentes shadcn/ui
+- **`src/components/`** — Componentes de negócio (Kanban, S3FileManager, etc.)
+- **`src/contexts/`** — Auth, Tasks, Theme, UploadProgress providers
+- **`src/hooks/`** — Custom hooks (WebSocket, TanStack Query hooks)
+- **`src/services/api.js`** — Axios instance com interceptors (JWT, 429 retry, refresh)
+- **`src/layouts/DashboardLayout.js`** — Layout principal (sidebar + header)
 
-### `npm test`
+## Key Patterns
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+- **Code Splitting**: Todas as páginas usam `React.lazy()` + `Suspense` para reduzir bundle inicial
+- **Chunk Error Recovery**: `LazyChunkErrorBoundary` deteta stale deployments e faz reload
+- **429 Retry**: API interceptor com 3 retries (2s→4s→8s + jitter), respeita `Retry-After`
+- **Polling Backoff**: Notifications polling escala 30s→5min em caso de rate limiting
+- **WebSocket Singleton**: Uma ligação partilhada entre componentes com backoff exponencial
 
-### `npm run build`
+## Deploy
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+- **Vercel** — SPA rewrites com exclusão de `/assets/` para evitar MIME type errors
+- `vercel.json` — Configuração de rewrites + security headers (HSTS, CSP, X-Frame)
