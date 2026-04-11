@@ -48,15 +48,18 @@ const StatisticsPage = () => {
         canViewAllStats ? getUsers() : Promise.resolve({ data: [] })
       ]);
 
-      setStats(statsRes.data);
+      setStats(statsRes.data || {});
       // API pode retornar resposta paginada {items: [...]} ou array direto
       const processData = processesRes.data;
-      setProcesses(Array.isArray(processData) ? processData : (processData?.items || []));
-      setUsers(Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.items || []));
+      const extractedProcesses = Array.isArray(processData) ? processData : (processData?.items || []);
+      setProcesses(extractedProcesses);
+      const usersData = usersRes.data;
+      setUsers(Array.isArray(usersData) ? usersData : (usersData?.items || []));
       
       // Fetch estatísticas de leads
       await fetchLeadsStats();
     } catch (error) {
+      console.error("Erro ao carregar estatísticas:", error);
       toast.error("Erro ao carregar estatísticas");
     } finally {
       setLoading(false);
@@ -89,7 +92,8 @@ const StatisticsPage = () => {
   };
 
   // Filtrar processos baseado no utilizador selecionado
-  const filteredProcesses = processes.filter(p => {
+  const safeProcesses = Array.isArray(processes) ? processes : [];
+  const filteredProcesses = safeProcesses.filter(p => {
     if (!canViewAllStats || selectedUser === "all") return true;
     return p.assigned_consultor === selectedUser || p.assigned_intermediario === selectedUser;
   });
@@ -326,7 +330,7 @@ const StatisticsPage = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="h-80">
-                  {leadsStats?.funnel_data && (
+                  {leadsStats?.funnel_data && Array.isArray(leadsStats.funnel_data) && (
                     <ResponsiveContainer width="100%" height="100%" minHeight={250}>
                       <BarChart data={leadsStats.funnel_data} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" />
@@ -353,7 +357,7 @@ const StatisticsPage = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="h-80">
-                  {leadsStats?.leads_by_source && leadsStats.leads_by_source.length > 0 ? (
+                  {Array.isArray(leadsStats?.leads_by_source) && leadsStats.leads_by_source.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%" minHeight={250}>
                       <PieChart>
                         <Pie
@@ -447,7 +451,7 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {leadsStats?.top_consultors && leadsStats.top_consultors.length > 0 ? (
+                {Array.isArray(leadsStats?.top_consultors) && leadsStats.top_consultors.length > 0 ? (
                   <div className="space-y-4">
                     {leadsStats.top_consultors.map((consultor, index) => (
                       <div key={index} className="flex items-center gap-4">

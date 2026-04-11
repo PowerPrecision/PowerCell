@@ -1,6 +1,41 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: 5
+Agent: Main Agent
+Task: 4 áreas de melhorias de UX no frontend
+
+Work Log:
+- **TASK 1a - AuditTrailPage DashboardLayout**: Adicionado import de DashboardLayout e envolvido o conteúdo com `<DashboardLayout title="Auditoria">`. Removido padding duplicado (DashboardLayout já fornece padding).
+- **TASK 1b - Sidebar accordion fix**: 
+  - Corrigido `onOpenChange` do Collapsible para usar `e.stopPropagation()` nos links internos, impedindo que o clique num item feche o grupo acordeão.
+  - Adicionadas rotas em falta ao `getInitialOpenSections()`: `/workflow-estados`, `/automation`, `/configuracoes-perfis`, `/gestao-formulario`, `/admin/migracao-rgpd`, `/diagnosticos`.
+- **TASK 2 - Rich Text Editor RGPD**:
+  - Importado `RichTextEditor` e `RichTextViewer` do componente UI existente.
+  - Substituído `<Textarea>` por `<RichTextEditor>` com suporte a `readOnly` baseado em permissões.
+  - Adicionada secção de "Pré-visualização" abaixo do editor com `bg-muted/50 rounded-lg p-4` usando `RichTextViewer`.
+- **TASK 3 - Kanban 2nd Proponent Indicator**:
+  - Adicionada detecção de 2º proponente: `co_buyers`, `compradores` (length > 1), `comprador2`, `segundo_proponente`.
+  - Adicionado `border-l-4 border-indigo-400` ao Card quando existe 2º proponente.
+  - Adicionado badge "2º Proponente" com ícone Users nos indicadores do cartão.
+- **TASK 4a - Move Tasks to right column**:
+  - Movido o bloco TasksPanel (Tarefas) da coluna esquerda (lg:col-span-2) para a coluna direita (sidebar).
+  - Posicionado logo abaixo da secção de Atividade (comments).
+- **TASK 4b - RGPD confirmation dialog**:
+  - Adicionado `window.confirm("Tem a certeza que deseja enviar o email de RGPD para este cliente?")` antes da chamada API no `handleRequestRgpd`.
+- **TASK 4c - Magic Link Portal Button**:
+  - Adicionado botão "Portal do Cliente" com Popover na área de action buttons.
+  - Opção "Copiar Link": chama `generateMagicLink`, copia para clipboard, mostra toast.
+  - Opção "Enviar por Email": chama `sendMagicLinkEmail`, mostra toast de confirmação.
+  - Adicionadas funções `generateMagicLink` e `sendMagicLinkEmail` ao `services/api.js`.
+  - Importado `Link as LinkIcon` dos lucide-react para evitar conflito com react-router-dom.
+
+Stage Summary:
+- 7 ficheiros alterados, 147 inserções, 30 remoções
+- Commit: abd988e "feat: melhorias de UX, correções na sidebar e editor HTML"
+- Files: AuditTrailPage.js, DashboardLayout.js, SystemConfigPage.js, KanbanCard.jsx, ProcessDetails.js, api.js
+
+---
 Task ID: 3
 Agent: Main Agent
 Task: Implementar Pipeline CI/CD com GitHub Actions
