@@ -63,7 +63,7 @@ class GDPRConfig:
     # Batch size para processamento
     batch_size: int = 100
     
-    # Dry run (apenas logar, não anonimizar)
+    # Dry run (apenas registar, não anonimizar)
     dry_run: bool = os.environ.get("GDPR_DRY_RUN", "false").lower() == "true"
     
     def __post_init__(self):

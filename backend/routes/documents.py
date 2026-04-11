@@ -398,7 +398,7 @@ async def upload_file_s3(
                 file_content = validated_content
                 content_type = detected_mime
                 
-                # Atualizar nome do ficheiro se foi convertido para PDF
+                # Actualizar nome do ficheiro se foi convertido para PDF
                 if detected_mime == MIME_TYPE_PDF and not original_filename.lower().endswith('.pdf'):
                     original_filename = original_filename.rsplit('.', 1)[0] + '.pdf' if '.' in original_filename else original_filename + '.pdf'
                     
@@ -1408,7 +1408,7 @@ async def move_file_to_category(
     success = s3_service.rename_file(source_path, new_path)
     
     if success:
-        # Atualizar metadados se existirem
+        # Actualizar metadados se existirem
         await db.document_metadata.update_one(
             {"s3_path": source_path},
             {"$set": {
@@ -2582,7 +2582,7 @@ async def apply_ai_suggestions(
     
     all_field_mappings = {**personal_fields, **financial_fields, **real_estate_fields}
     
-    # Preparar atualizações por subdocumento
+    # Preparar actualizações por subdocumento
     update_data = {}
     for field, value in suggestions.items():
         if field in all_field_mappings:

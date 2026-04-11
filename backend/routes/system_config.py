@@ -710,7 +710,7 @@ async def test_service_connection(
             smtp_user = str(smtp.smtp_user) if smtp.smtp_user else ""
             smtp_password = str(smtp.smtp_password) if smtp.smtp_password else ""
             
-            # Tentar conexão com contexto SSL seguro
+            # Tentar ligação com contexto SSL seguro
             context = ssl.create_default_context()
             if smtp.smtp_use_ssl:
                 server = smtplib.SMTP_SSL(smtp.smtp_server, smtp.smtp_port or 465, timeout=10, context=context)

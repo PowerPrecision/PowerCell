@@ -495,7 +495,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
       }
 
       // ======================================
-      // FINALIZAR SESSÃO AGREGADA - Consolidar e salvar
+      // FINALIZAR SESSÃO AGREGADA - Consolidar e guardar
       // ======================================
       try {
         setCurrentFile({ name: "A consolidar dados...", client: "Todos" });

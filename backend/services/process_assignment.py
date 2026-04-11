@@ -64,7 +64,7 @@ async def assign_consultant_to_process(
     if not valid:
         return False, {}, error
     
-    # Atualizar processo
+    # Actualizar processo
     update_data = {
         "consultant_id": consultant_id,
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -105,7 +105,7 @@ async def assign_mediador_to_process(
     if not valid:
         return False, {}, error
     
-    # Atualizar processo
+    # Actualizar processo
     update_data = {
         "mediador_id": mediador_id,
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -146,7 +146,7 @@ async def assign_indexacao_to_process(
     if not valid:
         return False, {}, error
     
-    # Atualizar processo
+    # Actualizar processo
     update_data = {
         "assigned_indexacao_id": indexacao_id,
         "indexacao_name": indexacao_user.get("name", ""),
@@ -212,7 +212,7 @@ async def assign_both_to_process(
     if len(update_data) == 1:  # Apenas updated_at
         return False, {}, "Nenhuma atribuição especificada"
     
-    # Atualizar processo
+    # Actualizar processo
     result = await db.processes.update_one(
         {"id": process_id},
         {"$set": update_data}

@@ -21,8 +21,8 @@ import { QueryClient } from '@tanstack/react-query';
  * PADRÕES DEFINIDOS:
  * - staleTime: 1 minuto (evita fetches excessivos ao navegar rápido)
  * - gcTime: 5 minutos (cache garbage collection)
- * - refetchOnWindowFocus: true (atualiza ao voltar de outra tab)
- * - refetchOnReconnect: true (atualiza ao recuperar conexão)
+ * - refetchOnWindowFocus: true (actualiza ao voltar de outra tab)
+ * - refetchOnReconnect: true (actualiza ao recuperar ligação)
  * - retry: 2 tentativas para erros de rede
  */
 export const queryClient = new QueryClient({
@@ -30,7 +30,7 @@ export const queryClient = new QueryClient({
     queries: {
       // Tempo até os dados serem considerados "stale" (obsoletos)
       // 1 minuto é ideal para CRM: evita fetches excessivos mas garante
-      // dados razoavelmente atualizados
+      // dados razoavelmente actualizados
       staleTime: 60 * 1000, // 1 minuto
       
       // Tempo até o cache ser limpo (garbage collection)
@@ -38,10 +38,10 @@ export const queryClient = new QueryClient({
       gcTime: 5 * 60 * 1000, // 5 minutos
       
       // CRÍTICO: Refetch quando o utilizador volta da tab do email/whatsapp
-      // para o CRM. Garante que o Kanban e Filme da Lead atualizam-se.
+      // para o CRM. Garante que o Kanban e Filme da Lead actualizam-se.
       refetchOnWindowFocus: true,
       
-      // Refetch quando a conexão é recuperada
+      // Refetch quando a ligação é recuperada
       refetchOnReconnect: true,
       
       // Não refetch em mount se os dados ainda são fresh

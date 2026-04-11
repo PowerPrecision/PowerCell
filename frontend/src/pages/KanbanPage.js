@@ -48,7 +48,7 @@ const KanbanPage = () => {
     }
   };
 
-  // Atualizar filtros na URL
+  // Actualizar filtros na URL
   const updateFilter = (key, value) => {
     setSearchParams(prev => {
       if (value === "all") {

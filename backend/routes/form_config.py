@@ -98,7 +98,7 @@ async def update_form_config(
     data: FormConfigUpdate,
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    """Atualizar configuração do formulário."""
+    """Actualizar configuração do formulário."""
     now = datetime.now(timezone.utc).isoformat()
     
     # Sanitize field labels and options in incoming data

@@ -105,7 +105,7 @@ class TrelloService:
         return await self._request("POST", "/cards", json=data)
     
     async def update_card(self, card_id: str, **updates) -> Dict:
-        """Atualizar um card existente."""
+        """Actualizar um card existente."""
         return await self._request("PUT", f"/cards/{card_id}", json=updates)
     
     async def move_card(self, card_id: str, list_id: str) -> Dict:

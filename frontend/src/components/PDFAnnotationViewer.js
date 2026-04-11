@@ -143,7 +143,7 @@ const PDFAnnotationViewer = ({
   const renderTasksRef = useRef([]);
   const annotationModeRef = useRef(false);
 
-  // Manter ref atualizada para uso em event handlers
+  // Manter ref actualizada para uso em event handlers
   useEffect(() => {
     annotationModeRef.current = annotationMode;
   }, [annotationMode]);

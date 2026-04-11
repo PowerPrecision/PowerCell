@@ -162,7 +162,7 @@ class SyncResult(BaseModel):
 @router.get("/status")
 async def get_trello_status(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """Verificar estado da integração Trello com diagnósticos detalhados."""
-    # Informação de configuração (mesmo que falhe a conexão)
+    # Informação de configuração (mesmo que falhe a ligação)
     config_info = {
         "has_api_key": bool(trello_service.api_key),
         "has_token": bool(trello_service.token),
@@ -190,7 +190,7 @@ async def get_trello_status(user: dict = Depends(require_roles([UserRole.ADMIN, 
                 "error": "TRELLO_BOARD_ID não definido nas variáveis de ambiente"
             }
         
-        # Testar conexão
+        # Testar ligação
         board = await trello_service.get_board()
         lists = await trello_service.get_lists()
         
@@ -334,12 +334,12 @@ async def configure_trello(
         upsert=True
     )
     
-    # Atualizar serviço
+    # Actualizar serviço
     trello_service.api_key = config.api_key
     trello_service.token = config.token
     trello_service.board_id = config.board_id
     
-    # Testar conexão
+    # Testar ligação
     try:
         board = await trello_service.get_board()
         return {
@@ -605,7 +605,7 @@ async def sync_from_trello(
                 })
                 
                 if existing:
-                    # Atualizar processo existente
+                    # Actualizar processo existente
                     update_data = {"status": status, "trello_card_id": card["id"]}
                     
                     # Atribuir utilizadores se não estiverem já atribuídos
@@ -623,7 +623,7 @@ async def sync_from_trello(
                     if trello_members:
                         update_data["trello_members"] = [m.get("fullName") for m in trello_members if m.get("fullName")]
                     
-                    # Só atualizar se há mudanças
+                    # Só actualizar se há mudanças
                     if existing.get("status") != status or len(update_data) > 2:
                         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
                         await db.processes.update_one(
@@ -721,7 +721,7 @@ async def assign_existing_processes(
         
         logger.info(f"Encontrados {len(processes)} processos para verificar atribuição")
         
-        # Obter cards do Trello para obter membros atualizados
+        # Obter cards do Trello para obter membros actualizados
         all_cards = await trello_service.get_cards_with_details()
         cards_by_id = {c["id"]: c for c in all_cards}
         
@@ -811,7 +811,7 @@ async def sync_to_trello(
                 description = build_card_description(process)
                 
                 if process.get("trello_card_id"):
-                    # Atualizar card existente
+                    # Actualizar card existente
                     try:
                         await trello_service.update_card(
                             process["trello_card_id"],
@@ -1105,7 +1105,7 @@ async def handle_card_created(action: dict):
 
 
 async def handle_card_updated(action: dict):
-    """Processar atualização de card no Trello."""
+    """Processar actualização de card no Trello."""
     card = action.get("data", {}).get("card", {})
     list_after = action.get("data", {}).get("listAfter", {})
     old_data = action.get("data", {}).get("old", {})
@@ -1122,12 +1122,12 @@ async def handle_card_updated(action: dict):
     
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     
-    # Atualizar nome se mudou
+    # Actualizar nome se mudou
     if card.get("name") and card["name"] != process.get("client_name"):
         update_data["client_name"] = card["name"]
         logger.info(f"Nome atualizado via Trello: {process.get('client_name')} -> {card['name']}")
     
-    # Atualizar descrição se mudou (extrair dados)
+    # Actualizar descrição se mudou (extrair dados)
     if "desc" in old_data or card.get("desc"):
         desc = card.get("desc", "")
         parsed = parse_card_description(desc)
@@ -1139,7 +1139,7 @@ async def handle_card_updated(action: dict):
         if parsed.get("nif"):
             update_data["client_nif"] = parsed["nif"]
     
-    # Atualizar status se mudou de lista
+    # Actualizar status se mudou de lista
     if list_after.get("name"):
         new_status = trello_list_to_status(list_after["name"])
         if new_status and new_status != process.get("status"):

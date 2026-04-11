@@ -48,7 +48,7 @@ const StaffDashboard = () => {
   const [indexacaoFilter, setIndexacaoFilter] = useState(() => searchParams.get("indexacao") || "all");
   const [parceiroFilter, setParceiroFilter] = useState(() => searchParams.get("parceiro") || "all");
 
-  // Atualizar filtros na URL
+  // Actualizar filtros na URL
   const updateTab = useCallback((tab) => {
     setActiveTab(tab);
     setSearchParams(prev => {

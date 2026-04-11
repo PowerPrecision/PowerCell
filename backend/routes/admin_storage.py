@@ -208,7 +208,7 @@ async def update_user_s3_mapping(
     s3_folder: str = Query(None),
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    """Atualiza o mapeamento de um utilizador para uma pasta S3."""
+    """Actualiza o mapeamento de um utilizador para uma pasta S3."""
     target_user = await db.users.find_one({"id": user_id})
     if not target_user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
@@ -370,7 +370,7 @@ async def update_process_s3_mapping(
     s3_folder: str = Query(None),
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    """Atualiza o mapeamento de um processo para uma pasta S3."""
+    """Actualiza o mapeamento de um processo para uma pasta S3."""
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -454,7 +454,7 @@ async def fix_missing_client_names(
             process_num = process.get("process_number", "Desconhecido")
             new_name = f"Cliente #{process_num}"
         
-        # Atualizar o processo
+        # Actualizar o processo
         if new_name:
             await db.processes.update_one(
                 {"id": process["id"]},
@@ -475,7 +475,7 @@ async def batch_update_process_s3_mappings(
     mappings: List[dict] = Body(...),
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    """Atualiza mapeamentos S3 em batch para múltiplos processos."""
+    """Actualiza mapeamentos S3 em batch para múltiplos processos."""
     results = {"updated": 0, "failed": 0, "errors": []}
     
     for mapping in mappings:

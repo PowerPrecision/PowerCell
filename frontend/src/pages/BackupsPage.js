@@ -108,7 +108,7 @@ const BackupsPage = () => {
       if (response.ok) {
         toast.success("Backup iniciado em background");
         
-        // Fazer polling a cada 3 segundos para atualizar o histórico
+        // Fazer polling a cada 3 segundos para actualizar o histórico
         let pollCount = 0;
         const maxPolls = 20; // Máximo de 60 segundos de polling
         
@@ -124,7 +124,7 @@ const BackupsPage = () => {
               const historyData = await historyRes.json();
               const latestBackup = historyData.history?.[0];
               
-              // Atualizar histórico
+              // Actualizar histórico
               setHistory(historyData.history || []);
               
               // Se o backup terminou (completed ou failed), parar polling
@@ -138,7 +138,7 @@ const BackupsPage = () => {
                   toast.error("Backup falhou. Verifique os logs.");
                 }
                 
-                // Atualizar estatísticas
+                // Actualizar estatísticas
                 fetchData();
               }
             }

@@ -54,7 +54,7 @@ async def find_and_fix_duplicates(dry_run: bool = False):
         client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=10000)
         db = client[db_name]
         
-        # Testar conexão
+        # Testar ligação
         await db.list_collection_names()
     except Exception as e:
         print(f"ERRO: Não foi possível conectar à base de dados.")

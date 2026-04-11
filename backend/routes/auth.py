@@ -224,7 +224,7 @@ async def update_profile(
     """
     user_id = user["id"]
     
-    # Campos permitidos para atualização pelo próprio utilizador
+    # Campos permitidos para actualização pelo próprio utilizador
     allowed_fields = ["name", "phone"]
     update_data = {}
     
@@ -246,7 +246,7 @@ async def update_profile(
     if result.modified_count == 0 and result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
     
-    # Retornar o utilizador atualizado
+    # Retornar o utilizador actualizado
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     
     return {
@@ -285,7 +285,7 @@ async def change_password(
     if not verify_password(current_password, password_field):
         raise HTTPException(status_code=400, detail="Password atual incorreta")
     
-    # Atualizar password
+    # Actualizar password
     new_hashed = hash_password(new_password)
     await db.users.update_one(
         {"id": user["id"]},

@@ -44,7 +44,7 @@ class ChatGroupCreate(BaseModel):
 
 
 class ChatGroupUpdate(BaseModel):
-    """Atualizar grupo."""
+    """Actualizar grupo."""
     name: Optional[str] = None
     description: Optional[str] = None
     add_members: Optional[List[str]] = None

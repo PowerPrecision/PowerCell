@@ -326,7 +326,7 @@ async def _analyze_document_background(
         
         await task_log_service.update_progress(task_id, 80, "A guardar resultados...")
         
-        # Se auto_apply, atualizar o processo
+        # Se auto_apply, actualizar o processo
         if auto_apply and mapped_data:
             for field, data in mapped_data.items():
                 if data:
@@ -455,7 +455,7 @@ async def _bulk_analysis_background(
         
         for i, process_id in enumerate(process_ids, 1):
             try:
-                # Atualizar progresso
+                # Actualizar progresso
                 progress = int((i / total) * 100)
                 await task_log_service.update_progress(
                     task_id, 

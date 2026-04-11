@@ -40,7 +40,7 @@ const ProcessStickyHeader = ({
     const handleScroll = () => {
       if (headerRef.current) {
         const rect = headerRef.current.getBoundingClientRect();
-        // Ativar sticky quando o header original sair da tela
+        // Ativar sticky quando o cabeçalho original sair do ecrã
         setIsSticky(window.scrollY > 200);
       }
     };

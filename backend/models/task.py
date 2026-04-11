@@ -21,7 +21,7 @@ class TaskCreate(BaseModel):
 
 
 class TaskUpdate(BaseModel):
-    """Atualizar tarefa."""
+    """Actualizar tarefa."""
     title: Optional[str] = None
     description: Optional[str] = None
     assigned_to: Optional[List[str]] = None

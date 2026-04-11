@@ -82,7 +82,7 @@ async def create_rule(data: dict, user: dict) -> dict:
 
 
 async def update_rule(rule_id: str, data: dict) -> Optional[dict]:
-    """Atualizar uma regra."""
+    """Actualizar uma regra."""
     update = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -133,7 +133,7 @@ async def evaluate_trigger(trigger_type: str, context: dict) -> list:
                 continue
         
         elif trigger_type == "process_stale":
-            # Verificar se dias sem atualização >= threshold
+            # Verificar se dias sem actualização >= threshold
             threshold = config.get("stale_days", 14)
             if context.get("days_since_update", 0) < threshold:
                 continue
@@ -236,7 +236,7 @@ async def execute_action(rule: dict, context: dict) -> bool:
                     }}}
                 )
         
-        # Atualizar contagem de execuções
+        # Actualizar contagem de execuções
         await db.automation_rules.update_one(
             {"id": rule["id"]},
             {

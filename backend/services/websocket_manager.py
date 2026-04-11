@@ -22,16 +22,16 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
-    """Gestor de conexões WebSocket."""
+    """Gestor de ligações WebSocket."""
     
     def __init__(self):
-        # Mapeamento de user_id para conjunto de conexões WebSocket
+        # Mapeamento de user_id para conjunto de ligações WebSocket
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         # Mapeamento de WebSocket para user_id
         self.websocket_to_user: Dict[WebSocket, str] = {}
     
     async def connect(self, websocket: WebSocket, user_id: str):
-        """Aceitar uma nova conexão WebSocket."""
+        """Aceitar uma nova ligação WebSocket."""
         await websocket.accept()
         
         if user_id not in self.active_connections:
@@ -43,7 +43,7 @@ class ConnectionManager:
         logger.info(f"WebSocket conectado para utilizador {user_id}. Total conexões: {self.get_total_connections()}")
     
     def disconnect(self, websocket: WebSocket):
-        """Remover uma conexão WebSocket."""
+        """Remover uma ligação WebSocket."""
         user_id = self.websocket_to_user.get(websocket)
         
         if user_id and user_id in self.active_connections:
@@ -70,7 +70,7 @@ class ConnectionManager:
                     logger.error(f"Erro ao enviar mensagem para {user_id}: {e}")
                     disconnected.add(websocket)
             
-            # Remover conexões que falharam
+            # Remover ligações que falharam
             for ws in disconnected:
                 self.disconnect(ws)
     
@@ -89,7 +89,7 @@ class ConnectionManager:
                     logger.error(f"Erro no broadcast para {user_id}: {e}")
                     disconnected.append(websocket)
         
-        # Remover conexões que falharam
+        # Remover ligações que falharam
         for ws in disconnected:
             self.disconnect(ws)
     
@@ -101,7 +101,7 @@ class ConnectionManager:
                 await self.send_personal_message(message, user_id)
     
     def get_total_connections(self) -> int:
-        """Obter número total de conexões activas."""
+        """Obter número total de ligações activas."""
         return sum(len(conns) for conns in self.active_connections.values())
     
     def get_connected_users(self) -> list:
@@ -113,7 +113,7 @@ class ConnectionManager:
         return user_id in self.active_connections and len(self.active_connections[user_id]) > 0
 
 
-# Instância global do gestor de conexões
+# Instância global do gestor de ligações
 manager = ConnectionManager()
 
 

@@ -135,7 +135,7 @@ class TaskLogService:
         if status is not None:
             updates["status"] = status.value if isinstance(status, TaskStatus) else status
             
-            # Atualizar timestamps baseado no status
+            # Actualizar timestamps baseado no status
             if status == TaskStatus.PROCESSING:
                 updates["started_at"] = now
                 if progress_message is None:
@@ -339,7 +339,7 @@ class TaskLogService:
         progress: int,
         progress_message: Optional[str] = None
     ) -> Optional[TaskLogResponse]:
-        """Atualiza o progresso de uma tarefa."""
+        """Actualiza o progresso de uma tarefa."""
         return await TaskLogService.update_task(
             task_id,
             progress=progress,

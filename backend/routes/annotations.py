@@ -123,7 +123,7 @@ async def get_process_annotations(
 
 
 # ====================================================================
-# PUT /{annotation_id} - Atualizar anotação
+# PUT /{annotation_id} - Actualizar anotação
 # ====================================================================
 
 @router.put("/{annotation_id}", response_model=AnnotationResponse)

@@ -92,7 +92,7 @@ export function useKanbanQuery(options = {}) {
     }),
     enabled: !!token && enabled,
     // staleTime de 1 minuto é ideal para Kanban
-    // Dados são atualizados via WebSocket, não precisamos de refetch constante
+    // Dados são actualizados via WebSocket, não precisamos de refetch constante
     staleTime: 60 * 1000,
     // Não refetch automaticamente quando a window ganha foco
     // porque já temos WebSocket para updates em tempo real

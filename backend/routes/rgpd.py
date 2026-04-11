@@ -518,7 +518,7 @@ async def list_all_rgpd(
 # ============ ENDPOINTS DE TEMPLATE RGPD ============
 
 class RGPDTemplateUpdate(BaseModel):
-    """Modelo para atualização do template RGPD."""
+    """Modelo para actualização do template RGPD."""
     content: str
     changelog: Optional[str] = Field(None, description="Descrição opcional da alteração realizada")
 
@@ -680,7 +680,7 @@ async def update_rgpd_template(
             {"$set": {"is_active": False}}
         )
 
-        # Atualizar system_config para apontar para a versão ativa
+        # Actualizar system_config para apontar para a versão ativa
         await db.system_config.update_one(
             {"_id": "rgpd_template"},
             {
@@ -808,7 +808,7 @@ async def update_rgpd_data(
     # Verificar se o RGPD existe
     existing = await _get_rgpd_or_404(request_id)
 
-    # Atualizar dados
+    # Actualizar dados
     update_data = consent_data.model_dump()
 
     # Manter a data de assinatura original se existir
@@ -880,7 +880,7 @@ async def resend_rgpd_email(
     new_token = f"{uuid.uuid4().hex}{uuid.uuid4().hex}"
     new_expires = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRY_HOURS)
 
-    # Atualizar
+    # Actualizar
     await db[RGPD_REQUESTS_COLLECTION].update_one(
         {"id": request_id},
         {

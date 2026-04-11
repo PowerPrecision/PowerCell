@@ -173,7 +173,7 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
         try:
             from services.trello import trello_service
             if config.trello.enabled:
-                # Atualizar a instância global do TrelloService
+                # Actualizar a instância global do TrelloService
                 if config.trello.api_key:
                     trello_service.api_key = config.trello.api_key
                 if config.trello.api_token:

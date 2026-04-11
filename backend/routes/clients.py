@@ -526,7 +526,7 @@ async def assign_client_to_user(
         # Inserir processo
         await db.processes.insert_one(process_doc)
     
-    # Atualizar cliente
+    # Actualizar cliente
     if process_id:
         await db.clients.update_one(
             {"id": client_id},
@@ -1051,9 +1051,9 @@ async def update_client(
     if sanitized_notas is not None:
         update_dict["notas"] = sanitized_notas
 
-    # RGPD: Encriptar dados sensíveis antes de atualizar
+    # RGPD: Encriptar dados sensíveis antes de actualizar
     # Isto garante que NIFs, telefones e outros dados sensíveis
-    # são guardados encriptados, mesmo em atualizações
+    # são guardados encriptados, mesmo em actualizações
     update_dict = encrypt_client_data(update_dict)
 
     await db.clients.update_one(
@@ -1264,7 +1264,7 @@ async def create_process_for_client(
     
     await db.processes.insert_one(new_process)
     
-    # Se temos um cliente real, atualizar a lista de processos
+    # Se temos um cliente real, actualizar a lista de processos
     if not source_process:
         await db.clients.update_one(
             {"id": client_id},

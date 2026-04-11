@@ -245,7 +245,7 @@ def validate_file_content(
         allowed_exts = file_config.get("extensions", [])
         
         if declared_ext and declared_ext not in allowed_exts:
-            # Possível tentativa de spoofing - logar mas permitir
+            # Possível tentativa de spoofing - registar mas permitir
             logger.warning(
                 f"[SECURITY] Possível extensão falsificada: {sanitize_for_log(filename)} "
                 f"declarou {declared_ext}, mas conteúdo é {detected_mime}"

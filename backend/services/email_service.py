@@ -624,7 +624,7 @@ def _fetch_emails_from_account_sync(
                             date_str = msg.get("Date", "")
                             body_text, body_html = get_email_body(msg)
                             
-                            # Determinar direção
+                            # Determinar direcção
                             direction = "received" if from_email == client_email else "sent"
                             
                             # Parsear data
@@ -1124,7 +1124,7 @@ async def send_email(
 
 
 async def test_email_connection(account_name: str = None) -> Dict[str, Any]:
-    """Testar conexão com as contas de email."""
+    """Testar ligação com as contas de email."""
     accounts = await get_email_accounts_async()
     
     if account_name:

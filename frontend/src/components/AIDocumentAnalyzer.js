@@ -121,7 +121,7 @@ const AIDocumentAnalyzer = ({ processId, clientName, onDataExtracted }) => {
       const data = await response.json();
       toast.success(data.message);
       
-      // Notificar o componente pai para atualizar os dados
+      // Notificar o componente pai para actualizar os dados
       if (onDataExtracted) {
         onDataExtracted({
           personal_data: {},

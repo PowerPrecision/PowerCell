@@ -6,7 +6,7 @@ O merge do código causou duplicação dos estados do workflow.
 Uso:
     cd backend
     
-    # Definir a conexão MongoDB (produção)
+    # Definir a ligação MongoDB (produção)
     export MONGO_URL="mongodb+srv://user:pass@cluster.mongodb.net"
     export DB_NAME="powercell"
     
@@ -56,7 +56,7 @@ async def find_and_fix_duplicates(dry_run: bool = False):
         client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
         db = client[db_name]
         
-        # Testar conexão
+        # Testar ligação
         await db.list_collection_names()
     except Exception as e:
         print(f"ERRO: Não foi possível conectar à base de dados.")

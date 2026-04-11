@@ -115,7 +115,7 @@ async def migrate_processes_encryption(dry_run: bool = False, batch_size: int = 
                         # Adicionar timestamp de migração
                         updated_process["encryption_migrated_at"] = datetime.now(timezone.utc).isoformat()
                         
-                        # Atualizar na base de dados
+                        # Actualizar na base de dados
                         await db.processes.update_one(
                             {"id": process_id},
                             {"$set": updated_process}

@@ -269,7 +269,7 @@ async def sign_rgpd(
     now = datetime.now(timezone.utc)
     consent_data["data_assinatura"] = now.strftime("%d/%m/%Y às %H:%M")
     
-    # Atualizar pedido
+    # Actualizar pedido
     await db[RGPD_REQUESTS_COLLECTION].update_one(
         {"id": request["id"]},
         {

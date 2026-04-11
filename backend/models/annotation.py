@@ -90,7 +90,7 @@ class AnnotationCreate(BaseModel):
 # ====================================================================
 
 class AnnotationUpdate(BaseModel):
-    """Schema para atualização de uma anotação existente."""
+    """Schema para actualização de uma anotação existente."""
     comment: Optional[str] = Field(None, min_length=1, max_length=2000, description="Novo conteúdo da anotação")
     annotation_type: Optional[str] = Field(None, description=f"Novo tipo: {', '.join(VALID_ANNOTATION_TYPES)}")
     color: Optional[str] = Field(None, description="Nova cor personalizada (hex)")

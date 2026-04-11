@@ -57,7 +57,7 @@ async def subscribe_push(
     })
     
     if existing:
-        # Atualizar subscrição existente
+        # Actualizar subscrição existente
         await db.push_subscriptions.update_one(
             {"endpoint": subscription.endpoint},
             {

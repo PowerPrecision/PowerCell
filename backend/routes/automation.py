@@ -79,7 +79,7 @@ async def update_rule_endpoint(
     data: RuleUpdate,
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    """Atualizar uma regra."""
+    """Actualizar uma regra."""
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if "trigger" in update_data and update_data["trigger"] not in VALID_TRIGGERS:
         raise HTTPException(status_code=400, detail="Trigger inválido")

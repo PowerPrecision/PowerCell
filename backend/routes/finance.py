@@ -235,7 +235,7 @@ def _calc_area_metrics(processes: list, area: str, config: dict) -> dict:
 # ====================================================================
 
 class FinanceConfigUpdate(BaseModel):
-    """Schema para atualizar as configurações financeiras."""
+    """Schema para actualizar as configurações financeiras."""
     imobiliaria: Optional[dict] = Field(None, description="Configurações da área de Imobiliária")
     credito: Optional[dict] = Field(None, description="Configurações da área de Crédito")
 
@@ -272,7 +272,7 @@ async def update_finance_config(
     """
     current = await _get_finance_config()
 
-    # Validar e aplicar atualizações
+    # Validar e aplicar actualizações
     for area in ["imobiliaria", "credito"]:
         update_data = getattr(body, area)
         if update_data is None:
