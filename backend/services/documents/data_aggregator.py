@@ -29,7 +29,7 @@ class ClientDataAggregator:
     Agregador de dados para um único cliente.
     
     Acumula extrações de múltiplos documentos e consolida
-    antes de salvar na base de dados.
+    antes de guardar na base de dados.
     """
     
     def __init__(self, process_id: str, client_name: str):

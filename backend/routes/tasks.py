@@ -382,7 +382,7 @@ async def update_task(
     task_data: TaskUpdate,
     current_user: dict = Depends(get_current_user)
 ):
-    """Atualizar uma tarefa."""
+    """Actualizar uma tarefa."""
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     
     if not task:

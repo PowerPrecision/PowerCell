@@ -5,7 +5,7 @@
  * Painel de gestão da integração com o Trello.
  * 
  * Funcionalidades:
- * - Verificar estado da conexão com diagnóstico detalhado
+ * - Verificar estado da ligação com diagnóstico detalhado
  * - Sincronizar dados do Trello com atribuição automática
  * - Visualizar mapeamento de membros Trello ↔ Utilizadores
  * - Configurar webhook para sync em tempo real
@@ -254,7 +254,7 @@ const TrelloIntegration = () => {
         description: data.message,
         variant: data.success ? "default" : "destructive",
       });
-      // Atualizar status para mostrar novas estatísticas
+      // Actualizar status para mostrar novas estatísticas
       fetchStatus();
     } catch (error) {
       toast({

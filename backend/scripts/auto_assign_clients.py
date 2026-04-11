@@ -201,7 +201,7 @@ async def assign_process_to_user(
     )
     
     if result.modified_count > 0:
-        # Atualizar também o cliente se existir
+        # Actualizar também o cliente se existir
         client_id = process.get("client_id")
         if client_id:
             await db.clients.update_one(
@@ -297,7 +297,7 @@ async def run_auto_assignment(
             if success:
                 stats["processes_assigned"] += 1
                 
-                # Atualizar contagem local
+                # Actualizar contagem local
                 user["current_process_count"] += 1
                 user["available_slots"] -= 1
                 

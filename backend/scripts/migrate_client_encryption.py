@@ -283,7 +283,7 @@ async def run_migration(dry_run: bool = False, batch_size: int = 100):
                         logger.info(f"  [DRY-RUN] Migraria: {client_id} - {client_name}")
                         migrated_count += 1
                     else:
-                        # Atualizar na base de dados
+                        # Actualizar na base de dados
                         update_result = await db.clients.update_one(
                             {"id": client_id},
                             {"$set": migrated}

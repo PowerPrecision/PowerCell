@@ -196,7 +196,7 @@ class TempLinkService:
         # Verificar expiração
         expires_at = datetime.fromisoformat(link["expires_at"].replace('Z', '+00:00'))
         if datetime.now(timezone.utc) > expires_at:
-            # Atualizar estado para expirado
+            # Actualizar estado para expirado
             await db.temp_links.update_one(
                 {"token": token},
                 {"$set": {"status": TempLinkStatus.EXPIRED.value}}

@@ -273,7 +273,7 @@ export function useUndoActions() {
   }, [executeWithUndo]);
 
   /**
-   * Atualizar dados com undo.
+   * Actualizar dados com undo.
    */
   const updateWithUndo = useCallback(async (endpoint, newData, oldData, message, api) => {
     return executeWithUndo({

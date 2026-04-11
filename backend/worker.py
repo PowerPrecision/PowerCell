@@ -84,7 +84,7 @@ async def process_task(task: dict):
             url = payload.get("url")
             if url:
                 result = await scrape_property_url(url)
-                # Se for lead, atualizar dados
+                # Se for lead, actualizar dados
                 lead_id = payload.get("lead_id")
                 if lead_id and result:
                     await db.property_leads.update_one(

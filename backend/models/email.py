@@ -84,7 +84,7 @@ class EmailCreate(BaseModel):
 
 
 class EmailUpdate(BaseModel):
-    """Atualizar registo de email."""
+    """Actualizar registo de email."""
     subject: Optional[str] = None
     body: Optional[str] = None
     notes: Optional[str] = None

@@ -28,7 +28,7 @@ export const useOnClickOutside = (refs, handler) => {
   const refsArray = Array.isArray(refs) ? refs : [refs];
   const handlerRef = useRef(handler);
 
-  // Manter handler atualizado
+  // Manter handler actualizado
   useEffect(() => {
     handlerRef.current = handler;
   }, [handler]);

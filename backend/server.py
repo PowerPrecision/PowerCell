@@ -281,7 +281,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     Regista erros 4xx e 5xx no sistema de logs para análise.
     Inclui headers CORS para garantir que erros não bloqueiam o frontend.
     """
-    # Só logar erros significativos (não 401/403 de autenticação normal)
+    # Só registar erros significativos (não 401/403 de autenticação normal)
     if exc.status_code >= 500 or exc.status_code in [400, 404]:
         try:
             from services.system_error_logger import system_error_logger
@@ -669,8 +669,8 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    # CORREÇÃO CRÍTICA: Não fechar a conexão DB se estivermos a correr testes!
-    # O pytest reutiliza a conexão global, se a fecharmos aqui, o próximo teste falha.
+    # CORREÇÃO CRÍTICA: Não fechar a ligação DB se estivermos a correr testes!
+    # O pytest reutiliza a ligação global, se a fecharmos aqui, o próximo teste falha.
     if os.getenv("TESTING") == "true":
         return
         

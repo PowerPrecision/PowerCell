@@ -122,7 +122,7 @@ const ProfilePage = () => {
         title: "Perfil atualizado",
         description: "Os seus dados foram atualizados com sucesso.",
       });
-      // Atualizar o estado local
+      // Actualizar o estado local
       if (response.data.user) {
         setProfileData({
           ...profileData,

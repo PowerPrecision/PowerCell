@@ -196,7 +196,7 @@ async def get_messages(
 
         query = {"group_id": conversation_id}
 
-        # Atualizar último lido
+        # Actualizar último lido
         await db.chat_groups.update_one(
             {"id": conversation_id, "members.user_id": user_id},
             {"$set": {"members.$[elem].last_read": datetime.now(timezone.utc).isoformat()}},
@@ -767,7 +767,7 @@ async def update_group(
     if not group:
         raise HTTPException(status_code=404, detail="Grupo não encontrado")
 
-    # Apenas criador pode atualizar
+    # Apenas criador pode actualizar
     if group.get("created_by") != user_id:
         raise HTTPException(status_code=403, detail="Apenas o criador pode atualizar o grupo")
 

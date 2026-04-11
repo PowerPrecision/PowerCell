@@ -21,7 +21,7 @@ router = APIRouter(tags=["WebSocket"])
 
 
 async def verify_websocket_token(token: str) -> dict:
-    """Verificar token JWT para conexão WebSocket."""
+    """Verificar token JWT para ligação WebSocket."""
     try:
         # CORREÇÃO: Usar a função decode do PyJWT
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
@@ -205,7 +205,7 @@ async def websocket_notifications(
                     logger.debug(f"Conexão fechada (RuntimeError): {user_id}")
                     connected = False
                     break
-                # Outros RuntimeErrors - logar e continuar
+                # Outros RuntimeErrors - registar e continuar
                 logger.warning(f"RuntimeError inesperado WebSocket {user_id}: {e}")
                 connected = False
                 break
@@ -224,12 +224,12 @@ async def websocket_notifications(
         logger.debug(f"WebSocket desconectado (outer): {user_id}")
     
     except Exception as e:
-        # Só logar se não for erro de desconexão
+        # Só registar se não for erro de desconexão
         if not is_disconnect_error(e):
             logger.error(f"Erro WebSocket (outer) {user_id}: {type(e).__name__}: {e}")
     
     finally:
-        # Sempre limpar a conexão
+        # Sempre limpar a ligação
         manager.disconnect(websocket)
         
         # Notificar outros utilizadores se for admin/ceo

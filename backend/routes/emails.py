@@ -1145,7 +1145,7 @@ async def advanced_email_search(
     if filters.process_id:
         query["process_id"] = filters.process_id
     
-    # Filtro por direção
+    # Filtro por direcção
     if filters.direction:
         query["direction"] = filters.direction.value
     
@@ -1314,7 +1314,7 @@ async def update_email_template(
     template: EmailTemplateCreate,
     current_user: dict = Depends(get_current_user)
 ):
-    """Atualizar template de resposta."""
+    """Actualizar template de resposta."""
     existing = await db.email_templates.find_one({"id": template_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Template não encontrado")
@@ -1449,7 +1449,7 @@ async def test_email_connections(
     account: Optional[str] = Query(None, description="Conta específica (precision, power) ou todas"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Testar conexão com as contas de email."""
+    """Testar ligação com as contas de email."""
     if current_user["role"] not in ["admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Sem permissão")
     
@@ -1942,7 +1942,7 @@ async def update_email(
     email_data: EmailUpdate,
     current_user: dict = Depends(get_current_user)
 ):
-    """Atualizar registo de email."""
+    """Actualizar registo de email."""
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
     
     if not email:

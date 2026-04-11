@@ -102,7 +102,7 @@ async def assign_client(client_id: str, user_id: str, create_process: bool = Tru
     client_name = client.get("name") or client.get("client_name", "Cliente")
     user_name = user.get("name", user.get("email", "Utilizador"))
     
-    # Atualizar cliente
+    # Actualizar cliente
     await db.clients.update_one(
         {"id": client_id},
         {"$set": {

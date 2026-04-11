@@ -122,7 +122,7 @@ async def analyze_document_task(
         
         extracted_data = result.get("extracted_data", {})
         
-        # Atualizar job na base de dados se tiver session_id
+        # Actualizar job na base de dados se tiver session_id
         if session_id:
             try:
                 await db.background_jobs.update_one(
@@ -229,7 +229,7 @@ async def aggregate_and_save_task(
                 "process_id": process_id,
             }
         
-        # Preparar dados de atualização
+        # Preparar dados de actualização
         update_data = {}
         
         # Agregar dados pessoais
@@ -262,7 +262,7 @@ async def aggregate_and_save_task(
         update_data["ai_import_timestamp"] = datetime.now(timezone.utc).isoformat()
         update_data["ai_documents_count"] = len(document_history)
         
-        # Executar atualização
+        # Executar actualização
         if update_data:
             await db.processes.update_one(
                 {"id": process_id},

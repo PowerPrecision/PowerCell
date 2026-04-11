@@ -200,7 +200,7 @@ async def invalidate_stats_cache(user_id: str = None) -> int:
     total_deleted = 0
 
     # 1. Invalidar sempre o cache GLOBAL
-    # Qualquer mutação afecta os KPIs da direção
+    # Qualquer mutação afecta os KPIs da direcção
     for key in ALL_GLOBAL_KEYS:
         try:
             deleted = await redis.delete(key)

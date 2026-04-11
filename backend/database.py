@@ -15,7 +15,7 @@ _db = None
 
 
 def reset_db_connection():
-    """Reset da conexão (útil para testes)."""
+    """Reset da ligação (útil para testes)."""
     global _client, _db
     if _client is not None:
         try:

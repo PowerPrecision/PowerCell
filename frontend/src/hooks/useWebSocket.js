@@ -4,15 +4,15 @@
  * ====================================================================
  * 
  * ARQUITECTURA:
- * - WebSocketManager: Singleton module-level que gere uma única conexão
+ * - WebSocketManager: Singleton module-level que gere uma única ligação
  * - useWebSocket(): Hook React que se subscreve ao singleton
  * 
  * VANTAGENS:
- * - Uma única conexão WebSocket por sessão (não importa quantos
+ * - Uma única ligação WebSocket por sessão (não importa quantos
  *   componentes chamem useWebSocket())
  * - Reference counting: conecta no 1º subscriber, desconecta no último
  * - Exponential backoff na reconexão
- * - Heartbeat para manter conexão activa
+ * - Heartbeat para manter ligação activa
  * - Proteção contra React StrictMode double-mount
  * ====================================================================
  */

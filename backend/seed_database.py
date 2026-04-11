@@ -26,7 +26,7 @@ async def seed_database():
     db = client[DB_NAME]
     
     try:
-        # Testar conexão
+        # Testar ligação
         await client.admin.command('ping')
         print("✅ Conexão estabelecida!")
         

@@ -217,7 +217,7 @@ const EmailViewerModal = ({
       if (!response.ok) throw new Error("Erro ao enviar resposta");
       
       setShowReplyBox(false);
-      // TODO: Atualizar lista de emails
+      // TODO: Actualizar lista de emails
     } catch (error) {
       console.error("Erro ao enviar resposta:", error);
     } finally {

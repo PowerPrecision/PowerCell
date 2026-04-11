@@ -294,7 +294,7 @@ const EmailHistoryPanel = ({
       
       if (!response.ok) throw new Error("Erro ao marcar email");
       
-      // Atualizar local
+      // Actualizar local
       setEmails(prev => prev.map(e => {
         if (e.id === emailId) {
           const updated = { ...e };
@@ -323,7 +323,7 @@ const EmailHistoryPanel = ({
       
       if (!response.ok) throw new Error("Erro ao desmarcar email");
       
-      // Atualizar local
+      // Actualizar local
       setEmails(prev => prev.map(e => {
         if (e.id === emailId) {
           const updated = { ...e };

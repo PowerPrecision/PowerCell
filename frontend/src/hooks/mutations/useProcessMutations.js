@@ -36,7 +36,7 @@ export function useMoveProcessMutation(addPendingMove, removePendingMove, option
       return response.data;
     },
     
-    // Optimistic update - atualiza a UI antes da resposta do servidor
+    // Optimistic update - actualiza a UI antes da resposta do servidor
     onMutate: async ({ processId, newStatus, oldStatus }) => {
       // Cancelar queries em flight para evitar race conditions
       await queryClient.cancelQueries({ queryKey: queryKeys.processes.all });
@@ -106,7 +106,7 @@ export function useMoveProcessMutation(addPendingMove, removePendingMove, option
 }
 
 /**
- * Hook para atualizar dados do processo
+ * Hook para actualizar dados do processo
  * 
  * @param {string|number} processId - ID do processo
  * @param {Object} options - Opções do hook
@@ -211,7 +211,7 @@ export function useAddActivityMutation(processId, options = {}) {
     
     onSuccess: (data, variables, context) => {
       toast.success('Atividade adicionada');
-      // Invalidar histórico para atualizar o "Filme da Lead"
+      // Invalidar histórico para actualizar o "Filme da Lead"
       queryClient.invalidateQueries({ queryKey: queryKeys.history.byProcess(processId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.activities.byProcess(processId) });
       onSuccess?.(data, variables, context);

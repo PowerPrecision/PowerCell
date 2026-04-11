@@ -305,7 +305,7 @@ async def update_process_document(
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     changes = []
     
-    # Iterar sobre campos que podem ser atualizados
+    # Iterar sobre campos que podem ser actualizados
     updatable_fields = [
         "client_name", "client_phone", "status", "process_type",
         "service_type", "priority", "notes", "consultant_id", "mediador_id",

@@ -173,7 +173,7 @@ export const TasksProvider = ({ children }) => {
         }
       });
       
-      // Atualizar estado
+      // Actualizar estado
       setTasks(data.tasks || []);
       setActiveCount(data.active_count || 0);
       setCompletedUnacknowledged(data.completed_unacknowledged || 0);

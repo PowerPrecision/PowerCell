@@ -210,7 +210,7 @@ async def encrypt_single_process(
     # Encriptar dados
     encrypted_process = encryption_service.encrypt_process(process)
     
-    # Remover _id para evitar erro de atualização
+    # Remover _id para evitar erro de actualização
     if "_id" in encrypted_process:
         del encrypted_process["_id"]
     

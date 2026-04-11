@@ -690,7 +690,7 @@ const UsersManagementPage = () => {
             </div>
             <DialogFooter>
               <Button type="submit" disabled={formLoading}>
-                {formLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}
+                {formLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
               </Button>
             </DialogFooter>
           </form>

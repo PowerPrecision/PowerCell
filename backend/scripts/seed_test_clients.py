@@ -503,7 +503,7 @@ async def criar_dados_teste(count: int = 100, clear: bool = False):
             processo = gerar_processo(process_number, clientes_processo, is_multi_titular)
             processos.append(processo)
             
-            # Atualizar lista de process_ids dos clientes
+            # Actualizar lista de process_ids dos clientes
             for c in clientes_processo:
                 c["process_ids"].append(processo["id"])
         
@@ -514,7 +514,7 @@ async def criar_dados_teste(count: int = 100, clear: bool = False):
         print(f"   📊 {num_processos - num_multi_titular} processos com 1 titular")
         
         # ============================================================
-        # PASSO 3: Atualizar process_ids nos clientes
+        # PASSO 3: Actualizar process_ids nos clientes
         # ============================================================
         print(f"\n🔄 A atualizar referências cliente-processo...")
         update_ops = []

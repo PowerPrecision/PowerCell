@@ -174,7 +174,7 @@ async def update_annotation(annotation_id: str, data: dict, user_id: str) -> Opt
             if annotation_type not in VALID_ANNOTATION_TYPES:
                 raise ValueError(f"Tipo de anotação inválido: {annotation_type}")
             update_fields["annotation_type"] = annotation_type
-            # Atualizar a cor para o padrão do novo tipo se não houver cor personalizada
+            # Actualizar a cor para o padrão do novo tipo se não houver cor personalizada
             update_fields["color"] = ANNOTATION_TYPES.get(annotation_type, {}).get("color", "#3B82F6")
 
         if "color" in data and data["color"] is not None:
@@ -195,7 +195,7 @@ async def update_annotation(annotation_id: str, data: dict, user_id: str) -> Opt
             {"$set": update_fields}
         )
 
-        # Retornar a anotação atualizada
+        # Retornar a anotação actualizada
         updated = await db[COLLECTION_NAME].find_one({"id": annotation_id}, {"_id": 0})
 
         logger.info(f"Anotação atualizada: {annotation_id} por user={user_id}")

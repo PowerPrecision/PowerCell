@@ -11,7 +11,7 @@
  * 
  * FLUXO:
  * 1. WebSocket recebe evento (PROCESS_STATUS_CHANGED, etc.)
- * 2. Handler atualiza o cache diretamente via setQueryData
+ * 2. Handler actualiza o cache diretamente via setQueryData
  * 3. React detecta mudança e re-renderiza apenas o cartão afetado
  * ====================================================================
  */
@@ -28,7 +28,7 @@ import { useWebSocket, WSEventType } from '../useWebSocket';
  * @param {Object} options.filters - Filtros ativos do Kanban
  * @param {Function} options.onNotification - Callback para notificações
  * @param {string|number} options.userId - ID do utilizador atual (para sender exclusion)
- * @returns {Object} Estado de conexão e funções de controle
+ * @returns {Object} Estado de ligação e funções de controle
  */
 export function useKanbanRealtime(options = {}) {
   const {
@@ -43,13 +43,13 @@ export function useKanbanRealtime(options = {}) {
   const [lockedProcesses, setLockedProcesses] = useState({});
   const [connectedUsers, setConnectedUsers] = useState({});
   
-  // Manter filters atualizados no ref
+  // Manter filters actualizados no ref
   useEffect(() => {
     filtersRef.current = filters;
   }, [filters]);
 
   /**
-   * Atualiza o cache do Kanban quando um processo é criado
+   * Actualiza o cache do Kanban quando um processo é criado
    */
   const handleProcessCreated = useCallback((payload) => {
     if (!payload || !payload.process_id) return;
@@ -94,7 +94,7 @@ export function useKanbanRealtime(options = {}) {
   }, [queryClient, onNotification]);
 
   /**
-   * Atualiza o cache do Kanban quando o status de um processo muda
+   * Actualiza o cache do Kanban quando o status de um processo muda
    */
   const handleProcessStatusChanged = useCallback((payload) => {
     if (!payload || !payload.process_id) return;
@@ -157,7 +157,7 @@ export function useKanbanRealtime(options = {}) {
   }, [queryClient]);
 
   /**
-   * Atualiza o cache do Kanban quando um processo é atualizado
+   * Actualiza o cache do Kanban quando um processo é actualizado
    */
   const handleProcessUpdated = useCallback((payload) => {
     if (!payload || !payload.process_id) return;

@@ -134,7 +134,7 @@ async def run_migration_task():
                         updates["titular2_data"] = {**titular2, **t2_updates}
                         has_changes = True
                 
-                # Atualizar cliente se houver alterações
+                # Actualizar cliente se houver alterações
                 if has_changes and updates:
                     await db.clients.update_one(
                         {"id": client_id},
@@ -369,7 +369,7 @@ async def run_migration_single(
         if t2_updates:
             updates["titular2_data"] = {**titular2, **t2_updates}
     
-    # Atualizar se houver alterações
+    # Actualizar se houver alterações
     if updates:
         await db.clients.update_one({"id": client_id}, {"$set": updates})
         return {

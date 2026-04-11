@@ -631,7 +631,7 @@ Equipa PowerCell
             member_lower = member.lower()
             # Verificar se alguma parte do nome corresponde
             if any(part in member_lower for part in name_parts):
-                # Determinar qual campo atualizar baseado no role
+                # Determinar qual campo actualizar baseado no role
                 if data.role in [UserRole.CONSULTOR]:
                     await db.processes.update_one(
                         {"id": proc["id"]},
@@ -912,13 +912,13 @@ async def update_process_active_status(user: dict = Depends(require_roles([UserR
     # Status que devem ser marcados como inativos
     inactive_statuses = ["desistencias", "concluidos"]
     
-    # Atualizar processos inativos
+    # Actualizar processos inativos
     inactive_result = await db.processes.update_many(
         {"status": {"$in": inactive_statuses}},
         {"$set": {"is_active": False}}
     )
     
-    # Atualizar processos ativos (todos os outros)
+    # Actualizar processos ativos (todos os outros)
     active_result = await db.processes.update_many(
         {"status": {"$nin": inactive_statuses}},
         {"$set": {"is_active": True}}
@@ -2213,7 +2213,7 @@ async def update_client_registration(
     
     # Campos aninhados
     if "personal_data" in data:
-        # Manter dados existentes e atualizar apenas os fornecidos
+        # Manter dados existentes e actualizar apenas os fornecidos
         existing_personal = process.get("personal_data", {})
         existing_personal.update(data["personal_data"])
         update_data["personal_data"] = existing_personal
@@ -2406,7 +2406,7 @@ async def get_stale_processes(
     }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_name": 1, 
         "mediador_name": 1, "updated_at": 1, "created_at": 1}).to_list(500)
     
-    # Calcular dias desde última atualização
+    # Calcular dias desde última actualização
     results = []
     for p in stale:
         last = p.get("updated_at") or p.get("created_at", "")

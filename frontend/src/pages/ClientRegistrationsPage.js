@@ -82,10 +82,10 @@ const ClientRegistrationsPage = () => {
   // Debounce para pesquisa
   const searchTimeoutRef = React.useRef(null);
 
-  // Atualizar filtros na URL
+  // Actualizar filtros na URL
   const updateSearch = useCallback((value) => {
     setSearch(value);
-    // Debounce: só atualiza a URL após 300ms sem input
+    // Debounce: só actualiza a URL após 300ms sem input
     clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
       setSearchParams(prev => {

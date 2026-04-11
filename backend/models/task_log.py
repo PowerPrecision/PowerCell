@@ -49,7 +49,7 @@ class TaskLogCreate(BaseModel):
 
 
 class TaskLogUpdate(BaseModel):
-    """Dados para atualizar uma tarefa."""
+    """Dados para actualizar uma tarefa."""
     status: Optional[TaskStatus] = None
     progress: Optional[int] = None
     progress_message: Optional[str] = None

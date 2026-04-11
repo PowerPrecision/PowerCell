@@ -779,7 +779,7 @@ async def update_lead(
     update_data: PropertyLeadUpdate,
     user: dict = Depends(get_current_user)
 ):
-    """Atualizar dados de um lead."""
+    """Actualizar dados de um lead."""
     lead = await db.property_leads.find_one({"id": lead_id})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
@@ -801,7 +801,7 @@ async def update_lead(
 
     await db.property_leads.update_one({"id": lead_id}, {"$set": update_dict})
     
-    # Retornar objeto atualizado (sem _id)
+    # Retornar objeto actualizado (sem _id)
     return await db.property_leads.find_one({"id": lead_id}, {"_id": 0})
 
 @router.patch("/{lead_id}/status")

@@ -187,7 +187,7 @@ async def move_process(
     if old_status == new_status:
         return True, {"status": new_status}, "Processo já está nesta coluna"
     
-    # Preparar atualização
+    # Preparar actualização
     update_data = {
         "status": new_status,
         "updated_at": datetime.now(timezone.utc).isoformat()

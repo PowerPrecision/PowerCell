@@ -568,7 +568,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # === CACHE INVALIDATION: Novo processo criado por staff afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
     
-    # Atualizar process_ids do cliente
+    # Actualizar process_ids do cliente
     if client_id:
         await db.clients.update_one(
             {"id": client_id},
@@ -1699,7 +1699,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             await log_audit_event(process_id, user, "Alterou dados pessoais", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["personal_data"] = data.personal_data.model_dump()
             
-            # Atualizar client_name se nome_completo ou nome for fornecido
+            # Actualizar client_name se nome_completo ou nome for fornecido
             personal_dict = data.personal_data.model_dump()
             new_name = personal_dict.get("nome_completo") or personal_dict.get("nome")
             if new_name:
@@ -1723,7 +1723,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             await log_audit_event(process_id, user, "Alterou dados de crédito", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["credit_data"] = data.credit_data.model_dump()
         
-        # Atualizar email e telefone do cliente
+        # Actualizar email e telefone do cliente
         if data.client_email is not None:
             update_data["client_email"] = sanitize_email(data.client_email)
         if data.client_phone is not None:
@@ -1761,12 +1761,12 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
-    # === CACHE INVALIDATION: Atualização de processo pode alterar KPIs ===
+    # === CACHE INVALIDATION: Actualização de processo pode alterar KPIs ===
     # Invalidar apenas se houve mudança de status (afeta contadores)
     if data.status:
         await invalidate_stats_cache(user_id=user.get("id"))
     
-    # === WEBSOCKET BROADCAST: Processo atualizado ===
+    # === WEBSOCKET BROADCAST: Processo actualizado ===
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_UPDATED,
         process_id=process_id,
@@ -1778,7 +1778,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         updated_at=updated.get("updated_at")
     )
     
-    # O22 - Executar regras de automação após atualização
+    # O22 - Executar regras de automação após actualização
     if data.status and can_update_status:
         try:
             from services.workflow_engine import process_trigger
@@ -1992,7 +1992,7 @@ async def assign_process(
     # === CACHE INVALIDATION: Atribuição altera KPIs dos users envolvidos ===
     await invalidate_stats_cache(user_id=user.get("id"))
     
-    # === WEBSOCKET BROADCAST: Atribuições atualizadas ===
+    # === WEBSOCKET BROADCAST: Atribuições actualizadas ===
     updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_ASSIGNED,
@@ -2413,7 +2413,7 @@ async def add_client_to_process(
     inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     
-    # Atualizar process_ids do cliente
+    # Actualizar process_ids do cliente
     await db.clients.update_one(
         {"id": client_id},
         {
@@ -2485,7 +2485,7 @@ async def remove_client_from_process(
         "updated_at": now
     }
     
-    # Atualizar titular2_data se necessário
+    # Actualizar titular2_data se necessário
     if co_buyers:
         update_data["titular2_data"] = {
             "name": co_buyers[0].get("name"),

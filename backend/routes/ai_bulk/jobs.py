@@ -76,7 +76,7 @@ async def create_background_job_db(
 
 
 async def update_background_job_db(job_id: str, **kwargs):
-    """Atualizar estado de um job em background (persistido na DB)."""
+    """Actualizar estado de um job em background (persistido na DB)."""
     update_data = {**kwargs, "updated_at": datetime.now(timezone.utc).isoformat()}
     
     # Actualizar cache em memória
@@ -168,7 +168,7 @@ def create_background_job(job_type: str, user_email: str, details: dict = None) 
 
 
 def update_background_job(job_id: str, **kwargs):
-    """[LEGACY] Atualizar estado de um job em background (apenas memória)."""
+    """[LEGACY] Actualizar estado de um job em background (apenas memória)."""
     if job_id in background_processes:
         background_processes[job_id].update(kwargs)
         
