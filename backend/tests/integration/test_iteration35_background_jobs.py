@@ -33,7 +33,7 @@ class TestAuthentication:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
             timeout=30
         )
@@ -56,7 +56,7 @@ class TestBackgroundJobsEndpoints:
     def auth_headers(self):
         """Get auth headers for admin user"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
             timeout=30
         )
@@ -208,7 +208,7 @@ class TestScraperEndpoint:
     def auth_headers(self):
         """Get auth headers"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
             timeout=30
         )
@@ -484,7 +484,7 @@ class TestHealthAndCleanup:
         """Cleanup test data"""
         # Login as admin
         login_response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
             timeout=30
         )

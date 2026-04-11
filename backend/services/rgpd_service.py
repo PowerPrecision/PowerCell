@@ -10,6 +10,7 @@ Este módulo implementa:
 """
 import uuid
 import io
+import base64
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any

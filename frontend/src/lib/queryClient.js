@@ -1,0 +1,203 @@
+/**
+ * ====================================================================
+ * QUERY CLIENT CONFIGURATION - TanStack Query v5
+ * ====================================================================
+ * Configuração global do QueryClient para gestão de estado de servidor.
+ * 
+ * BENEFÍCIOS:
+ * - Caching automático com staleTime
+ * - Auto-refetch on window focus (crítico para CRM)
+ * - Deduplicação de requests
+ * - Background refetching
+ * - Retry inteligente
+ * ====================================================================
+ */
+
+import { QueryClient } from '@tanstack/react-query';
+
+/**
+ * Configuração do QueryClient otimizada para CRM.
+ * 
+ * PADRÕES DEFINIDOS:
+ * - staleTime: 1 minuto (evita fetches excessivos ao navegar rápido)
+ * - gcTime: 5 minutos (cache garbage collection)
+ * - refetchOnWindowFocus: true (atualiza ao voltar de outra tab)
+ * - refetchOnReconnect: true (atualiza ao recuperar conexão)
+ * - retry: 2 tentativas para erros de rede
+ */
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Tempo até os dados serem considerados "stale" (obsoletos)
+      // 1 minuto é ideal para CRM: evita fetches excessivos mas garante
+      // dados razoavelmente atualizados
+      staleTime: 60 * 1000, // 1 minuto
+      
+      // Tempo até o cache ser limpo (garbage collection)
+      // 5 minutos é suficiente para navegação entre páginas
+      gcTime: 5 * 60 * 1000, // 5 minutos
+      
+      // CRÍTICO: Refetch quando o utilizador volta da tab do email/whatsapp
+      // para o CRM. Garante que o Kanban e Filme da Lead atualizam-se.
+      refetchOnWindowFocus: true,
+      
+      // Refetch quando a conexão é recuperada
+      refetchOnReconnect: true,
+      
+      // Não refetch em mount se os dados ainda são fresh
+      refetchOnMount: true,
+      
+      // Retry configurado para erros de rede
+      retry: (failureCount, error) => {
+        // Não tentar retry para erros 4xx (client errors)
+        if (error?.status >= 400 && error?.status < 500) {
+          return false;
+        }
+        // Máximo 2 tentativas para erros de rede
+        return failureCount < 2;
+      },
+      
+      // Delay entre retries (exponential backoff)
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+      
+      // Estrutura de dados estruturada para debug
+      structuralSharing: true,
+    },
+    mutations: {
+      // Retry para mutations (operações de escrita)
+      retry: false, // Normalmente não queremos retry para mutations
+      
+      // Timeout para mutations
+      gcTime: 0, // Não guardar cache de mutations
+    },
+  },
+});
+
+/**
+ * Query Keys Factory
+ * 
+ * Centraliza todas as query keys para consistência e type-safety.
+ * Segue o padrão de factory functions para criar keys compostas.
+ */
+export const queryKeys = {
+  // Processos
+  processes: {
+    all: ['processes'],
+    lists: () => [...queryKeys.processes.all, 'list'],
+    list: (filters) => [...queryKeys.processes.lists(), filters],
+    details: () => [...queryKeys.processes.all, 'detail'],
+    detail: (id) => [...queryKeys.processes.details(), id],
+    kanban: (filters) => [...queryKeys.processes.all, 'kanban', filters],
+    myClients: (filters) => [...queryKeys.processes.all, 'my-clients', filters],
+  },
+  
+  // Histórico/Timeline
+  history: {
+    all: ['history'],
+    byProcess: (processId) => [...queryKeys.history.all, 'process', processId],
+  },
+  
+  // Atividades/Comentários
+  activities: {
+    all: ['activities'],
+    byProcess: (processId) => [...queryKeys.activities.all, 'process', processId],
+  },
+  
+  // Prazos/Deadlines
+  deadlines: {
+    all: ['deadlines'],
+    lists: () => [...queryKeys.deadlines.all, 'list'],
+    byProcess: (processId) => [...queryKeys.deadlines.all, 'process', processId],
+    myDeadlines: () => [...queryKeys.deadlines.all, 'my'],
+    calendar: (consultorId, mediadorId) => [...queryKeys.deadlines.all, 'calendar', { consultorId, mediadorId }],
+  },
+  
+  // Documentos
+  documents: {
+    all: ['documents'],
+    byProcess: (processId) => [...queryKeys.documents.all, 'process', processId],
+    expiries: (processId) => [...queryKeys.documents.all, 'expiries', processId],
+    upcomingExpiries: (days) => [...queryKeys.documents.all, 'upcoming', days],
+  },
+  
+  // Notificações
+  notifications: {
+    all: ['notifications'],
+    list: (unreadOnly) => [...queryKeys.notifications.all, { unreadOnly }],
+  },
+  
+  // Tarefas
+  tasks: {
+    all: ['tasks'],
+    list: (filters) => [...queryKeys.tasks.all, 'list', filters],
+    myTasks: (includeCompleted) => [...queryKeys.tasks.all, 'my', { includeCompleted }],
+    byProcess: (processId) => [...queryKeys.tasks.all, 'process', processId],
+  },
+  
+  // Emails
+  emails: {
+    all: ['emails'],
+    byProcess: (processId, direction) => [...queryKeys.emails.all, 'process', processId, { direction }],
+    stats: (processId) => [...queryKeys.emails.all, 'stats', processId],
+    monitored: (processId) => [...queryKeys.emails.all, 'monitored', processId],
+    drafts: (limit) => [...queryKeys.emails.all, 'drafts', { limit }],
+  },
+  
+  // Anotações
+  annotations: {
+    all: ['annotations'],
+    byProcess: (processId, includeResolved) => [...queryKeys.annotations.all, 'process', processId, { includeResolved }],
+    byDocument: (documentPath, processId) => [...queryKeys.annotations.all, 'document', documentPath, processId],
+  },
+  
+  // Utilizadores
+  users: {
+    all: ['users'],
+    list: (role) => [...queryKeys.users.all, 'list', { role }],
+  },
+  
+  // Leads
+  leads: {
+    all: ['leads'],
+    list: (filters) => [...queryKeys.leads.all, 'list', filters],
+    byStatus: () => [...queryKeys.leads.all, 'by-status'],
+    detail: (id) => [...queryKeys.leads.all, 'detail', id],
+  },
+  
+  // Imóveis
+  properties: {
+    all: ['properties'],
+    list: (filters) => [...queryKeys.properties.all, 'list', filters],
+    detail: (id) => [...queryKeys.properties.all, 'detail', id],
+  },
+  
+  // Clientes
+  clients: {
+    all: ['clients'],
+    list: (filters) => [...queryKeys.clients.all, 'list', filters],
+    detail: (id) => [...queryKeys.clients.all, 'detail', id],
+  },
+  
+  // Workflow Statuses
+  workflowStatuses: {
+    all: ['workflow-statuses'],
+    list: () => [...queryKeys.workflowStatuses.all, 'list'],
+  },
+  
+  // Estatísticas
+  stats: {
+    all: ['stats'],
+    dashboard: () => [...queryKeys.stats.all, 'dashboard'],
+  },
+  
+  // Financeiro
+  finance: {
+    all: ['finance'],
+    summary: (params) => [...queryKeys.finance.all, 'summary', params],
+    monthly: (params) => [...queryKeys.finance.all, 'monthly', params],
+    commissions: (params) => [...queryKeys.finance.all, 'commissions', params],
+    performance: (params) => [...queryKeys.finance.all, 'performance', params],
+  },
+};
+
+export default queryClient;

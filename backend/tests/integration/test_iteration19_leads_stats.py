@@ -39,7 +39,7 @@ class TestHealthAndAuth:
     def test_admin_login(self):
         """Test admin login with admin@sistema.pt"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         assert response.status_code == 200, f"Admin login failed: {response.text}"
@@ -51,7 +51,7 @@ class TestHealthAndAuth:
     def test_consultor_login(self):
         """Test consultor login"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         # Note: consultor might not exist, so we accept both 200 and 401
@@ -69,7 +69,7 @@ class TestLeadsEndpoints:
     def setup(self):
         """Get admin token for authenticated requests"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         if response.status_code == 200:
@@ -161,7 +161,7 @@ class TestLeadRefreshEndpoint:
     def setup(self):
         """Get admin token for authenticated requests"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         if response.status_code == 200:
@@ -218,7 +218,7 @@ class TestStatsEndpoints:
     def setup(self):
         """Get admin token for authenticated requests"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         if response.status_code == 200:
@@ -304,7 +304,7 @@ class TestLeadsCardDateAndStale:
     def setup(self):
         """Get admin token for authenticated requests"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         if response.status_code == 200:

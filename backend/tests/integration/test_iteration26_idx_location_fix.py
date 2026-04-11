@@ -28,7 +28,7 @@ class TestIteration26IdxLocationFix:
         self.session.headers.update({"Content-Type": "application/json"})
         
         # Login as admin
-        response = self.session.post(f"{BASE_URL}/api/auth/login", json={
+        response = self.session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })
@@ -51,7 +51,7 @@ class TestIteration26IdxLocationFix:
     
     def test_01_admin_login(self):
         """Test 1: Admin login works"""
-        response = self.session.post(f"{BASE_URL}/api/auth/login", json={
+        response = self.session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })

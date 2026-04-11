@@ -30,7 +30,7 @@ class TestAuthentication:
     def auth_token(self):
         """Get authentication token for consultor"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -53,7 +53,7 @@ class TestDocumentsS3:
     def auth_token(self):
         """Get authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         assert response.status_code == 200
@@ -155,7 +155,7 @@ class TestEmailSync:
     def auth_token(self):
         """Get authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         assert response.status_code == 200
@@ -277,7 +277,7 @@ class TestLeadsScraper:
     def auth_token(self):
         """Get authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         assert response.status_code == 200
@@ -422,7 +422,7 @@ class TestEmailAccounts:
     def auth_token(self):
         """Get authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         assert response.status_code == 200

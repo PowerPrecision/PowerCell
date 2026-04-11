@@ -34,7 +34,7 @@ class TestAuthentication:
     def test_01_admin_login(self):
         """Test admin login and get auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -56,7 +56,7 @@ class TestKanbanFilters:
         if not hasattr(TestAuthentication, 'token'):
             # Login first
             response = requests.post(
-                f"{BASE_URL}/api/auth/login",
+                f"{BASE_URL}/api/auth/login-v2",
                 json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
             )
             assert response.status_code == 200
@@ -198,7 +198,7 @@ class TestClientDeletion:
         """Ensure we have admin token"""
         if not hasattr(TestAuthentication, 'token'):
             response = requests.post(
-                f"{BASE_URL}/api/auth/login",
+                f"{BASE_URL}/api/auth/login-v2",
                 json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
             )
             assert response.status_code == 200
@@ -281,7 +281,7 @@ class TestEmailPreferences:
         """Ensure we have admin token"""
         if not hasattr(TestAuthentication, 'token'):
             response = requests.post(
-                f"{BASE_URL}/api/auth/login",
+                f"{BASE_URL}/api/auth/login-v2",
                 json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
             )
             assert response.status_code == 200
@@ -327,7 +327,7 @@ class TestAdminNotificationPreferences:
         """Ensure we have admin token"""
         if not hasattr(TestAuthentication, 'token'):
             response = requests.post(
-                f"{BASE_URL}/api/auth/login",
+                f"{BASE_URL}/api/auth/login-v2",
                 json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
             )
             assert response.status_code == 200
@@ -387,7 +387,7 @@ class TestCleanup:
         """Ensure we have admin token"""
         if not hasattr(TestAuthentication, 'token'):
             response = requests.post(
-                f"{BASE_URL}/api/auth/login",
+                f"{BASE_URL}/api/auth/login-v2",
                 json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
             )
             assert response.status_code == 200

@@ -30,7 +30,7 @@ class TestEmailConnection:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup - get auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -92,7 +92,7 @@ class TestEmailAccounts:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup - get auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -135,7 +135,7 @@ class TestEmailSync:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup - get auth token and process ID"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -187,7 +187,7 @@ class TestEmailFilters:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup - get auth token and process ID"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -291,7 +291,7 @@ class TestManualEmailCreation:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup - get auth token and process ID"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -354,7 +354,7 @@ class TestCalendarRegression:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup - get auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -409,7 +409,7 @@ class TestTasksRegression:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup - get auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -484,7 +484,7 @@ class TestCleanup:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup - get auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })

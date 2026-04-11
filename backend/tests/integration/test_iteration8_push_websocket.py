@@ -34,7 +34,7 @@ class TestHealthAndAuth:
     def test_admin_login(self):
         """Test admin login"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         assert response.status_code == 200
@@ -49,7 +49,7 @@ class TestHealthAndAuth:
 def auth_token():
     """Get authentication token for admin user"""
     response = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        f"{BASE_URL}/api/auth/login-v2",
         json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     )
     if response.status_code == 200:

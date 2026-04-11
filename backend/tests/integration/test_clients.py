@@ -24,10 +24,6 @@ class TestClientEndpoints:
         assert True
     
     @pytest.mark.asyncio
-        # Verificar que retorna 403
-        assert True
-    
-    @pytest.mark.asyncio
     async def test_consultor_can_create_client(self):
         """consultor pode criar clientes."""
         assert True
@@ -49,10 +45,6 @@ class TestClientProcessRelation:
     @pytest.mark.asyncio
     async def test_create_process_for_client(self):
         """Criar processo para cliente existente."""
-        assert True
-    
-    @pytest.mark.asyncio
-        # POST /api/clients/{id}/create-process deve retornar 403
         assert True
     
     @pytest.mark.asyncio
@@ -87,12 +79,6 @@ class TestClientSearch:
 
 class TestClientPermissions:
     """Testes para permissões de clientes."""
-    
-    @pytest.mark.asyncio
-        assert True
-    
-    @pytest.mark.asyncio
-        assert True
     
     @pytest.mark.asyncio
     async def test_only_admin_can_delete_clients(self):

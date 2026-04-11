@@ -30,7 +30,7 @@ class TestExpiringDocumentsDashboard:
     def get_auth_token(self, email: str, password: str) -> str:
         """Helper to get auth token"""
         response = self.session.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": email, "password": password}
         )
         if response.status_code == 200:
@@ -266,7 +266,7 @@ class TestManagementRolePermissions:
         """Check if we can find admin/ceo/diretor users to test management permissions"""
         # First login as consultor to get list of users
         response = self.session.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         

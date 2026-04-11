@@ -24,7 +24,7 @@ class TestAuth:
     def test_admin_login(self):
         """Test admin login to get authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json=ADMIN_CREDENTIALS
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -36,7 +36,7 @@ class TestAuth:
 def auth_token():
     """Get admin authentication token"""
     response = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        f"{BASE_URL}/api/auth/login-v2",
         json=ADMIN_CREDENTIALS
     )
     if response.status_code == 200:

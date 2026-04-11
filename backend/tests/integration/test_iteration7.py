@@ -31,7 +31,7 @@ class TestHealthAndAuth:
     
     def test_admin_login(self):
         """Test admin login"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -51,7 +51,7 @@ class TestDashboardEndpoints:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Get admin token for authenticated requests"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -127,7 +127,7 @@ class TestProcessDetails:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Get admin token and a process ID"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -191,7 +191,7 @@ class TestImpersonateFunctionality:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Get admin token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })

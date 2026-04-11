@@ -6,6 +6,9 @@ Os utilizadores de teste são criados automaticamente:
 - admin@sistema.pt / admin123
 - consultor@sistema.pt / consultor123  
 - mediador@sistema.pt / mediador123
+
+CI/CD: Variáveis de ambiente dummy são definidas para evitar crash
+durante os testes no GitHub Actions.
 """
 import os
 import sys
@@ -15,6 +18,42 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+
+# ==================================================================
+# VARIÁVEIS DE AMBIENTE DUMMY PARA CI/CD
+# Estas variáveis são definidas ANTES de qualquer import da app
+# para evitar que o FastAPI faça crash por falta de credenciais.
+# ==================================================================
+DUMMY_ENV_VARS = {
+    "TESTING": "true",
+    "SECRET_KEY": "test_secret_key_for_ci_pipeline_do_not_use_in_production",
+    "JWT_SECRET": "test_jwt_secret_for_ci_pipeline_do_not_use_in_production",
+    "MONGO_URI": "mongodb://localhost:27017/test_db_ci",
+    "MONGODB_URL": "mongodb://localhost:27017/test_db_ci",
+    "MONGO_URL": "mongodb://localhost:27017/test_db_ci",
+    "DB_NAME": "test_db_ci",
+    "CORS_ORIGINS": "http://localhost:3000,http://localhost:5173",
+    "REDIS_URL": "none",
+    "OPENAI_API_KEY": "sk-test-dummy-key",
+    "SENTRY_DSN": "",
+    "REACT_APP_BACKEND_URL": "http://localhost:8001",
+    "SMTP_SERVER": "smtp.test.com",
+    "SMTP_PORT": "587",
+    "SMTP_USERNAME": "test@test.com",
+    "SMTP_PASSWORD": "test_password",
+    "POWER_EMAIL": "power@test.com",
+    "POWER_PASSWORD": "test_password",
+    "GENIUS_EMAIL": "genius@test.com",
+    "GENIUS_PASSWORD": "test_password",
+    "AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+    "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "AWS_REGION": "eu-west-1",
+    "S3_BUCKET": "test-bucket",
+}
+
+# Definir variáveis de ambiente dummy ANTES de importar a app
+for key, value in DUMMY_ENV_VARS.items():
+    os.environ.setdefault(key, value)
 
 # CORREÇÃO: Definir modo de teste ANTES de importar a app
 os.environ["TESTING"] = "true"
@@ -165,7 +204,7 @@ async def client():
 @pytest_asyncio.fixture
 async def admin_token(client):
     """Obter token de admin."""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "admin@sistema.pt",
         "password": "admin123"
     })
@@ -177,7 +216,7 @@ async def admin_token(client):
 @pytest_asyncio.fixture
 async def consultor_token(client):
     """Obter token de consultor."""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "consultor@sistema.pt",
         "password": "consultor123"
     })
@@ -188,7 +227,7 @@ async def consultor_token(client):
 @pytest_asyncio.fixture
 async def mediador_token(client):
     """Obter token de mediador."""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "mediador@sistema.pt",
         "password": "mediador123"
     })
@@ -217,7 +256,7 @@ def test_credentials():
 @pytest_asyncio.fixture
 async def auth_headers(client, test_credentials):
     """Headers de autenticação com token de admin."""
-    response = await client.post("/auth/login", json=test_credentials["admin"])
+    response = await client.post("/auth/login-v2", json=test_credentials["admin"])
     
     if response.status_code == 200:
         token = response.json().get("access_token") or response.json().get("token")
@@ -230,7 +269,7 @@ async def auth_headers(client, test_credentials):
 @pytest_asyncio.fixture
 async def gestor_headers(client):
     """Headers de autenticação para gestor de documentos."""
-    response = await client.post("/auth/login", json={
+    response = await client.post("/auth/login-v2", json={
         "email": "powerprecision@sistema.pt",
         "password": "PowerCell"
     })

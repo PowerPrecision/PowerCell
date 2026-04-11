@@ -23,7 +23,7 @@ class TestAuthentication:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "geral@powerealestate.pt", "password": "admin"}
         )
         assert response.status_code == 200, f"Admin login failed: {response.text}"
@@ -33,7 +33,7 @@ class TestAuthentication:
     def consultant_token(self):
         """Get consultant authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "flaviosilva@powerealestate.pt", "password": "flavio123"}
         )
         assert response.status_code == 200, f"Consultant login failed: {response.text}"

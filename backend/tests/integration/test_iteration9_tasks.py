@@ -30,7 +30,7 @@ class TestTasksSystem:
         self.session.headers.update({"Content-Type": "application/json"})
         
         # Login as admin
-        login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
+        login_response = self.session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": self.admin_email,
             "password": self.admin_password
         })
@@ -76,7 +76,7 @@ class TestTasksSystem:
     
     def test_admin_login(self):
         """Test admin login"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": self.admin_email,
             "password": self.admin_password
         })
@@ -443,7 +443,7 @@ class TestCalendarEndpoints:
         self.session.headers.update({"Content-Type": "application/json"})
         
         # Login as admin
-        login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
+        login_response = self.session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": self.admin_email,
             "password": self.admin_password
         })

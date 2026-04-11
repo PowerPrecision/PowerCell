@@ -26,7 +26,7 @@ class TestHealthAndAuth:
     
     def test_admin_login(self):
         """Test admin login"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD
         })
@@ -44,7 +44,7 @@ class TestWorkflowStatuses:
     @pytest.fixture
     def auth_token(self):
         """Get admin auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD
         })
@@ -190,7 +190,7 @@ class TestUsersEndpoint:
     @pytest.fixture
     def auth_token(self):
         """Get admin auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD
         })
@@ -264,7 +264,7 @@ class TestKanbanEndpoint:
     @pytest.fixture
     def auth_token(self):
         """Get admin auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD
         })
@@ -324,7 +324,7 @@ class TestStatsEndpoint:
     @pytest.fixture
     def auth_token(self):
         """Get admin auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD
         })

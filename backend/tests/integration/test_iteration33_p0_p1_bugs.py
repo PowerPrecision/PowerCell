@@ -23,7 +23,7 @@ class TestP0EmergentIntegrations:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Login as admin to get token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })
@@ -94,7 +94,7 @@ class TestP1BackgroundJobs:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Login as admin to get token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })
@@ -317,7 +317,7 @@ class TestCleanup:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Login as admin to get token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "admin"
         })

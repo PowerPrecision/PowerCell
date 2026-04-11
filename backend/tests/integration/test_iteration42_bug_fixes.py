@@ -32,7 +32,7 @@ def get_admin_session():
         _admin_session = requests.Session()
         _admin_session.headers.update({"Content-Type": "application/json"})
         
-        response = _admin_session.post(f"{BASE_URL}/api/auth/login", json={
+        response = _admin_session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@admin.com",
             "password": "adminadmin"
         })
@@ -57,7 +57,7 @@ def get_consultor_session():
         _consultor_session = requests.Session()
         _consultor_session.headers.update({"Content-Type": "application/json"})
         
-        response = _consultor_session.post(f"{BASE_URL}/api/auth/login", json={
+        response = _consultor_session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "flaviosilva@powerealestate.pt",
             "password": "flavio123"
         })

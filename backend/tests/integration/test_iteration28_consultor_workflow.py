@@ -32,7 +32,7 @@ def consultor_session():
     session.headers.update({"Content-Type": "application/json"})
     
     # Login como consultor
-    response = session.post(f"{BASE_URL}/api/auth/login", json={
+    response = session.post(f"{BASE_URL}/api/auth/login-v2", json={
         "email": CONSULTOR_EMAIL,
         "password": CONSULTOR_PASSWORD
     })
@@ -53,7 +53,7 @@ def admin_session():
     session = requests.Session()
     session.headers.update({"Content-Type": "application/json"})
     
-    response = session.post(f"{BASE_URL}/api/auth/login", json={
+    response = session.post(f"{BASE_URL}/api/auth/login-v2", json={
         "email": ADMIN_EMAIL,
         "password": ADMIN_PASSWORD
     })
@@ -75,7 +75,7 @@ class TestConsultorLogin:
         session = requests.Session()
         session.headers.update({"Content-Type": "application/json"})
         
-        response = session.post(f"{BASE_URL}/api/auth/login", json={
+        response = session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": CONSULTOR_EMAIL,
             "password": CONSULTOR_PASSWORD
         })
@@ -95,7 +95,7 @@ class TestConsultorLogin:
     def test_02_consultor_login_invalid_password(self):
         """Login com senha incorreta deve falhar."""
         session = requests.Session()
-        response = session.post(f"{BASE_URL}/api/auth/login", json={
+        response = session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": CONSULTOR_EMAIL,
             "password": "senhaerrada"
         })

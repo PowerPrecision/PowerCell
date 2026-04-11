@@ -25,7 +25,7 @@ class TestAuthentication:
     
     def test_admin_login_success(self):
         """Test login with admin@sistema.pt / admin"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -44,7 +44,7 @@ class TestMyClientsAPI:
     @pytest.fixture
     def admin_token(self):
         """Get admin auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -96,7 +96,7 @@ class TestEmailSearchAPI:
     @pytest.fixture
     def admin_token(self):
         """Get admin auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -137,7 +137,7 @@ class TestProcessDataFields:
     @pytest.fixture
     def admin_token(self):
         """Get admin auth token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -189,7 +189,7 @@ class TestIntermediarioRoleMenu:
         - Line 294-299: Os Meus Clientes included for intermediário
         """
         # Try to find an intermediário user
-        admin_response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        admin_response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })

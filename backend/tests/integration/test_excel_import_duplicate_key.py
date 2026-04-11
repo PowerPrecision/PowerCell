@@ -25,7 +25,7 @@ class TestExcelImportDuplicateKeyFix:
     def auth_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -43,7 +43,7 @@ class TestExcelImportDuplicateKeyFix:
     def test_01_login_success(self):
         """Test admin login works"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -272,7 +272,7 @@ class TestIndexConfiguration:
     def auth_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200

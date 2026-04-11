@@ -36,7 +36,7 @@ def api_client():
 @pytest.fixture
 def admin_token(api_client):
     """Get admin authentication token"""
-    response = api_client.post(f"{BASE_URL}/api/auth/login", json={
+    response = api_client.post(f"{BASE_URL}/api/auth/login-v2", json={
         "email": ADMIN_EMAIL,
         "password": ADMIN_PASSWORD
     })
@@ -48,7 +48,7 @@ def admin_token(api_client):
 @pytest.fixture
 def consultor_token(api_client):
     """Get consultor authentication token"""
-    response = api_client.post(f"{BASE_URL}/api/auth/login", json={
+    response = api_client.post(f"{BASE_URL}/api/auth/login-v2", json={
         "email": CONSULTOR_EMAIL,
         "password": CONSULTOR_PASSWORD
     })
@@ -70,7 +70,7 @@ class TestHealthAndBasics:
     
     def test_admin_login(self, api_client):
         """Test admin can login"""
-        response = api_client.post(f"{BASE_URL}/api/auth/login", json={
+        response = api_client.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         })
@@ -82,7 +82,7 @@ class TestHealthAndBasics:
     
     def test_consultor_login(self, api_client):
         """Test consultor can login"""
-        response = api_client.post(f"{BASE_URL}/api/auth/login", json={
+        response = api_client.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": CONSULTOR_EMAIL,
             "password": CONSULTOR_PASSWORD
         })

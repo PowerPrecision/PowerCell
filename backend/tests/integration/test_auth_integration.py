@@ -19,7 +19,7 @@ class TestAuthEndpoints:
     async def test_login_success(self, test_client, test_credentials):
         """Testa login com credenciais válidas."""
         response = await test_client.post(
-            "/auth/login",
+            "/auth/login-v2",
             json=test_credentials["admin"]
         )
         
@@ -32,7 +32,7 @@ class TestAuthEndpoints:
     async def test_login_invalid_credentials(self, test_client):
         """Testa login com credenciais inválidas."""
         response = await test_client.post(
-            "/auth/login",
+            "/auth/login-v2",
             json={"email": "invalid@test.com", "password": "wrongpassword"}
         )
         

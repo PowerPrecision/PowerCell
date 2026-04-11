@@ -166,7 +166,7 @@ class TestUserRateLimit:
         """Testa exclusão de endpoints do rate limiting."""
         EXCLUDED_ENDPOINTS = [
             "/api/health",
-            "/api/auth/login",
+            "/api/auth/login-v2",
             "/api/auth/refresh",
             "/api/public/",
             "/api/ws/",
@@ -180,7 +180,7 @@ class TestUserRateLimit:
         
         # Endpoints excluídos
         assert not should_rate_limit("/api/health")
-        assert not should_rate_limit("/api/auth/login")
+        assert not should_rate_limit("/api/auth/login-v2")
         assert not should_rate_limit("/api/public/client-registration")
         
         # Endpoints com rate limit

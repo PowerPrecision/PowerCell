@@ -27,6 +27,9 @@ export const WSEventType = {
   PROCESS_UPDATED: 'process_updated',
   PROCESS_STATUS_CHANGED: 'process_status_changed',
   PROCESS_ASSIGNED: 'process_assigned',
+  PROCESS_MOVED: 'process_moved',
+  PROCESS_LOCKED: 'process_locked',
+  PROCESS_UNLOCKED: 'process_unlocked',
   
   // Documentos
   DOCUMENT_EXPIRING: 'document_expiring',

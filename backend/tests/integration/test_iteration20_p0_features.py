@@ -17,7 +17,7 @@ class TestAuth:
     
     def test_admin_login_success(self):
         """Test admin login with geral@powerealestate.pt/admin2026"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "geral@powerealestate.pt",
             "password": "admin2026"
         })
@@ -30,7 +30,7 @@ class TestAuth:
 
 def get_admin_token():
     """Helper to get admin token"""
-    response = requests.post(f"{BASE_URL}/api/auth/login", json={
+    response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
         "email": "geral@powerealestate.pt",
         "password": "admin2026"
     })

@@ -29,7 +29,7 @@ class TestMinutasAPI:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin123"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -160,7 +160,7 @@ class TestBackupAPI:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin123"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -252,7 +252,7 @@ class TestScraperAPI:
     def admin_token(self):
         """Get admin authentication token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@sistema.pt", "password": "admin123"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -346,14 +346,14 @@ class TestStaffMinutasAccess:
         """Test that consultor role can access minutas endpoint"""
         # Login as consultor (if exists)
         login_response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "consultor@sistema.pt", "password": "consultor123"}
         )
         
         if login_response.status_code != 200:
             # Try another staff account
             login_response = requests.post(
-                f"{BASE_URL}/api/auth/login",
+                f"{BASE_URL}/api/auth/login-v2",
                 json={"email": "staff@sistema.pt", "password": "staff123"}
             )
         
@@ -384,7 +384,7 @@ class TestBackupAdminOnly:
         """Test that non-admin users cannot access backup endpoints"""
         # Try to login as a non-admin user
         login_response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "consultor@sistema.pt", "password": "consultor123"}
         )
         

@@ -29,7 +29,7 @@ def get_auth_session():
         _session.headers.update({"Content-Type": "application/json"})
         
         # Login as admin
-        response = _session.post(f"{BASE_URL}/api/auth/login", json={
+        response = _session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })

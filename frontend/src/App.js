@@ -4,6 +4,9 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { UploadProgressProvider } from "./contexts/UploadProgressContext";
 import { TasksProvider } from "./contexts/TasksContext";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import React, { Suspense, Component } from "react";
@@ -214,15 +217,16 @@ const RootRedirect = () => {
 
 function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <UploadProgressProvider>
-        <TasksProvider>
-        <BrowserRouter>
-        <Sentry.ErrorBoundary fallback={ErrorFallback}>
-        <LazyChunkErrorBoundary>
-        <Suspense fallback={<PageLoadingSkeleton />}>
-        <Routes>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <AuthProvider>
+          <UploadProgressProvider>
+          <TasksProvider>
+          <BrowserRouter>
+          <Sentry.ErrorBoundary fallback={ErrorFallback}>
+          <LazyChunkErrorBoundary>
+          <Suspense fallback={<PageLoadingSkeleton />}>
+          <Routes>
           {/* Root redirect - shows form or redirects to dashboard based on auth */}
           <Route path="/" element={<RootRedirect />} />
           {/* Public client registration form - explicit route */}
@@ -633,7 +637,10 @@ function App() {
       </TasksProvider>
       </UploadProgressProvider>
     </AuthProvider>
-    </ThemeProvider>
+      </ThemeProvider>
+      {/* React Query DevTools - apenas em desenvolvimento */}
+      {process.env.NODE_ENV === 'development' && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
   );
 }
 

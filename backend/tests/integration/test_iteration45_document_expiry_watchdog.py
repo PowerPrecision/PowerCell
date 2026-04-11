@@ -28,7 +28,7 @@ class TestDocumentUploadAutoCategorization:
     def auth_token(self):
         """Get authentication token for consultant"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTANT_EMAIL, "password": CONSULTANT_PASSWORD}
         )
         if response.status_code != 200:
@@ -97,7 +97,7 @@ class TestDocumentMetadataExpiryFields:
     def auth_token(self):
         """Get authentication token for consultant"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTANT_EMAIL, "password": CONSULTANT_PASSWORD}
         )
         if response.status_code != 200:
@@ -196,7 +196,7 @@ class TestNotificationTypeSupport:
     def auth_token(self):
         """Get authentication token for consultant"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTANT_EMAIL, "password": CONSULTANT_PASSWORD}
         )
         if response.status_code != 200:

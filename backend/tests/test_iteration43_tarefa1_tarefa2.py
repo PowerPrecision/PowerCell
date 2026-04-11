@@ -35,7 +35,7 @@ class TestAuthentication:
     def test_admin_login(self):
         """Test admin can login successfully"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         assert response.status_code == 200, f"Admin login failed: {response.text}"
@@ -47,7 +47,7 @@ class TestAuthentication:
     def test_consultor_login(self):
         """Test consultor can login successfully"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
         )
         assert response.status_code == 200, f"Consultor login failed: {response.text}"
@@ -60,7 +60,7 @@ class TestAuthentication:
 def admin_token():
     """Get admin authentication token"""
     response = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        f"{BASE_URL}/api/auth/login-v2",
         json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     )
     if response.status_code == 200:
@@ -72,7 +72,7 @@ def admin_token():
 def consultor_token():
     """Get consultor authentication token"""
     response = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        f"{BASE_URL}/api/auth/login-v2",
         json={"email": CONSULTOR_EMAIL, "password": CONSULTOR_PASSWORD}
     )
     if response.status_code == 200:

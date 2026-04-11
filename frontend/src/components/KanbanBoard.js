@@ -1,27 +1,28 @@
 /**
- * KanbanBoard Component (Orchestrator)
+ * KanbanBoard Component (Orchestrator) - Refatorado com TanStack Query
  * 
  * Componente principal do Quadro Kanban - agora um ORQUESTRADOR.
  * 
- * RESPONSABILIDADE ÚNICA (SRP):
- * - Fazer fetch dos dados na montagem
- * - Gerir estado global das colunas
- * - Fornecer contexto de Drag & Drop
- * - Renderizar lista de KanbanColumn
- * 
- * PERFORMANCE:
- * - Estado dos formulários ISOLADO nos modais
- * - React.memo nos cartões previne re-renders desnecessários
- * - Projeção de dados para minimizar dados transferidos
+ * MELHORIAS COM REACT QUERY:
+ * - Caching automático com staleTime
+ * - Refetch on window focus
+ * - Integração WebSocket com setQueryData
+ * - Eliminação de useEffect/useState "esparguete"
  * 
  * ARQUITETURA:
  * - KanbanBoard (orquestrador) → KanbanColumn → KanbanCard
- * - Modals com estado isolado: ProcessDetailsModal, CreateClientModal, AssignUsersModal
+ * - useKanbanQuery: Fetch com caching
+ * - useKanbanRealtime: WebSocket + React Query integration
+ * - useMoveProcessMutation: Drag & Drop com optimistic update
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { toast } from 'sonner';
-import { useWebSocket, WSEventType } from '../hooks/useWebSocket';
+
+// React Query hooks
+import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';
+import { useKanbanRealtime } from '../hooks/queries/useKanbanRealtime';
+import { useMoveProcessMutation } from '../hooks/mutations/useProcessMutations';
 
 // Importar componentes refatorados
 import {
@@ -34,8 +35,6 @@ import {
   AssignUsersModal,
 } from './kanban';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
-
 const KanbanBoard = ({ 
   token, 
   user, 
@@ -44,9 +43,7 @@ const KanbanBoard = ({
   indexacaoFilter = 'all',
   parceiroFilter = 'all' 
 }) => {
-  // === ESTADO GLOBAL DO BOARD ===
-  const [loading, setLoading] = useState(true);
-  const [kanbanData, setKanbanData] = useState({ columns: [], total_processes: 0 });
+  // === ESTADO LOCAL (apenas UI state, não server state) ===
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
   const [urgencyFilter, setUrgencyFilter] = useState('all');
@@ -60,10 +57,10 @@ const KanbanBoard = ({
   // === ESTADO DE COLUNAS COLAPSADAS ===
   const [collapsedColumns, setCollapsedColumns] = useState(new Set());
   
-  // === REFS (React way em vez de document.getElementById) ===
+  // === REFS ===
   const scrollContainerRef = useRef(null);
   
-  // === ESTADO DE MODALS (apenas flags de abertura) ===
+  // === ESTADO DE MODALS ===
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -73,170 +70,54 @@ const KanbanBoard = ({
   // Verificar se o utilizador pode criar clientes
   const canCreateClient = user && ['intermediario', 'mediador'].includes(user.role);
 
-  // === DATA FETCHING ===
-  const fetchKanbanData = useCallback(async () => {
-    try {
-      setLoading(true); // Mostrar loading quando filtros mudam
-      const params = new URLSearchParams();
-      
-      // FILTRO DE ESTADO ATIVO: Por defeito, mostra apenas processos ativos
-      // O backend usa 'active_only' como default, mas enviamos explicitamente
-      params.append('view_mode', 'active_only');
-      
-      if (consultorFilter && consultorFilter !== 'all') {
-        params.append('consultor_id', consultorFilter === 'none' ? 'none' : consultorFilter);
-      }
-      if (mediadorFilter && mediadorFilter !== 'all') {
-        params.append('mediador_id', mediadorFilter === 'none' ? 'none' : mediadorFilter);
-      }
-      if (indexacaoFilter && indexacaoFilter !== 'all') {
-        params.append('indexacao_id', indexacaoFilter === 'none' ? 'none' : indexacaoFilter);
-      }
-      if (parceiroFilter && parceiroFilter !== 'all') {
-        params.append('parceiro_id', parceiroFilter === 'none' ? 'none' : parceiroFilter);
-      }
-
-      const url = `${API_URL}/api/processes/kanban?${params.toString()}`;
-
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!response.ok) throw new Error('Failed to fetch kanban data');
-      const data = await response.json();
-      setKanbanData(data);
-    } catch (error) {
-      console.error('Error fetching kanban:', error);
-      toast.error('Erro ao carregar dados do Kanban');
-    } finally {
-      setLoading(false);
-    }
-  }, [token, consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter]);
-
-  useEffect(() => {
-    fetchKanbanData();
-  }, [fetchKanbanData]);
-
-  // === WEBSOCKET REAL-TIME UPDATES ===
-  const handleProcessUpdate = useCallback((eventType, payload) => {
-    if (!payload || !payload.process_id) return;
-
-    setKanbanData(prev => {
-      const newColumns = prev.columns.map(col => ({ ...col, processes: [...col.processes] }));
-
-      switch (eventType) {
-        case WSEventType.PROCESS_CREATED: {
-          const targetStatus = payload.status || 'clientes_espera';
-          const targetColIndex = newColumns.findIndex(col => col.name === targetStatus);
-          if (targetColIndex >= 0) {
-            const newProcess = {
-              id: payload.process_id,
-              process_number: payload.process_number,
-              client_name: payload.client_name || 'Novo Cliente',
-              status: targetStatus,
-              priority: payload.priority,
-              process_type: payload.process_type,
-              consultor_names: payload.consultor_names || [],
-              mediador_names: payload.mediador_names || [],
-              updated_at: payload.updated_at,
-            };
-            newColumns[targetColIndex].processes.unshift(newProcess);
-            newColumns[targetColIndex].count += 1;
-            toast.info(`Novo processo: ${payload.client_name || 'Novo Cliente'}`);
-          }
-          break;
-        }
-
-        case WSEventType.PROCESS_STATUS_CHANGED: {
-          const sourceStatus = payload.old_status;
-          const targetStatus = payload.status;
-          let movedProcess = null;
-
-          const sourceColIndex = newColumns.findIndex(col => col.name === sourceStatus);
-          if (sourceColIndex >= 0) {
-            const processIndex = newColumns[sourceColIndex].processes.findIndex(p => p.id === payload.process_id);
-            if (processIndex >= 0) {
-              movedProcess = { ...newColumns[sourceColIndex].processes[processIndex], status: targetStatus };
-              newColumns[sourceColIndex].processes.splice(processIndex, 1);
-              newColumns[sourceColIndex].count -= 1;
-            }
-          }
-
-          const targetColIndex = newColumns.findIndex(col => col.name === targetStatus);
-          if (targetColIndex >= 0) {
-            if (movedProcess) {
-              newColumns[targetColIndex].processes.unshift(movedProcess);
-              newColumns[targetColIndex].count += 1;
-            } else {
-              newColumns[targetColIndex].processes.unshift({
-                id: payload.process_id,
-                process_number: payload.process_number,
-                client_name: payload.client_name || 'Cliente',
-                status: targetStatus,
-                updated_at: payload.updated_at,
-              });
-              newColumns[targetColIndex].count += 1;
-            }
-          }
-          break;
-        }
-
-        case WSEventType.PROCESS_UPDATED:
-        case WSEventType.PROCESS_ASSIGNED: {
-          for (const col of newColumns) {
-            const processIndex = col.processes.findIndex(p => p.id === payload.process_id);
-            if (processIndex >= 0) {
-              col.processes[processIndex] = {
-                ...col.processes[processIndex],
-                ...(payload.client_name && { client_name: payload.client_name }),
-                ...(payload.priority && { priority: payload.priority }),
-                ...(payload.consultor_names && { consultor_names: payload.consultor_names }),
-                ...(payload.mediador_names && { mediador_names: payload.mediador_names }),
-                updated_at: payload.updated_at,
-              };
-              break;
-            }
-          }
-          break;
-        }
-
-        default:
-          break;
-      }
-
-      return { ...prev, columns: newColumns };
-    });
-  }, []);
-
-  const { isConnected, on, off } = useWebSocket({
-    onProcessUpdate: handleProcessUpdate,
-    autoConnect: true,
+  // === REACT QUERY - DATA FETCHING ===
+  const filters = { consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter };
+  
+  const {
+    kanbanData,
+    columns,
+    totalProcesses,
+    isLoading,
+    isFetching,
+    isError,
+    refetch,
+  } = useKanbanQuery({
+    token,
+    ...filters,
   });
 
-  useEffect(() => {
-    const unsubscribers = [
-      on(WSEventType.PROCESS_CREATED, (data) => handleProcessUpdate(WSEventType.PROCESS_CREATED, data)),
-      on(WSEventType.PROCESS_STATUS_CHANGED, (data) => handleProcessUpdate(WSEventType.PROCESS_STATUS_CHANGED, data)),
-      on(WSEventType.PROCESS_UPDATED, (data) => handleProcessUpdate(WSEventType.PROCESS_UPDATED, data)),
-      on(WSEventType.PROCESS_ASSIGNED, (data) => handleProcessUpdate(WSEventType.PROCESS_ASSIGNED, data)),
-    ];
+  // === REACT QUERY - WEBSOCKET REAL-TIME ===
+  const {
+    isConnected,
+    lockedProcesses,
+    sendMessage,
+    addPendingMove,
+    removePendingMove,
+  } = useKanbanRealtime({
+    filters,
+    userId: user?.id,
+    onNotification: ({ type, message }) => {
+      if (type === 'info') {
+        toast.info(message);
+      }
+    },
+  });
 
-    return () => {
-      unsubscribers.forEach(unsub => unsub?.());
-    };
-  }, [on, handleProcessUpdate]);
+  // === REACT QUERY - MUTATIONS ===
+  const moveProcessMutation = useMoveProcessMutation(addPendingMove, removePendingMove, { filters });
 
   // === AUTO-COLLAPSE EMPTY COLUMNS ===
-  useEffect(() => {
-    if (kanbanData.columns.length > 0 && collapsedColumns.size === 0) {
-      const emptyColumnIds = kanbanData.columns
+  // Este efeito é local, não precisa de React Query
+  useState(() => {
+    if (columns.length > 0 && collapsedColumns.size === 0) {
+      const emptyColumnIds = columns
         .filter(col => col.count === 0)
         .map(col => col.id);
       if (emptyColumnIds.length > 0) {
         setCollapsedColumns(new Set(emptyColumnIds));
       }
     }
-  }, [kanbanData.columns, collapsedColumns.size]);
+  }, [columns]);
 
   // === DRAG & DROP HANDLERS ===
   const handleDragStart = useCallback((e, process, columnName) => {
@@ -266,49 +147,13 @@ const KanbanBoard = ({
     const { process, sourceColumn } = draggingCard;
     setDraggingCard(null);
 
-    // Optimistic update
-    setKanbanData(prev => {
-      const newColumns = prev.columns.map(col => {
-        if (col.name === sourceColumn) {
-          return {
-            ...col,
-            processes: col.processes.filter(p => p.id !== process.id),
-            count: col.count - 1,
-          };
-        }
-        if (col.name === targetColumn) {
-          return {
-            ...col,
-            processes: [...col.processes, { ...process, status: targetColumn }],
-            count: col.count + 1,
-          };
-        }
-        return col;
-      });
-      return { ...prev, columns: newColumns };
+    // Usar mutation com optimistic update
+    moveProcessMutation.mutate({
+      processId: process.id,
+      newStatus: targetColumn,
+      oldStatus: sourceColumn,
     });
-
-    // API call
-    try {
-      const response = await fetch(
-        `${API_URL}/api/processes/kanban/${process.id}/move?new_status=${targetColumn}`,
-        {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!response.ok) throw new Error('Failed to move process');
-      toast.success('Processo movido com sucesso');
-    } catch (error) {
-      console.error('Error moving process:', error);
-      toast.error('Erro ao mover processo');
-      fetchKanbanData(); // Revert on error
-    }
-  }, [draggingCard, token, fetchKanbanData]);
+  }, [draggingCard, moveProcessMutation]);
 
   // === COLUMN COLLAPSE HANDLER ===
   const handleToggleCollapse = useCallback((columnId) => {
@@ -327,10 +172,25 @@ const KanbanBoard = ({
   const handleCardClick = useCallback((process) => {
     setSelectedProcess(process);
     setShowProcessDialog(true);
-  }, []);
+    // Send lock event via WebSocket
+    if (sendMessage) {
+      sendMessage('process_locked', { process_id: process.id });
+    }
+  }, [sendMessage]);
+
+  // === DIALOG CLOSE HANDLER ===
+  const handleDialogClose = useCallback((open) => {
+    if (!open && selectedProcess && sendMessage) {
+      sendMessage('process_unlocked', { process_id: selectedProcess.id });
+    }
+    if (!open) {
+      setSelectedProcess(null);
+    }
+    setShowProcessDialog(open);
+  }, [selectedProcess, sendMessage]);
 
   // === FILTERED DATA ===
-  const filteredColumns = kanbanData.columns.map(column => ({
+  const filteredColumns = columns.map(column => ({
     ...column,
     processes: column.processes.filter(process => {
       // Text search filter
@@ -382,7 +242,7 @@ const KanbanBoard = ({
     ? filteredColumns.flatMap(col => col.processes.map(p => ({ ...p, columnLabel: col.label, columnColor: col.color })))
     : [];
 
-  // === SCROLL HANDLERS (usando useRef em vez de document.getElementById) ===
+  // === SCROLL HANDLERS ===
   const scrollContainer = useCallback((direction) => {
     const container = scrollContainerRef.current;
     if (container) {
@@ -397,15 +257,15 @@ const KanbanBoard = ({
 
   // === MODAL CALLBACKS ===
   const handleCreateSuccess = useCallback(() => {
-    fetchKanbanData();
-  }, [fetchKanbanData]);
+    refetch();
+  }, [refetch]);
 
   const handleAssignSuccess = useCallback(() => {
-    fetchKanbanData();
-  }, [fetchKanbanData]);
+    refetch();
+  }, [refetch]);
 
   // === RENDER ===
-  if (loading) {
+  if (isLoading) {
     return <KanbanSkeleton />;
   }
 
@@ -413,7 +273,7 @@ const KanbanBoard = ({
     <div className="space-y-4" data-testid="kanban-board">
       {/* Header */}
       <KanbanHeader
-        totalProcesses={kanbanData.total_processes}
+        totalProcesses={totalProcesses}
         visibleCount={filteredColumns.reduce((acc, col) => acc + col.processes.length, 0)}
         isConnected={isConnected}
         searchTerm={searchTerm}
@@ -427,6 +287,7 @@ const KanbanBoard = ({
         onUrgencyFilterChange={setUrgencyFilter}
         onScrollLeft={() => scrollContainer('left')}
         onScrollRight={() => scrollContainer('right')}
+        isFetching={isFetching}
       />
 
       {/* Search Results List View */}
@@ -459,6 +320,7 @@ const KanbanBoard = ({
                   onDragStart={handleDragStart}
                   onCardClick={handleCardClick}
                   draggingCard={draggingCard}
+                  lockedProcesses={lockedProcesses}
                 />
               ))}
             </div>
@@ -467,11 +329,13 @@ const KanbanBoard = ({
         </div>
       )}
 
-      {/* Modals - Estado isolado dentro de cada componente */}
+      {/* Modals */}
       <ProcessDetailsModal
         open={showProcessDialog}
-        onOpenChange={setShowProcessDialog}
+        onOpenChange={handleDialogClose}
         process={selectedProcess}
+        isLockedByOther={selectedProcess ? !!lockedProcesses[selectedProcess.id] && lockedProcesses[selectedProcess.id]?.user_id !== user?.id : false}
+        lockedBy={selectedProcess ? lockedProcesses[selectedProcess.id]?.user_name : undefined}
       />
 
       {canCreateClient && (

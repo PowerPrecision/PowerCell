@@ -28,7 +28,7 @@ class TestTrelloIntegration:
         self.session.headers.update({"Content-Type": "application/json"})
         
         # Login as admin
-        response = self.session.post(f"{BASE_URL}/api/auth/login", json={
+        response = self.session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin2026"
         })
@@ -278,7 +278,7 @@ class TestTrelloWebhook:
         self.session.headers.update({"Content-Type": "application/json"})
         
         # Login as admin
-        response = self.session.post(f"{BASE_URL}/api/auth/login", json={
+        response = self.session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin2026"
         })
@@ -336,7 +336,7 @@ class TestTrelloConfiguration:
         self.session.headers.update({"Content-Type": "application/json"})
         
         # Login as admin
-        response = self.session.post(f"{BASE_URL}/api/auth/login", json={
+        response = self.session.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin2026"
         })

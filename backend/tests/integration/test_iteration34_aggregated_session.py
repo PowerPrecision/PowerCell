@@ -30,7 +30,7 @@ class TestAggregatedSessionEndpoints:
     def admin_token(self):
         """Get admin JWT token."""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -478,7 +478,7 @@ class TestCleanup:
     def admin_token(self):
         """Get admin JWT token."""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
         )
         if response.status_code == 200:

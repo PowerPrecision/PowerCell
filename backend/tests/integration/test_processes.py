@@ -33,14 +33,6 @@ class TestProcessEndpoints:
         assert True
     
     @pytest.mark.asyncio
-        # Em ambiente real:
-        # response = await client.post("/api/processes", 
-        #     headers={"Authorization": f"Bearer {gestor_token}"},
-        #     json={...})
-        # assert response.status_code == 403
-        assert True
-    
-    @pytest.mark.asyncio
     async def test_admin_can_create_process(self):
         """admin pode criar processos."""
         # Em ambiente real:
@@ -110,10 +102,4 @@ class TestProcessPermissions:
         """Admin deve ver todos os processos."""
         assert True
     
-    @pytest.mark.asyncio
-        """Gestor documentos pode ver detalhes do processo."""
-        assert True
-    
-    @pytest.mark.asyncio
-        """Gestor documentos não pode actualizar processo."""
-        assert True
+

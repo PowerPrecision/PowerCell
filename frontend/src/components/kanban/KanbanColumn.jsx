@@ -39,6 +39,7 @@ const KanbanColumn = memo(({
   onDragStart,
   onCardClick,
   draggingCard,
+  lockedProcesses = {},
 }) => {
   const isEmpty = column.count === 0;
   const isDragOver = dragOverColumn === column.name;
@@ -145,6 +146,8 @@ const KanbanColumn = memo(({
                   draggingCard={draggingCard}
                   onDragStart={onDragStart}
                   onCardClick={onCardClick}
+                  isLocked={!!lockedProcesses[process.id]}
+                  lockedBy={lockedProcesses[process.id]?.user_name}
                 />
               ))
             )}

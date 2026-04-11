@@ -297,12 +297,17 @@ class TestGestorDocumentosRestrictions:
             timeout=30
         )
         if response.status_code != 200:
+            raise AssertionError(f"Login failed for gestor_docs: {response.status_code}")
         return response.json()["access_token"]
-    
+
+    def test_gestor_docs_cannot_edit_process(self):
+        """Gestor de documentos não pode editar processos."""
+        token = self.gestor_docs_token()
+
         # First get a process ID
         response = requests.get(
             f"{BASE_URL}/api/processes?limit=1",
-            headers={"Authorization": f"Bearer {gestor_docs_token}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=30
         )
         
@@ -318,7 +323,7 @@ class TestGestorDocumentosRestrictions:
         # Try to edit the process
         response = requests.put(
             f"{BASE_URL}/api/processes/{process_id}",
-            headers={"Authorization": f"Bearer {gestor_docs_token}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=30
         )
         
@@ -330,7 +335,7 @@ class TestGestorDocumentosRestrictions:
     
         response = requests.get(
             f"{BASE_URL}/api/processes?limit=5",
-            headers={"Authorization": f"Bearer {gestor_docs_token}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=30
         )
         

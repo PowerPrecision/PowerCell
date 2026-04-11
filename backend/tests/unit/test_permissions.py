@@ -10,16 +10,21 @@ import pytest
 
 class TestRolePermissions:
     """Testes para verificar permissões por role."""
-    
+
+    def test_restricted_roles_are_valid(self):
+        """Roles restritas devem existir no sistema."""
         from models.enums import UserRoleEnum
-        
-        
+
+        restricted_roles = ["cliente"]
+
         for role in restricted_roles:
             assert role in UserRoleEnum.all_values()
             # Em produção, verificar que endpoint retorna 403
-    
+
+    def test_only_staff_can_create_processes(self):
+        """Apenas staff pode criar processos."""
         restricted_for_process_creation = ["cliente"]
-        
+
         for role in restricted_for_process_creation:
             # Em produção, endpoint POST /processes deve retornar 403
             assert role in ["cliente"]
@@ -76,6 +81,7 @@ class TestCanCreateProcess:
     def test_frontend_permission_check_logic(self):
         """Simula lógica de verificação do frontend."""
         def can_create_process(user_role: str) -> bool:
+            return user_role != "cliente"
         
         assert can_create_process("admin") == True
         assert can_create_process("consultor") == True
@@ -83,6 +89,7 @@ class TestCanCreateProcess:
     def test_frontend_permission_check_clients(self):
         """Simula lógica de criação de clientes."""
         def can_create_clients(user_role: str) -> bool:
+            return user_role != "cliente"
         
         assert can_create_clients("admin") == True
         assert can_create_clients("consultor") == True
@@ -94,17 +101,18 @@ class TestCanViewAssignments:
     def test_roles_that_can_see_assignments(self):
         """Verifica quais roles podem ver atribuições."""
         roles_that_can_see = [
-            "admin", "ceo", "diretor", "consultor", 
+            "admin", "ceo", "diretor", "consultor",
             "intermediario", "mediador", "administrativo"
         ]
-        
-        
+        roles_that_cannot_see = ["cliente"]
+
         for role in roles_that_can_see:
             assert role not in roles_that_cannot_see
     
     def test_frontend_assignments_button_logic(self):
         """Simula lógica do botão de atribuições."""
         def can_see_assignments(user_role: str) -> bool:
-        
+            return user_role != "cliente"
+
         assert can_see_assignments("admin") == True
         assert can_see_assignments("consultor") == True

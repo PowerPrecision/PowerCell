@@ -22,7 +22,7 @@ class TestAuthentication:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200, f"Login failed: {response.text}"
@@ -44,7 +44,7 @@ class TestHtmlExtractionEndpoint:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200
@@ -130,7 +130,7 @@ class TestLeadCreation:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200
@@ -200,7 +200,7 @@ class TestLeadUrlValidation:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200
@@ -252,7 +252,7 @@ class TestLeadsKanbanEndpoints:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200
@@ -294,7 +294,7 @@ class TestScraperSupportedSites:
     def auth_token(self):
         """Get admin auth token"""
         response = requests.post(
-            f"{BASE_URL}/api/auth/login",
+            f"{BASE_URL}/api/auth/login-v2",
             json={"email": "admin@admin.com", "password": "admin"}
         )
         assert response.status_code == 200

@@ -23,12 +23,14 @@ import {
 } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { User, Mail, Phone, Home, MapPin, Euro, Calendar, Users } from 'lucide-react';
+import { User, Mail, Phone, Home, MapPin, Euro, Calendar, Users, AlertTriangle } from 'lucide-react';
 
 const ProcessDetailsModal = memo(({
   open,
   onOpenChange,
   process,
+  isLockedByOther = false,
+  lockedBy,
 }) => {
   const navigate = useNavigate();
 
@@ -59,6 +61,17 @@ const ProcessDetailsModal = memo(({
         </DialogHeader>
         
         <div className="space-y-6 mt-4">
+          {/* Lock collision warning */}
+          {isLockedByOther && (
+            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                <strong>{lockedBy}</strong> está a editar este processo neste momento. 
+                Aguarde um instante para evitar conflitos.
+              </p>
+            </div>
+          )}
+
           {/* Cliente Info */}
           <div className="space-y-3">
             <h3 className="font-semibold text-lg flex items-center gap-2">

@@ -22,7 +22,7 @@ class TestAuthAndSetup:
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Authenticate as admin and return token"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -54,7 +54,7 @@ class TestDocumentCategorizationExpiryDate:
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Authenticate as admin"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -149,7 +149,7 @@ class TestSmartRenameEndpoints:
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Authenticate as admin"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -271,7 +271,7 @@ class TestBackgroundJobMonitor:
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Authenticate as admin"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })

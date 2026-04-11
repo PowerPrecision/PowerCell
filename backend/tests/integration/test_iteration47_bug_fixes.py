@@ -37,7 +37,7 @@ class TestAuthentication:
     @pytest.fixture
     def consultor_token(self):
         """Login as consultor and get token."""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "flaviosilva@powerealestate.pt",
             "password": "flavio123"
         }, timeout=10)
@@ -47,7 +47,7 @@ class TestAuthentication:
     @pytest.fixture
     def admin_token(self):
         """Login as admin and get token."""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         }, timeout=10)
@@ -72,7 +72,7 @@ class TestDocumentsEndpoint:
     @pytest.fixture
     def consultor_token(self):
         """Login as consultor."""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "flaviosilva@powerealestate.pt",
             "password": "flavio123"
         }, timeout=10)
@@ -149,7 +149,7 @@ class TestAdminUsersDropdown:
     @pytest.fixture
     def admin_token(self):
         """Login as admin."""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         }, timeout=10)
@@ -161,7 +161,7 @@ class TestAdminUsersDropdown:
     def ceo_token(self):
         """Try to login as CEO."""
         # Try to find a CEO user
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "ceo@sistema.pt",
             "password": "ceo123"
         }, timeout=10)
@@ -172,7 +172,7 @@ class TestAdminUsersDropdown:
     @pytest.fixture
     def diretor_token(self):
         """Try to login as DIRETOR."""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "diretor@sistema.pt",
             "password": "diretor123"
         }, timeout=10)
@@ -222,7 +222,7 @@ class TestAdminUsersDropdown:
     def test_consultor_cannot_list_users(self):
         """Consultor should NOT be able to list users (security check)."""
         # Login as consultor
-        login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        login_response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "flaviosilva@powerealestate.pt",
             "password": "flavio123"
         }, timeout=10)
@@ -286,7 +286,7 @@ class TestPublicRegistration:
                 
                 # Now verify process has process_number by fetching it
                 # We need to login first to check the process
-                login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
+                login_response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
                     "email": "flaviosilva@powerealestate.pt",
                     "password": "flavio123"
                 }, timeout=10)
@@ -358,7 +358,7 @@ class TestResolveAllErrors:
     @pytest.fixture
     def admin_token(self):
         """Login as admin."""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         }, timeout=10)
@@ -394,7 +394,7 @@ class TestResolveAllErrors:
     def test_consultor_cannot_resolve_all(self):
         """Consultor should NOT be able to resolve all errors."""
         # Login as consultor
-        login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        login_response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "flaviosilva@powerealestate.pt",
             "password": "flavio123"
         }, timeout=10)
@@ -424,7 +424,7 @@ class TestSystemLogsEndpoint:
     @pytest.fixture
     def admin_token(self):
         """Login as admin."""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin123"
         }, timeout=10)

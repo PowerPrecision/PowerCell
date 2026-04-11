@@ -130,6 +130,11 @@ class WSEventType:
     PROCESS_STATUS_CHANGED = "process_status_changed"
     PROCESS_ASSIGNED = "process_assigned"
     
+    # Kanban Collaboration
+    PROCESS_MOVED = "process_moved"
+    PROCESS_LOCKED = "process_locked"
+    PROCESS_UNLOCKED = "process_unlocked"
+    
     # Documentos
     DOCUMENT_EXPIRING = "document_expiring"
     DOCUMENT_UPLOADED = "document_uploaded"

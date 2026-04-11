@@ -28,7 +28,7 @@ class TestAuthentication:
     @staticmethod
     def get_admin_token():
         """Get admin token for authenticated requests"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "admin@sistema.pt",
             "password": "admin"
         })
@@ -39,7 +39,7 @@ class TestAuthentication:
     @staticmethod
     def get_ceo_token():
         """Get CEO token for authenticated requests"""
-        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+        response = requests.post(f"{BASE_URL}/api/auth/login-v2", json={
             "email": "pedroborges@powerealestate.pt",
             "password": "power2026"
         })
