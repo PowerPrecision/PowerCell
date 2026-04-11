@@ -612,6 +612,7 @@ const DashboardLayout = ({ children, title }) => {
   // Verificar se está em modo de impersonate para ajustar o layout
   const { isImpersonating } = useAuth();
   const impersonateOffset = isImpersonating ? 'top-12' : 'top-0';
+  const headerStyle = isImpersonating ? { top: '48px' } : {};
 
   return (
     <div className="min-h-screen bg-background">
@@ -625,10 +626,10 @@ const DashboardLayout = ({ children, title }) => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed ${impersonateOffset} left-0 z-50 h-full w-64 bg-slate-900 text-white border-r border-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        className={`fixed ${impersonateOffset} left-0 z-50 w-64 bg-slate-900 text-white border-r border-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
-        style={isImpersonating ? { height: 'calc(100% - 48px)' } : {}}
+        style={isImpersonating ? { height: 'calc(100vh - 48px)', top: '48px' } : {}}
       >
         <div className="flex flex-col h-full">
           {/* Logo - PowerCell */}
@@ -651,6 +652,22 @@ const DashboardLayout = ({ children, title }) => {
           {/* Navigation */}
           <ScrollArea className="flex-1 py-4">
             <nav className="space-y-1 px-3">
+              {/* Novo Processo Button - para consultores e intermediários */}
+              {["consultor", "intermediario", "mediador", "consultor_intermediario"].includes(user?.role?.toLowerCase()) && (
+                <Link
+                  to="/registos-clientes"
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors bg-teal-600 text-white hover:bg-teal-700 mb-2"
+                  onClick={() => {
+                    if (window.innerWidth < 1024) {
+                      setSidebarOpen(false);
+                    }
+                  }}
+                >
+                  <PlusCircle className="h-5 w-5" />
+                  Novo Processo
+                </Link>
+              )}
+
               {/* Main items - always visible */}
               {navData.main.map((item) => {
                 const isActive = location.pathname === item.href;
@@ -754,10 +771,11 @@ const DashboardLayout = ({ children, title }) => {
       </aside>
 
       {/* Main content */}
-      <div className="lg:pl-64">
+      <div className={`lg:pl-64 ${isImpersonating ? 'pt-12' : ''}`}>
         {/* Top bar - Fixed height to prevent layout shift */}
         <header 
-          className={`border-b border-border bg-card sticky ${impersonateOffset} z-50 h-14`}
+          className="border-b border-border bg-card sticky z-50 h-14"
+          style={headerStyle}
         >
           <div className={`flex items-center justify-between h-full px-2 lg:px-6 gap-1 sm:gap-2`}>
             <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">

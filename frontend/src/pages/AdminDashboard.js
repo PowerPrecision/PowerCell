@@ -11,16 +11,24 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { ScrollArea } from "../components/ui/scroll-area";
 import { useAuth } from "../contexts/AuthContext";
 import { 
   Users, FolderOpen, Loader2, CheckCircle, XCircle, FileText, 
-  Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building
+  Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building,
+  TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight
 } from "lucide-react";
 import { toast } from "sonner";
+import { format, parseISO } from "date-fns";
+import { pt } from "date-fns/locale";
 import { 
   getStats, getUsers, getWorkflowStatuses, getOneDriveStatus, 
-  getProcesses, getCalendarDeadlines, createDeadline, deleteDeadline, getUpcomingExpiries
+  getProcesses, getCalendarDeadlines, createDeadline, deleteDeadline, getUpcomingExpiries,
+  getActivities
 } from "../services/api";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
+} from "recharts";
 import KanbanBoard from "../components/KanbanBoard";
 import LeadsKanban from "../components/LeadsKanban";
 import { 
@@ -43,8 +51,9 @@ const AdminDashboard = () => {
   const [upcomingExpiries, setUpcomingExpiries] = useState([]);
   const [staleStats, setStaleStats] = useState(null);
   const [showStaleList, setShowStaleList] = useState(false);
+  const [recentActivities, setRecentActivities] = useState([]);
   
-  const [activeTab, setActiveTab] = useState("kanban");
+  const [activeTab, setActiveTab] = useState("overview");
   const [consultorFilter, setConsultorFilter] = useState("all");
   const [mediadorFilter, setMediadorFilter] = useState("all");
   const [indexacaoFilter, setIndexacaoFilter] = useState("all");
@@ -76,6 +85,52 @@ const AdminDashboard = () => {
       return matchesConsultor && matchesMediador && matchesIndexacao;
     });
   }, [processes, consultorFilter, mediadorFilter, indexacaoFilter]);
+
+  // ===== KPIs do Dashboard =====
+  const activeProcesses = useMemo(() => 
+    (processes || []).filter(p => !["concluido", "arquivo", "perdido", "desistencias", "cancelado"].includes(p.status)),
+    [processes]
+  );
+  
+  const totalActive = activeProcesses.length;
+  
+  const totalValueInPortfolio = useMemo(() => 
+    activeProcesses.reduce((sum, p) => sum + (p.property_value || 0), 0),
+    [activeProcesses]
+  );
+  
+  const conversionRate = useMemo(() => {
+    const submitted = (processes || []).filter(p => ["pre_aprovacao", "credito_aprovado", "pedido_avaliacao", "avaliacao", "cpcv", "minuta", "escritura", "concluido", "arquivo"].includes(p.status)).length;
+    const approved = (processes || []).filter(p => ["credito_aprovado", "pedido_avaliacao", "avaliacao", "cpcv", "minuta", "escritura", "concluido", "arquivo"].includes(p.status)).length;
+    return submitted > 0 ? ((approved / submitted) * 100).toFixed(1) : "0.0";
+  }, [processes]);
+  
+  const newToday = useMemo(() => {
+    const today = new Date().toISOString().split("T")[0];
+    return (processes || []).filter(p => (p.created_at || "").startsWith(today)).length;
+  }, [processes]);
+
+  // ===== Funnel Data =====
+  const funnelData = useMemo(() => {
+    const stages = [
+      { key: "clientes_espera", label: "Leads", color: "#3B82F6" },
+      { key: "documentacao", label: "Documentação", color: "#6366F1" },
+      { key: "analise", label: "Análise", color: "#8B5CF6" },
+      { key: "pre_aprovacao", label: "Pré-Aprovação", color: "#A855F7" },
+      { key: "credito_aprovado", label: "Aprovado", color: "#10B981" },
+      { key: "pedido_avaliacao", label: "Avaliação", color: "#F59E0B" },
+      { key: "avaliacao", label: "Avaliado", color: "#F97316" },
+      { key: "cpcv", label: "CPCV", color: "#EF4444" },
+      { key: "minuta", label: "Minuta", color: "#EC4899" },
+      { key: "escritura", label: "Escriturado", color: "#22C55E" },
+      { key: "concluido", label: "Concluído", color: "#14B8A6" },
+    ];
+    return stages.map(stage => ({
+      name: stage.label,
+      value: (processes || []).filter(p => p.status === stage.key).length,
+      color: stage.color,
+    })).filter(s => s.value > 0);
+  }, [processes]);
 
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { fetchCalendarData(); }, [consultorFilter, mediadorFilter]);
@@ -109,6 +164,13 @@ const AdminDashboard = () => {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (staleRes.ok) setStaleStats(await staleRes.json());
+      } catch { /* silent */ }
+      
+      // Fetch recent activities (latest 20 across all processes)
+      try {
+        const activitiesRes = await getActivities(null);
+        const allActivities = activitiesRes.data || [];
+        setRecentActivities(Array.isArray(allActivities) ? allActivities.slice(0, 20) : []);
       } catch { /* silent */ }
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -184,54 +246,163 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-border">
+        {/* KPI Cards de Topo */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="border-border hover:shadow-md transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Processos</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Activity className="h-4 w-4 text-blue-500" />
+                Processos Ativos
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{stats.total_processes || 0}</div>
+              <div className="text-3xl font-bold">{totalActive}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                de {(processes || []).length} total
+              </p>
             </CardContent>
           </Card>
-          <Card className="border-border">
+          <Card className="border-border hover:shadow-md transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Utilizadores</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-emerald-500" />
+                Valor em Carteira
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-blue-600" />
-                <span className="text-3xl font-bold">{users.length}</span>
+              <div className="text-3xl font-bold">
+                {totalValueInPortfolio >= 1000000 
+                  ? `€${(totalValueInPortfolio / 1000000).toFixed(1)}M`
+                  : `€${(totalValueInPortfolio / 1000).toFixed(0)}k`
+                }
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Imóveis em processo
+              </p>
             </CardContent>
           </Card>
-          <Card className="border-border">
+          <Card className="border-border hover:shadow-md transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Documentos a Expirar</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Target className="h-4 w-4 text-amber-500" />
+                Taxa de Conversão
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-amber-600" />
-                <span className="text-3xl font-bold">{upcomingExpiries.length}</span>
-              </div>
+              <div className="text-3xl font-bold">{conversionRate}%</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Aprovados / Submetidos
+              </p>
             </CardContent>
           </Card>
-          <Card className="border-border">
+          <Card className="border-border hover:shadow-md transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Drive</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-violet-500" />
+                Novos Hoje
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-2">
-                <FolderOpen className="h-5 w-5" />
-                {storageStatus?.configured ? (
-                  <Badge className="bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300">
-                    <CheckCircle className="h-3 w-3 mr-1" />
-                    {storageStatus.provider || 'Configurado'}
-                  </Badge>
+              <div className="text-3xl font-bold">{newToday}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {newToday === 1 ? "processo criado" : "processos criados"}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Funnel + Activity Feed Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Funnel Chart */}
+          <Card className="lg:col-span-2 border-border">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <LayoutGrid className="h-5 w-5 text-blue-500" />
+                Funil do Pipeline
+              </CardTitle>
+              <CardDescription>
+                Processos por fase do workflow
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {funnelData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={funnelData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" allowDecimals={false} />
+                    <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
+                    <Tooltip 
+                      formatter={(value) => [`${value} processos`, "Quantidade"]}
+                      contentStyle={{ borderRadius: "8px", fontSize: "13px" }}
+                    />
+                    <Bar dataKey="value" radius={[0, 6, 6, 0]} name="Processos">
+                      {funnelData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[280px] text-muted-foreground">
+                  Sem dados de pipeline disponíveis
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Activity Feed */}
+          <Card className="border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock className="h-5 w-5 text-amber-500" />
+                Atividade Recente
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Últimas atualizações do sistema
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[260px]">
+                {recentActivities.length > 0 ? (
+                  <div className="space-y-3">
+                    {recentActivities.map((activity, idx) => (
+                      <div key={activity.id || idx} className="flex gap-3 pb-3 border-b border-border/50 last:border-0">
+                        <div className="flex-shrink-0 mt-0.5">
+                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm">
+                            <span className="font-medium">{activity.user_name || "Utilizador"}</span>
+                            {" "}{activity.action || activity.description || "Atualizou o processo"}
+                          </p>
+                          {(activity.process_id || activity.created_at) && (
+                            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                              {activity.created_at && format(parseISO(activity.created_at), "dd MMM HH:mm", { locale: pt })}
+                              {activity.process_id && (
+                                <>
+                                  <ChevronRight className="h-3 w-3" />
+                                  <button
+                                    className="text-blue-600 hover:underline"
+                                    onClick={() => navigate(`/processo/${activity.process_id}`)}
+                                  >
+                                    Ver processo
+                                  </button>
+                                </>
+                              )}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
-                  <Badge variant="secondary"><XCircle className="h-3 w-3 mr-1" />Não configurado</Badge>
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm py-8">
+                    Sem atividade recente
+                  </div>
                 )}
-              </div>
+              </ScrollArea>
             </CardContent>
           </Card>
         </div>

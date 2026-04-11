@@ -58,6 +58,7 @@ const SendDocumentationModal = ({
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [documents, setDocuments] = useState([]);
+  const [rgpdDocuments, setRgpdDocuments] = useState([]); // RGPD signed docs
   const [selectedDocs, setSelectedDocs] = useState([]);
   const [recipients, setRecipients] = useState([]);
   const [selectedRecipients, setSelectedRecipients] = useState([]);
@@ -111,8 +112,25 @@ const SendDocumentationModal = ({
       
       if (docsRes.ok) {
         const docsData = await docsRes.json();
-        setDocuments(docsData.documents || docsData || []);
+        const allDocs = docsData.documents || docsData || [];
+        setDocuments(allDocs);
+        
+        // Separar documentos RGPD assinados (categoria "RGPD") e pré-selecionar
+        const rgpdDocs = allDocs.filter(d => d.category === "RGPD" || (d.original_name || "").toLowerCase().includes("rgpd"));
+        setRgpdDocuments(rgpdDocs);
+        if (rgpdDocs.length > 0) {
+          // Pré-selecionar documentos RGPD assinados
+          setSelectedDocs(rgpdDocs.map(d => d.id));
+        }
       }
+      
+      // Carregar status do RGPD do processo
+      try {
+        const rgpdRes = await fetch(`${API_URL}/api/rgpd/status/${processId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        // RGPD status loaded silently - used to decide pre-selection
+      } catch { /* silent */ }
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast.error("Erro ao carregar dados");
@@ -352,6 +370,38 @@ const SendDocumentationModal = ({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Coluna Esquerda: Documentos e Destinatários */}
             <div className="space-y-4">
+              {/* Anexos Disponíveis: RGPD assinado */}
+              {rgpdDocuments.length > 0 && (
+                <div className="border rounded-lg p-3 bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800">
+                  <Label className="flex items-center gap-2 mb-2 text-emerald-800 dark:text-emerald-200">
+                    <CheckCircle className="h-4 w-4" />
+                    RGPD Assinado (pré-selecionado)
+                  </Label>
+                  <ScrollArea className="h-auto max-h-24">
+                    <div className="space-y-1">
+                      {rgpdDocuments.map((doc) => (
+                        <label
+                          key={doc.id}
+                          className="flex items-center gap-2 p-2 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 cursor-pointer"
+                        >
+                          <Checkbox
+                            checked={selectedDocs.includes(doc.id)}
+                            onCheckedChange={() => toggleDocument(doc.id)}
+                          />
+                          <FileText className="h-4 w-4 text-emerald-600" />
+                          <span className="text-sm truncate flex-1">
+                            {doc.original_name || doc.filename || "RGPD"}
+                          </span>
+                          <Badge variant="outline" className="text-xs text-emerald-700 border-emerald-300">
+                            Pré-selecionado
+                          </Badge>
+                        </label>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </div>
+              )}
+
               {/* Documentos */}
               <div className="border rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">

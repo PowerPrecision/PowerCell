@@ -105,7 +105,11 @@ class LazyChunkErrorBoundary extends Component {
       error?.code === "MODULE_NOT_FOUND" ||
       error?.message?.includes("Failed to fetch dynamically imported module") ||
       error?.message?.includes("Loading chunk") ||
-      error?.message?.includes("Loading CSS chunk");
+      error?.message?.includes("Loading CSS chunk") ||
+      error?.message?.includes("text/html") ||
+      error?.message?.includes("MIME type") ||
+      error?.message?.includes("Unexpected token") ||
+      error?.message?.includes("Script error");
 
     if (isChunkError) {
       console.warn("[LazyChunkErrorBoundary] Erro de chunk detetado, a recarregar página...");

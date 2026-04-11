@@ -17,7 +17,7 @@ import {
 import { getMyClients, getWorkflowStatuses } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText, 
-  Clock, Users, Building2, Phone, Mail, Calendar
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
@@ -52,6 +52,7 @@ const MyClientsPage = () => {
   // Sync filters with URL
   const searchTerm = searchParams.get("search") || "";
   const statusFilter = searchParams.get("status") || "all";
+  const showInactive = searchParams.get("show_inactive") === "true";
   const setSearchTerm = (value) => {
     setSearchParams(prev => {
       if (value) prev.set("search", value);
@@ -63,6 +64,13 @@ const MyClientsPage = () => {
     setSearchParams(prev => {
       if (value && value !== "all") prev.set("status", value);
       else prev.delete("status");
+      return prev;
+    }, { replace: true });
+  };
+  const setShowInactive = (value) => {
+    setSearchParams(prev => {
+      if (value) prev.set("show_inactive", "true");
+      else prev.delete("show_inactive");
       return prev;
     }, { replace: true });
   };
@@ -89,12 +97,20 @@ const MyClientsPage = () => {
     }
   };
 
+  // Status terminais que são excluídos por padrão
+  const TERMINAL_STATUSES = ["concluido", "arquivo", "perdido", "desistencias", "cancelado"];
+
   const filteredClients = useMemo(() => {
     const normalizedSearch = searchTerm
       ? searchTerm.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
       : "";
 
     return clients.filter((client) => {
+      // Excluir status terminais por padrão (a menos que o toggle esteja ativo)
+      if (!showInactive && TERMINAL_STATUSES.includes(client.status)) {
+        return false;
+      }
+
       const matchesSearch = !normalizedSearch || 
         client.client_name?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalizedSearch) ||
         client.client_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -104,7 +120,7 @@ const MyClientsPage = () => {
       
       return matchesSearch && matchesStatus;
     });
-  }, [clients, searchTerm, statusFilter]);
+  }, [clients, searchTerm, statusFilter, showInactive]);
 
   const getPriorityColor = (priority) => {
     switch (priority) {
@@ -133,9 +149,10 @@ const MyClientsPage = () => {
 
   // Estatísticas rápidas
   const stats = useMemo(() => {
-    const total = clients.length;
-    const withPendingTasks = clients.filter(c => c.pending_count > 0).length;
-    const withProperty = clients.filter(c => c.has_property).length;
+    const activeClients = clients.filter(c => !TERMINAL_STATUSES.includes(c.status));
+    const total = activeClients.length;
+    const withPendingTasks = activeClients.filter(c => c.pending_count > 0).length;
+    const withProperty = activeClients.filter(c => c.has_property).length;
     
     return { total, withPendingTasks, withProperty };
   }, [clients]);
@@ -236,7 +253,24 @@ const MyClientsPage = () => {
                   ))}
                 </SelectContent>
               </Select>
+              {/* Toggle: Mostrar inativos */}
+              <Button
+                variant={showInactive ? "default" : "outline"}
+                size="sm"
+                className={`h-10 w-full md:w-auto gap-2 ${showInactive ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}`}
+                onClick={() => setShowInactive(!showInactive)}
+                data-testid="toggle-inactive"
+              >
+                {showInactive ? <X className="w-4 h-4" /> : <Filter className="w-4 h-4" />}
+                {showInactive ? "Ocultar Concluídos" : "Mostrar Concluídos"}
+              </Button>
             </div>
+            {showInactive && (
+              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                A mostrar todos os processos, incluindo concluídos e desistências
+              </p>
+            )}
           </CardContent>
         </Card>
 
