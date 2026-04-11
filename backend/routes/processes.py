@@ -16,6 +16,7 @@ WORKFLOW DE 14 FASES:
 Autor: PowerCell Development Team
 ====================================================================
 """
+import os
 import uuid
 import logging
 import re
@@ -89,6 +90,9 @@ from utils.input_sanitization import (
 )
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
+
+# Portal imports
+from services.portal_security import create_client_magic_token, PORTAL_TOKEN_VALIDITY_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +241,56 @@ router = APIRouter(prefix="/processes", tags=["Processes"])
 # ====================================================================
 # ENDPOINTS DE CRIAÇÃO
 # ====================================================================
+
+@router.post("/{process_id}/generate-magic-link")
+async def generate_magic_link(
+    process_id: str,
+    user: dict = Depends(require_staff())
+):
+    """
+    Gera um Magic Link para o Portal do Cliente.
+
+    Permite que um consultor/admin gere um link seguro para o cliente
+    acompanhar o seu processo e submeter documentos, sem necessidade
+    de registo ou password.
+
+    O link é um JWT com validade de 90 dias que contém:
+    - role: "client_portal" (isolado de staff)
+    - process_id: ID do processo
+
+    Returns:
+    - magic_link: URL completa para enviar ao cliente
+    - token: JWT token (para debug/teste)
+    - expires_in_days: Validade do link
+    """
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    # Gerar magic link JWT
+    token = create_client_magic_token(process_id)
+
+    # Construir URL completa
+    frontend_url = os.environ.get("FRONTEND_URL", "https://app.powercell.pt")
+    magic_link = f"{frontend_url}/portal/{token}"
+
+    logger.info(
+        f"Magic link gerado por {user.get('email')} para processo {process_id} "
+        f"(cliente: {process.get('client_name', 'N/A')})"
+    )
+
+    return {
+        "magic_link": magic_link,
+        "token": token,
+        "process_id": process_id,
+        "client_name": process.get("client_name", ""),
+        "client_email": process.get("client_email", ""),
+        "expires_in_days": PORTAL_TOKEN_VALIDITY_DAYS,
+    }
+
 
 @router.post("", response_model=ProcessResponse)
 async def create_process(data: ProcessCreate, user: dict = Depends(get_current_user)):
