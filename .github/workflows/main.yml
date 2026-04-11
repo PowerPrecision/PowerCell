@@ -42,6 +42,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -99,6 +102,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
       
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -157,6 +163,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
       
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -170,10 +179,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Run ALL tests with coverage (parallel)
+      - name: Run ALL tests with coverage
         run: |
           pytest --tb=short -v \
-            -n auto \
             --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=0 \
             --ignore=tests/e2e \
             --ignore-glob="tests/test_iteration*.py" \
