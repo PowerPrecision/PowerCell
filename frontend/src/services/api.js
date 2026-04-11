@@ -59,6 +59,15 @@ api.interceptors.request.use(
 // ====================================================================
 // INTERCEPTOR DE RESPONSE - GLOBAL ERROR HANDLING
 // ====================================================================
+
+// Retry configuration for 429 errors
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY = 2000; // 2 seconds
+const MAX_RETRY_DELAY = 30000;    // 30 seconds
+
+// Track which URLs are currently retrying to avoid toast spam
+const retryingUrls = new Set();
+
 api.interceptors.response.use(
   // Sucesso - apenas retorna a response
   (response) => response,
@@ -149,16 +158,48 @@ api.interceptors.response.use(
     }
     
     // ================================================================
-    // 429 - TOO MANY REQUESTS (Rate Limit)
+    // 429 - TOO MANY REQUESTS (Rate Limit) - Automatic Retry
     // ================================================================
     if (status === 429) {
-      const retryAfter = response.headers["retry-after"] || "alguns segundos";
+      // Initialize retry count on config
+      config.__retryCount = config.__retryCount || 0;
+      const urlKey = `${config.method}:${config.url}`;
       
-      toast({
-        variant: "destructive",
-        title: "Demasiados Pedidos",
-        description: `O sistema está ocupado. Tente novamente em ${retryAfter}.`,
-      });
+      if (config.__retryCount < MAX_RETRIES) {
+        config.__retryCount += 1;
+        
+        // Exponential backoff with jitter
+        const baseDelay = INITIAL_RETRY_DELAY * Math.pow(2, config.__retryCount - 1);
+        const jitter = Math.random() * 1000; // 0-1s random jitter
+        const retryDelay = Math.min(baseDelay + jitter, MAX_RETRY_DELAY);
+        
+        // Read Retry-After header if present
+        const retryAfterHeader = parseInt(response.headers["retry-after"], 10);
+        const finalDelay = retryAfterHeader > 0 ? (retryAfterHeader * 1000) : retryDelay;
+        
+        retryingUrls.add(urlKey);
+        console.warn(`[API] 429 Rate limited on ${config.url}. Retry ${config.__retryCount}/${MAX_RETRIES} in ${Math.round(finalDelay / 1000)}s`);
+        
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(), finalDelay);
+        }).then(() => {
+          retryingUrls.delete(urlKey);
+          return api(config); // Retry the original request
+        });
+      }
+      
+      // All retries exhausted
+      retryingUrls.delete(urlKey);
+      
+      // Only show toast if this URL wasn't already showing one (avoid spam)
+      if (!retryingUrls.has(urlKey)) {
+        const retryAfter = response.headers["retry-after"] || "alguns segundos";
+        toast({
+          variant: "destructive",
+          title: "Demasiados Pedidos",
+          description: `O sistema está ocupado. Tente novamente em ${retryAfter}.`,
+        });
+      }
       return Promise.reject(error);
     }
     

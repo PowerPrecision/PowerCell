@@ -53,7 +53,10 @@ const notificationColors = {
 };
 
 // Polling interval for real-time notifications (30 seconds - increased to reduce server load)
-const POLLING_INTERVAL = 30000;
+const BASE_POLLING_INTERVAL = 30000;
+const BACKOFF_MULTIPLIER = 2;
+const MAX_POLLING_INTERVAL = 300000; // 5 minutes max backoff
+const BACKOFF_RESET_SUCCESS_COUNT = 3; // Reset after N consecutive successes
 
 const NotificationsDropdown = () => {
   const navigate = useNavigate();
@@ -64,6 +67,9 @@ const NotificationsDropdown = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const previousUnreadCount = useRef(0);
   const isFirstLoad = useRef(true);
+  const pollingIntervalRef = useRef(BASE_POLLING_INTERVAL);
+  const intervalRef = useRef(null);
+  const consecutiveSuccessRef = useRef(0);
 
   // Play notification sound
   const playNotificationSound = useCallback(() => {
@@ -114,6 +120,18 @@ const NotificationsDropdown = () => {
       setNotifications(newNotifications);
       setUnreadCount(newUnreadCount);
       
+      // Success — gradually restore normal polling interval
+      consecutiveSuccessRef.current += 1;
+      if (consecutiveSuccessRef.current >= BACKOFF_RESET_SUCCESS_COUNT && pollingIntervalRef.current > BASE_POLLING_INTERVAL) {
+        pollingIntervalRef.current = BASE_POLLING_INTERVAL;
+        consecutiveSuccessRef.current = 0;
+        // Restart interval with restored timing
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = setInterval(fetchNotifications, pollingIntervalRef.current);
+        }
+      }
+      
       // Check for new notifications (after first load)
       if (!isFirstLoad.current && newUnreadCount > previousUnreadCount.current) {
         const newCount = newUnreadCount - previousUnreadCount.current;
@@ -141,7 +159,26 @@ const NotificationsDropdown = () => {
       previousUnreadCount.current = newUnreadCount;
       isFirstLoad.current = false;
     } catch (error) {
-      console.error("Erro ao carregar notificações:", error);
+      const is429 = error.response?.status === 429;
+      
+      // On 429, increase polling interval with exponential backoff
+      if (is429) {
+        consecutiveSuccessRef.current = 0;
+        pollingIntervalRef.current = Math.min(
+          pollingIntervalRef.current * BACKOFF_MULTIPLIER,
+          MAX_POLLING_INTERVAL
+        );
+        console.warn(
+          `[Notifications] Rate limited. Backing off to ${Math.round(pollingIntervalRef.current / 1000)}s polling interval`
+        );
+        // Restart interval with new backoff timing
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = setInterval(fetchNotifications, pollingIntervalRef.current);
+        }
+      } else {
+        console.error("Erro ao carregar notificações:", error);
+      }
     } finally {
       setLoading(false);
     }
@@ -149,9 +186,10 @@ const NotificationsDropdown = () => {
 
   useEffect(() => {
     fetchNotifications();
-    // Fast polling for real-time notifications (10 seconds)
-    const interval = setInterval(fetchNotifications, POLLING_INTERVAL);
-    return () => clearInterval(interval);
+    intervalRef.current = setInterval(fetchNotifications, pollingIntervalRef.current);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [fetchNotifications]);
 
   const handleNotificationClick = async (notification) => {
