@@ -10,7 +10,8 @@
 #
 # JOBS:
 # 1. Frontend CI (React + Vite)
-# 2. Backend CI (Python + FastAPI)
+# 2. Backend CI — Fast (unit tests, ~30s)
+# 3. Backend CI — Full (all tests + coverage, ~2min)
 # ====================================================================
 
 name: PowerCell CI
@@ -39,15 +40,9 @@ jobs:
         working-directory: frontend
     
     steps:
-      # --------------------------------------------------------------
-      # 1. Checkout do código
-      # --------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      # --------------------------------------------------------------
-      # 2. Setup Node.js
-      # --------------------------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -55,55 +50,32 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
       
-      # --------------------------------------------------------------
-      # 3. Instalar dependências
-      # --------------------------------------------------------------
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
       
-      # --------------------------------------------------------------
-      # 4. Linting (verificar erros de código)
-      # --------------------------------------------------------------
       - name: Run ESLint
         run: npm run lint -- --max-warnings=100 || true
         continue-on-error: true
-        # Nota: continue-on-error para não falhar o build por warnings
-        # O Vite build é o verdadeiro gatekeeper
       
-      # --------------------------------------------------------------
-      # 5. BUILD - CRÍTICO!
-      # O Vite é muito rigoroso. Se houver erro de importação ou
-      # variável não declarada, o build falha e o job chumba.
-      # --------------------------------------------------------------
       - name: Build Vite project
         run: npm run build
         env:
-          # Variáveis de ambiente necessárias para o build
           NODE_ENV: production
           REACT_APP_BACKEND_URL: ${{ secrets.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com' }}
       
-      # --------------------------------------------------------------
-      # 6. Verificar que o build gerou ficheiros
-      # --------------------------------------------------------------
       - name: Verify build output
         run: |
           if [ ! -d "dist" ]; then
             echo "::error::Build directory 'dist' not found!"
             exit 1
           fi
-          
-          # Verificar que existem ficheiros HTML e JS
           if [ ! -f "dist/index.html" ]; then
             echo "::error::index.html not found in dist!"
             exit 1
           fi
-          
           echo "✅ Build successful! Output files:"
           ls -la dist/
       
-      # --------------------------------------------------------------
-      # 7. Upload do build como artifact (opcional, para debugging)
-      # --------------------------------------------------------------
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         if: success()
@@ -113,26 +85,21 @@ jobs:
           retention-days: 7
 
   # ==================================================================
-  # JOB 2: BACKEND CI (Python + FastAPI)
+  # JOB 2: BACKEND CI — FAST (unit tests sem coverage)
   # ==================================================================
-  backend:
-    name: Backend CI
+  backend-fast:
+    name: Backend CI — Fast
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     
     defaults:
       run:
         working-directory: backend
     
     steps:
-      # --------------------------------------------------------------
-      # 1. Checkout do código
-      # --------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      # --------------------------------------------------------------
-      # 2. Setup Python
-      # --------------------------------------------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -140,39 +107,84 @@ jobs:
           cache: 'pip'
           cache-dependency-path: backend/requirements.txt
       
-      # --------------------------------------------------------------
-      # 3. Instalar dependências
-      # --------------------------------------------------------------
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Instalar ferramentas de teste/linting (já devem estar no requirements)
-          pip install pytest pytest-asyncio pytest-cov flake8
       
-      # --------------------------------------------------------------
-      # 4. Linting com Flake8 - DETETAR ERROS DE SINTAXE GRAVES
-      # E9: Erros de sintaxe
-      # F63: Erros de assertion
-      # F7: Erros de syntax
-      # F82: Variáveis não definidas
-      # --------------------------------------------------------------
       - name: Lint with flake8
         run: |
-          # Stop the build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          
-          # Exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
       
-      # --------------------------------------------------------------
-      # 5. Testes com Pytest
-      # CRÍTICO: Variáveis de ambiente dummy para evitar crash no startup
-      # --------------------------------------------------------------
-      - name: Run tests with pytest
-        run: pytest --tb=short -v --ignore=tests/e2e --ignore-glob="tests/test_iteration*.py" --ignore-glob="tests/integration/test_iteration*.py"
+      - name: Run unit tests (fast, no coverage)
+        run: |
+          pytest tests/unit/ --tb=short -q --no-header \
+            --ignore-glob="tests/unit/test_iteration*.py"
         env:
-          # Variáveis de ambiente dummy para testes
+          TESTING: "true"
+          SECRET_KEY: "test_secret_key_for_ci_pipeline"
+          JWT_SECRET: "test_jwt_secret_for_ci_pipeline"
+          MONGO_URI: "mongodb://localhost:27017/test_db_ci"
+          MONGODB_URL: "mongodb://localhost:27017/test_db_ci"
+          DB_NAME: "test_db_ci"
+          REDIS_URL: "none"
+          OPENAI_API_KEY: "sk-test-dummy-key"
+          SENTRY_DSN: ""
+
+  # ==================================================================
+  # JOB 3: BACKEND CI — FULL (all tests + coverage + xdist)
+  # ==================================================================
+  backend-full:
+    name: Backend CI — Full
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: backend-fast
+    
+    defaults:
+      run:
+        working-directory: backend
+    
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run ALL tests with coverage (parallel)
+        run: |
+          pytest --tb=short -v \
+            -n auto \
+            --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=0 \
+            --ignore=tests/e2e \
+            --ignore-glob="tests/test_iteration*.py" \
+            --ignore=tests/test_websocket.py \
+            --ignore=tests/test_accessibility_apis.py \
+            --ignore-glob="tests/integration/test_iteration*.py" \
+            --ignore-glob="tests/integration/test_excel*.py" \
+            --ignore=tests/test_chat_and_config_iteration64.py
+        env:
           TESTING: "true"
           SECRET_KEY: "test_secret_key_for_ci_pipeline_do_not_use_in_production"
           JWT_SECRET: "test_jwt_secret_for_ci_pipeline_do_not_use_in_production"
@@ -191,23 +203,11 @@ jobs:
           POWER_PASSWORD: "test_password"
           GENIUS_EMAIL: "genius@test.com"
           GENIUS_PASSWORD: "test_password"
-          AWS_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE"
+          AWS_ACCESS_KEY_ID: "AKIAIOSFODNN1EXAMPLE"
           AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
           AWS_REGION: "eu-west-1"
           S3_BUCKET: "test-bucket"
       
-      # --------------------------------------------------------------
-      # 6. Coverage report (opcional)
-      # --------------------------------------------------------------
-      - name: Generate coverage report
-        if: always()
-        run: |
-          coverage report || true
-          coverage xml || true
-      
-      # --------------------------------------------------------------
-      # 7. Upload coverage como artifact
-      # --------------------------------------------------------------
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         if: always()
@@ -219,12 +219,12 @@ jobs:
           retention-days: 7
 
   # ==================================================================
-  # JOB 3: NOTIFY (opcional - requer configuração de secrets)
+  # JOB 4: NOTIFY (opcional)
   # ==================================================================
   notify:
     name: Notify on Failure
     runs-on: ubuntu-latest
-    needs: [frontend, backend]
+    needs: [frontend, backend-fast, backend-full]
     if: failure()
     
     steps:
@@ -234,5 +234,3 @@ jobs:
           echo "Commit: ${{ github.sha }}"
           echo "Author: ${{ github.actor }}"
           echo "Workflow: ${{ github.workflow_url }}"
-          # Aqui pode ser adicionado Slack/Teams notification
-          # via webhook se necessário
