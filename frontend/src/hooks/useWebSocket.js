@@ -1,15 +1,19 @@
 /**
  * ====================================================================
- * HOOK USEWEBSOCKET - CREDITOIMO
+ * WEBSOCKET SINGLETON MANAGER + HOOK - CREDITOIMO
  * ====================================================================
- * Hook React para gestão de conexões WebSocket em tempo real.
  * 
- * Funcionalidades:
- * - Conexão automática com autenticação
- * - Reconexão automática com exponential backoff
+ * ARQUITECTURA:
+ * - WebSocketManager: Singleton module-level que gere uma única conexão
+ * - useWebSocket(): Hook React que se subscreve ao singleton
+ * 
+ * VANTAGENS:
+ * - Uma única conexão WebSocket por sessão (não importa quantos
+ *   componentes chamem useWebSocket())
+ * - Reference counting: conecta no 1º subscriber, desconecta no último
+ * - Exponential backoff na reconexão
  * - Heartbeat para manter conexão activa
- * - Gestão de eventos de notificação
- * - Proteção contra conexões paralelas (React StrictMode, re-renders)
+ * - Proteção contra React StrictMode double-mount
  * ====================================================================
  */
 
@@ -48,371 +52,457 @@ export const WSEventType = {
   USER_OFFLINE: 'user_offline',
 };
 
-const INITIAL_RECONNECT_INTERVAL = 1000; // 1 segundo (início)
-const MAX_RECONNECT_INTERVAL = 30000; // 30 segundos (teto)
-const HEARTBEAT_INTERVAL = 30000; // 30 segundos
+const INITIAL_RECONNECT_INTERVAL = 1000;
+const MAX_RECONNECT_INTERVAL = 30000;
+const HEARTBEAT_INTERVAL = 30000;
+const POLLING_INTERVAL = 30000;
+const MAX_WS_FAILS = 3;
 
-export function useWebSocket(options = {}) {
-  const { token } = useAuth();
-  const [isConnected, setIsConnected] = useState(false);
-  const [lastMessage, setLastMessage] = useState(null);
-  const [connectionError, setConnectionError] = useState(null);
-  
-  const wsRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
-  const heartbeatIntervalRef = useRef(null);
-  const eventHandlersRef = useRef({});
-  const reconnectAttemptsRef = useRef(0);
-  const reconnectIntervalRef = useRef(INITIAL_RECONNECT_INTERVAL);
-  const isConnectingRef = useRef(false); // Previne conexões paralelas
-  
-  const {
-    onNotification,
-    onProcessUpdate,
-    onDeadlineReminder,
-    onUserOnline,
-    onUserOffline,
-    onConnect,
-    onDisconnect,
-    autoConnect = true,
-  } = options;
+// ====================================================================
+// WEBSOCKET MANAGER (Singleton — module level)
+// ====================================================================
+class WebSocketManager {
+  constructor() {
+    this.ws = null;
+    this.token = null;
+    this.isConnected = false;
+    this.connectionError = null;
+    this.lastMessage = null;
 
-  // Obter URL do WebSocket
-  const getWebSocketUrl = useCallback(() => {
+    // State listeners (React setState wrappers)
+    this._stateListeners = new Set();
+
+    // Event handlers registry
+    this._eventHandlers = {};
+
+    // Reconnection state
+    this._reconnectTimeout = null;
+    this._reconnectAttempts = 0;
+    this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
+
+    // Heartbeat
+    this._heartbeatInterval = null;
+
+    // Polling fallback
+    this._pollingInterval = null;
+    this._wsFailCount = 0;
+
+    // Reference counting
+    this._subscriberCount = 0;
+    this._isConnecting = false;
+  }
+
+  /**
+   * Obter URL do WebSocket
+   */
+  _getUrl() {
     const backendUrl = process.env.REACT_APP_BACKEND_URL;
-    
-    // Se não há URL configurada, não conectar
-    if (!backendUrl) {
-      console.warn('WebSocket: REACT_APP_BACKEND_URL não configurada');
-      return null;
-    }
-    
-    // Construir URL WebSocket corretamente
-    // REACT_APP_BACKEND_URL pode ser:
-    // - https://domain.com (produção/preview)
-    // - http://localhost:8001 (desenvolvimento local)
-    
+    if (!backendUrl) return null;
+
     try {
       const url = new URL(backendUrl);
-      
-      // Determinar protocolo WebSocket baseado no protocolo HTTP
       const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-      
-      // Construir URL WebSocket mantendo host e porta originais
-      const wsUrl = `${wsProtocol}//${url.host}/api/ws/notifications?token=${token}`;
-      
-      return wsUrl;
+      return `${wsProtocol}//${url.host}/api/ws/notifications?token=${this.token}`;
     } catch (e) {
-      // Fallback para o método antigo se URL() falhar
-      console.warn('WebSocket: Erro ao parsear URL, usando fallback');
       const wsProtocol = backendUrl.startsWith('https') ? 'wss' : 'ws';
       const wsUrl = backendUrl.replace(/^https?:\/\//, `${wsProtocol}://`);
-      return `${wsUrl}/api/ws/notifications?token=${token}`;
+      return `${wsUrl}/api/ws/notifications?token=${this.token}`;
     }
-  }, [token]);
+  }
 
-  // Limpar heartbeat
-  const clearHeartbeat = useCallback(() => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  }, []);
+  /**
+   * Notificar todos os listeners de mudança de estado
+   */
+  _notifyStateListeners() {
+    this._stateListeners.forEach(listener => listener({
+      isConnected: this.isConnected,
+      connectionError: this.connectionError,
+      lastMessage: this.lastMessage,
+    }));
+  }
 
-  // Iniciar heartbeat
-  const startHeartbeat = useCallback(() => {
-    clearHeartbeat();
-    heartbeatIntervalRef.current = setInterval(() => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'ping' }));
+  // ====================================================================
+  // HEARTBEAT
+  // ====================================================================
+  _startHeartbeat() {
+    this._stopHeartbeat();
+    this._heartbeatInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'ping' }));
       }
     }, HEARTBEAT_INTERVAL);
-  }, [clearHeartbeat]);
+  }
 
-  // Processar mensagem recebida
-  const handleMessage = useCallback((event) => {
-    try {
-      const data = JSON.parse(event.data);
-      setLastMessage(data);
-      
-      const { type, data: payload } = data;
-      
-      // Chamar handler registado para este tipo de evento
-      if (eventHandlersRef.current[type]) {
-        eventHandlersRef.current[type].forEach(handler => handler(payload, data));
-      }
-      
-      // Handlers específicos passados nas options
-      switch (type) {
-        case WSEventType.NEW_NOTIFICATION:
-          onNotification?.(payload);
-          break;
-        
-        case WSEventType.PROCESS_CREATED:
-        case WSEventType.PROCESS_UPDATED:
-        case WSEventType.PROCESS_STATUS_CHANGED:
-        case WSEventType.PROCESS_ASSIGNED:
-          onProcessUpdate?.(type, payload);
-          break;
-        
-        case WSEventType.DEADLINE_REMINDER:
-          onDeadlineReminder?.(payload);
-          break;
-        
-        case WSEventType.CONNECTION_STATUS:
-          if (payload.status === 'connected') {
-            console.log('WebSocket: Conectado com sucesso', payload);
-          }
-          break;
-        
-        case WSEventType.HEARTBEAT:
-          // Pong recebido, conexão está activa
-          break;
-        
-        case WSEventType.USER_ONLINE:
-          onUserOnline?.(payload);
-          break;
-        
-        case WSEventType.USER_OFFLINE:
-          onUserOffline?.(payload);
-          break;
-        
-        default:
-          // Eventos não esperados são silenciados para reduzir ruído no console
-          break;
-      }
-    } catch (error) {
-      console.error('WebSocket: Erro ao processar mensagem:', error);
+  _stopHeartbeat() {
+    if (this._heartbeatInterval) {
+      clearInterval(this._heartbeatInterval);
+      this._heartbeatInterval = null;
     }
-  }, [onNotification, onProcessUpdate, onDeadlineReminder, onUserOnline, onUserOffline]);
+  }
 
-  // O11 - Polling fallback quando WebSocket falha
-  const pollingIntervalRef = useRef(null);
-  const wsFailCountRef = useRef(0);
-  const MAX_WS_FAILS = 3;
-  const POLLING_INTERVAL = 30000; // 30 seconds
-  
-  const startPollingFallback = useCallback(() => {
-    if (pollingIntervalRef.current) return; // Already polling
-    
-    console.log('WebSocket: Iniciando polling fallback (30s)');
-    pollingIntervalRef.current = setInterval(async () => {
-      if (!token) return;
+  // ====================================================================
+  // POLLING FALLBACK
+  // ====================================================================
+  _startPolling() {
+    if (this._pollingInterval) return;
+    this._pollingInterval = setInterval(async () => {
+      if (!this.token) return;
       try {
         const apiUrl = process.env.REACT_APP_BACKEND_URL;
         const response = await fetch(`${apiUrl}/api/notifications?unread=true&limit=10`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${this.token}` }
         });
         if (response.ok) {
           const data = await response.json();
           const notifications = data.notifications || data;
           if (Array.isArray(notifications)) {
             notifications.forEach(n => {
-              onNotification?.(n);
+              this._dispatchEvent(WSEventType.NEW_NOTIFICATION, n);
             });
           }
         }
       } catch (e) {
-        // Silent fail - polling is best-effort
+        // Silent fail
       }
     }, POLLING_INTERVAL);
-  }, [token, onNotification]);
-  
-  const stopPollingFallback = useCallback(() => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-      wsFailCountRef.current = 0;
-      console.log('WebSocket: Polling fallback parado');
-    }
-  }, []);
+  }
 
-  // Conectar ao WebSocket
-  const connect = useCallback(() => {
-    if (!token) {
-      console.log('WebSocket: Sem token, não conectando');
-      return;
+  _stopPolling() {
+    if (this._pollingInterval) {
+      clearInterval(this._pollingInterval);
+      this._pollingInterval = null;
+      this._wsFailCount = 0;
     }
-    
-    // Prevenir conexões paralelas (React StrictMode, re-renders, etc.)
-    if (isConnectingRef.current) {
-      console.log('WebSocket: Conexão já em curso, ignorando');
-      return;
+  }
+
+  // ====================================================================
+  // EVENT DISPATCHING
+  // ====================================================================
+  _dispatchEvent(type, payload, rawData) {
+    // Notify registered handlers
+    const handlers = this._eventHandlers[type];
+    if (handlers) {
+      handlers.forEach(handler => handler(payload, rawData));
     }
-    
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('WebSocket: Já conectado');
-      return;
-    }
-    
-    // Fechar conexão anterior se existir (CLOSED/CLOSING/CONNECTING)
-    if (wsRef.current) {
-      wsRef.current.onopen = null;
-      wsRef.current.onmessage = null;
-      wsRef.current.onclose = null;
-      wsRef.current.onerror = null;
-      if (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.close(1000, 'Nova conexão');
-      }
-      wsRef.current = null;
-    }
-    
+  }
+
+  /**
+   * Processar mensagem recebida
+   */
+  _handleMessage(event) {
     try {
-      const url = getWebSocketUrl();
-      
-      // Se não há URL, não conectar
-      if (!url) {
-        isConnectingRef.current = false;
-        console.log('WebSocket: URL não disponível');
-        return;
+      const data = JSON.parse(event.data);
+      this.lastMessage = data;
+      const { type, data: payload } = data;
+
+      // Dispatch to all registered handlers
+      this._dispatchEvent(type, payload, data);
+
+      // Notify state listeners (for lastMessage update)
+      this._notifyStateListeners();
+
+      // System-level logging (minimal)
+      switch (type) {
+        case WSEventType.CONNECTION_STATUS:
+          if (payload.status === 'connected') {
+            console.log('WebSocket: Conectado com sucesso', payload);
+          }
+          break;
+        case WSEventType.HEARTBEAT:
+          break;
+        default:
+          break;
       }
-      
-      console.log('WebSocket: Conectando a', url.replace(/token=.*/, 'token=***'));
-      
-      isConnectingRef.current = true;
-      wsRef.current = new WebSocket(url);
-      
-      wsRef.current.onopen = () => {
-        console.log('WebSocket: Conexão estabelecida');
-        isConnectingRef.current = false;
-        reconnectAttemptsRef.current = 0; // Reset tentativas
-        reconnectIntervalRef.current = INITIAL_RECONNECT_INTERVAL; // Reset backoff
-        setIsConnected(true);
-        setConnectionError(null);
-        wsFailCountRef.current = 0;
-        stopPollingFallback(); // O11 - Parar polling quando WS conecta
-        startHeartbeat();
-        onConnect?.();
-      };
-      
-      wsRef.current.onmessage = handleMessage;
-      
-      wsRef.current.onclose = (event) => {
-        console.log('WebSocket: Conexão fechada', event.code, event.reason);
-        isConnectingRef.current = false;
-        setIsConnected(false);
-        clearHeartbeat();
-        onDisconnect?.();
-        
-        // Reconectar automaticamente se não foi fechamento intencional
-        if (event.code !== 1000 && event.code !== 4001) {
-          // Exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s (teto)
-          const delay = reconnectIntervalRef.current;
-          reconnectAttemptsRef.current++;
-          reconnectIntervalRef.current = Math.min(
-            reconnectIntervalRef.current * 2,
-            MAX_RECONNECT_INTERVAL
-          );
-          console.log(`WebSocket: Reconectando em ${delay/1000}s... (tentativa ${reconnectAttemptsRef.current})`);
-          reconnectTimeoutRef.current = setTimeout(connect, delay);
-        }
-      };
-      
-      wsRef.current.onerror = (error) => {
-        console.error('WebSocket: Erro:', error);
-        isConnectingRef.current = false;
-        setConnectionError('Erro na conexão WebSocket');
-        // O11 - Contar falhas e ativar polling fallback
-        wsFailCountRef.current++;
-        if (wsFailCountRef.current >= MAX_WS_FAILS) {
-          startPollingFallback();
-        }
-      };
-      
     } catch (error) {
-      isConnectingRef.current = false;
-      console.error('WebSocket: Erro ao criar conexão:', error);
-      setConnectionError(error.message);
+      console.error('WebSocket: Erro ao processar mensagem:', error);
     }
-  }, [token, getWebSocketUrl, handleMessage, startHeartbeat, clearHeartbeat, stopPollingFallback, startPollingFallback, onConnect, onDisconnect]);
+  }
 
-  // Desconectar
-  const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    
-    isConnectingRef.current = false;
-    reconnectAttemptsRef.current = 0;
-    reconnectIntervalRef.current = INITIAL_RECONNECT_INTERVAL;
-    clearHeartbeat();
-    
-    if (wsRef.current) {
-      wsRef.current.onopen = null;
-      wsRef.current.onmessage = null;
-      wsRef.current.onclose = null;
-      wsRef.current.onerror = null;
-      wsRef.current.close(1000, 'Desconexão intencional');
-      wsRef.current = null;
-    }
-    
-    setIsConnected(false);
-  }, [clearHeartbeat]);
+  // ====================================================================
+  // CONNECT / DISCONNECT
+  // ====================================================================
+  connect(token) {
+    if (!token) return;
 
-  // Enviar mensagem
-  const sendMessage = useCallback((type, data = {}) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type, ...data }));
+    this.token = token;
+
+    // Already connected or connecting
+    if (this._isConnecting) return;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+
+    // Clean up stale connection
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      if (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN) {
+        this.ws.close(1000, 'Nova conexão');
+      }
+      this.ws = null;
+    }
+
+    const url = this._getUrl();
+    if (!url) return;
+
+    this._isConnecting = true;
+    console.log('WebSocket: Conectando a', url.replace(/token=.*/, 'token=***'));
+
+    try {
+      this.ws = new WebSocket(url);
+
+      this.ws.onopen = () => {
+        console.log('WebSocket: Conexão estabelecida');
+        this._isConnecting = false;
+        this._reconnectAttempts = 0;
+        this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
+        this.isConnected = true;
+        this.connectionError = null;
+        this._wsFailCount = 0;
+        this._stopPolling();
+        this._startHeartbeat();
+        this._notifyStateListeners();
+        this._dispatchEvent(WSEventType.CONNECTION_STATUS, {
+          status: 'connected',
+          user_id: null,
+        });
+      };
+
+      this.ws.onmessage = (event) => this._handleMessage(event);
+
+      this.ws.onclose = (event) => {
+        console.log('WebSocket: Conexão fechada', event.code, event.reason);
+        this._isConnecting = false;
+        this.isConnected = false;
+        this._stopHeartbeat();
+        this._notifyStateListeners();
+
+        // Auto-reconnect unless intentional close
+        if (event.code !== 1000 && event.code !== 4001 && this._subscriberCount > 0) {
+          const delay = this._reconnectInterval;
+          this._reconnectAttempts++;
+          this._reconnectInterval = Math.min(this._reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
+          console.log(`WebSocket: Reconectando em ${delay / 1000}s... (tentativa ${this._reconnectAttempts})`);
+          this._reconnectTimeout = setTimeout(() => this.connect(this.token), delay);
+        }
+      };
+
+      this.ws.onerror = () => {
+        this._isConnecting = false;
+        this.connectionError = 'Erro na conexão WebSocket';
+        this._wsFailCount++;
+        if (this._wsFailCount >= MAX_WS_FAILS) {
+          this._startPolling();
+        }
+        this._notifyStateListeners();
+      };
+
+    } catch (error) {
+      this._isConnecting = false;
+      this.connectionError = error.message;
+      this._notifyStateListeners();
+    }
+  }
+
+  disconnect() {
+    if (this._reconnectTimeout) {
+      clearTimeout(this._reconnectTimeout);
+      this._reconnectTimeout = null;
+    }
+
+    this._isConnecting = false;
+    this._reconnectAttempts = 0;
+    this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
+    this._stopHeartbeat();
+
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.close(1000, 'Desconexão intencional');
+      this.ws = null;
+    }
+
+    this.isConnected = false;
+    this.token = null;
+  }
+
+  /**
+   * Increment subscriber count and connect if first subscriber
+   */
+  addSubscriber(token) {
+    this._subscriberCount++;
+    if (this._subscriberCount === 1 && !this.isConnected) {
+      this.connect(token);
+    }
+    return this._subscriberCount;
+  }
+
+  /**
+   * Decrement subscriber count and disconnect if last subscriber
+   */
+  removeSubscriber() {
+    this._subscriberCount = Math.max(0, this._subscriberCount - 1);
+    if (this._subscriberCount === 0) {
+      this.disconnect();
+      this._stopPolling();
+    }
+    return this._subscriberCount;
+  }
+
+  // ====================================================================
+  // PUBLIC API (called by hook instances)
+  // ====================================================================
+
+  sendMessage(type, data = {}) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type, ...data }));
       return true;
     }
-    console.warn('WebSocket: Não conectado, mensagem não enviada');
     return false;
-  }, []);
+  }
 
-  // Marcar notificação como lida via WebSocket
-  const markNotificationRead = useCallback((notificationId) => {
-    return sendMessage('mark_notification_read', { notification_id: notificationId });
-  }, [sendMessage]);
-
-  // Marcar todas as notificações como lidas
-  const markAllNotificationsRead = useCallback(() => {
-    return sendMessage('mark_all_read');
-  }, [sendMessage]);
-
-  // Registar handler de evento
-  const on = useCallback((eventType, handler) => {
-    if (!eventHandlersRef.current[eventType]) {
-      eventHandlersRef.current[eventType] = [];
+  /**
+   * Registar handler de evento
+   */
+  on(eventType, handler) {
+    if (!this._eventHandlers[eventType]) {
+      this._eventHandlers[eventType] = [];
     }
-    eventHandlersRef.current[eventType].push(handler);
-    
-    // Retornar função para remover handler
+    this._eventHandlers[eventType].push(handler);
     return () => {
-      eventHandlersRef.current[eventType] = eventHandlersRef.current[eventType].filter(
-        h => h !== handler
-      );
+      if (this._eventHandlers[eventType]) {
+        this._eventHandlers[eventType] = this._eventHandlers[eventType].filter(h => h !== handler);
+      }
     };
-  }, []);
+  }
 
-  // Remover handler de evento
-  const off = useCallback((eventType, handler) => {
-    if (eventHandlersRef.current[eventType]) {
-      eventHandlersRef.current[eventType] = eventHandlersRef.current[eventType].filter(
-        h => h !== handler
-      );
+  off(eventType, handler) {
+    if (this._eventHandlers[eventType]) {
+      this._eventHandlers[eventType] = this._eventHandlers[eventType].filter(h => h !== handler);
     }
-  }, []);
+  }
 
-  // Conectar automaticamente quando há token
+  /**
+   * Subscribe to connection state changes
+   */
+  subscribe(listener) {
+    this._stateListeners.add(listener);
+    return () => this._stateListeners.delete(listener);
+  }
+}
+
+// Module-level singleton
+const wsManager = new WebSocketManager();
+
+// ====================================================================
+// REACT HOOK (lightweight wrapper around singleton)
+// ====================================================================
+export function useWebSocket(options = {}) {
+  const { token } = useAuth();
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastMessage, setLastMessage] = useState(null);
+  const [connectionError, setConnectionError] = useState(null);
+
+  const optionsRef = useRef(options);
+  const tokenRef = useRef(token);
+
+  // Keep options ref up-to-date without triggering re-subscriptions
   useEffect(() => {
-    if (autoConnect && token) {
-      connect();
+    optionsRef.current = options;
+  }, [options]);
+
+  // Keep token ref up-to-date
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  // Subscribe to singleton state changes
+  useEffect(() => {
+    const unsubscribe = wsManager.subscribe(({ isConnected: connected, connectionError: error, lastMessage: msg }) => {
+      setIsConnected(connected);
+      setConnectionError(error);
+      setLastMessage(msg);
+    });
+
+    // Initialize with current state
+    setIsConnected(wsManager.isConnected);
+    setConnectionError(wsManager.connectionError);
+    setLastMessage(wsManager.lastMessage);
+
+    return unsubscribe;
+  }, []);
+
+  // Subscribe to option callbacks (onProcessUpdate, etc.)
+  useEffect(() => {
+    const unsubs = [];
+    const opts = optionsRef.current;
+
+    if (opts.onProcessUpdate) {
+      unsubs.push(wsManager.on(WSEventType.PROCESS_CREATED, (p) => opts.onProcessUpdate(WSEventType.PROCESS_CREATED, p)));
+      unsubs.push(wsManager.on(WSEventType.PROCESS_UPDATED, (p) => opts.onProcessUpdate(WSEventType.PROCESS_UPDATED, p)));
+      unsubs.push(wsManager.on(WSEventType.PROCESS_STATUS_CHANGED, (p) => opts.onProcessUpdate(WSEventType.PROCESS_STATUS_CHANGED, p)));
+      unsubs.push(wsManager.on(WSEventType.PROCESS_ASSIGNED, (p) => opts.onProcessUpdate(WSEventType.PROCESS_ASSIGNED, p)));
     }
-    
+
+    if (opts.onNotification) {
+      unsubs.push(wsManager.on(WSEventType.NEW_NOTIFICATION, opts.onNotification));
+    }
+
+    if (opts.onDeadlineReminder) {
+      unsubs.push(wsManager.on(WSEventType.DEADLINE_REMINDER, opts.onDeadlineReminder));
+    }
+
+    if (opts.onUserOnline) {
+      unsubs.push(wsManager.on(WSEventType.USER_ONLINE, opts.onUserOnline));
+    }
+
+    if (opts.onUserOffline) {
+      unsubs.push(wsManager.on(WSEventType.USER_OFFLINE, opts.onUserOffline));
+    }
+
+    return () => unsubs.forEach(unsub => unsub?.());
+  }, []);
+
+  // Subscriber lifecycle: connect on mount, disconnect on last unmount
+  useEffect(() => {
+    if (optionsRef.current.autoConnect !== false && token) {
+      wsManager.addSubscriber(token);
+    }
+
     return () => {
-      disconnect();
-      stopPollingFallback(); // O11 - Limpar polling ao desmontar
+      wsManager.removeSubscriber();
     };
-  }, [autoConnect, token, connect, disconnect, stopPollingFallback]);
+  }, [token]);
+
+  const sendMessage = useCallback((type, data = {}) => {
+    return wsManager.sendMessage(type, data);
+  }, []);
+
+  const markNotificationRead = useCallback((notificationId) => {
+    return wsManager.sendMessage('mark_notification_read', { notification_id: notificationId });
+  }, []);
+
+  const markAllNotificationsRead = useCallback(() => {
+    return wsManager.sendMessage('mark_all_read');
+  }, []);
+
+  const on = useCallback((eventType, handler) => {
+    return wsManager.on(eventType, handler);
+  }, []);
+
+  const off = useCallback((eventType, handler) => {
+    return wsManager.off(eventType, handler);
+  }, []);
 
   return {
     isConnected,
-    isPolling: !!pollingIntervalRef.current,
+    isPolling: !!wsManager._pollingInterval,
     lastMessage,
     connectionError,
-    connect,
-    disconnect,
+    connect: (t) => wsManager.connect(t || token),
+    disconnect: () => wsManager.removeSubscriber(),
     sendMessage,
     markNotificationRead,
     markAllNotificationsRead,
