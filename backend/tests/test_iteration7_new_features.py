@@ -439,7 +439,7 @@ class TestHealthAndAuth:
         print("✓ Health endpoint working")
     
     def test_admin_login(self):
-        """POST /api/auth/login - Admin login"""
+        """POST /api/auth/login-v2 - Admin login"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login-v2",
             json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
@@ -451,7 +451,7 @@ class TestHealthAndAuth:
         print("✓ Admin login successful")
     
     def test_ceo_login(self):
-        """POST /api/auth/login - CEO login"""
+        """POST /api/auth/login-v2 - CEO login"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login-v2",
             json={"email": CEO_EMAIL, "password": CEO_PASSWORD}
