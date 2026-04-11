@@ -196,7 +196,7 @@ const RichTextEditor = ({
     'header', 'font', 'size',
     'bold', 'italic', 'underline', 'strike',
     'color', 'background',
-    'list', 'bullet', 'indent',
+    'list', 'indent',
     'align',
     'link',
     'image',
