@@ -10,7 +10,8 @@ async def test_get_processes_as_admin(client, admin_token):
     )
     assert response.status_code == 200
     data = response.json()
-    assert isinstance(data, list)
+    # API returns paginated response with 'items' key
+    assert "items" in data or isinstance(data, list)
 
 
 @pytest.mark.asyncio
@@ -28,7 +29,8 @@ async def test_get_single_process(client, admin_token):
         "/processes",
         headers={"Authorization": f"Bearer {admin_token}"}
     )
-    processes = list_response.json()
+    data = list_response.json()
+    processes = data.get("items", data) if isinstance(data, dict) else data
     
     if processes:
         process_id = processes[0]["id"]
@@ -57,7 +59,8 @@ async def test_update_process_status_as_admin(client, admin_token):
         "/processes",
         headers={"Authorization": f"Bearer {admin_token}"}
     )
-    processes = list_response.json()
+    data = list_response.json()
+    processes = data.get("items", data) if isinstance(data, dict) else data
     
     if processes:
         process_id = processes[0]["id"]
@@ -85,7 +88,8 @@ async def test_consultor_can_update_real_estate_data(client, consultor_token):
         "/processes",
         headers={"Authorization": f"Bearer {consultor_token}"}
     )
-    processes = list_response.json()
+    data = list_response.json()
+    processes = data.get("items", data) if isinstance(data, dict) else data
     
     if processes:
         process_id = processes[0]["id"]
@@ -110,7 +114,8 @@ async def test_mediador_cannot_update_credit_data_before_authorization(client, m
         "/processes",
         headers={"Authorization": f"Bearer {mediador_token}"}
     )
-    processes = list_response.json()
+    data = list_response.json()
+    processes = data.get("items", data) if isinstance(data, dict) else data
     
     early_process = next(
         (p for p in processes if p["status"] == "pedido_inicial"),
