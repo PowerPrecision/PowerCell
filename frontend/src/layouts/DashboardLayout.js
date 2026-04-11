@@ -120,7 +120,7 @@ const DashboardLayout = ({ children, title }) => {
     // Rotas do grupo IA
     const iaRoutes = ["/configuracoes/ia", "/ai-insights", "/revisao-dados-ia", "/configuracoes/treino-ia"];
     // Rotas do grupo Configurações (unificado com Sistema)
-    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/auditoria"];
+    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/auditoria", "/workflow-estados", "/automation", "/configuracoes-perfis", "/gestao-formulario", "/admin/migracao-rgpd", "/diagnosticos"];
     
     return {
       negocio: negocioRoutes.some(r => path.startsWith(r)),
@@ -681,7 +681,13 @@ const DashboardLayout = ({ children, title }) => {
                 <Collapsible
                   key={group.id}
                   open={openSections[group.id]}
-                  onOpenChange={() => toggleSection(group.id)}
+                  onOpenChange={(open) => {
+                    // Only toggle if the CollapsibleTrigger itself was clicked
+                    // Prevent items inside from collapsing the group
+                    if (open !== openSections[group.id]) {
+                      toggleSection(group.id);
+                    }
+                  }}
                   className="mt-2"
                 >
                   <CollapsibleTrigger className="flex items-center justify-between w-full px-3 py-2.5 rounded-md text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">
@@ -707,7 +713,8 @@ const DashboardLayout = ({ children, title }) => {
                               ? "bg-teal-600/80 text-white"
                               : "text-slate-400 hover:bg-slate-800 hover:text-white"
                           }`}
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent Collapsible onOpenChange from firing
                             // Só fecha o sidebar no mobile (quando está aberto como overlay)
                             if (window.innerWidth < 1024) {
                               setSidebarOpen(false);
