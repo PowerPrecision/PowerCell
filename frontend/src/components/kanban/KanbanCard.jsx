@@ -80,7 +80,7 @@ const KanbanCard = memo(({
     <Card
       className={`cursor-pointer hover:shadow-md transition-shadow relative ${
         isCurrentlyDragging ? "opacity-50" : ""
-      } ${hasSecondProponent ? "border-l-4 border-indigo-400" : ""}`
+      } ${hasSecondProponent ? "border-l-4 border-indigo-400" : ""}`}
       draggable
       onDragStart={handleDragStart}
       onClick={handleClick}
