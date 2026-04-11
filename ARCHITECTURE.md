@@ -75,9 +75,9 @@ graph TB
     end
 
     subgraph Infra["📦 Infraestrutura"]
-        MongoDB[("MongoDB Atlas<br/>(Base de Dados)"]
-        Redis[("Redis<br/>(Cache + Task Queue)"]
-        S3[("AWS S3<br/>(Armazenamento)"]
+        MongoDB[("MongoDB Atlas - Base de Dados")]
+        Redis[("Redis - Cache + Task Queue")]
+        S3[("AWS S3 - Armazenamento")]
         Sentry["Sentry<br/>(Observabilidade)"]
         SendGrid["SendGrid/Resend<br/>(Email Transacional)"]
         OpenAI["OpenAI / Gemini<br/>(Modelos de IA)"]
