@@ -5,7 +5,11 @@ from fastapi import APIRouter, Depends
 from database import db
 from models.auth import UserRole
 from services.auth import get_current_user, require_staff
-from services.redis_cache import cache_get, cache_set
+from services.redis_cache import (
+    cache_get, cache_set,
+    build_user_kpi_key, build_user_leads_key,
+    STATS_GLOBAL_LEADS_KEY, STATS_GLOBAL_CONVERSION_KEY,
+)
 
 
 router = APIRouter(tags=["Stats"])
@@ -19,8 +23,9 @@ async def get_stats(user: dict = Depends(get_current_user)):
     com asyncio.gather(), reduzindo o tempo total de ~12 chamadas sequenciais
     para 2-3 chamadas paralelas.
     """
-    # O13 - Redis cache: TTL 60s por role+user
-    cache_key = f"stats:{user['role']}:{user['id']}"
+    # O13 - Redis cache: chave hierárquica por user
+    # TTL longo (24h) porque invalidação cirúrgica garante fresh data
+    cache_key = build_user_kpi_key(user['id'])
     cached = await cache_get(cache_key)
     if cached:
         return cached
@@ -154,8 +159,8 @@ async def get_stats(user: dict = Depends(get_current_user)):
     stats["pending_deadlines"] = pending_deadlines_count
     stats["total_pending"] = pending_deadlines_count + pending_tasks_count
     
-    # O13 - Cache result for 60 seconds
-    await cache_set(cache_key, stats, ttl=60)
+    # O13 - Cache result for 24 hours (invalidação cirúrgica substitui TTL curto)
+    await cache_set(cache_key, stats, ttl=86400)
     return stats
 
 
@@ -167,8 +172,9 @@ async def get_leads_stats(user: dict = Depends(require_staff())):
     OTIMIZAÇÃO: Contagens por status executadas em paralelo com asyncio.gather().
     N+1 de nomes de consultores substituído por $in batch lookup.
     """
-    # O13 - Redis cache: TTL 120s
-    cache_key = f"stats:leads:{user['id']}"
+    # O13 - Redis cache: chave hierárquica por user
+    # TTL longo (24h) porque invalidação cirúrgica garante fresh data
+    cache_key = build_user_leads_key(user['id'])
     cached = await cache_get(cache_key)
     if cached:
         return cached
@@ -241,8 +247,8 @@ async def get_leads_stats(user: dict = Depends(require_staff())):
         ]
     }
     
-    # O13 - Cache result for 120 seconds
-    await cache_set(cache_key, result, ttl=120)
+    # O13 - Cache result for 24 hours (invalidação cirúrgica substitui TTL curto)
+    await cache_set(cache_key, result, ttl=86400)
     return result
 
 
@@ -252,8 +258,9 @@ async def get_conversion_stats(user: dict = Depends(require_staff())):
     Estatísticas de tempo de conversão de leads.
     Calcula o tempo médio desde criação até proposta.
     """
-    # O13 - Redis cache: TTL 300s (conversion stats change slowly)
-    cache_key = "stats:conversion"
+    # O13 - Redis cache: chave global hierárquica
+    # TTL longo (24h) porque invalidação cirúrgica garante fresh data
+    cache_key = STATS_GLOBAL_CONVERSION_KEY
     cached = await cache_get(cache_key)
     if cached:
         return cached
@@ -290,8 +297,8 @@ async def get_conversion_stats(user: dict = Depends(require_staff())):
         "max_days": max(conversion_times) if conversion_times else 0
     }
     
-    # O13 - Cache result for 300 seconds
-    await cache_set(cache_key, result, ttl=300)
+    # O13 - Cache result for 24 hours (invalidação cirúrgica substitui TTL curto)
+    await cache_set(cache_key, result, ttl=86400)
     return result
 
 
