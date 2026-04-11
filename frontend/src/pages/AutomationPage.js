@@ -12,7 +12,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Switch } from "../components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -256,6 +256,9 @@ const AutomationPage = () => {
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="rule-dialog">
             <DialogHeader>
               <DialogTitle>{editingRule ? "Editar Regra" : "Nova Regra de Automacao"}</DialogTitle>
+              <DialogDescription className="sr-only">
+                {editingRule ? "Editar uma regra de automação existente" : "Criar uma nova regra de automação"}
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>

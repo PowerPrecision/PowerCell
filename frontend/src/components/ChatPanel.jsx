@@ -1165,6 +1165,10 @@ const ChatPanel = ({ open, onOpenChange }) => {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md h-[calc(100vh-4rem)] sm:h-[700px] p-0 flex flex-col">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Chat</DialogTitle>
+          <DialogDescription>Mensagens e conversas do chat</DialogDescription>
+        </DialogHeader>
         {showSearch ? (
           renderSearch()
         ) : showNewGroup ? (

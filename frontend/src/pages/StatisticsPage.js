@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, Users, FileText, CheckCircle, 
-  Clock, AlertCircle, Euro, Calendar, Target, Building, Trophy
+  Clock, AlertCircle, Euro, Calendar, Target, Building, Trophy, Loader2
 } from "lucide-react";
 import { getStats, getProcesses, getUsers } from "../services/api";
 import { toast } from "sonner";
@@ -132,6 +132,11 @@ const StatisticsPage = () => {
 
   return (
     <DashboardLayout title="Estatísticas e Análise">
+      {loading ? (
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
       <div className="space-y-4 md:space-y-6 p-4 md:p-6">
         {/* Filtros */}
         <div className="flex flex-wrap gap-4">
@@ -472,6 +477,7 @@ const StatisticsPage = () => {
           </TabsContent>
         </Tabs>
       </div>
+      )}
     </DashboardLayout>
   );
 };
