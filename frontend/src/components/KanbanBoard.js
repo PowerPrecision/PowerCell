@@ -322,7 +322,7 @@ const KanbanBoard = ({
                   draggingCard={draggingCard}
                   lockedProcesses={lockedProcesses}
                 />
-              ))
+              ))}
             </div>
             <ScrollBar orientation="horizontal" />
           </ScrollArea>
