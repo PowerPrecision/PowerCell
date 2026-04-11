@@ -41,7 +41,7 @@ WORKDIR /app
 RUN npm install -g serve
 
 # Copiar build do stage anterior
-COPY --from=builder /app/build ./build
+COPY --from=builder /app/dist ./dist
 
 # Utilizador não-root
 RUN addgroup -g 1001 -S nodejs && \
@@ -58,7 +58,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
 
 # Comando
-CMD ["serve", "-s", "build", "-l", "3000"]
+CMD ["serve", "-s", "dist", "-l", "3000"]
 
 
 # -----------------------------

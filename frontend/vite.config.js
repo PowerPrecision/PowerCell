@@ -65,7 +65,7 @@ export default defineConfig(({ mode }) => {
     
     // Build configuration
     build: {
-      outDir: 'build',
+      outDir: 'dist',
       sourcemap: mode !== 'production',
       rollupOptions: {
         output: {
