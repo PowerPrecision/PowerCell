@@ -1288,7 +1288,7 @@ const SystemConfigPage = () => {
               className="min-h-[300px]"
             />
 
-            {/* Pré-visualização */
+            {/* Pré-visualização */}
             <div className="space-y-2">
               <p className="text-sm font-medium text-muted-foreground">Pré-visualização</p>
               <div className="bg-muted/50 rounded-lg p-4 mt-1">
