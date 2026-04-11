@@ -88,6 +88,7 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection
 )
 from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.redis_cache import invalidate_stats_cache
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +311,9 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     # Inserir na base de dados
     await db.processes.insert_one(process_doc)
     
+    # === CACHE INVALIDATION: Novo processo afecta KPIs ===
+    await invalidate_stats_cache(user_id=user["id"])
+    
     # Registar no histórico
     await log_history(process_id, user, "Criou processo")
     
@@ -505,6 +509,9 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     
     # Inserir na base de dados
     await db.processes.insert_one(process_doc)
+    
+    # === CACHE INVALIDATION: Novo processo criado por staff afecta KPIs ===
+    await invalidate_stats_cache(user_id=user["id"])
     
     # Atualizar process_ids do cliente
     if client_id:
@@ -1304,6 +1311,9 @@ async def move_process_kanban(
         }}
     )
     
+    # === CACHE INVALIDATION: Mover processo altera KPIs (concluídos/ativos/desistências) ===
+    await invalidate_stats_cache(user_id=user.get("id"))
+    
     # Log history
     await log_history(process_id, user, "Moveu processo", "status", old_status, new_status)
     
@@ -1692,6 +1702,11 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
+    # === CACHE INVALIDATION: Atualização de processo pode alterar KPIs ===
+    # Invalidar apenas se houve mudança de status (afeta contadores)
+    if data.status:
+        await invalidate_stats_cache(user_id=user.get("id"))
+    
     # === WEBSOCKET BROADCAST: Processo atualizado ===
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_UPDATED,
@@ -1913,6 +1928,9 @@ async def assign_process(
                 await log_history(process_id, user, "Atribuiu parceiro", "assigned_parceiro_id", old_name, parceiro_user["name"])
     
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    
+    # === CACHE INVALIDATION: Atribuição altera KPIs dos users envolvidos ===
+    await invalidate_stats_cache(user_id=user.get("id"))
     
     # === WEBSOCKET BROADCAST: Atribuições atualizadas ===
     updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
