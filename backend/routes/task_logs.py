@@ -3,10 +3,13 @@
 ROTAS DE TAREFAS ASSÍNCRONAS - TASKLOG
 ====================================================================
 Endpoints para o Motor de Tarefas Assíncronas:
-- GET /api/tasks/active - Lista tarefas ativas do utilizador
-- POST /api/tasks/:id/acknowledge - Confirma visualização de tarefa concluída
-- DELETE /api/tasks/:id/cancel - Cancela tarefa pendente
-- GET /api/tasks - Lista todas as tarefas do utilizador
+- GET /api/task-logs/active - Lista tarefas ativas do utilizador
+- POST /api/task-logs/:id/acknowledge - Confirma visualização de tarefa concluída
+- DELETE /api/task-logs/:id/cancel - Cancela tarefa pendente
+- GET /api/task-logs - Lista todas as tarefas do utilizador
+
+NOTE: Prefix changed from /tasks to /task-logs to avoid route
+collision with routes/tasks.py which also uses prefix="/tasks".
 ====================================================================
 """
 
@@ -21,7 +24,7 @@ from services.task_log_service import task_log_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/tasks", tags=["Async Tasks"])
+router = APIRouter(prefix="/task-logs", tags=["Async Tasks"])
 
 
 # ====================================================================
@@ -32,7 +35,7 @@ HTTP_404_RESPONSE = {"description": "Not Found - Tarefa não encontrada"}
 
 
 # ====================================================================
-# GET /API/TASKS/ACTIVE - TAREFAS ATIVAS
+# GET /API/TASK-LOGS/ACTIVE - TAREFAS ATIVAS
 # ====================================================================
 @router.get("/active", response_model=TaskLogListResponse)
 async def get_active_tasks(
@@ -72,7 +75,7 @@ async def get_active_tasks(
 
 
 # ====================================================================
-# GET /API/TASKS/:TASK_ID - DETALHES DA TAREFA
+# GET /API/TASK-LOGS/:TASK_ID - DETALHES DA TAREFA
 # ====================================================================
 @router.get("/{task_id}", response_model=TaskLogResponse)
 async def get_task_details(
@@ -95,7 +98,7 @@ async def get_task_details(
 
 
 # ====================================================================
-# POST /API/TASKS/:TASK_ID/ACKNOWLEDGE - CONFIRMAR VISUALIZAÇÃO
+# POST /API/TASK-LOGS/:TASK_ID/ACKNOWLEDGE - CONFIRMAR VISUALIZAÇÃO
 # ====================================================================
 @router.post("/{task_id}/acknowledge")
 async def acknowledge_task(
@@ -134,7 +137,7 @@ async def acknowledge_task(
 
 
 # ====================================================================
-# DELETE /API/TASKS/:TASK_ID/CANCEL - CANCELAR TAREFA
+# DELETE /API/TASK-LOGS/:TASK_ID/CANCEL - CANCELAR TAREFA
 # ====================================================================
 @router.delete("/{task_id}/cancel")
 async def cancel_task(
@@ -177,7 +180,7 @@ async def cancel_task(
 
 
 # ====================================================================
-# GET /API/TASKS - LISTAR TAREFAS DO UTILIZADOR
+# GET /API/TASK-LOGS - LISTAR TAREFAS DO UTILIZADOR
 # ====================================================================
 @router.get("", response_model=TaskLogListResponse)
 async def list_user_tasks(
@@ -224,7 +227,7 @@ async def list_user_tasks(
 
 
 # ====================================================================
-# DELETE /API/TASKS/:TASK_ID - ELIMINAR TAREFA
+# DELETE /API/TASK-LOGS/:TASK_ID - ELIMINAR TAREFA
 # ====================================================================
 @router.delete("/{task_id}")
 async def delete_task(
