@@ -6,9 +6,10 @@
  * 
  * Funcionalidades:
  * - Conexão automática com autenticação
- * - Reconexão automática em caso de falha
+ * - Reconexão automática com exponential backoff
  * - Heartbeat para manter conexão activa
  * - Gestão de eventos de notificação
+ * - Proteção contra conexões paralelas (React StrictMode, re-renders)
  * ====================================================================
  */
 
@@ -47,7 +48,8 @@ export const WSEventType = {
   USER_OFFLINE: 'user_offline',
 };
 
-const RECONNECT_INTERVAL = 5000; // 5 segundos
+const INITIAL_RECONNECT_INTERVAL = 1000; // 1 segundo (início)
+const MAX_RECONNECT_INTERVAL = 30000; // 30 segundos (teto)
 const HEARTBEAT_INTERVAL = 30000; // 30 segundos
 
 export function useWebSocket(options = {}) {
@@ -60,11 +62,16 @@ export function useWebSocket(options = {}) {
   const reconnectTimeoutRef = useRef(null);
   const heartbeatIntervalRef = useRef(null);
   const eventHandlersRef = useRef({});
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectIntervalRef = useRef(INITIAL_RECONNECT_INTERVAL);
+  const isConnectingRef = useRef(false); // Previne conexões paralelas
   
   const {
     onNotification,
     onProcessUpdate,
     onDeadlineReminder,
+    onUserOnline,
+    onUserOffline,
     onConnect,
     onDisconnect,
     autoConnect = true,
@@ -162,13 +169,22 @@ export function useWebSocket(options = {}) {
           // Pong recebido, conexão está activa
           break;
         
+        case WSEventType.USER_ONLINE:
+          onUserOnline?.(payload);
+          break;
+        
+        case WSEventType.USER_OFFLINE:
+          onUserOffline?.(payload);
+          break;
+        
         default:
-          console.log('WebSocket: Evento não tratado:', type, payload);
+          // Eventos não esperados são silenciados para reduzir ruído no console
+          break;
       }
     } catch (error) {
       console.error('WebSocket: Erro ao processar mensagem:', error);
     }
-  }, [onNotification, onProcessUpdate, onDeadlineReminder]);
+  }, [onNotification, onProcessUpdate, onDeadlineReminder, onUserOnline, onUserOffline]);
 
   // O11 - Polling fallback quando WebSocket falha
   const pollingIntervalRef = useRef(null);
@@ -218,9 +234,27 @@ export function useWebSocket(options = {}) {
       return;
     }
     
+    // Prevenir conexões paralelas (React StrictMode, re-renders, etc.)
+    if (isConnectingRef.current) {
+      console.log('WebSocket: Conexão já em curso, ignorando');
+      return;
+    }
+    
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       console.log('WebSocket: Já conectado');
       return;
+    }
+    
+    // Fechar conexão anterior se existir (CLOSED/CLOSING/CONNECTING)
+    if (wsRef.current) {
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      if (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close(1000, 'Nova conexão');
+      }
+      wsRef.current = null;
     }
     
     try {
@@ -228,16 +262,21 @@ export function useWebSocket(options = {}) {
       
       // Se não há URL, não conectar
       if (!url) {
+        isConnectingRef.current = false;
         console.log('WebSocket: URL não disponível');
         return;
       }
       
       console.log('WebSocket: Conectando a', url.replace(/token=.*/, 'token=***'));
       
+      isConnectingRef.current = true;
       wsRef.current = new WebSocket(url);
       
       wsRef.current.onopen = () => {
         console.log('WebSocket: Conexão estabelecida');
+        isConnectingRef.current = false;
+        reconnectAttemptsRef.current = 0; // Reset tentativas
+        reconnectIntervalRef.current = INITIAL_RECONNECT_INTERVAL; // Reset backoff
         setIsConnected(true);
         setConnectionError(null);
         wsFailCountRef.current = 0;
@@ -250,19 +289,28 @@ export function useWebSocket(options = {}) {
       
       wsRef.current.onclose = (event) => {
         console.log('WebSocket: Conexão fechada', event.code, event.reason);
+        isConnectingRef.current = false;
         setIsConnected(false);
         clearHeartbeat();
         onDisconnect?.();
         
         // Reconectar automaticamente se não foi fechamento intencional
         if (event.code !== 1000 && event.code !== 4001) {
-          console.log(`WebSocket: Reconectando em ${RECONNECT_INTERVAL/1000}s...`);
-          reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL);
+          // Exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s (teto)
+          const delay = reconnectIntervalRef.current;
+          reconnectAttemptsRef.current++;
+          reconnectIntervalRef.current = Math.min(
+            reconnectIntervalRef.current * 2,
+            MAX_RECONNECT_INTERVAL
+          );
+          console.log(`WebSocket: Reconectando em ${delay/1000}s... (tentativa ${reconnectAttemptsRef.current})`);
+          reconnectTimeoutRef.current = setTimeout(connect, delay);
         }
       };
       
       wsRef.current.onerror = (error) => {
         console.error('WebSocket: Erro:', error);
+        isConnectingRef.current = false;
         setConnectionError('Erro na conexão WebSocket');
         // O11 - Contar falhas e ativar polling fallback
         wsFailCountRef.current++;
@@ -272,10 +320,11 @@ export function useWebSocket(options = {}) {
       };
       
     } catch (error) {
+      isConnectingRef.current = false;
       console.error('WebSocket: Erro ao criar conexão:', error);
       setConnectionError(error.message);
     }
-  }, [token, getWebSocketUrl, handleMessage, startHeartbeat, clearHeartbeat, onConnect, onDisconnect]);
+  }, [token, getWebSocketUrl, handleMessage, startHeartbeat, clearHeartbeat, stopPollingFallback, startPollingFallback, onConnect, onDisconnect]);
 
   // Desconectar
   const disconnect = useCallback(() => {
@@ -284,9 +333,16 @@ export function useWebSocket(options = {}) {
       reconnectTimeoutRef.current = null;
     }
     
+    isConnectingRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    reconnectIntervalRef.current = INITIAL_RECONNECT_INTERVAL;
     clearHeartbeat();
     
     if (wsRef.current) {
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
       wsRef.current.close(1000, 'Desconexão intencional');
       wsRef.current = null;
     }

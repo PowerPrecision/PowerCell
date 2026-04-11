@@ -41,6 +41,7 @@ export function useKanbanRealtime(options = {}) {
   const filtersRef = useRef(filters);
   const pendingMovesRef = useRef(new Set());
   const [lockedProcesses, setLockedProcesses] = useState({});
+  const [connectedUsers, setConnectedUsers] = useState({});
   
   // Manter filters atualizados no ref
   useEffect(() => {
@@ -317,6 +318,31 @@ export function useKanbanRealtime(options = {}) {
               return next;
           });
       }),
+
+      // Listen for USER_ONLINE (other admins/CEOs connecting)
+      on(WSEventType.USER_ONLINE, (payload) => {
+          if (!payload?.user_id || payload.user_id === userId) return;
+          setConnectedUsers((prev) => ({
+              ...prev,
+              [payload.user_id]: {
+                  user_id: payload.user_id,
+                  user_name: payload.user_name,
+                  online: true,
+              },
+          }));
+      }),
+
+      // Listen for USER_OFFLINE (other admins/CEOs disconnecting)
+      on(WSEventType.USER_OFFLINE, (payload) => {
+          if (!payload?.user_id || payload.user_id === userId) return;
+          setConnectedUsers((prev) => {
+              const next = { ...prev };
+              if (next[payload.user_id]) {
+                  next[payload.user_id] = { ...next[payload.user_id], online: false };
+              }
+              return next;
+          });
+      }),
     ];
 
     return () => {
@@ -327,6 +353,7 @@ export function useKanbanRealtime(options = {}) {
   return {
     isConnected,
     lockedProcesses,
+    connectedUsers,
     sendMessage,
     // Função para forçar invalidação manual
     invalidateKanban: () => {
