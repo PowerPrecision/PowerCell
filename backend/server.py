@@ -654,6 +654,19 @@ async def startup():
     except (IOError, OSError, ValueError, ImportError) as backup_err:
         logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
 
+    # Iniciar CDC Audit Listener (Change Data Capture para compliance)
+    # Monitoriza alterações em processes/document_metadata via Change Stream
+    # e regista eventos na coleção compliance_audit_logs.
+    # Roles em modo fantasma (ex: indexacao) são automaticamente excluídas.
+    try:
+        from services.audit_cdc import cdc_listener
+        cdc_task = asyncio.create_task(cdc_listener.start())
+        _background_tasks.add(cdc_task)
+        cdc_task.add_done_callback(_background_tasks.discard)
+        logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
+    except (IOError, OSError, ValueError, ImportError) as cdc_err:
+        logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     # CORREÇÃO CRÍTICA: Não fechar a conexão DB se estivermos a correr testes!
