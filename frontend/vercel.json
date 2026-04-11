@@ -7,7 +7,7 @@
   "devCommand": "yarn dev",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!assets|_next|favicon\\.ico|robots\\.txt|manifest\\.json|sw\\.js|workbox-|icon-.*\\.png).*)",
       "destination": "/index.html"
     }
   ],
