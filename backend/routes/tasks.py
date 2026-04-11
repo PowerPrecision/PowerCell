@@ -220,6 +220,122 @@ async def get_tasks(
     return enriched_tasks
 
 
+@router.get("/active")
+async def get_active_background_tasks(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Buscar tarefas assíncronas ativas do utilizador actual.
+
+    Usado pelo TasksContext (frontend polling) para mostrar
+    notificações de jobs em execução (PDF, IA, emails, etc.).
+
+    Retorna:
+    - tasks: Lista de jobs activos/concluídos não confirmados
+    - active_count: Número de jobs em progresso
+    - completed_unacknowledged: Jobs concluídos sem acknowledgement
+    """
+    try:
+        query = {
+            "user_email": current_user.get("email", ""),
+            "status": {"$in": ["running", "pending", "completed", "failed"]},
+        }
+
+        # Excluir jobs já confirmados (acknowledged)
+        jobs = await db.background_jobs.find(
+            query,
+            {"_id": 0}
+        ).sort("created_at", -1).to_list(50)
+
+        # Mapear para o formato esperado pelo frontend TasksContext
+        tasks = []
+        active_count = 0
+        completed_unacknowledged = 0
+
+        for job in jobs:
+            status = job.get("status", "unknown")
+            is_active = status in ["running", "pending"]
+            is_done = status in ["completed", "failed"]
+            is_unack = not job.get("acknowledged_at")
+
+            if is_active:
+                active_count += 1
+
+            if is_done and is_unack:
+                completed_unacknowledged += 1
+
+            # Só incluir jobs que ainda são relevantes
+            if is_active or (is_done and is_unack):
+                tasks.append({
+                    "task_id": job.get("id", ""),
+                    "title": job.get("name", job.get("job_type", "Tarefa")),
+                    "description": job.get("message", ""),
+                    "status": "processing" if status == "running" else status,
+                    "type": job.get("job_type", "CUSTOM"),
+                    "created_at": job.get("created_at", ""),
+                    "updated_at": job.get("updated_at", ""),
+                    "acknowledged_at": job.get("acknowledged_at"),
+                    "result_url": job.get("result_url"),
+                    "error_message": job.get("error") or job.get("message") if status == "failed" else None,
+                    "progress": job.get("progress"),
+                })
+
+        return {
+            "tasks": tasks,
+            "active_count": active_count,
+            "completed_unacknowledged": completed_unacknowledged,
+        }
+
+    except Exception as e:
+        logger.warning(f"Erro ao buscar tarefas activas: {e}")
+        return {"tasks": [], "active_count": 0, "completed_unacknowledged": 0}
+
+
+@router.post("/{task_id}/acknowledge")
+async def acknowledge_background_task(
+    task_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Confirmar visualização de uma tarefa assíncrona.
+    Marca o job como acknowledged para parar de notificar.
+    """
+    result = await db.background_jobs.update_one(
+        {"id": task_id, "user_email": current_user.get("email", "")},
+        {"$set": {"acknowledged_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+    return {"success": True}
+
+
+@router.delete("/{task_id}/cancel")
+async def cancel_background_task(
+    task_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Cancelar uma tarefa pendente/em execução.
+    """
+    job = await db.background_jobs.find_one({"id": task_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+
+    if job.get("status") not in ["pending", "running"]:
+        raise HTTPException(status_code=400, detail="Apenas tarefas pendentes/em execução podem ser canceladas")
+
+    await db.background_jobs.update_one(
+        {"id": task_id},
+        {"$set": {
+            "status": "failed",
+            "error": "Cancelada pelo utilizador",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "acknowledged_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    return {"success": True, "message": "Tarefa cancelada"}
+
+
 @router.get("/my-tasks", response_model=List[TaskResponse])
 async def get_my_tasks(
     include_completed: bool = Query(False),
