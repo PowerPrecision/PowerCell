@@ -49,8 +49,10 @@ const StatisticsPage = () => {
       ]);
 
       setStats(statsRes.data);
-      setProcesses(processesRes.data);
-      setUsers(usersRes.data);
+      // API pode retornar resposta paginada {items: [...]} ou array direto
+      const processData = processesRes.data;
+      setProcesses(Array.isArray(processData) ? processData : (processData?.items || []));
+      setUsers(Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.items || []));
       
       // Fetch estatísticas de leads
       await fetchLeadsStats();
