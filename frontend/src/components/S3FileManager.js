@@ -786,7 +786,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Eliminar ficheiro
   const handleDelete = async () => {
     if (!deleteDialog.file) return;
-    
+
+    // Impedir eliminação de pastas (paths que terminam com /)
+    if (deleteDialog.file.path?.endsWith('/')) {
+      toast.error("Não é possível eliminar pastas. Selecione um ficheiro específico.");
+      setDeleteDialog({ open: false, file: null });
+      return;
+    }
+
     setDeleting(true);
     try {
       const response = await fetch(
@@ -801,7 +808,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         toast.success("Ficheiro eliminado");
         fetchFiles();
       } else {
-        toast.error("Erro ao eliminar ficheiro");
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.detail || "Erro ao eliminar ficheiro");
       }
     } catch (error) {
       toast.error("Erro ao eliminar ficheiro");
@@ -2086,6 +2094,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       const isPreviewing = previewFile?.path === file.path;
                       const isDragging = draggedFile?.path === file.path || draggedFiles.some(f => f.path === file.path);
                       const isMultiDrag = draggedFiles.length > 1 && isSelected;
+                      const isFolder = file.path?.endsWith('/');
                       return (
                         <div
                           key={`${file.path}-${idx}`}
@@ -2175,8 +2184,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             >
                               <Pencil className="h-3 w-3" />
                             </Button>
-                            {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar */}
-                            {!isIndexacao && (
+                            {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar; também ocultar para pastas */}
+                            {!isIndexacao && !isFolder && (
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
@@ -2363,8 +2372,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       >
                         <Pencil className="h-3 w-3" />
                       </Button>
-                      {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar */}
-                      {!isIndexacao && (
+                      {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar; também ocultar para pastas */}
+                      {!isIndexacao && !previewFile?.path?.endsWith('/') && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -2455,6 +2464,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                     <div className="flex gap-3 min-w-max">
                       {filteredFiles.map((file, idx) => {
                         const isDragging = draggedFile?.path === file.path || draggedFiles.some(f => f.path === file.path);
+                        const isFolder = file.path?.endsWith('/');
                         return (
                           <div
                             key={`${file.path}-${idx}`}
@@ -2487,8 +2497,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                 >
                                   <Download className="h-3.5 w-3.5" />
                                 </Button>
-                                {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar */}
-                                {!isIndexacao && (
+                                {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar; também ocultar para pastas */}
+                                {!isIndexacao && !isFolder && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -2580,8 +2590,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                   >
                                     <Download className="h-3.5 w-3.5" />
                                   </Button>
-                                  {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar */}
-                                  {!isIndexacao && (
+                                  {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar; também ocultar para pastas */}
+                                  {!isIndexacao && !previewFile?.path?.endsWith('/') && (
                                     <Button
                                       variant="ghost"
                                       size="icon"
