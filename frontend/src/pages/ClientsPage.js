@@ -107,14 +107,14 @@ export default function ClientsPage() {
   const searchTerm = searchParams.get("search") || "";
   const sortField = searchParams.get("sort") || "created_at";
   const sortOrder = searchParams.get("order") || "desc";
-  const statusFilter = searchParams.get("status") || "active";
+  const statusFilter = searchParams.get("status") || "all";
   const phaseFilter = searchParams.get("phase") || "all";
   const assignmentFilter = searchParams.get("assignment") || "all";
   const indexacaoFilter = searchParams.get("indexacao") || "all";
   
   const updateParam = (key, value) => {
     setSearchParams(prev => {
-      if (value && value !== "all" && value !== "active" && value !== "created_at_desc") {
+      if (value && value !== "all" && value !== "created_at_desc") {
         prev.set(key, value);
       } else {
         prev.delete(key);
