@@ -1,6 +1,22 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: 9
+Agent: Main Agent
+Task: Remover menu Novo processo, corrigir filtro clientes, statusFilter default, alertas IA
+
+Work Log:
+- **Task 1 - Remover "Novo processo"**: Não existia menu no sidebar. Removido atalho `Ctrl+N` ("Novo processo/tarefa") do `useKeyboardShortcuts.js` e handler `onNew` do `DashboardLayout.js`.
+- **Task 2 - Corrigir filtro clientes**: O backend aplicava `limit=500` à query de PROCESSOS (não clientes), o que fazia com que alguns clientes desaparecessem. Removido `skip/limit` da query MongoDB e aplicada paginação ao resultado final (lista de clientes únicos).
+- **Task 3 - statusFilter default "active"**: Alterado `ClientsPage.js` de `|| "all"` para `|| "active"`.
+- **Task 4 - Desativar alertas de consultor não atribuído**: Removido alerta `"unassigned"` e sugestão `"assignment"` do `ai_improvement_agent.py`. Processos sem consultor já não geram alertas no Agente de Melhoria IA.
+- Commit: `a90e92f`, build OK, push OK.
+
+Stage Summary:
+- 5 ficheiros alterados, 14 inserções, 31 remoções
+- Files: useKeyboardShortcuts.js, DashboardLayout.js, ClientsPage.js, clients.py, ai_improvement_agent.py
+
+---
 Task ID: 8
 Agent: Main Agent
 Task: Botões Simular Preenchimento + Testar Submissão em formulários

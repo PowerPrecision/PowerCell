@@ -35,7 +35,6 @@ import {
   User,
   Building2,
   CreditCard,
-  PlusCircle,
   BarChart3,
   Cog,
   Home,
@@ -107,9 +106,7 @@ const DashboardLayout = ({ children, title }) => {
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   
   // Atalhos de teclado
-  const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts({
-    onNew: () => navigate("/processos/novo"),
-  });
+  const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts({});
   
   // Determinar quais secções devem estar abertas baseado na rota actual
   const getInitialOpenSections = () => {
@@ -652,22 +649,6 @@ const DashboardLayout = ({ children, title }) => {
           {/* Navigation */}
           <ScrollArea className="flex-1 py-4">
             <nav className="space-y-1 px-3">
-              {/* Novo Processo Button - para consultores e intermediários */}
-              {["consultor", "intermediario", "mediador", "consultor_intermediario"].includes(user?.role?.toLowerCase()) && (
-                <Link
-                  to="/registos-clientes"
-                  className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors bg-teal-600 text-white hover:bg-teal-700 mb-2"
-                  onClick={() => {
-                    if (window.innerWidth < 1024) {
-                      setSidebarOpen(false);
-                    }
-                  }}
-                >
-                  <PlusCircle className="h-5 w-5" />
-                  Novo Processo
-                </Link>
-              )}
-
               {/* Main items - always visible */}
               {navData.main.map((item) => {
                 const isActive = location.pathname === item.href;

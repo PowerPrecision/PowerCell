@@ -78,15 +78,15 @@ const WorkflowEditor = () => {
 
   const handleCreateStatus = async (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.label) {
-      toast.error("Nome e etiqueta são obrigatórios");
+    if (!formData.label) {
+      toast.error("Nome do estado é obrigatório");
       return;
     }
 
     setFormLoading(true);
     try {
       await createWorkflowStatus({
-        name: formData.name.toLowerCase().replace(/\s+/g, "_"),
+        name: formData.label.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""),
         label: formData.label,
         order: formData.order || statuses.length + 1,
         color: formData.color,
@@ -191,7 +191,6 @@ const WorkflowEditor = () => {
 
   const resetForm = () => {
     setFormData({
-      name: "",
       label: "",
       order: statuses.length + 1,
       color: "blue",
@@ -274,9 +273,6 @@ const WorkflowEditor = () => {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-sm truncate">{status.label}</span>
-                    <Badge variant="outline" className="text-xs flex-shrink-0">
-                      {status.order || ''} - {status.name}
-                    </Badge>
                     {status.is_default && (
                       <Badge className="bg-blue-100 text-blue-800 text-xs flex-shrink-0">
                         Padrão
@@ -331,7 +327,7 @@ const WorkflowEditor = () => {
           </DialogHeader>
           <form onSubmit={handleCreateStatus} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="create-label">Etiqueta (Nome Visível) *</Label>
+              <Label htmlFor="create-label">Nome do Estado *</Label>
               <Input
                 id="create-label"
                 value={formData.label}
@@ -339,23 +335,6 @@ const WorkflowEditor = () => {
                 placeholder="Ex: Clientes em Espera"
                 required
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-name">Nome Interno (sem espaços)</Label>
-              <Input
-                id="create-name"
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    name: e.target.value.toLowerCase().replace(/\s+/g, "_"),
-                  })
-                }
-                placeholder="Ex: clientes_espera"
-              />
-              <p className="text-xs text-muted-foreground">
-                Identificador único. Letras minúsculas e underscores.
-              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -441,13 +420,7 @@ const WorkflowEditor = () => {
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label>Nome Interno</Label>
-              <Input value={formData.name} disabled className="bg-muted" />
-              <p className="text-xs text-muted-foreground">
-                O nome interno não pode ser alterado
-              </p>
-            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-order">Ordem</Label>

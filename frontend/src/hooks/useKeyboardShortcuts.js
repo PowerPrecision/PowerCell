@@ -7,7 +7,6 @@ import { useEffect, useCallback, useState } from "react";
 // Mapa de atalhos padrão
 const DEFAULT_SHORTCUTS = {
   "ctrl+k": { action: "search", description: "Abrir pesquisa" },
-  "ctrl+n": { action: "new", description: "Novo processo/tarefa" },
   "ctrl+/": { action: "help", description: "Mostrar atalhos" },
   "escape": { action: "close", description: "Fechar modal" },
 };
@@ -44,9 +43,6 @@ export const useKeyboardShortcuts = (customHandlers = {}) => {
         case "search":
           setShowSearchModal(true);
           if (customHandlers.onSearch) customHandlers.onSearch();
-          break;
-        case "new":
-          if (customHandlers.onNew) customHandlers.onNew();
           break;
         case "help":
           setShowHelpModal(prev => !prev);

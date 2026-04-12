@@ -114,7 +114,7 @@ export default function ClientsPage() {
   
   const updateParam = (key, value) => {
     setSearchParams(prev => {
-      if (value && value !== "all" && value !== "active" && value !== "created_at_desc") {
+      if (value && value !== "all" && value !== "created_at_desc") {
         prev.set(key, value);
       } else {
         prev.delete(key);
