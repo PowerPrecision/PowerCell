@@ -36,8 +36,16 @@ async def verify_websocket_token(token: str) -> dict:
             return None
         
         return user
-    except jwt.PyJWTError as e:  # CORREÇÃO: Capturar erro específico do PyJWT
-        logger.error(f"Erro JWT WebSocket: {e}")
+    except jwt.ExpiredSignatureError:
+        # Token expirado — comportamento esperado, usar warning em vez de error
+        logger.warning(f"JWT WebSocket: Token expirado (Signature has expired)")
+        return "expired"
+    except jwt.PyJWTError as e:
+        # Outros erros JWT (token malformado, assinatura inválida, etc.)
+        logger.error(f"JWT WebSocket: Token inválido — {e}")
+        return "invalid"
+    except Exception as e:
+        logger.error(f"JWT WebSocket: Erro inesperado — {type(e).__name__}: {e}")
         return None
 
 
@@ -73,8 +81,14 @@ async def websocket_notifications(
 ):
     user = await verify_websocket_token(token)
     
-    if not user:
-        await websocket.close(code=4001, reason="Token inválido ou expirado")
+    # Token expirado — código 4001 para o frontend saber que deve fazer refresh
+    if user == "expired":
+        await websocket.close(code=4001, reason="Token expirado")
+        return
+    
+    # Token inválido — código 4002, sem possibilidade de refresh
+    if user == "invalid" or user is None:
+        await websocket.close(code=4002, reason="Token inválido")
         return
     
     user_id = user["id"]

@@ -31,7 +31,9 @@ import {
 } from "../components/ui/alert-dialog";
 import { toast } from "../hooks/use-toast";
 import { useAuth } from "../contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 import api from "../services/api";
+import DashboardLayout from "../layouts/DashboardLayout";
 import {
   User,
   Lock,
@@ -44,6 +46,7 @@ import {
   LogOut,
   Clock,
   MapPin,
+  ArrowLeft,
 } from "lucide-react";
 
 // ====================================================================
@@ -52,6 +55,7 @@ import {
 
 const ProfilePage = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
 
   // Estados para dados do perfil
   const [profileData, setProfileData] = useState({
@@ -281,9 +285,10 @@ const ProfilePage = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background p-4 md:p-6">
+      <DashboardLayout>
         <div className="max-w-4xl mx-auto space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 bg-muted animate-pulse rounded" />
             <div className="space-y-1.5">
               <div className="h-8 w-40 bg-muted animate-pulse rounded" />
               <div className="h-4 w-64 bg-muted animate-pulse rounded" />
@@ -293,24 +298,34 @@ const ProfilePage = () => {
             {[1,2,3,4].map(i => <div key={i} className="h-36 bg-muted animate-pulse rounded-lg" />)}
           </div>
         </div>
-      </div>
+      </DashboardLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6">
+    <DashboardLayout>
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold">Área Pessoal</h1>
-            <p className="text-muted-foreground mt-1">
-              Gerir os seus dados e preferências de conta
-            </p>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => navigate(-1)}
+              className="shrink-0"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold">Área Pessoal</h1>
+              <p className="text-muted-foreground mt-1">
+                Gerir os seus dados e preferências de conta
+              </p>
+            </div>
           </div>
           <Button variant="outline" onClick={logout} className="gap-2">
             <LogOut className="h-4 w-4" />
-            Terminar Sessão
+            <span className="hidden sm:inline">Terminar Sessão</span>
           </Button>
         </div>
 
@@ -675,7 +690,7 @@ const ProfilePage = () => {
           </AlertDialogContent>
         </AlertDialog>
       </div>
-    </div>
+    </DashboardLayout>
   );
 };
 

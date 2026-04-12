@@ -232,7 +232,7 @@ const StaffDashboard = () => {
         }
       });
       
-      toast.success(`Lead "${newLead.client_name}" criada com sucesso!`);
+      toast.success(`Cliente "${newLead.client_name}" criado com sucesso!`);
       setShowLeadDialog(false);
       setNewLead({
         client_name: "",
@@ -243,7 +243,7 @@ const StaffDashboard = () => {
       fetchData(); // Atualizar dados
     } catch (error) {
       console.error("Erro ao criar lead:", error);
-      toast.error(error.response?.data?.detail || "Erro ao criar lead");
+      toast.error(error.response?.data?.detail || "Erro ao criar cliente");
     } finally {
       setCreatingLead(false);
     }
@@ -283,14 +283,14 @@ const StaffDashboard = () => {
               <span className="text-sm">{canSeeAllStats ? `${stats.total_processes || 0} processos no sistema` : "Os seus processos atribuídos"}</span>
             </div>
           </div>
-          {/* Botão Nova Lead */}
+          {/* Botão Novo Cliente */}
           <Button 
             onClick={() => setShowLeadDialog(true)}
             className="bg-teal-600 hover:bg-teal-700 shrink-0"
             size="sm"
           >
             <Plus className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Nova Lead</span>
+            <span className="hidden sm:inline">Novo Cliente</span>
           </Button>
         </div>
 
@@ -844,16 +844,16 @@ const StaffDashboard = () => {
 
         </Tabs>
 
-        {/* Dialog para criar nova lead */}
+        {/* Dialog para criar novo cliente */}
         <Dialog open={showLeadDialog} onOpenChange={setShowLeadDialog}>
           <DialogContent className="sm:max-w-[500px]" aria-describedby="create-lead-description">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5" />
-                Nova Lead
+                Novo Cliente
               </DialogTitle>
               <DialogDescription id="create-lead-description">
-                Preencha os dados para criar uma nova lead. A lead aparecerá nos Registos de Clientes.
+                Preencha os dados para criar um novo cliente. O cliente aparecerá nos Registos de Clientes.
               </DialogDescription>
             </DialogHeader>
             
@@ -925,7 +925,7 @@ const StaffDashboard = () => {
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     A criar...
                   </>
-                ) : "Criar Lead"}
+                ) : "Criar Cliente"}
               </Button>
             </DialogFooter>
           </DialogContent>

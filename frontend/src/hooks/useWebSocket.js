@@ -57,6 +57,11 @@ const MAX_RECONNECT_INTERVAL = 30000;
 const HEARTBEAT_INTERVAL = 30000;
 const POLLING_INTERVAL = 30000;
 const MAX_WS_FAILS = 3;
+const API_URL = process.env.REACT_APP_BACKEND_URL + '/api';
+
+// WebSocket close codes
+const WS_CLOSE_TOKEN_EXPIRED = 4001;
+const WS_CLOSE_TOKEN_INVALID = 4002;
 
 // ====================================================================
 // WEBSOCKET MANAGER (Singleton — module level)
@@ -90,6 +95,9 @@ class WebSocketManager {
     // Reference counting
     this._subscriberCount = 0;
     this._isConnecting = false;
+
+    // Token refresh lock (prevents concurrent refresh attempts)
+    this._isRefreshing = false;
   }
 
   /**
@@ -187,6 +195,79 @@ class WebSocketManager {
   }
 
   /**
+   * Attempt to refresh the JWT token and reconnect.
+   * Returns true if refresh succeeded, false otherwise.
+   */
+  async _refreshAndReconnect() {
+    if (this._isRefreshing) return false;
+    this._isRefreshing = true;
+
+    try {
+      const currentRefreshToken = localStorage.getItem('refreshToken');
+      if (!currentRefreshToken) {
+        console.warn('WebSocket: Sem refresh token disponível');
+        return false;
+      }
+
+      console.log('WebSocket: Token expirado, a tentar refresh...');
+      const response = await fetch(`${API_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: currentRefreshToken })
+      });
+
+      if (!response.ok) {
+        console.warn('WebSocket: Refresh falhou, sessão pode ter expirado');
+        return false;
+      }
+
+      const data = await response.json();
+
+      // Update stored tokens
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('refreshToken', data.refresh_token);
+      this.token = data.access_token;
+
+      console.log('WebSocket: Token renovado com sucesso, a reconectar...');
+
+      // Reset reconnect state and reconnect with new token
+      this._reconnectAttempts = 0;
+      this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
+      this.connect(this.token);
+
+      return true;
+    } catch (error) {
+      console.error('WebSocket: Erro ao fazer refresh do token:', error);
+      return false;
+    } finally {
+      this._isRefreshing = false;
+    }
+  }
+
+  /**
+   * Update the stored token (called when AuthContext refreshes)
+   */
+  updateToken(newToken) {
+    if (!newToken || newToken === this.token) return;
+
+    const oldToken = this.token;
+    this.token = newToken;
+
+    console.log('WebSocket: Token atualizado');
+
+    // If currently connected, reconnect with new token
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      console.log('WebSocket: Reconectando com novo token...');
+      this.ws.onclose = null; // Prevent auto-reconnect with old token
+      this.ws.close(1000, 'Token atualizado');
+      this.ws = null;
+      this.isConnected = false;
+      this._stopHeartbeat();
+      this.connect(newToken);
+    }
+  }
+
+  /**
    * Processar mensagem recebida
    */
   _handleMessage(event) {
@@ -277,8 +358,22 @@ class WebSocketManager {
         this._stopHeartbeat();
         this._notifyStateListeners();
 
+        // Handle token expiration (4001) - try to refresh and reconnect
+        if (event.code === WS_CLOSE_TOKEN_EXPIRED && this._subscriberCount > 0) {
+          console.log('WebSocket: Token expirado (4001), a tentar refresh...');
+          this._refreshAndReconnect();
+          return;
+        }
+
+        // Handle invalid token (4002) - no reconnect, session is dead
+        if (event.code === WS_CLOSE_TOKEN_INVALID) {
+          console.warn('WebSocket: Token inválido (4002), sem reconexão');
+          this._startPolling(); // Fall back to polling
+          return;
+        }
+
         // Auto-reconnect unless intentional close
-        if (event.code !== 1000 && event.code !== 4001 && this._subscriberCount > 0) {
+        if (event.code !== 1000 && this._subscriberCount > 0) {
           const delay = this._reconnectInterval;
           this._reconnectAttempts++;
           this._reconnectInterval = Math.min(this._reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
@@ -416,6 +511,13 @@ export function useWebSocket(options = {}) {
   // Keep token ref up-to-date
   useEffect(() => {
     tokenRef.current = token;
+  }, [token]);
+
+  // When token changes (from AuthContext refresh), update the WebSocket manager
+  useEffect(() => {
+    if (token && token !== wsManager.token) {
+      wsManager.updateToken(token);
+    }
   }, [token]);
 
   // Subscribe to singleton state changes
