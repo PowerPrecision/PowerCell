@@ -818,7 +818,7 @@ const LeadsKanban = () => {
               data-testid="add-lead-btn"
             >
               <Plus className="h-4 w-4 mr-2" />
-              Novo Lead
+              Novo Pedido de Visita
             </Button>
           </div>
         </div>
@@ -1000,7 +1000,7 @@ const LeadsKanban = () => {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingLead ? "Editar Lead" : "Novo Lead de Imóvel"}
+              {editingLead ? "Editar Lead" : "Novo Pedido de Visita"}
             </DialogTitle>
             <DialogDescription>
               Cole o URL do anúncio para extrair dados automaticamente ou
@@ -1230,7 +1230,7 @@ const LeadsKanban = () => {
               {saving ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : null}
-              {editingLead ? "Guardar" : "Criar Lead"}
+              {editingLead ? "Guardar" : "Criar Pedido"}
             </Button>
           </DialogFooter>
         </DialogContent>
