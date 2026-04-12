@@ -49,6 +49,7 @@ from services.alerts import (
 )
 from services.realtime_notifications import notify_process_status_change
 from services.trello import trello_service, status_to_trello_list, build_card_description
+from services.encryption import decrypt_client_data
 
 # Importar serviços refatorados
 from services.process_service import (
