@@ -313,6 +313,7 @@ export const getProcesses = (params = {}) => api.get("/processes", { params });
 export const getProcessesPaginated = (params = {}) => api.get("/processes/paginated", { params });
 export const getProcess = (id) => api.get(`/processes/${id}`);
 export const createProcess = (data) => api.post("/processes", data);
+export const searchClients = (q, limit = 10) => api.get("/clients/search", { params: { q, limit } });
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
 export const updateProcess = (id, data) => api.put(`/processes/${id}`, data);
 export const assignProcess = (id, consultorId, mediadorId, indexacaoId) => 

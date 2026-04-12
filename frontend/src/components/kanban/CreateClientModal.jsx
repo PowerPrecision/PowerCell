@@ -1,12 +1,12 @@
 /**
  * CreateClientModal Component
  * 
- * Modal para criação de novo cliente/processo.
+ * Modal para criação de novo processo com pesquisa inteligente de clientes.
  * 
  * RESPONSABILIDADE ÚNICA:
- * - Gerir o estado do formulário de criação
- * - Validar campos obrigatórios
- * - Submeter criação de cliente
+ * - Pesquisa de clientes existentes via autocomplete
+ * - Criação de novo cliente inline se não encontrado
+ * - Submeter criação de processo
  * 
  * PERFORMANCE:
  * - Estado do formulário ISOLADO dentro deste componente
@@ -22,7 +22,6 @@ import {
   DialogFooter,
 } from '../ui/dialog';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { 
   Select, 
@@ -34,11 +33,9 @@ import {
 import { Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClientProcess } from '../../services/api';
+import SmartClientSearch from '../SmartClientSearch';
 
 const INITIAL_FORM_STATE = {
-  client_name: '',
-  client_email: '',
-  client_phone: '',
   process_type: 'credito_habitacao',
 };
 
@@ -47,50 +44,52 @@ const CreateClientModal = memo(({
   onOpenChange,
   onSuccess,
 }) => {
-  // Estado LOCAL do formulário - isolado do componente pai
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [isCreating, setIsCreating] = useState(false);
-
-  // Handlers memoizados
-  const handleFieldChange = useCallback((field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  }, []);
+  const [selectedClient, setSelectedClient] = useState(null);
 
   const handleClose = useCallback(() => {
     onOpenChange?.(false);
-    // Reset form on close
     setFormData(INITIAL_FORM_STATE);
+    setSelectedClient(null);
   }, [onOpenChange]);
 
   const handleCreate = useCallback(async () => {
-    if (!formData.client_name.trim()) {
-      toast.error('Por favor, introduza o nome do cliente');
+    if (!selectedClient) {
+      toast.error('Selecione ou crie um cliente');
       return;
     }
 
     setIsCreating(true);
     try {
-      await createClientProcess({
-        client_name: formData.client_name,
-        client_email: formData.client_email,
+      const payload = {
         process_type: formData.process_type,
         personal_data: {
-          nome_completo: formData.client_name,
-          email: formData.client_email,
-          telefone: formData.client_phone,
+          nome_completo: selectedClient.name,
+          email: selectedClient.email,
+          telefone: selectedClient.phone,
+          ...(selectedClient.nif ? { nif: selectedClient.nif } : {}),
         },
-      });
+      };
 
-      toast.success(`Cliente "${formData.client_name}" criado com sucesso!`);
+      // Se cliente existente, passar o ID para o backend
+      if (selectedClient.id) {
+        payload.client_id = selectedClient.id;
+        payload.client_name = selectedClient.name;
+        payload.client_email = selectedClient.email;
+      }
+
+      await createClientProcess(payload);
+      toast.success(`Processo criado para "${selectedClient.name}"!`);
       handleClose();
       onSuccess?.();
     } catch (error) {
-      console.error('Erro ao criar cliente:', error);
-      toast.error(error.response?.data?.detail || 'Erro ao criar cliente');
+      console.error('Erro ao criar processo:', error);
+      toast.error(error.response?.data?.detail || 'Erro ao criar processo');
     } finally {
       setIsCreating(false);
     }
-  }, [formData, handleClose, onSuccess]);
+  }, [selectedClient, formData, handleClose, onSuccess]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -98,51 +97,25 @@ const CreateClientModal = memo(({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5" />
-            Criar Novo Cliente
+            Novo Processo
           </DialogTitle>
           <DialogDescription id="create-client-description">
-            Preencha os dados para criar um novo cliente no sistema.
+            Pesquise um cliente existente ou crie um novo. O processo será associado ao cliente selecionado.
           </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="client_name">Nome do Cliente *</Label>
-            <Input
-              id="client_name"
-              placeholder="Nome completo do cliente"
-              value={formData.client_name}
-              onChange={(e) => handleFieldChange('client_name', e.target.value)}
-            />
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="client_email">Email</Label>
-              <Input
-                id="client_email"
-                type="email"
-                placeholder="email@exemplo.com"
-                value={formData.client_email}
-                onChange={(e) => handleFieldChange('client_email', e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="client_phone">Telefone</Label>
-              <Input
-                id="client_phone"
-                placeholder="+351 000 000 000"
-                value={formData.client_phone}
-                onChange={(e) => handleFieldChange('client_phone', e.target.value)}
-              />
-            </div>
-          </div>
+          <SmartClientSearch
+            selectedClient={selectedClient}
+            onClientSelect={setSelectedClient}
+            onClearClient={() => setSelectedClient(null)}
+          />
           
           <div className="space-y-2">
             <Label htmlFor="process_type">Tipo de Processo</Label>
             <Select 
               value={formData.process_type} 
-              onValueChange={(v) => handleFieldChange('process_type', v)}
+              onValueChange={(v) => setFormData(prev => ({ ...prev, process_type: v }))}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -165,7 +138,7 @@ const CreateClientModal = memo(({
           </Button>
           <Button 
             onClick={handleCreate} 
-            disabled={isCreating || !formData.client_name.trim()}
+            disabled={isCreating || !selectedClient}
             className="bg-teal-600 hover:bg-teal-700"
           >
             {isCreating ? (
@@ -176,7 +149,7 @@ const CreateClientModal = memo(({
             ) : (
               <>
                 <Plus className="h-4 w-4 mr-2" />
-                Criar Cliente
+                Criar Processo
               </>
             )}
           </Button>

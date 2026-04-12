@@ -473,9 +473,26 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     existing_client = None
     client_id = None
 
-    # Procurar cliente existente por NIF ou email
-    # Usar blind indexes (nif_hash, email_hash) para dados encriptados
-    if client_nif or client_email:
+    # Se recebeu client_id, usar diretamente
+    if data.client_id:
+        existing_client = await db.clients.find_one({"id": data.client_id})
+        if existing_client:
+            client_id = existing_client["id"]
+            # Desencriptar dados do cliente existente para usar no processo
+            decrypted = decrypt_client_data(existing_client)
+            client_name = decrypted.get("nome", client_name)
+            client_email = decrypted.get("contacto", {}).get("email", client_email) or client_email
+            client_phone = decrypted.get("contacto", {}).get("telefone", client_phone) or client_phone
+            nif_val = decrypted.get("dados_pessoais", {}).get("nif", "")
+            if nif_val:
+                client_nif = nif_val
+                personal["nif"] = nif_val
+            logger.info(f"Cliente existente usado via client_id: {client_id}")
+        else:
+            logger.warning(f"client_id {data.client_id} não encontrado, vai criar novo")
+
+    # Se não encontrou por client_id, procurar por NIF ou email (deduplicação)
+    if not client_id and (client_nif or client_email):
         query = []
         if client_nif:
             nif_hash = generate_nif_hash(client_nif)
