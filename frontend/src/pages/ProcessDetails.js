@@ -105,8 +105,6 @@ import {
   Lock,
   Eye,
   EyeOff,
-  FlaskConical,
-  Play,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isAfter } from "date-fns";
@@ -200,93 +198,6 @@ const validateNIF = (nif) => {
   return { valid: true, error: null };
 };
 
-// Dados de simulação para testar o formulário
-const SIMULATE_DATA = {
-  personalData: {
-    nome_completo: "João Pedro da Silva Santos",
-    nif: "291654738",
-    documento_id: "00123456",
-    data_nascimento: "1992-03-15",
-    data_validade_cc: "2030-06-15",
-    sexo: "M",
-    naturalidade: "Lisboa",
-    nacionalidade: "Portuguesa",
-    estado_civil: "solteiro",
-    altura: "1.78",
-    nome_pai: "António Manuel da Silva Santos",
-    nome_mae: "Maria José Ferreira dos Santos",
-    morada_fiscal: "Rua Augusta, 123, 4º Esq, 1100-053 Lisboa",
-  },
-  titular2Data: {
-    name: "Ana Maria Rodrigues Santos",
-    nif: "287654321",
-    email: "ana.santos.teste@email.pt",
-    phone: "+351923456789",
-    birth_date: "1994-07-22",
-    estado_civil: "Casado",
-    naturalidade: "Porto",
-    nacionalidade: "Portuguesa",
-    documento_id: "00987654",
-    morada_fiscal: "Rua Augusta, 123, 4º Esq, 1100-053 Lisboa",
-    portal_financas_utilizador: "287654321",
-    portal_financas_senha: "SenhaTeste_2",
-    seg_social_utilizador: "287654321",
-    seg_social_senha: "SenhaTeste_2",
-  },
-  financialData: {
-    monthly_income: 1850,
-    capital_proprio: 70000,
-    valor_financiado: "280000",
-    renda_habitacao_atual: 800,
-    efetivo: "sim",
-    precisa_vender_casa: "nao",
-    fiador: "nao",
-    acesso_portal_financas: "ambos",
-    chave_movel_digital: "sim",
-    portal_financas_utilizador: "291654738",
-    portal_financas_senha: "SenhaTeste_1",
-    seg_social_utilizador: "291654738",
-    seg_social_senha: "SenhaTeste_1",
-    employment_type: "efetivo",
-    trabalha_estrangeiro: "nao",
-    employment_duration: "3",
-    employer_name: "Tech Solutions Lda.",
-    bancos_creditos: ["CGD"],
-    bancos_simulacoes: ["Millennium bcp", "Novo Banco"],
-    tempo_restante_credito: "5_10_anos",
-    rendimento_bruto: 2300,
-    salario_liquido: 1850,
-    salario_bruto: 2300,
-    empresa: "Tech Solutions Lda.",
-    tipo_contrato: "efetivo",
-    categoria_profissional: "Técnico de Informática",
-    subsidiario_alimentacao: 200,
-  },
-  realEstateData: {
-    tipo_imovel: "apartamento",
-    num_quartos: "T3",
-    tipologia: "T3",
-    localizacao: "Lisboa, Parque das Nações",
-    area_pretendida: 120,
-    valor_maximo_imovel: 350000,
-    finalidade: "habitacao_propria",
-    caracteristicas: ["elevador", "garagem", "transportes"],
-    outras_informacoes: "Dados de simulação — fictícios para teste",
-    owner_name: "Carlos Ferreira",
-    owner_email: "carlos.ferreira@email.pt",
-    owner_phone: "+351911111111",
-  },
-  creditData: {
-    requested_amount: 280000,
-    loan_term_years: 30,
-    interest_rate: 3.25,
-    monthly_payment: 1215.50,
-    bank_name: "Caixa Geral de Depósitos",
-    bank_approval_date: "2025-02-10",
-    bank_approval_notes: "Aprovado com garantia hipotecária. Taxa fixa nos primeiros 5 anos.",
-  },
-};
-
 const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -360,7 +271,6 @@ const ProcessDetails = () => {
 
   // Estado para o modal de envio de documentação
   const [showSendDocsModal, setShowSendDocsModal] = useState(false);
-  const [simulating, setSimulating] = useState(false);
 
   // Buscar utilizadores
   const fetchUsers = async () => {
@@ -1121,129 +1031,6 @@ const ProcessDetails = () => {
       toast.error(message);
     }
   };
-
-  // Função para simular preenchimento completo do formulário (apenas para testes)
-  const handleSimulateFill = useCallback(() => {
-    setSimulating(true);
-    
-    // Preencher todos os estados de formulário com dados de teste
-    setPersonalData({ ...personalData, ...SIMULATE_DATA.personalData });
-    setTitular2Data({ ...titular2Data, ...SIMULATE_DATA.titular2Data });
-    setFinancialData({ ...financialData, ...SIMULATE_DATA.financialData });
-    setRealEstateData({ ...realEstateData, ...SIMULATE_DATA.realEstateData });
-    setCreditData({ ...creditData, ...SIMULATE_DATA.creditData });
-    
-    // Atualizar também o nome no processo para ficar consistente
-    setProcess(prev => prev ? { ...prev, client_email: "joao.santos.teste@email.pt", client_phone: "+351912345678" } : prev);
-    
-    // Limpar erro de NIF
-    setNifError(null);
-    
-    setTimeout(() => {
-      setSimulating(false);
-      setActiveTab("personal");
-      toast.success("Formulário preenchido com dados de teste. Navegue pelas tabs para rever.", {
-        duration: 4000,
-      });
-    }, 300);
-  }, [personalData, titular2Data, financialData, realEstateData, creditData]);
-
-  // Função para simular preenchimento E testar submissão
-  const handleSimulateAndTestSubmit = useCallback(async () => {
-    // 1. Primeiro preencher tudo
-    setSimulating(true);
-    setPersonalData({ ...personalData, ...SIMULATE_DATA.personalData });
-    setTitular2Data({ ...titular2Data, ...SIMULATE_DATA.titular2Data });
-    setFinancialData({ ...financialData, ...SIMULATE_DATA.financialData });
-    setRealEstateData({ ...realEstateData, ...SIMULATE_DATA.realEstateData });
-    setCreditData({ ...creditData, ...SIMULATE_DATA.creditData });
-    setProcess(prev => prev ? { ...prev, client_email: "joao.santos.teste@email.pt", client_phone: "+351912345678" } : prev);
-    setNifError(null);
-    
-    // 2. Esperar um pouco para os estados atualizarem
-    await new Promise(resolve => setTimeout(resolve, 400));
-    setSimulating(false);
-    
-    // 3. Agora tentar submeter
-    toast.info("A testar submissão com dados simulados...", { duration: 2000 });
-    
-    try {
-      const updateData = {};
-      const cleanedPersonal = cleanPersonalDataForSubmit({ ...personalData, ...SIMULATE_DATA.personalData });
-      const cleanedFinancial = cleanFinancialDataForSubmit({ ...financialData, ...SIMULATE_DATA.financialData });
-      
-      updateData.client_email = "joao.santos.teste@email.pt";
-      updateData.client_phone = "+351912345678";
-      updateData.personal_data = cleanedPersonal;
-      updateData.financial_data = cleanedFinancial;
-      updateData.titular2_data = { ...titular2Data, ...SIMULATE_DATA.titular2Data };
-      
-      if (["consultor", "mediador", "admin", "ceo", "diretor", "administrativo"].includes(userRole)) {
-        updateData.real_estate_data = { ...realEstateData, ...SIMULATE_DATA.realEstateData };
-      }
-      
-      if (["mediador", "admin", "ceo", "diretor", "administrativo"].includes(userRole)) {
-        updateData.credit_data = { ...creditData, ...SIMULATE_DATA.creditData };
-      }
-      
-      // Enviar para o backend sem guardar de verdade — usarDry run para testar validação
-      const response = await fetch(`${API_URL}/api/processes/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(updateData),
-      });
-      
-      if (response.ok) {
-        toast.success("✅ Submissão teste SUCESSO! O formulário passa na validação do backend.", { duration: 5000 });
-      } else {
-        const data = await response.json().catch(() => ({}));
-        const detail = data.detail;
-        
-        if (Array.isArray(detail)) {
-          // Pydantic validation errors
-          const errorMessages = detail.map(err => {
-            const fieldPath = err.loc || [];
-            const fieldName = fieldPath[fieldPath.length - 1] || "campo";
-            const fieldLabels = {
-              "client_email": "Email", "client_phone": "Telefone", "nif": "NIF",
-              "nome_completo": "Nome", "data_nascimento": "Data Nascimento",
-              "personal_data": "Dados Pessoais", "financial_data": "Dados Financeiros",
-              "real_estate_data": "Dados Imóvel", "credit_data": "Dados Crédito",
-              "titular2_data": "2º Titular",
-            };
-            const friendlyName = fieldLabels[fieldName] || fieldName;
-            let msg = err.msg || "Valor inválido";
-            if (msg.includes("Field required")) msg = "campo obrigatório";
-            if (msg.includes("Input should be a valid string")) msg = "deve ser texto";
-            if (msg.includes("Input should be a valid number")) msg = "deve ser número";
-            if (msg.includes("Input should be a valid email")) msg = "email inválido";
-            return `${friendlyName}: ${msg}`;
-          });
-          
-          toast.error(
-            <div>
-              <strong>❌ Submissão teste FALHOU ({response.status}):</strong>
-              <ul style={{margin: '8px 0 0 0', paddingLeft: '16px'}}>
-                {errorMessages.map((e, i) => <li key={i}>{e}</li>)}
-              </ul>
-            </div>,
-            { duration: 8000 }
-          );
-        } else {
-          const errorMsg = typeof detail === 'string' ? detail : (detail?.message || detail?.msg || `Erro ${response.status}`);
-          toast.error(`❌ Submissão teste FALHOU: ${errorMsg}`, { duration: 8000 });
-        }
-      }
-    } catch (error) {
-      toast.error(`❌ Erro de rede ao testar: ${error.message}`, { duration: 6000 });
-    }
-    
-    // 4. Refetch para reverter dados ao estado original do servidor
-    fetchData();
-  }, [personalData, titular2Data, financialData, realEstateData, creditData, id, token, userRole]);
 
   // Helper: indicador visual de confiança da IA para campos extraídos
   const getConfidenceIndicator = (fieldName) => {
@@ -3001,41 +2788,6 @@ const ProcessDetails = () => {
 
                 {!isViewMode && (
                 <div className="flex flex-wrap justify-end gap-2">
-                  {/* Botões de simulação — exclusivos admin/ceo */}
-                  {(userRole === "admin" || userRole === "ceo") && (
-                    <>
-                  <Button
-                    variant="outline"
-                    onClick={handleSimulateFill}
-                    disabled={saving || simulating || isProcessLocked}
-                    data-testid="simulate-fill-btn"
-                    className="gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50"
-                    title="Preencher todos os campos com dados de teste"
-                  >
-                    {simulating ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <FlaskConical className="h-4 w-4" />
-                    )}
-                    <span className="hidden sm:inline">Simular Preenchimento</span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleSimulateAndTestSubmit}
-                    disabled={saving || simulating || isProcessLocked}
-                    data-testid="test-submit-btn"
-                    className="gap-1.5 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                    title="Preencher com dados de teste e submeter ao backend para verificar validação"
-                  >
-                    {simulating ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Play className="h-4 w-4" />
-                    )}
-                    <span className="hidden sm:inline">Testar Submissão</span>
-                  </Button>
-                    </>
-                  )}
                   {/* Botão Guardar normal */}
                   <Button onClick={handleSave} disabled={saving} data-testid="save-process-btn">
                     {saving ? (
