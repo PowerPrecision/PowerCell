@@ -16,6 +16,7 @@ import { Loader2, LayoutGrid, Calendar, Users, FileText, FileX, CheckCircle, XCi
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
 import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft } from "../services/api";
+import SmartClientSearch from "../components/SmartClientSearch";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -110,6 +111,7 @@ const StaffDashboard = () => {
     client_phone: "",
     process_type: "credito_habitacao"
   });
+  const [selectedClient, setSelectedClient] = useState(null);
 
   const isAdmin = user?.role === "admin";
   const isCeo = user?.role === "ceo";
@@ -212,38 +214,52 @@ const StaffDashboard = () => {
     navigate(`/processos-filtrados?filter=${filter}`);
   };
 
-  // Criar nova lead
+  // Criar novo processo/cliente
   const handleCreateLead = async () => {
-    if (!newLead.client_name.trim()) {
-      toast.error("Por favor, introduza o nome do cliente");
+    if (!selectedClient && !newLead.client_name.trim()) {
+      toast.error("Selecione ou crie um cliente");
       return;
     }
     
     setCreatingLead(true);
     try {
-      await createClientProcess({
-        client_name: newLead.client_name,
-        client_email: newLead.client_email,
+      const clientName = selectedClient?.name || newLead.client_name;
+      const clientEmail = selectedClient?.email || newLead.client_email;
+      const clientPhone = selectedClient?.phone || newLead.client_phone;
+      const clientNif = selectedClient?.nif || "";
+
+      const payload = {
         process_type: newLead.process_type,
         personal_data: {
-          nome_completo: newLead.client_name,
-          email: newLead.client_email,
-          telefone: newLead.client_phone
+          nome_completo: clientName,
+          email: clientEmail,
+          telefone: clientPhone,
+          ...(clientNif ? { nif: clientNif } : {}),
         }
-      });
+      };
+
+      // Se veio da pesquisa (cliente existente), passar client_id
+      if (selectedClient?.id) {
+        payload.client_id = selectedClient.id;
+        payload.client_name = clientName;
+        payload.client_email = clientEmail;
+      }
+
+      await createClientProcess(payload);
       
-      toast.success(`Cliente "${newLead.client_name}" criado com sucesso!`);
+      toast.success(`Processo criado para "${clientName}"!`);
       setShowLeadDialog(false);
+      setSelectedClient(null);
       setNewLead({
         client_name: "",
         client_email: "",
         client_phone: "",
         process_type: "credito_habitacao"
       });
-      fetchData(); // Atualizar dados
+      fetchData();
     } catch (error) {
       console.error("Erro ao criar lead:", error);
-      toast.error(error.response?.data?.detail || "Erro ao criar cliente");
+      toast.error(error.response?.data?.detail || "Erro ao criar processo");
     } finally {
       setCreatingLead(false);
     }
@@ -844,51 +860,39 @@ const StaffDashboard = () => {
 
         </Tabs>
 
-        {/* Dialog para criar novo cliente */}
-        <Dialog open={showLeadDialog} onOpenChange={setShowLeadDialog}>
+        {/* Dialog para criar novo processo/cliente */}
+        <Dialog open={showLeadDialog} onOpenChange={(open) => {
+          if (!open) { setSelectedClient(null); setNewLead({ client_name: "", client_email: "", client_phone: "", process_type: "credito_habitacao" }); }
+          setShowLeadDialog(open);
+        }}>
           <DialogContent className="sm:max-w-[500px]" aria-describedby="create-lead-description">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5" />
-                Novo Cliente
+                Novo Processo
               </DialogTitle>
               <DialogDescription id="create-lead-description">
-                Preencha os dados para criar um novo cliente. O cliente aparecerá nos Registos de Clientes.
+                Pesquise um cliente existente ou crie um novo. O processo será associado ao cliente selecionado.
               </DialogDescription>
             </DialogHeader>
             
             <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="client_name">Nome do Cliente *</Label>
-                <Input
-                  id="client_name"
-                  placeholder="Nome completo do cliente"
-                  value={newLead.client_name}
-                  onChange={(e) => setNewLead({ ...newLead, client_name: e.target.value })}
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="client_email">Email</Label>
-                  <Input
-                    id="client_email"
-                    type="email"
-                    placeholder="email@exemplo.com"
-                    value={newLead.client_email}
-                    onChange={(e) => setNewLead({ ...newLead, client_email: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="client_phone">Telefone</Label>
-                  <Input
-                    id="client_phone"
-                    placeholder="+351 000 000 000"
-                    value={newLead.client_phone}
-                    onChange={(e) => setNewLead({ ...newLead, client_phone: e.target.value })}
-                  />
-                </div>
-              </div>
+              <SmartClientSearch
+                selectedClient={selectedClient}
+                onClientSelect={(client) => {
+                  setSelectedClient(client);
+                  setNewLead(prev => ({
+                    ...prev,
+                    client_name: client.name || "",
+                    client_email: client.email || "",
+                    client_phone: client.phone || "",
+                  }));
+                }}
+                onClearClient={() => {
+                  setSelectedClient(null);
+                  setNewLead(prev => ({ ...prev, client_name: "", client_email: "", client_phone: "" }));
+                }}
+              />
               
               <div className="space-y-2">
                 <Label htmlFor="process_type">Tipo de Processo</Label>
@@ -917,7 +921,7 @@ const StaffDashboard = () => {
               </Button>
               <Button 
                 onClick={handleCreateLead} 
-                disabled={creatingLead || !newLead.client_name.trim()}
+                disabled={creatingLead || !selectedClient}
                 className="bg-teal-600 hover:bg-teal-700"
               >
                 {creatingLead ? (
@@ -925,7 +929,7 @@ const StaffDashboard = () => {
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     A criar...
                   </>
-                ) : "Criar Cliente"}
+                ) : "Criar Processo"}
               </Button>
             </DialogFooter>
           </DialogContent>

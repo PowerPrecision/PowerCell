@@ -555,6 +555,47 @@ async def assign_client_to_user(
     }
 
 
+@router.get("/search")
+async def search_clients(
+    q: str = Query(..., min_length=2, description="Pesquisa por nome, email ou NIF"),
+    limit: int = Query(10, le=20, description="Número máximo de resultados"),
+    user: dict = Depends(get_current_user)
+):
+    """Pesquisa leve de clientes para autocomplete."""
+    q = sanitize_string(q, max_length=200)
+
+    name_regex = create_accent_insensitive_regex(q)
+    simple_regex = {"$regex": re.escape(q), "$options": "i"}
+
+    query = {
+        "$or": [
+            {"nome": name_regex},
+            {"contacto.email": simple_regex},
+            {"dados_pessoais.nif": simple_regex},
+        ]
+    }
+
+    clients = await db.clients.find(
+        query,
+        {"_id": 0, "id": 1, "nome": 1, "contacto.email": 1, "contacto.telefone": 1, "dados_pessoais.nif": 1}
+    ).sort("nome", 1).limit(limit).to_list(length=limit)
+
+    results = [
+        {
+            "id": c.get("id"),
+            "nome": c.get("nome"),
+            "nif": c.get("dados_pessoais", {}).get("nif") if isinstance(c.get("dados_pessoais"), dict) else None,
+            "email": c.get("contacto", {}).get("email") if isinstance(c.get("contacto"), dict) else None,
+            "telefone": c.get("contacto", {}).get("telefone") if isinstance(c.get("contacto"), dict) else None,
+        }
+        for c in clients
+    ]
+
+    results = decrypt_clients_list(results)
+
+    return {"results": results}
+
+
 @router.get("")
 async def list_clients(
     search: Optional[str] = Query(None, description="Pesquisar por nome, email ou NIF"),
@@ -1242,6 +1283,10 @@ async def create_process_for_client(
     if client_name and not personal_data.get("nome"):
         personal_data["nome"] = client_name
     
+    # Obter estado inicial do workflow
+    first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
+    initial_status = first_status["name"] if first_status else "clientes_espera"
+    
     # Criar novo processo com dados do cliente
     new_process = {
         "id": process_id,
@@ -1251,7 +1296,7 @@ async def create_process_for_client(
         "client_email": client_email,
         "client_phone": client_phone,
         "process_type": process_type,
-        "status": "novo",
+        "status": initial_status,
         "description": description,
         # Dados pessoais e financeiros com campos consistentes
         "personal_data": personal_data,
@@ -1268,6 +1313,14 @@ async def create_process_for_client(
         "source": "client_portal"
     }
     
+    # Auto-assign based on creator role
+    if user["role"] in ["mediador", "intermediario"]:
+        new_process["assigned_mediador_id"] = user["id"]
+        new_process["mediador_name"] = user["name"]
+    elif user["role"] in ["consultor", "diretor"]:
+        new_process["assigned_consultor_id"] = user["id"]
+        new_process["consultor_name"] = user["name"]
+
     await db.processes.insert_one(new_process)
     
     # Se temos um cliente real, actualizar a lista de processos

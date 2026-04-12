@@ -348,6 +348,7 @@ class CreditData(BaseModel):
 
 class ProcessCreate(BaseModel):
     process_type: str
+    client_id: Optional[str] = None  # ID de cliente existente (opcional)
     client_name: Optional[str] = None
     client_email: Optional[str] = None
     personal_data: Optional[PersonalData] = None

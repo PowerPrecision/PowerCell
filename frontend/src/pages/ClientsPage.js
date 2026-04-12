@@ -60,6 +60,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { TableSkeleton, StatsCardSkeleton } from "../components/ui/skeletons";
+import SmartClientSearch, { PROCESS_TYPE_LABELS } from "../components/SmartClientSearch";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -606,6 +607,12 @@ export default function ClientsPage() {
                             <Eye className="h-4 w-4 mr-2" />
                             Ver Ficha
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => openCreateProcessDialog(client)}
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Iniciar Novo Processo
+                          </DropdownMenuItem>
                           {canDeleteClients && (
                             <DropdownMenuItem onClick={() => handleDeleteClient(client.id)} className="text-red-600">
                               <Trash2 className="h-4 w-4 mr-2" />
@@ -736,6 +743,12 @@ export default function ClientsPage() {
                               <Eye className="h-4 w-4 mr-2" />
                               Ver Ficha
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => openCreateProcessDialog(client)}
+                            >
+                              <Plus className="h-4 w-4 mr-2" />
+                              Iniciar Novo Processo
+                            </DropdownMenuItem>
                             {canDeleteClients && (
                               <DropdownMenuItem
                                 onClick={() => handleDeleteClient(client.id)}
@@ -860,42 +873,65 @@ export default function ClientsPage() {
         </Dialog>
         )}
 
-        {/* Create Process Dialog - só visível para quem pode criar processos */}
+        {/* Create Process Dialog */}
         {canCreateProcess && (
-        <Dialog open={showProcessDialog} onOpenChange={setShowProcessDialog}>
+        <Dialog open={showProcessDialog} onOpenChange={(open) => {
+          if (!open) { setSelectedClient(null); setNewProcessType("credito_habitacao"); }
+          setShowProcessDialog(open);
+        }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5" />
-                Novo Processo para {selectedClient?.nome}
+                {selectedClient?.nome ? `Novo Processo para ${selectedClient.nome}` : "Novo Processo"}
               </DialogTitle>
               <DialogDescription className="sr-only">
                 Criar um novo processo para o cliente selecionado.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
-              <p className="text-sm text-muted-foreground">
-                Criar um novo processo de compra/financiamento para este cliente.
-                Os dados pessoais e financeiros serão copiados automaticamente.
-              </p>
+              {selectedClient && (
+                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="text-xs font-medium text-primary">
+                      {selectedClient.nome?.charAt(0)?.toUpperCase() || "?"}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm">{selectedClient.nome}</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {selectedClient.dados_pessoais?.nif && <span>NIF: {selectedClient.dados_pessoais.nif}</span>}
+                      {selectedClient.contacto?.email && <span>· {selectedClient.contacto.email}</span>}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {!selectedClient && (
+                <p className="text-sm text-muted-foreground">
+                  Selecione um cliente na lista (menu "⋯" → "Iniciar Novo Processo") para criar um processo.
+                </p>
+              )}
               <div className="space-y-2">
                 <Label>Tipo de Processo</Label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     { value: "credito_habitacao", label: "Crédito Habitação" },
-                    { value: "compra_direta", label: "Compra Directa" },
-                    { value: "arrendamento", label: "Arrendamento" },
-                    { value: "consultoria", label: "Consultoria" },
+                    { value: "credito_pessoal", label: "Crédito Pessoal" },
+                    { value: "credito_consolidado", label: "Crédito Consolidado" },
+                    { value: "credito_automovel", label: "Crédito Automóvel" },
+                    { value: "transferencia_credito", label: "Transferência" },
+                    { value: "imobiliario", label: "Imobiliário" },
                   ].map((type) => (
                     <Button
                       key={type.value}
                       variant={
                         newProcessType === type.value ? "default" : "outline"
                       }
-                      className="justify-start"
+                      size="sm"
+                      className="justify-start text-xs h-9"
                       onClick={() => setNewProcessType(type.value)}
                     >
-                      <Building2 className="h-4 w-4 mr-2" />
+                      <Building2 className="h-3.5 w-3.5 mr-1.5" />
                       {type.label}
                     </Button>
                   ))}
@@ -911,6 +947,7 @@ export default function ClientsPage() {
               </Button>
               <Button
                 onClick={handleCreateProcess}
+                disabled={!selectedClient}
                 data-testid="submit-new-process"
               >
                 <Plus className="h-4 w-4 mr-2" />
