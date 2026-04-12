@@ -695,13 +695,15 @@ async def list_clients(
                     process_query = indexacao_query
         
         # Buscar todos os processos (clientes únicos)
+        # NOTA: Não aplicar limit/skip ao nível dos processos pois isso limitaria
+        # o número de clientes únicos. A paginação aplica-se ao resultado final.
         processes = await db.processes.find(
             process_query,
             {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
              "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
              "assigned_consultor_id": 1, "assigned_mediador_id": 1,
              "consultor_name": 1, "mediador_name": 1, "is_active": 1}
-        ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
+        ).sort("client_name", 1).to_list(length=None)
         
         # Agrupar por cliente
         clients_map = {}
@@ -756,6 +758,10 @@ async def list_clients(
         if has_active_process is not None:
             clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
         
+        # Aplicar paginação ao resultado final (clientes, não processos)
+        total_count = len(clients)
+        clients = clients[skip:skip + limit]
+        
         # Desencriptar dados sensíveis
         clients = decrypt_clients_list(clients)
         
@@ -764,7 +770,7 @@ async def list_clients(
         
         return {
             "clients": clients,
-            "total": len(clients),
+            "total": total_count,
             "showing_all": True,
             "available_statuses": available_statuses
         }

@@ -106,9 +106,7 @@ const DashboardLayout = ({ children, title }) => {
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   
   // Atalhos de teclado
-  const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts({
-    onNew: () => navigate("/processos/novo"),
-  });
+  const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts({});
   
   // Determinar quais secções devem estar abertas baseado na rota actual
   const getInitialOpenSections = () => {

@@ -156,16 +156,8 @@ class AIImprovementAgent:
             # 2. Documentos em falta ou a expirar
             # (Verificar se há documentos com validade a expirar)
             
-            # 3. Processo sem consultor atribuído
-            if not p.get("assigned_consultant_id") and not p.get("consultor_id"):
-                alerts.append({
-                    "type": "unassigned",
-                    "severity": "medium",
-                    "process_id": process_id,
-                    "client_name": client_name,
-                    "message": "Processo sem consultor atribuído",
-                    "suggestion": "Atribuir um consultor responsável"
-                })
+            # 3. Processo sem consultor atribuído — DESATIVADO
+            # Processos sem consultor não geram alertas no Agente de Melhoria IA
             
             # 4. Valor de financiamento não definido
             if not p.get("valor_financiamento") and not p.get("financing_value"):
@@ -222,17 +214,8 @@ class AIImprovementAgent:
                     "impact": "Melhoria na qualidade do atendimento"
                 })
         
-        # 3. Se há muitos processos não atribuídos
-        unassigned = by_consultant.get("Não atribuído", 0)
-        if unassigned > 5:
-            suggestions.append({
-                "type": "assignment",
-                "priority": "high",
-                "title": f"{unassigned} processos sem consultor",
-                "description": "Processos sem responsável podem ser esquecidos.",
-                "action": "Atribuir consultores aos processos pendentes",
-                "impact": "Evitar perda de clientes"
-            })
+        # 3. Sugestões sobre processos não atribuídos — DESATIVADO
+        # Processos sem consultor não geram sugestões no Agente de Melhoria IA
         
         # 4. Sugestões com IA (se disponível)
         if self.llm_client and alerts:
