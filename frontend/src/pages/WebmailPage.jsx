@@ -7,6 +7,7 @@
  */
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import DashboardLayout from "../layouts/DashboardLayout";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -469,8 +470,9 @@ const WebmailPage = () => {
   // RENDER
   // ============================================================
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="flex flex-col h-[calc(100vh-64px)] -mx-6 -mt-6">
+    <DashboardLayout title="Email">
+      <TooltipProvider delayDuration={300}>
+        <div className="flex flex-col h-[calc(100vh-64px)] -mx-6 -mt-6">
         {/* ===== TOP BAR ===== */}
         <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-background shrink-0">
           {/* Mobile back button */}
@@ -1144,8 +1146,9 @@ const WebmailPage = () => {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
-    </TooltipProvider>
+        </div>
+      </TooltipProvider>
+    </DashboardLayout>
   );
 };
 
