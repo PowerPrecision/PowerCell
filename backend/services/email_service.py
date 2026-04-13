@@ -297,24 +297,6 @@ def _fetch_and_parse_email(mail, num):
 
 
 
-def _extract_email_bytes_from_fetch(fetch_result):
-    """
-    Extrair bytes de um email de forma segura a partir de mail.fetch().
-    """
-    if not fetch_result or len(fetch_result) < 2:
-        return None
-    msg_data = fetch_result[1]
-    if not msg_data:
-        return None
-    if isinstance(msg_data, list) and len(msg_data) > 0:
-        item = msg_data[0]
-        if isinstance(item, tuple) and len(item) >= 2:
-            return item[1]
-        elif isinstance(item, bytes):
-            return item
-    return None
-
-
 def _safe_search_result(mail_result):
     """Extrair message_numbers de mail.search() de forma segura."""
     if not mail_result or len(mail_result) < 2:
@@ -1328,7 +1310,7 @@ def _fetch_all_from_folder_sync(
                 cc_emails = [extract_email_address(e) for e in (msg.get("Cc", "") or "").split(",") if e.strip()]
                 subject = decode_email_header(msg.get("Subject", ""))
                 date_str = msg.get("Date", "")
-                body_text, body_html = get_email_body_with_embedded_images(msg)
+                body_text, body_html, _ = get_email_body_with_embedded_images(msg)
                 
                 direction = "sent" if from_email.lower() == account.email.lower() else "received"
                 
