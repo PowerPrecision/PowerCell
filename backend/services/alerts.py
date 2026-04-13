@@ -412,8 +412,8 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
     
     # Obter nome do cliente (compatível com ambos os formatos)
     client_name = process.get("client_name") or process.get("nome") or "Cliente"
-    client_email = process.get("client_email") or process.get("contacto", {}).get("email") or ""
-    client_phone = process.get("client_phone") or process.get("contacto", {}).get("telefone") or ""
+    client_email = process.get("client_email") or (process.get("contacto") or {}).get("email") or ""
+    client_phone = process.get("client_phone") or (process.get("contacto") or {}).get("telefone") or ""
     
     assignment_note = ""
     if has_property:
@@ -661,10 +661,10 @@ def check_valuation_alert(process: dict) -> Dict[str, Any]:
     Returns:
         dict: Alerta com detalhes ou inactive se não houver problema
     """
-    # Obter dados de crédito e imóvel
-    credit_data = process.get("credit_data", {})
-    property_data = process.get("property_data", {})
-    financial_data = process.get("financial_data", {})
+    # Obter dados de crédito e imóvel (usar or {} para evitar NoneType)
+    credit_data = process.get("credit_data") or {}
+    property_data = process.get("property_data") or {}
+    financial_data = process.get("financial_data") or {}
     
     # Valor da avaliação bancária
     valuation_value = credit_data.get("valuation_value")
