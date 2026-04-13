@@ -3,6 +3,8 @@ import subprocess
 import logging
 from datetime import datetime, timezone
 
+# v2025-01-webmail-sync
+
 # Garantir que libmagic está instalado (necessário para python-magic)
 def ensure_libmagic():
     try:
