@@ -102,8 +102,9 @@ async def get_email_accounts_async() -> List[EmailAccount]:
             # Só criar contas se provider for SMTP
             if provider == "smtp":
                 # === CONTA 1: Power Real Estate ===
-                smtp_user = email_config.get("smtp_user")
-                smtp_password = email_config.get("smtp_password")
+                # Prioridade: campos IMAP dedicados > campos SMTP
+                smtp_user = email_config.get("imap_user") or email_config.get("smtp_user")
+                smtp_password = email_config.get("imap_password") or email_config.get("smtp_password")
                 smtp_server = email_config.get("smtp_server")
                 imap_server = email_config.get("imap_server")
                 
@@ -118,10 +119,12 @@ async def get_email_accounts_async() -> List[EmailAccount]:
                         password=smtp_password
                     ))
                     logger.info(f"Conta Power carregada da DB: {smtp_user}")
+                else:
+                    logger.warning(f"Conta Power incompleta: user={bool(smtp_user)}, pass={bool(smtp_password)}, server={bool(smtp_server or imap_server)}")
                 
                 # === CONTA 2: Precision Crédito ===
-                smtp_user_2 = email_config.get("smtp_user_2")
-                smtp_password_2 = email_config.get("smtp_password_2")
+                smtp_user_2 = email_config.get("imap_user_2") or email_config.get("smtp_user_2")
+                smtp_password_2 = email_config.get("imap_password_2") or email_config.get("smtp_password_2")
                 smtp_server_2 = email_config.get("smtp_server_2")
                 imap_server_2 = email_config.get("imap_server_2")
                 
@@ -136,6 +139,8 @@ async def get_email_accounts_async() -> List[EmailAccount]:
                         password=smtp_password_2
                     ))
                     logger.info(f"Conta Precision carregada da DB: {smtp_user_2}")
+                else:
+                    logger.warning(f"Conta Precision incompleta: user={bool(smtp_user_2)}, pass={bool(smtp_password_2)}, server={bool(smtp_server_2 or imap_server_2)}")
                     
     except Exception as e:
         logger.warning(f"Erro ao carregar configuração de email da DB: {e}")
@@ -1209,7 +1214,7 @@ def _fetch_all_from_folder_sync(
         
         result, data = mail.select(folder)
         if result != 'OK':
-            logger.warning(f"[Webmail Sync] Não foi possível selecionar pasta {folder}: {result}")
+            logger.debug(f"[Webmail Sync] Pasta não encontrada: {folder} ({result})")
             mail.logout()
             return emails_found
         
@@ -1224,11 +1229,28 @@ def _fetch_all_from_folder_sync(
         
         for num in nums:
             try:
-                _, msg_data = mail.fetch(num, "(RFC822)")
-                if not msg_data or not msg_data[0] or not msg_data[0][1]:
+                fetch_result = mail.fetch(num, "(RFC822)")
+                # mail.fetch pode retornar 2 ou mais valores dependendo do servidor
+                # Formato: ('OK', [(b'1 (RFC822 {size}', b'...email...'), b')'])
+                if not fetch_result or len(fetch_result) < 2:
+                    continue
+                msg_data = fetch_result[1]
+                if not msg_data:
                     continue
                     
-                msg = email.message_from_bytes(msg_data[0][1])
+                # Extrair o conteúdo do email (bytes)
+                email_bytes = None
+                if isinstance(msg_data, list) and len(msg_data) > 0:
+                    item = msg_data[0]
+                    if isinstance(item, tuple) and len(item) >= 2:
+                        email_bytes = item[1]
+                    elif isinstance(item, bytes):
+                        email_bytes = item
+                
+                if not email_bytes:
+                    continue
+                
+                msg = email.message_from_bytes(email_bytes)
                 
                 msg_id = msg.get("Message-ID", "")
                 if not msg_id:

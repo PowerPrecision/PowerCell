@@ -218,9 +218,12 @@ const WebmailPage = () => {
     setSyncing(true);
     try {
       const params = new URLSearchParams({
-        account: account || "",
         days: "7",
       });
+      // Não enviar account param vazio — sync todas as contas por defeito
+      if (account) {
+        params.append("account", account);
+      }
       const response = await fetch(
         `${API_URL}/api/emails/webmail/sync?${params.toString()}`,
         {
@@ -228,17 +231,29 @@ const WebmailPage = () => {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
+      const data = await response.json().catch(() => ({}));
+
+      // Erro HTTP (500, etc)
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.detail || "Erro na sincronização");
+        toast.error(data.detail || "Erro na sincronização");
+        return;
       }
-      const data = await response.json();
+
+      // Erro de negócio (success: false mas 200 OK)
+      if (data.success === false) {
+        toast.error(data.error || "Erro na sincronização");
+        return;
+      }
+
       const synced = data.total_synced || 0;
       const dups = data.total_duplicates || 0;
+      const errs = data.total_errors || 0;
       if (synced > 0) {
-        toast.success(`${synced} novo${synced !== 1 ? "s" : ""} email${synced !== 1 ? "s" : ""} sincronizado${synced !== 1 ? "s" : ""}${dups > 0 ? ` (${dups} duplicado${dups !== 1 ? "s" : ""})` : ""}`);
+        toast.success(`${synced} novo${synced !== 1 ? "s" : ""} email${synced !== 1 ? "s" : ""} sincronizado${synced !== 1 ? "s" : ""}${dups > 0 ? ` (${dups} duplicado${dups !== 1 ? "s" : ""})` : ""}${errs > 0 ? ` | ${errs} erro${errs !== 1 ? "s" : ""}` : ""}`);
       } else if (dups > 0) {
         toast.info(`${dups} email${dups !== 1 ? "s" : ""} já sincronizado${dups !== 1 ? "s" : ""}. Tudo em dia!`);
+      } else if (errs > 0) {
+        toast.error(`${errs} erro${errs !== 1 ? "s" : ""} na sincronização. Verifique as configurações de email.`);
       } else {
         toast.info("Nenhum email novo para sincronizar");
       }
@@ -247,7 +262,7 @@ const WebmailPage = () => {
       fetchEmails(activeFolder, currentPage, searchQuery);
     } catch (error) {
       console.error("Erro ao sincronizar emails:", error);
-      toast.error(error.message || "Erro ao sincronizar emails");
+      toast.error("Erro de ligação ao servidor");
     } finally {
       setSyncing(false);
     }
