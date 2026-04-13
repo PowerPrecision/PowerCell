@@ -1,6 +1,127 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: 14
+Agent: Main Agent
+Task: SmartRichEditor — abstrair complexidade HTML de utilizadores não-admin
+
+Work Log:
+- **SmartRichEditor.jsx** (`2c85c79`): Novo componente reutilizável (`src/components/ui/SmartRichEditor.jsx`)
+  - Modo Visual (default): Editor WYSIWYG via react-quill — edição normal
+  - Modo HTML (admin-only): `<textarea>` monospace com código HTML puro
+  - Botão `</> Editar HTML` no canto superior direito — **SÓ visível se `user.role === 'admin'`**
+  - Consultores nunca veem o botão nem sabem que o modo HTML existe
+  - Props: `value`, `onChange`, `readOnly`, `advanced`, `minHeight`, `label`, `placeholder`, `allowHtmlAdmin`
+  - Protege variáveis {{handlebars}} ao transitar entre modos
+- **SendDocumentationModal.js** (`2c85c79`): Substituído sistema de 3 tabs (Preview / Editar HTML / Código) por 2 tabs (Preview / Editar)
+  - Tab "Editar" usa SmartRichEditor internamente com toggle HTML integrado
+  - Tab "Código" e botão "Copiar HTML" removidos (funcionalidade agora dentro do SmartRichEditor)
+  - Texto informativo contextual baseado no role do utilizador
+  - Limpos imports não utilizados (`Code`, `RichTextEditor` direct)
+- **SystemConfigPage.js** (`2c85c79`): Substituído RichTextEditor + pré-visualização separada por SmartRichEditor único
+  - Secção "Pré-visualização" redundante removida (o modo visual já é a preview)
+  - Limpo import de `RichTextViewer` (já não usado nesta página)
+
+Stage Summary:
+- 3 ficheiros alterados: `SmartRichEditor.jsx` (novo), `SendDocumentationModal.js`, `SystemConfigPage.js`
+- Commit: `2c85c79` (pushed to `dev`)
+
+---
+Task ID: 13
+Agent: Main Agent
+Task: Corrigir erro "too many values to unpack" na sincronização de emails (resolução final)
+
+Work Log:
+- **Diagnóstico (`086c502`)**: Após 3 tentativas falhadas de corrigir `mail.fetch()` unpacking, identificou-se a causa REAL:
+  - O erro NUNCA foi no `mail.fetch()` — era na linha 1331 de `email_service.py`
+  - `get_email_body_with_embedded_images(msg)` retorna **3 valores** `(body_text, body_html, embedded_images)`
+  - O código fazia unpack para apenas **2 variáveis**: `body_text, body_html = get_email_body_with_embedded_images(msg)`
+  - Isto causava `too many values to unpack (expected 2)` para CADA email, e o `except` fazia `continue` — nenhum email era guardado
+- **Correção (`086c502`)**: Alterado para `body_text, body_html, _ = get_email_body_with_embedded_images(msg)`
+- **Cleanup (`086c502`)**: Removida função `_extract_email_bytes_from_fetch` duplicada (havía 2 definições idênticas, linhas 251-276 e 300-315)
+- **Histórico de tentativas anteriores** (commits já no remote):
+  - `54143d1`: Corrigiu apenas 1 de 6 localizações (insuficiente)
+  - `8bef4b2`: Criou helper `_extract_email_bytes_from_fetch()`, substituiu todas as 6 localizações (mas o bug era noutro lado)
+  - `3976603`: Reforço da mesma correção (commit duplicado)
+
+Stage Summary:
+- 1 ficheiro alterado: `backend/services/email_service.py` (+1, -19)
+- O bug explicava por que 29 emails eram encontrados mas 0 eram guardados
+- Commit: `086c502` (pushed to `dev`)
+
+---
+Task ID: 12
+Agent: Main Agent
+Task: Corrigir sincronização webmail — credenciais IMAP, 404, NoneType alerts
+
+Work Log:
+- **Alerts NoneType (`f48f4bb`)**: Erro `'NoneType' object has no attribute 'get'` em `services/alerts.py`
+  - Causa: MongoDB campos set to `null`; `.get("key", {})` não aplica default quando valor é `None`
+  - Correção: `process.get("credit_data") or {}` em vez de `process.get("credit_data", {})`
+  - Mesma correção aplicada a `property_data`, `financial_data`, `contacto`
+- **Webmail sync 404 (`fab2ef9`)**: `POST /api/emails/webmail/sync` retornava 404
+  - Causa: `emails.py`, `email_service.py`, `worker.py` tinham alterações locais nunca commitadas ao Git
+  - `git push` dizia "Everything up-to-date" porque nada estava staged
+  - Correção: `git add` + `git commit` dos 3 ficheiros
+- **IMAP credenciais erradas (`83f104d`)**: Emails não sincronizavam para `flaviosilva@powerealestate.pt`
+  - Causa: `get_email_accounts_async()` usava `smtp_user`/`smtp_password` para login IMAP
+  - O modelo de dados tem campos dedicados `imap_user`/`imap_password`
+  - Correção: Alterado para usar `imap_user`/`imap_password` com fallback para SMTP
+- **IMAP fetch format (`54143d1`, `8bef4b2`, `3976603`)**: "too many values to unpack"
+  - Tentativas múltiplas de corrigir `mail.fetch()` (ver Task ID 13 para resolução final)
+
+Stage Summary:
+- Ficheiros: `backend/services/alerts.py`, `backend/routes/emails.py`, `backend/services/email_service.py`
+- Commits: `f48f4bb`, `fab2ef9`, `83f104d`, `54143d1`, `8bef4b2`, `3976603`, `086c502`
+
+---
+Task ID: 11
+Agent: Main Agent
+Task: Webmail de 3 colunas (estilo Outlook) com compositor e sincronização IMAP
+
+Work Log:
+- **WebmailPage.jsx (`fcb858b`)**: Criada página de webmail completo com layout 3 colunas (estilo Outlook)
+  - Coluna esquerda: Lista de pastas (INBOX, Enviados, Rascunhos, Lixo, Spam) com contadores
+  - Coluna central: Lista de emails da pasta selecionada (remetente, assunto, preview, data, indicadores)
+  - Coluna direita: Painel de leitura com corpo HTML, ações (responder, encaminhar, eliminar, arquivo)
+  - Compositor de emails: Formulário modal com To, CC, CC0, Assunto, Body (RichText), Anexos
+  - Pesquisa de emails por texto
+  - Filtros: Todos / Não lidos / Com estrela
+  - Marcação de lido/não lido, estrela, eliminação, arquivo
+  - Suporte a contas múltiplas (Power + Precision)
+- **Sync button (`041799b`)**: Adicionado botão "Sincronizar" no sidebar para puxar emails do IMAP
+- **Endpoint webmail sync (`fab2ef9`)**: `POST /api/emails/webmail/sync` — sincroniza todas as contas IMAP
+  - Busca emails de INBOX e pastas de enviados
+  - Deduplicação por `message_id + account`
+  - Guarda no MongoDB com metadata completa
+- **Endpoints de webmail (`fcb858b`)**: CRUD completo
+  - `GET /api/emails/webmail` — lista com filtros (folder, account, search, unread, starred)
+  - `GET /api/emails/webmail/:id` — detalhe
+  - `PUT /api/emails/webmail/:id` — atualizar (read, starred, archived, folder)
+  - `DELETE /api/emails/webmail/:id` — eliminar
+  - `POST /api/emails/webmail/send` — enviar email via SMTP
+- **S3FileManager fix (`fdbb4a4`)**: Impedir eliminação de pastas no gestor de ficheiros S3
+
+Stage Summary:
+- Página de webmail completa com funcionalidades de email profissional
+- Integração IMAP (leitura) e SMTP (envio)
+- Commits: `fcb858b`, `041799b`, `fab2ef9`, `8e6604b`, `85a2d79`, `abf8ca5`
+
+---
+Task ID: 10
+Agent: Main Agent
+Task: Corrigir eliminação acidental de pastas no S3FileManager
+
+Work Log:
+- **S3FileManager fix (`fdbb4a4`)**: Adicionada validação para impedir eliminação de pastas (diretórios)
+  - Tipos de ficheiro sem extensão (pastas) não podem ser eliminados
+  - Apenas ficheiros com extensão podem ser removidos
+
+Stage Summary:
+- 1 ficheiro alterado
+- Commit: `fdbb4a4`
+
+---
 Task ID: 9
 Agent: Main Agent
 Task: Remover menu Novo processo, corrigir filtro clientes, statusFilter default, alertas IA
