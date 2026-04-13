@@ -61,6 +61,7 @@ import {
   ClipboardList,
   DollarSign,
   Lock,
+  Mail,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -113,7 +114,7 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo Negócio
-    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/meus-clientes", "/registos-clientes", "/financeiro"];
+    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/webmail", "/meus-clientes", "/registos-clientes", "/financeiro"];
     // Rotas do grupo IA
     const iaRoutes = ["/configuracoes/ia", "/ai-insights", "/revisao-dados-ia", "/configuracoes/treino-ia"];
     // Rotas do grupo Configurações (unificado com Sistema)
@@ -548,6 +549,13 @@ const DashboardLayout = ({ children, title }) => {
         label: "Minutas",
         icon: FileArchive,
         href: "/minutas",
+      });
+      
+      // Email (Webmail) para todos os staff
+      negocioItems.push({
+        label: "Email",
+        icon: Mail,
+        href: "/webmail",
       });
       
       // Validades de documentos para todos os staff

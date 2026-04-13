@@ -74,6 +74,7 @@ const FormManagementPage = React.lazy(() => import("./pages/FormManagementPage")
 const AuditTrailPage = React.lazy(() => import("./pages/AuditTrailPage"));
 const FinanceDashboard = React.lazy(() => import("./pages/FinanceDashboard"));
 const RGPDMigrationPage = React.lazy(() => import("./pages/RGPDMigrationPage"));
+const WebmailPage = React.lazy(() => import("./pages/WebmailPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -608,6 +609,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo", "diretor"]}>
                 <RGPDMigrationPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Webmail - Email Client - Staff */}
+          <Route
+            path="/webmail"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <WebmailPage />
               </ProtectedRoute>
             }
           />
