@@ -1474,6 +1474,89 @@ async def get_configured_accounts(
     ]
 
 
+# ==== WEBMAIL - LISTAGEM POR PASTA ====
+
+@router.get("/webmail")
+async def webmail_list(
+    folder: str = Query("inbox", description="Pasta: inbox, sent, drafts, starred, trash"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(30, le=100),
+    search: Optional[str] = Query(None, description="Pesquisa texto"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Listar emails no formato Webmail por pasta.
+    
+    - inbox: emails recebidos (direction=received, não arquivados)
+    - sent: emails enviados (direction=sent)
+    - starred: emails marcados como estrela
+    - trash: emails arquivados
+    - drafts: emails com status=draft
+    """
+    query = {"is_archived": False}
+    
+    if folder == "inbox":
+        query["direction"] = "received"
+        query["status"] = {"$ne": "draft"}
+    elif folder == "sent":
+        query["direction"] = "sent"
+        query["status"] = {"$ne": "draft"}
+    elif folder == "starred":
+        query["is_starred"] = True
+    elif folder == "trash":
+        query["is_archived"] = True
+    elif folder == "drafts":
+        query["status"] = "draft"
+    
+    # Pesquisa textual
+    if search:
+        search = sanitize_string(search, max_length=200)
+        query["$or"] = [
+            {"subject": {"$regex": search, "$options": "i"}},
+            {"body": {"$regex": search, "$options": "i"}},
+            {"from_email": {"$regex": search, "$options": "i"}},
+            {"to_emails": {"$regex": search, "$options": "i"}},
+        ]
+    
+    skip = (page - 1) * limit
+    total = await db.emails.count_documents(query)
+    
+    emails = await db.emails.find(
+        query,
+        {"_id": 0, "body": 0, "body_html": 0}
+    ).sort("sent_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Contar não lidos para a pasta inbox
+    unread_count = 0
+    if folder == "inbox":
+        unread_count = await db.emails.count_documents({
+            "direction": "received",
+            "status": {"$ne": "draft"},
+            "is_read": False,
+            "is_archived": False
+        })
+    
+    # Enriquecer emails com nome do processo/cliente
+    enriched = []
+    for email in emails:
+        e = await enrich_email(email)
+        # Preview: primeira linha do body (buscar sem os campos excluídos acima)
+        body_preview = email.get("body", "")[:120]
+        if len(body_preview) == 120:
+            body_preview += "..."
+        e["preview"] = body_preview
+        enriched.append(e)
+    
+    return {
+        "emails": enriched,
+        "total": total,
+        "page": page,
+        "pages": (total + limit - 1) // limit,
+        "unread_count": unread_count,
+        "folder": folder
+    }
+
+
 @router.get("/process/{process_id}", response_model=List[EmailResponse])
 async def get_process_emails(
     process_id: str,
