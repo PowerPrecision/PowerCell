@@ -102,8 +102,9 @@ async def get_email_accounts_async() -> List[EmailAccount]:
             # Só criar contas se provider for SMTP
             if provider == "smtp":
                 # === CONTA 1: Power Real Estate ===
-                smtp_user = email_config.get("smtp_user")
-                smtp_password = email_config.get("smtp_password")
+                # Prioridade: campos IMAP dedicados > campos SMTP
+                smtp_user = email_config.get("imap_user") or email_config.get("smtp_user")
+                smtp_password = email_config.get("imap_password") or email_config.get("smtp_password")
                 smtp_server = email_config.get("smtp_server")
                 imap_server = email_config.get("imap_server")
                 
@@ -118,10 +119,12 @@ async def get_email_accounts_async() -> List[EmailAccount]:
                         password=smtp_password
                     ))
                     logger.info(f"Conta Power carregada da DB: {smtp_user}")
+                else:
+                    logger.warning(f"Conta Power incompleta: user={bool(smtp_user)}, pass={bool(smtp_password)}, server={bool(smtp_server or imap_server)}")
                 
                 # === CONTA 2: Precision Crédito ===
-                smtp_user_2 = email_config.get("smtp_user_2")
-                smtp_password_2 = email_config.get("smtp_password_2")
+                smtp_user_2 = email_config.get("imap_user_2") or email_config.get("smtp_user_2")
+                smtp_password_2 = email_config.get("imap_password_2") or email_config.get("smtp_password_2")
                 smtp_server_2 = email_config.get("smtp_server_2")
                 imap_server_2 = email_config.get("imap_server_2")
                 
@@ -136,6 +139,8 @@ async def get_email_accounts_async() -> List[EmailAccount]:
                         password=smtp_password_2
                     ))
                     logger.info(f"Conta Precision carregada da DB: {smtp_user_2}")
+                else:
+                    logger.warning(f"Conta Precision incompleta: user={bool(smtp_user_2)}, pass={bool(smtp_password_2)}, server={bool(smtp_server_2 or imap_server_2)}")
                     
     except Exception as e:
         logger.warning(f"Erro ao carregar configuração de email da DB: {e}")
