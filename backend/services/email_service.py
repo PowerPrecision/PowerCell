@@ -248,6 +248,54 @@ def get_email_body_with_embedded_images(msg) -> tuple:
     return body_text, body_html, embedded_images
 
 
+def _extract_email_bytes_from_fetch(fetch_result) -> Optional[bytes]:
+    """
+    Extrair bytes de um email de forma segura a partir do resultado de mail.fetch().
+    
+    O formato do resultado varia entre servidores IMAP:
+    - ('OK', [(b'1 (RFC822 {size}', b'...email...'), b')'])
+    - ('OK', [(b'1 (RFC822 {size}', email_bytes)])
+    
+    Returns:
+        bytes do email ou None se não conseguir extrair
+    """
+    if not fetch_result or len(fetch_result) < 2:
+        return None
+    
+    msg_data = fetch_result[1]
+    if not msg_data:
+        return None
+    
+    if isinstance(msg_data, list) and len(msg_data) > 0:
+        item = msg_data[0]
+        if isinstance(item, tuple) and len(item) >= 2:
+            return item[1]
+        elif isinstance(item, bytes):
+            return item
+    
+    return None
+
+
+def _fetch_and_parse_email(mail, num):
+    """
+    Buscar e parsear um email de forma segura.
+    
+    Returns:
+        tuple: (msg, msg_id) ou (None, None) se falhar
+    """
+    fetch_result = mail.fetch(num, "(RFC822)")
+    email_bytes = _extract_email_bytes_from_fetch(fetch_result)
+    if not email_bytes:
+        return None, None
+    
+    msg = email.message_from_bytes(email_bytes)
+    msg_id = msg.get("Message-ID", "")
+    if not msg_id:
+        return None, None
+    
+    return msg, msg_id
+
+
 def get_email_body(msg) -> tuple:
     """Extrair corpo do email (texto e HTML) com suporte a imagens embutidas."""
     body_text, body_html, _ = get_email_body_with_embedded_images(msg)
@@ -352,9 +400,11 @@ def _fetch_emails_by_name_sync(
                 
                 for num in message_numbers[0].split():
                     try:
-                        _, msg_data = mail.fetch(num, "(RFC822)")
-                        email_body = msg_data[0][1]
-                        msg = email.message_from_bytes(email_body)
+                        fetch_result = mail.fetch(num, "(RFC822)")
+                        email_bytes = _extract_email_bytes_from_fetch(fetch_result)
+                        if not email_bytes:
+                            continue
+                        msg = email.message_from_bytes(email_bytes)
                         
                         msg_id = msg.get("Message-ID", "")
                         if msg_id in seen_ids:
@@ -423,9 +473,11 @@ def _fetch_emails_by_name_sync(
                 
                 for num in message_numbers[0].split():
                     try:
-                        _, msg_data = mail.fetch(num, "(RFC822)")
-                        email_body = msg_data[0][1]
-                        msg = email.message_from_bytes(email_body)
+                        fetch_result = mail.fetch(num, "(RFC822)")
+                        email_bytes = _extract_email_bytes_from_fetch(fetch_result)
+                        if not email_bytes:
+                            continue
+                        msg = email.message_from_bytes(email_bytes)
                         
                         msg_id = msg.get("Message-ID", "")
                         if msg_id in seen_ids:
@@ -484,9 +536,11 @@ def _fetch_emails_by_name_sync(
             
             for num in nums:
                 try:
-                    _, msg_data = mail.fetch(num, "(RFC822)")
-                    email_body = msg_data[0][1]
-                    msg = email.message_from_bytes(email_body)
+                    fetch_result = mail.fetch(num, "(RFC822)")
+                    email_bytes = _extract_email_bytes_from_fetch(fetch_result)
+                    if not email_bytes:
+                        continue
+                    msg = email.message_from_bytes(email_bytes)
                     
                     msg_id = msg.get("Message-ID", "")
                     if msg_id in seen_ids:
@@ -617,9 +671,11 @@ def _fetch_emails_from_account_sync(
                     
                     for num in message_numbers[0].split():
                         try:
-                            _, msg_data = mail.fetch(num, "(RFC822)")
-                            email_body = msg_data[0][1]
-                            msg = email.message_from_bytes(email_body)
+                            fetch_result = mail.fetch(num, "(RFC822)")
+                            email_bytes = _extract_email_bytes_from_fetch(fetch_result)
+                            if not email_bytes:
+                                continue
+                            msg = email.message_from_bytes(email_bytes)
                             
                             # Extrair informações
                             from_email = extract_email_address(msg.get("From", ""))
@@ -1230,23 +1286,7 @@ def _fetch_all_from_folder_sync(
         for num in nums:
             try:
                 fetch_result = mail.fetch(num, "(RFC822)")
-                # mail.fetch pode retornar 2 ou mais valores dependendo do servidor
-                # Formato: ('OK', [(b'1 (RFC822 {size}', b'...email...'), b')'])
-                if not fetch_result or len(fetch_result) < 2:
-                    continue
-                msg_data = fetch_result[1]
-                if not msg_data:
-                    continue
-                    
-                # Extrair o conteúdo do email (bytes)
-                email_bytes = None
-                if isinstance(msg_data, list) and len(msg_data) > 0:
-                    item = msg_data[0]
-                    if isinstance(item, tuple) and len(item) >= 2:
-                        email_bytes = item[1]
-                    elif isinstance(item, bytes):
-                        email_bytes = item
-                
+                email_bytes = _extract_email_bytes_from_fetch(fetch_result)
                 if not email_bytes:
                     continue
                 
