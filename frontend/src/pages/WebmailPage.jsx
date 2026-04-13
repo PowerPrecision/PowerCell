@@ -102,6 +102,12 @@ const WebmailPage = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
 
+  // Auto-select account based on user email domain
+  const userDomain = (user?.email || "").split("@")[1]?.toLowerCase() || "";
+  const defaultAccount = userDomain.includes("power") ? "power"
+    : userDomain.includes("precision") ? "precision"
+    : "power";
+
   // Estado principal
   const [activeFolder, setActiveFolder] = useState("inbox");
   const [emails, setEmails] = useState([]);
@@ -114,7 +120,7 @@ const WebmailPage = () => {
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [account, setAccount] = useState("precision");
+  const [account, setAccount] = useState(defaultAccount);
 
   // Composer state
   const [composerOpen, setComposerOpen] = useState(false);
@@ -123,7 +129,7 @@ const WebmailPage = () => {
     cc_emails: "",
     subject: "",
     body: "",
-    account: "precision",
+    account: defaultAccount,
     process_id: null,
   });
   const [composerSending, setComposerSending] = useState(false);
