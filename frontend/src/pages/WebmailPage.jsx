@@ -163,6 +163,7 @@ const WebmailPage = () => {
         folder: folder || activeFolder,
         page: String(page || 1),
         limit: "30",
+        account: account,
       });
       if (search && search.trim()) {
         params.append("search", search.trim());
