@@ -30,7 +30,7 @@ from models.email import (
     EmailMarkType, EmailTemplateCreate, EmailTemplateResponse, EmailFilter
 )
 from services.auth import get_current_user
-from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, sync_webmail_emails
+from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails
 from services.email_draft_service import (
     get_pending_drafts,
     get_draft_stats,
@@ -1569,15 +1569,34 @@ async def webmail_sync(
     Faz pull de TODOS os emails recentes das pastas INBOX e Enviados,
     sem filtro de processo. Deduplica por Message-ID + conta.
     """
+    # Verificar contas configuradas primeiro
+    accounts = await get_email_accounts_async()
+    if not accounts:
+        return {
+            "success": False,
+            "error": "Nenhuma conta de email configurada. Vá a Configurações > Email e configure pelo menos uma conta IMAP.",
+            "accounts_found": 0
+        }
+    
+    # Se account foi especificado, verificar se existe
+    if account:
+        matched = [a for a in accounts if a.name == account]
+        if not matched:
+            available = [a.name for a in accounts]
+            return {
+                "success": False,
+                "error": f"Conta '{account}' não encontrada. Contas disponíveis: {available}",
+                "accounts_found": len(accounts),
+                "available_accounts": available
+            }
+    
     result = await sync_webmail_emails(
         account_name=account,
         days=days,
         max_emails=150
     )
     
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=result.get("error", "Erro na sincronização"))
-    
+    # Sempre retornar resultado, mesmo com erro (para dar feedback ao utilizador)
     return result
 
 
