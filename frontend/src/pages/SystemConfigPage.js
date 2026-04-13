@@ -15,7 +15,8 @@ import { Switch } from "../components/ui/switch";
 import { Textarea } from "../components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import DocumentRecipientsManager from "../components/DocumentRecipientsManager";
-import RichTextEditor, { RichTextViewer } from "../components/ui/RichTextEditor";
+import RichTextEditor from "../components/ui/RichTextEditor";
+import SmartRichEditor from "../components/ui/SmartRichEditor";
 import {
   Select,
   SelectContent,
@@ -1281,23 +1282,14 @@ const SystemConfigPage = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <RichTextEditor
+            <SmartRichEditor
               value={templateContent}
               onChange={setTemplateContent}
               placeholder="Introduza o texto do template RGPD..."
               readOnly={!isAdminOrCEO}
-              className="min-h-[300px] mb-4"
+              minHeight={300}
+              advanced
             />
-
-            {/* Pré-visualização */}
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-muted-foreground">Pré-visualização</p>
-              <div className="overflow-y-auto max-h-64 whitespace-pre-wrap break-words p-4 bg-gray-50 dark:bg-gray-900 border rounded-md">
-                <RichTextViewer
-                  html={templateContent || "<p className=\"text-muted-foreground\">Nenhum conteúdo para pré-visualizar.</p>"}
-                />
-              </div>
-            </div>
 
             {/* Variáveis disponíveis */}
             <div className="bg-muted/50 rounded-lg p-3">

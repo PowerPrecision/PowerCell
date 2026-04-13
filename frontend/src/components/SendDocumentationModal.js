@@ -39,10 +39,10 @@ import {
   Building2,
   Eye,
   Edit3,
-  Code,
 } from "lucide-react";
 import { toast } from "sonner";
-import RichTextEditor, { RichTextViewer } from "./ui/RichTextEditor";
+import { RichTextViewer } from "./ui/RichTextEditor";
+import SmartRichEditor from "./ui/SmartRichEditor";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -72,7 +72,7 @@ const SendDocumentationModal = ({
   const [emailHtml, setEmailHtml] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("preview");
+  const [activeTab, setActiveTab] = useState("preview"); // "preview" | "edit"
 
   // Carregar configuração e documentos
   useEffect(() => {
@@ -561,13 +561,7 @@ const SendDocumentationModal = ({
                     {canEditTemplate && (
                       <TabsTrigger value="edit" className="text-xs">
                         <Edit3 className="h-3.5 w-3.5 mr-1" />
-                        Editar HTML
-                      </TabsTrigger>
-                    )}
-                    {canEditTemplate && (
-                      <TabsTrigger value="code" className="text-xs">
-                        <Code className="h-3.5 w-3.5 mr-1" />
-                        Código
+                        Editar
                       </TabsTrigger>
                     )}
                   </TabsList>
@@ -587,34 +581,13 @@ const SendDocumentationModal = ({
 
                 {canEditTemplate && (
                   <TabsContent value="edit" className="mt-2">
-                    <RichTextEditor
+                    <SmartRichEditor
                       value={emailHtml}
                       onChange={setEmailHtml}
                       placeholder="Edite o conteúdo do email..."
                       minHeight={300}
-                      className="max-h-[400px] overflow-y-auto"
+                      advanced
                     />
-                  </TabsContent>
-                )}
-
-                {canEditTemplate && (
-                  <TabsContent value="code" className="mt-2">
-                    <div className="relative">
-                      <pre className="bg-muted p-3 rounded-lg text-xs overflow-auto max-h-[400px] font-mono whitespace-pre-wrap border">
-                        {emailHtml || "Nenhum HTML gerado"}
-                      </pre>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="absolute top-2 right-2"
-                        onClick={() => {
-                          navigator.clipboard.writeText(emailHtml);
-                          toast.success("HTML copiado!");
-                        }}
-                      >
-                        Copiar HTML
-                      </Button>
-                    </div>
                   </TabsContent>
                 )}
               </Tabs>
@@ -625,7 +598,10 @@ const SendDocumentationModal = ({
                   <strong>Assunto:</strong> {emailSubject || `Documentação - ${process?.client_name || "N/A"} (Processo #${process?.process_number || "N/A"})`}
                 </p>
                 <p>
-                  <strong>Nota:</strong> O editor WYSIWYG permite adicionar notas, apagar texto, formatar tabelas, negritos, etc. O HTML é enviado diretamente no corpo do email.
+                  <strong>Nota:</strong> {canEditTemplate
+                    ? "Pode editar o conteúdo visualmente ou alternar para o modo HTML no botão </> Editar HTML."
+                    : "O conteúdo do email é gerado automaticamente com base nos documentos selecionados."
+                  }
                 </p>
               </div>
             </div>
