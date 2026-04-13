@@ -1181,3 +1181,255 @@ async def test_email_connection(account_name: str = None) -> Dict[str, Any]:
         results[account.name] = result
     
     return results
+
+
+# =====================================================================
+# SYNC GLOBAL PARA WEBMAIL (sem filtro de processo)
+# =====================================================================
+
+def _fetch_all_from_folder_sync(
+    account: EmailAccount,
+    folder: str = "INBOX",
+    since_days: int = 7,
+    max_emails: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    Buscar TODOS os emails de uma pasta IMAP (sem filtro de processo).
+    Versão síncrona para execução em thread.
+    """
+    emails_found = []
+    
+    try:
+        context = ssl.create_default_context()
+        mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context)
+        mail.login(account.email, account.password)
+        
+        since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
+        logger.info(f"[Webmail Sync] Buscando emails em {folder} ({account.name}) desde {since_date}")
+        
+        result, data = mail.select(folder)
+        if result != 'OK':
+            logger.warning(f"[Webmail Sync] Não foi possível selecionar pasta {folder}: {result}")
+            mail.logout()
+            return emails_found
+        
+        _, message_numbers = mail.search(None, f'(SINCE {since_date})')
+        nums = message_numbers[0].split()
+        
+        # Limitar aos mais recentes (do fim para o início)
+        if len(nums) > max_emails:
+            nums = nums[-max_emails:]
+        
+        logger.info(f"[Webmail Sync] {len(nums)} emails para processar em {folder}")
+        
+        for num in nums:
+            try:
+                _, msg_data = mail.fetch(num, "(RFC822)")
+                if not msg_data or not msg_data[0] or not msg_data[0][1]:
+                    continue
+                    
+                msg = email.message_from_bytes(msg_data[0][1])
+                
+                msg_id = msg.get("Message-ID", "")
+                if not msg_id:
+                    continue
+                
+                from_email = extract_email_address(msg.get("From", ""))
+                to_emails = [extract_email_address(e) for e in (msg.get("To", "")).split(",") if e.strip()]
+                cc_emails = [extract_email_address(e) for e in (msg.get("Cc", "") or "").split(",") if e.strip()]
+                subject = decode_email_header(msg.get("Subject", ""))
+                date_str = msg.get("Date", "")
+                body_text, body_html = get_email_body_with_embedded_images(msg)
+                
+                direction = "sent" if from_email.lower() == account.email.lower() else "received"
+                
+                email_date = None
+                if date_str:
+                    try:
+                        email_date = email.utils.parsedate_to_datetime(date_str)
+                    except Exception:
+                        email_date = datetime.now()
+                
+                # Extrair anexos
+                attachments = []
+                for part in msg.walk():
+                    content_disposition = str(part.get("Content-Disposition", ""))
+                    if "attachment" in content_disposition:
+                        filename = part.get_filename() or "anexo"
+                        filename = decode_email_header(filename)
+                        size = len(part.get_payload(decode=True) or b"")
+                        attachments.append({
+                            "filename": filename,
+                            "content_type": part.get_content_type(),
+                            "size": size
+                        })
+                
+                emails_found.append({
+                    "message_id": msg_id,
+                    "from_email": from_email,
+                    "to_emails": to_emails,
+                    "cc_emails": cc_emails,
+                    "subject": subject,
+                    "body": body_text or "",
+                    "body_html": body_html or "",
+                    "attachments": attachments,
+                    "date": email_date.isoformat() if email_date else datetime.now().isoformat(),
+                    "direction": direction,
+                    "source": "webmail_sync",
+                    "account": account.name,
+                })
+                
+            except Exception as e:
+                logger.warning(f"[Webmail Sync] Erro ao processar email: {e}")
+                continue
+        
+        mail.logout()
+        logger.info(f"[Webmail Sync] {len(emails_found)} emails extraídos de {folder} ({account.name})")
+        
+    except Exception as e:
+        logger.error(f"[Webmail Sync] Erro ao conectar IMAP {account.name}: {e}")
+    
+    return emails_found
+
+
+async def sync_webmail_emails(
+    account_name: str = None,
+    days: int = 7,
+    max_emails: int = 100
+) -> Dict[str, Any]:
+    """
+    Sincronizar TODOS os emails recentes do IMAP para o webmail.
+    Sem filtro de processo — guarda todos os emails recebidos e enviados.
+    
+    Args:
+        account_name: "precision" ou "power" (None = todas as contas)
+        days: Dias para sincronizar (default 7)
+        max_emails: Máximo de emails por pasta (default 100)
+    
+    Returns:
+        Dict com resultado da sincronização
+    """
+    accounts = await get_email_accounts_async()
+    if not accounts:
+        return {"success": False, "error": "Nenhuma conta de email configurada"}
+    
+    if account_name:
+        accounts = [a for a in accounts if a.name == account_name]
+        if not accounts:
+            return {"success": False, "error": f"Conta '{account_name}' não encontrada"}
+    
+    total_synced = 0
+    total_duplicates = 0
+    total_errors = 0
+    results = {}
+    
+    for account in accounts:
+        try:
+            all_emails = []
+            
+            # Buscar da INBOX
+            loop = asyncio.get_event_loop()
+            inbox_emails = await loop.run_in_executor(
+                _email_executor,
+                lambda: _fetch_all_from_folder_sync(account, "INBOX", days, max_emails)
+            )
+            all_emails.extend(inbox_emails)
+            
+            # Buscar da pasta de Enviados (tentar vários nomes)
+            for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados", "INBOX.Enviados"]:
+                try:
+                    sent_emails = await loop.run_in_executor(
+                        _email_executor,
+                        lambda f=sent_folder: _fetch_all_from_folder_sync(account, f, days, max_emails)
+                    )
+                    if sent_emails:
+                        all_emails.extend(sent_emails)
+                        break
+                except Exception:
+                    continue
+            
+            # Guardar emails na DB (deduplicação por message_id + account)
+            synced = 0
+            duplicates = 0
+            
+            for em in all_emails:
+                try:
+                    msg_id = em.get("message_id", "")
+                    if not msg_id:
+                        continue
+                    
+                    # Verificar se já existe
+                    existing = await db.emails.find_one({
+                        "message_id": msg_id,
+                        "account": account.name
+                    })
+                    
+                    if existing:
+                        duplicates += 1
+                        continue
+                    
+                    # Parsear data
+                    sent_at = em.get("date")
+                    try:
+                        if sent_at:
+                            sent_at = datetime.fromisoformat(sent_at.replace("Z", "+00:00")).isoformat()
+                        else:
+                            sent_at = datetime.now(timezone.utc).isoformat()
+                    except Exception:
+                        sent_at = datetime.now(timezone.utc).isoformat()
+                    
+                    email_doc = {
+                        "id": str(uuid.uuid4()),
+                        "process_id": None,
+                        "direction": em.get("direction", "received"),
+                        "from_email": em.get("from_email", ""),
+                        "to_emails": em.get("to_emails", []),
+                        "cc_emails": em.get("cc_emails", []),
+                        "bcc_emails": [],
+                        "subject": em.get("subject", ""),
+                        "body": em.get("body", ""),
+                        "body_html": em.get("body_html", ""),
+                        "attachments": em.get("attachments", []),
+                        "status": "synced",
+                        "sent_at": sent_at,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "created_by": None,
+                        "notes": f"Webmail sync - {account.name}",
+                        "synced": True,
+                        "account": account.name,
+                        "message_id": msg_id,
+                        "is_read": em.get("direction") == "sent",
+                        "is_starred": False,
+                        "is_archived": False,
+                        "source": "webmail_sync",
+                    }
+                    
+                    await db.emails.insert_one(email_doc)
+                    synced += 1
+                    
+                except Exception as e:
+                    logger.warning(f"[Webmail Sync] Erro ao guardar email: {e}")
+                    total_errors += 1
+            
+            total_synced += synced
+            total_duplicates += duplicates
+            results[account.name] = {
+                "synced": synced,
+                "duplicates": duplicates,
+                "total_fetched": len(all_emails),
+            }
+            
+            logger.info(f"[Webmail Sync] Conta {account.name}: {synced} novos, {duplicates} duplicados")
+            
+        except Exception as e:
+            logger.error(f"[Webmail Sync] Erro ao sincronizar conta {account.name}: {e}")
+            results[account.name] = {"error": str(e)}
+            total_errors += 1
+    
+    return {
+        "success": total_errors == 0 or total_synced > 0,
+        "total_synced": total_synced,
+        "total_duplicates": total_duplicates,
+        "total_errors": total_errors,
+        "accounts": results,
+    }

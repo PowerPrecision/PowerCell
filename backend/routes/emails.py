@@ -30,7 +30,7 @@ from models.email import (
     EmailMarkType, EmailTemplateCreate, EmailTemplateResponse, EmailFilter
 )
 from services.auth import get_current_user
-from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts
+from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, sync_webmail_emails
 from services.email_draft_service import (
     get_pending_drafts,
     get_draft_stats,
@@ -1555,6 +1555,30 @@ async def webmail_list(
         "unread_count": unread_count,
         "folder": folder
     }
+
+
+@router.post("/webmail/sync")
+async def webmail_sync(
+    account: Optional[str] = Query(None, description="Conta: precision ou power (None = todas)"),
+    days: int = Query(7, ge=1, le=30, description="Dias para sincronizar"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Sincronizar emails do IMAP para o Webmail.
+    
+    Faz pull de TODOS os emails recentes das pastas INBOX e Enviados,
+    sem filtro de processo. Deduplica por Message-ID + conta.
+    """
+    result = await sync_webmail_emails(
+        account_name=account,
+        days=days,
+        max_emails=150
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Erro na sincronização"))
+    
+    return result
 
 
 @router.get("/process/{process_id}", response_model=List[EmailResponse])
