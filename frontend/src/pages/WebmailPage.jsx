@@ -53,6 +53,15 @@ import {
   Loader2,
   ArrowLeft,
   AtSign,
+  Image,
+  FileSpreadsheet,
+  File,
+  Tag,
+  CheckSquare,
+  Square,
+  Upload,
+  Download,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isToday, isYesterday } from "date-fns";
@@ -96,6 +105,24 @@ const formatFullDate = (dateStr) => {
   } catch {
     return dateStr;
   }
+};
+
+// Formatar tamanho de ficheiro
+const formatFileSize = (bytes) => {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
+
+// Ícone por tipo de ficheiro
+const getAttachmentIcon = (filename) => {
+  if (!filename) return File;
+  const lower = filename.toLowerCase();
+  if (/\.(jpg|jpeg|png|gif|bmp|webp|svg|ico|tiff?)$/i.test(lower)) return Image;
+  if (/\.(xls|xlsx|csv|ods)$/i.test(lower)) return FileSpreadsheet;
+  if (/\.(doc|docx|pdf|txt|rtf|odt)$/i.test(lower)) return FileText;
+  return File;
 };
 
 const WebmailPage = () => {
@@ -149,13 +176,53 @@ const WebmailPage = () => {
   const [syncing, setSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(null);
 
+  // Labels state
+  const [labels, setLabels] = useState([]);
+  const [selectedLabel, setSelectedLabel] = useState(null);
+  const [labelsLoading, setLabelsLoading] = useState(false);
+
+  // Multi-select state
+  const [selectedEmails, setSelectedEmails] = useState(new Set());
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [labelDropdownOpen, setLabelDropdownOpen] = useState(false);
+
+  // Upload attachments state (composer)
+  const [uploadAttachments, setUploadAttachments] = useState([]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const fileInputRef = useRef(null);
+
   // Debounce search
   const searchTimeoutRef = useRef(null);
 
   // ============================================================
+  // FETCH LABELS
+  // ============================================================
+  const fetchLabels = useCallback(async () => {
+    if (!token) return;
+    setLabelsLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/emails/labels`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLabels(Array.isArray(data) ? data : data.labels || []);
+      }
+    } catch {
+      // Silently fail — labels are non-critical
+    } finally {
+      setLabelsLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchLabels();
+  }, [fetchLabels]);
+
+  // ============================================================
   // FETCH EMAILS
   // ============================================================
-  const fetchEmails = useCallback(async (folder, page, search) => {
+  const fetchEmails = useCallback(async (folder, page, search, label) => {
     if (!token) return;
     setLoading(true);
     try {
@@ -163,9 +230,13 @@ const WebmailPage = () => {
         folder: folder || activeFolder,
         page: String(page || 1),
         limit: "30",
+        account: account,
       });
       if (search && search.trim()) {
         params.append("search", search.trim());
+      }
+      if (label) {
+        params.append("label", label);
       }
 
       const response = await fetch(
@@ -189,15 +260,16 @@ const WebmailPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, activeFolder]);
+  }, [token, activeFolder, account]);
 
-  // Carregar emails quando muda pasta ou página
+  // Carregar emails quando muda pasta, página ou label
   useEffect(() => {
-    fetchEmails(activeFolder, currentPage, "");
+    fetchEmails(activeFolder, currentPage, "", selectedLabel);
     setSelectedEmail(null);
     setEmailDetail(null);
     setShowMobileReading(false);
-  }, [activeFolder, currentPage, fetchEmails]);
+    setSelectedEmails(new Set());
+  }, [activeFolder, currentPage, selectedLabel, fetchEmails]);
 
   // Debounced search
   const handleSearchChange = useCallback((value) => {
@@ -207,14 +279,14 @@ const WebmailPage = () => {
     }
     searchTimeoutRef.current = setTimeout(() => {
       setCurrentPage(1);
-      fetchEmails(activeFolder, 1, value);
+      fetchEmails(activeFolder, 1, value, selectedLabel);
     }, 400);
-  }, [activeFolder, fetchEmails]);
+  }, [activeFolder, fetchEmails, selectedLabel]);
 
   // Refresh
   const handleRefresh = useCallback(() => {
-    fetchEmails(activeFolder, currentPage, searchQuery);
-  }, [activeFolder, currentPage, searchQuery, fetchEmails]);
+    fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
+  }, [activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel]);
 
   // ============================================================
   // SYNC EMAILS (IMAP → DB)
@@ -265,19 +337,33 @@ const WebmailPage = () => {
       }
       setLastSyncTime(new Date());
       // Refresh the list
-      fetchEmails(activeFolder, currentPage, searchQuery);
+      fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
     } catch (error) {
       console.error("Erro ao sincronizar emails:", error);
       toast.error("Erro de ligação ao servidor");
     } finally {
       setSyncing(false);
     }
-  }, [token, account, syncing, activeFolder, currentPage, searchQuery, fetchEmails]);
+  }, [token, account, syncing, activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
   // ============================================================
   const handleSelectEmail = useCallback(async (email) => {
+    if (multiSelectMode) {
+      // Toggle checkbox in multi-select mode
+      setSelectedEmails((prev) => {
+        const next = new Set(prev);
+        if (next.has(email.id)) {
+          next.delete(email.id);
+        } else {
+          next.add(email.id);
+        }
+        return next;
+      });
+      return;
+    }
+
     setSelectedEmail(email);
     setShowMobileReading(true);
 
@@ -317,7 +403,7 @@ const WebmailPage = () => {
     } finally {
       setDetailLoading(false);
     }
-  }, [token]);
+  }, [token, multiSelectMode]);
 
   // ============================================================
   // TOGGLE STAR
@@ -386,6 +472,7 @@ const WebmailPage = () => {
       });
     }
     setCcExpanded(mode === "forward" || false);
+    setUploadAttachments([]);
     setComposerOpen(true);
   }, [account]);
 
@@ -410,6 +497,20 @@ const WebmailPage = () => {
         .map((e) => e.trim())
         .filter(Boolean);
 
+      const bodyPayload = {
+        to_emails: toList,
+        subject: composerData.subject,
+        body: composerData.body,
+        body_html: "",
+        cc_emails: ccList,
+        process_id: composerData.process_id,
+      };
+
+      // Include attachment_ids if any uploads
+      if (uploadAttachments.length > 0) {
+        bodyPayload.attachment_ids = uploadAttachments.map((a) => a.id);
+      }
+
       const response = await fetch(
         `${API_URL}/api/emails/send?account=${composerData.account}`,
         {
@@ -418,20 +519,14 @@ const WebmailPage = () => {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            to_emails: toList,
-            subject: composerData.subject,
-            body: composerData.body,
-            body_html: "",
-            cc_emails: ccList,
-            process_id: composerData.process_id,
-          }),
+          body: JSON.stringify(bodyPayload),
         }
       );
 
       if (!response.ok) throw new Error("Erro ao enviar email");
       toast.success("Email enviado com sucesso");
       setComposerOpen(false);
+      setUploadAttachments([]);
       handleRefresh();
     } catch (error) {
       console.error("Erro ao enviar:", error);
@@ -439,7 +534,7 @@ const WebmailPage = () => {
     } finally {
       setComposerSending(false);
     }
-  }, [composerData, token, handleRefresh]);
+  }, [composerData, token, handleRefresh, uploadAttachments]);
 
   // ============================================================
   // LINK TO PROCESS
@@ -516,6 +611,141 @@ const WebmailPage = () => {
   );
 
   // ============================================================
+  // MULTI-SELECT HANDLERS
+  // ============================================================
+  const handleToggleMultiSelect = useCallback(() => {
+    setMultiSelectMode((prev) => {
+      if (prev) {
+        setSelectedEmails(new Set());
+        setLabelDropdownOpen(false);
+      }
+      return !prev;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedEmails.size === emails.length) {
+      setSelectedEmails(new Set());
+    } else {
+      setSelectedEmails(new Set(emails.map((e) => e.id)));
+    }
+  }, [emails, selectedEmails.size]);
+
+  const handleApplyLabelToSelected = useCallback(async (labelId) => {
+    if (selectedEmails.size === 0 || !labelId) return;
+    try {
+      const response = await fetch(`${API_URL}/api/emails/labels/apply`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email_ids: Array.from(selectedEmails),
+          label_id: labelId,
+        }),
+      });
+      if (response.ok) {
+        toast.success("Marcador aplicado com sucesso");
+        setLabelDropdownOpen(false);
+        setSelectedEmails(new Set());
+        setMultiSelectMode(false);
+        handleRefresh();
+        fetchLabels();
+      } else {
+        toast.error("Erro ao aplicar marcador");
+      }
+    } catch {
+      toast.error("Erro ao aplicar marcador");
+    }
+  }, [selectedEmails, token, handleRefresh, fetchLabels]);
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (selectedEmails.size === 0) return;
+    try {
+      const ids = Array.from(selectedEmails);
+      await Promise.all(
+        ids.map((id) =>
+          fetch(`${API_URL}/api/emails/${id}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        )
+      );
+      toast.success(`${ids.length} email${ids.length !== 1 ? "s" : ""} eliminado${ids.length !== 1 ? "s" : ""}`);
+      setSelectedEmails(new Set());
+      setMultiSelectMode(false);
+      if (selectedEmail && ids.includes(selectedEmail.id)) {
+        setSelectedEmail(null);
+        setEmailDetail(null);
+      }
+      handleRefresh();
+    } catch {
+      toast.error("Erro ao eliminar emails");
+    }
+  }, [selectedEmails, token, selectedEmail, handleRefresh]);
+
+  // ============================================================
+  // FILE UPLOAD (Composer)
+  // ============================================================
+  const uploadFiles = useCallback(async (files) => {
+    if (!files || files.length === 0) return;
+    setUploadingFiles(true);
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append("files", file);
+      try {
+        const res = await fetch(`${API_URL}/api/emails/attachments/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const uploaded = data.files || [data];
+          setUploadAttachments((prev) => [...prev, ...uploaded]);
+        } else {
+          toast.error(`Erro ao carregar ${file.name}`);
+        }
+      } catch {
+        toast.error(`Erro ao carregar ${file.name}`);
+      }
+    }
+    setUploadingFiles(false);
+  }, [token]);
+
+  const handleDropZoneClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileInputChange = useCallback((e) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      uploadFiles(Array.from(files));
+    }
+    // Reset input so same file can be selected again
+    if (e.target) e.target.value = "";
+  }, [uploadFiles]);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      uploadFiles(Array.from(files));
+    }
+  }, [uploadFiles]);
+
+  const handleRemoveUpload = useCallback((fileId) => {
+    setUploadAttachments((prev) => prev.filter((a) => a.id !== fileId));
+  }, []);
+
+  // ============================================================
   // FOLDER COUNTS (derived from email list data)
   // ============================================================
   const folderCounts = useMemo(() => {
@@ -577,6 +807,25 @@ const WebmailPage = () => {
             </SelectContent>
           </Select>
 
+          {/* Select (multi-select toggle) */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={multiSelectMode ? "default" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                onClick={handleToggleMultiSelect}
+              >
+                {multiSelectMode ? (
+                  <CheckSquare className="h-4 w-4" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Selecionar</TooltipContent>
+          </Tooltip>
+
           {/* Refresh */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -624,16 +873,17 @@ const WebmailPage = () => {
             <Separator />
 
             {/* Folders */}
-            <nav className="flex-1 p-2 space-y-0.5">
+            <nav className="p-2 space-y-0.5">
               {FOLDERS.map((folder) => {
                 const Icon = folder.icon;
-                const isActive = activeFolder === folder.id;
+                const isActive = activeFolder === folder.id && !selectedLabel;
                 return (
                   <button
                     key={folder.id}
                     onClick={() => {
                       setActiveFolder(folder.id);
                       setCurrentPage(1);
+                      setSelectedLabel(null);
                     }}
                     className={`
                       w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm
@@ -660,8 +910,53 @@ const WebmailPage = () => {
               })}
             </nav>
 
+            {/* Marcadores (Labels) */}
+            {labels.length > 0 && (
+              <>
+                <Separator />
+                <div className="px-2 pt-2 pb-1">
+                  <div className="flex items-center gap-2 px-3 py-1.5">
+                    <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Marcadores
+                    </span>
+                  </div>
+                  <div className="space-y-0.5">
+                    {labels.map((label) => {
+                      const isLabelActive = selectedLabel === label.id;
+                      return (
+                        <button
+                          key={label.id}
+                          onClick={() => {
+                            setSelectedLabel(isLabelActive ? null : label.id);
+                            setCurrentPage(1);
+                            setActiveFolder("inbox");
+                          }}
+                          className={`
+                            w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm
+                            transition-colors text-left
+                            ${
+                              isLabelActive
+                                ? "bg-accent text-accent-foreground font-medium"
+                                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                            }
+                          `}
+                        >
+                          <span
+                            className="w-3 h-3 rounded-full shrink-0 border border-black/10"
+                            style={{ backgroundColor: label.color || "#6b7280" }}
+                          />
+                          <span className="flex-1 truncate">{label.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+
             {/* Footer info */}
-            <div className="p-3 border-t space-y-1">
+            <div className="mt-auto p-3 border-t space-y-1">
               <p className="text-[10px] text-muted-foreground">
                 {totalEmails} email{totalEmails !== 1 ? "s" : ""}
               </p>
@@ -680,14 +975,38 @@ const WebmailPage = () => {
           `}>
             {/* List header */}
             <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
-              <h2 className="text-sm font-semibold">
-                {FOLDERS.find((f) => f.id === activeFolder)?.label}
-              </h2>
-              {totalPages > 1 && (
-                <span className="text-xs text-muted-foreground">
-                  Página {currentPage} de {totalPages}
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold">
+                  {selectedLabel
+                    ? labels.find((l) => l.id === selectedLabel)?.name || "Marcador"
+                    : FOLDERS.find((f) => f.id === activeFolder)?.label}
+                </h2>
+                {selectedLabel && (
+                  <button
+                    onClick={() => setSelectedLabel(null)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {multiSelectMode && (
+                  <button
+                    onClick={handleSelectAll}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {selectedEmails.size === emails.length && emails.length > 0
+                      ? "Desselecionar"
+                      : "Selecionar tudo"}
+                  </button>
+                )}
+                {totalPages > 1 && (
+                  <span className="text-xs text-muted-foreground">
+                    Página {currentPage} de {totalPages}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Email list */}
@@ -714,6 +1033,8 @@ const WebmailPage = () => {
                   <p className="text-sm text-muted-foreground">
                     {searchQuery
                       ? "Nenhum email encontrado"
+                      : selectedLabel
+                      ? "Sem emails com este marcador"
                       : "Sem emails nesta pasta"}
                   </p>
                 </div>
@@ -722,21 +1043,33 @@ const WebmailPage = () => {
                 <div className="divide-y">
                   {emails.map((email) => {
                     const isSelected = selectedEmail?.id === email.id;
+                    const isChecked = selectedEmails.has(email.id);
                     return (
                       <button
                         key={email.id}
                         onClick={() => handleSelectEmail(email)}
                         className={`
                           w-full text-left p-3 transition-colors hover:bg-accent/50
-                          ${isSelected ? "bg-accent" : ""}
+                          ${isSelected && !multiSelectMode ? "bg-accent" : ""}
                         `}
                       >
                         <div className="flex items-start gap-2">
+                          {/* Multi-select checkbox */}
+                          {multiSelectMode && (
+                            <span className="mt-1 shrink-0">
+                              {isChecked ? (
+                                <CheckSquare className="h-4 w-4 text-primary" />
+                              ) : (
+                                <Square className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </span>
+                          )}
+
                           {/* Unread dot */}
-                          {!email.is_read && (
+                          {!multiSelectMode && !email.is_read && (
                             <span className="bg-blue-500 w-2 h-2 rounded-full mt-1.5 shrink-0" />
                           )}
-                          {email.is_read && <span className="w-2 shrink-0" />}
+                          {!multiSelectMode && email.is_read && <span className="w-2 shrink-0" />}
 
                           {/* Content */}
                           <div className="flex-1 min-w-0">
@@ -768,10 +1101,35 @@ const WebmailPage = () => {
                             </p>
 
                             {/* Preview + indicators */}
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <p className="text-xs text-muted-foreground truncate flex-1">
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              <p className="text-xs text-muted-foreground truncate flex-1 min-w-0">
                                 {email.preview || ""}
                               </p>
+                              {/* Label badges */}
+                              {email.labels?.length > 0 && (
+                                <span className="flex items-center gap-1 shrink-0">
+                                  {email.labels.slice(0, 2).map((lbl) => (
+                                    <span
+                                      key={lbl.id || lbl.name}
+                                      className="rounded-full px-1.5 py-0.5 text-white leading-none"
+                                      style={{
+                                        backgroundColor: lbl.color || "#6b7280",
+                                        fontSize: "10px",
+                                      }}
+                                    >
+                                      {lbl.name}
+                                    </span>
+                                  ))}
+                                  {email.labels.length > 2 && (
+                                    <span
+                                      className="rounded-full px-1.5 py-0.5 text-muted-foreground leading-none border"
+                                      style={{ fontSize: "10px" }}
+                                    >
+                                      +{email.labels.length - 2}
+                                    </span>
+                                  )}
+                                </span>
+                              )}
                               {/* Star */}
                               {email.is_starred && (
                                 <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />
@@ -888,6 +1246,23 @@ const WebmailPage = () => {
                       <span>Data:</span>
                       <span>{formatFullDate(emailDetail.sent_at)}</span>
                     </div>
+                    {/* Label badges on detail */}
+                    {emailDetail.labels?.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                        {emailDetail.labels.map((lbl) => (
+                          <span
+                            key={lbl.id || lbl.name}
+                            className="rounded-full px-2 py-0.5 text-white leading-none"
+                            style={{
+                              backgroundColor: lbl.color || "#6b7280",
+                              fontSize: "11px",
+                            }}
+                          >
+                            {lbl.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Action buttons */}
@@ -981,30 +1356,54 @@ const WebmailPage = () => {
                       )}
                     </div>
 
-                    {/* Attachments */}
+                    {/* Attachments - Visual Cards */}
                     {emailDetail.attachments?.length > 0 && (
                       <div className="mt-6 pt-4 border-t">
                         <h4 className="font-medium text-sm flex items-center gap-2 mb-3">
                           <Paperclip className="h-4 w-4" />
                           Anexos ({emailDetail.attachments.length})
                         </h4>
-                        <div className="space-y-1.5">
-                          {emailDetail.attachments.map((attachment, idx) => (
-                            <div
-                              key={attachment.id || idx}
-                              className="flex items-center gap-2 p-2 rounded-md border bg-muted/30 text-sm"
-                            >
-                              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                              <span className="flex-1 truncate">
-                                {attachment.filename || `Anexo ${idx + 1}`}
-                              </span>
-                              {attachment.size && (
-                                <span className="text-xs text-muted-foreground">
-                                  {(attachment.size / 1024).toFixed(0)} KB
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {emailDetail.attachments.map((attachment, idx) => {
+                            const AttIcon = getAttachmentIcon(attachment.filename);
+                            return (
+                              <div
+                                key={attachment.id || idx}
+                                className="flex items-center gap-3 p-3 rounded-lg border bg-muted/20 hover:bg-muted/40 transition-colors group"
+                              >
+                                <div className="h-9 w-9 rounded-md bg-muted flex items-center justify-center shrink-0">
+                                  <AttIcon className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">
+                                    {attachment.filename || `Anexo ${idx + 1}`}
+                                  </p>
+                                  {attachment.size && (
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      {formatFileSize(attachment.size)}
+                                    </p>
+                                  )}
+                                </div>
+                                {attachment.url && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <a
+                                        href={attachment.url}
+                                        download={attachment.filename || `Anexo ${idx + 1}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="h-8 w-8 rounded-md border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <Download className="h-3.5 w-3.5" />
+                                      </a>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Descarregar</TooltipContent>
+                                  </Tooltip>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -1026,8 +1425,63 @@ const WebmailPage = () => {
           </div>
         </div>
 
+        {/* ===== MULTI-SELECT FLOATING ACTION BAR ===== */}
+        {multiSelectMode && selectedEmails.size > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-background border shadow-lg rounded-xl px-4 py-2.5 flex items-center gap-3">
+            <span className="text-sm font-medium">
+              {selectedEmails.size} selecionado{selectedEmails.size !== 1 ? "s" : ""}
+            </span>
+            <Separator orientation="vertical" className="h-5" />
+            {/* Apply Label button + dropdown */}
+            <div className="relative">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1.5"
+                onClick={() => setLabelDropdownOpen((prev) => !prev)}
+                disabled={labels.length === 0}
+              >
+                <Tag className="h-3.5 w-3.5" />
+                Aplicar Marcador
+              </Button>
+              {labelDropdownOpen && labels.length > 0 && (
+                <div className="absolute bottom-full left-0 mb-1 bg-background border rounded-md shadow-md py-1 min-w-[160px] z-50">
+                  {labels.map((label) => (
+                    <button
+                      key={label.id}
+                      onClick={() => handleApplyLabelToSelected(label.id)}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent transition-colors text-left"
+                    >
+                      <span
+                        className="w-3 h-3 rounded-full shrink-0"
+                        style={{ backgroundColor: label.color || "#6b7280" }}
+                      />
+                      <span className="truncate">{label.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={handleDeleteSelected}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Eliminar
+            </Button>
+          </div>
+        )}
+
         {/* ===== EMAIL COMPOSER DIALOG ===== */}
-        <Dialog open={composerOpen} onOpenChange={setComposerOpen}>
+        <Dialog open={composerOpen} onOpenChange={(open) => {
+          if (!open) {
+            setUploadAttachments([]);
+            setUploadingFiles(false);
+          }
+          setComposerOpen(open);
+        }}>
           <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
             <DialogHeader className="px-6 pt-5 pb-3">
               <DialogTitle>
@@ -1112,6 +1566,76 @@ const WebmailPage = () => {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Drag & Drop upload zone */}
+              <div
+                onClick={handleDropZoneClick}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                className={`
+                  border-2 border-dashed rounded-lg p-4 text-center cursor-pointer
+                  transition-colors
+                  ${uploadingFiles
+                    ? "border-primary/50 bg-primary/5"
+                    : "border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30"
+                  }
+                `}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileInputChange}
+                />
+                {uploadingFiles ? (
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A carregar ficheiro(s)...
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <Upload className="h-5 w-5 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">
+                      Arraste ficheiros aqui ou clique para selecionar
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Uploaded files list */}
+              {uploadAttachments.length > 0 && (
+                <div className="space-y-1.5">
+                  {uploadAttachments.map((file) => {
+                    const UpIcon = getAttachmentIcon(file.filename);
+                    return (
+                      <div
+                        key={file.id}
+                        className="flex items-center gap-2 p-2 rounded-md border bg-muted/20"
+                      >
+                        <UpIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="flex-1 text-sm truncate">
+                          {file.filename || "Ficheiro"}
+                        </span>
+                        {file.size && (
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {formatFileSize(file.size)}
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveUpload(file.id);
+                          }}
+                          className="h-5 w-5 rounded-full hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground shrink-0 transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Body */}
               <div>

@@ -1,6 +1,78 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: 2-b
+Agent: Frontend Agent
+Task: Refactor WebmailPage.jsx — Labels Sidebar, Multi-Select, Attachment Cards, Drag & Drop
+
+Work Log:
+- **Imports (line 57-72)**: Added lucide-react icons: `Image, FileSpreadsheet, File, Tag, CheckSquare, Square, Upload, Download, Trash2`. All existing imports preserved.
+- **Utility functions (line 111-130)**: Added `formatFileSize(bytes)` — formats bytes as B/KB/MB. Added `getAttachmentIcon(filename)` — returns appropriate icon based on file extension (Image for images, FileSpreadsheet for sheets, FileText for docs, File for others).
+- **New state variables (line 178-192)**:
+  - Labels: `labels`, `selectedLabel`, `labelsLoading`
+  - Multi-select: `selectedEmails` (Set), `multiSelectMode`, `labelDropdownOpen`
+  - Upload: `uploadAttachments`, `uploadingFiles`
+  - `fileInputRef` (useRef for hidden file input)
+- **fetchLabels (line 200-222)**: New `useCallback` fetching `GET /api/emails/labels` with auth. Handles array and object responses gracefully. `useEffect` on mount calls `fetchLabels()`.
+- **fetchEmails modified (line 248-261)**: Added `label` parameter to `fetchEmails`. When `selectedLabel` is set, appends `label=<label_id>` to query params. All callers updated: `useEffect`, `handleSearchChange`, `handleRefresh`, `handleSyncEmails`.
+- **handleSelectEmail modified (line 353-358)**: In multi-select mode, clicking an email toggles its ID in `selectedEmails` Set instead of opening reading pane.
+- **handleSendEmail modified (line 505-512)**: Includes `attachment_ids: uploadAttachments.map(a => a.id)` in request body when uploads exist.
+- **openComposer modified (line 447)**: Clears `uploadAttachments` when opening composer.
+- **Multi-select handlers (line 618-690)**:
+  - `handleToggleMultiSelect`: Toggles mode, clears selection on exit.
+  - `handleSelectAll`: Selects/deselects all emails on current page.
+  - `handleApplyLabelToSelected`: POST to `/api/emails/labels/apply` with `email_ids` + `label_id`.
+  - `handleDeleteSelected`: Deletes all selected emails via parallel DELETE calls.
+- **File upload handlers (line 694-745)**:
+  - `uploadFiles(files)`: Sequential upload via `POST /api/emails/attachments/upload` with FormData.
+  - `handleDropZoneClick`, `handleFileInputChange`, `handleDragOver`, `handleDrop`: Drag & drop event handlers.
+  - `handleRemoveUpload`: Removes file from `uploadAttachments` list.
+- **Labels sidebar (line 913-946)**: "Marcadores" section below FOLDERS nav. Shows colored circle + label name for each label. Click selects label (highlights, filters list). Click again deselects.
+- **Label badges on email list (line 1088-1102)**: After preview text, renders up to 2 colored label pills per email. Shows "+N" badge if more than 2. Uses `backgroundColor: label.color`, white text, 10px font, rounded-full.
+- **Label badges on email detail (line 1295-1308)**: Below date meta, shows all label badges.
+- **Multi-select toolbar button (line 812-824)**: "Selecionar" toggle button next to Refresh. Shows CheckSquare (active) or Square (inactive).
+- **Multi-select checkboxes (line 1058-1065, 1069-1072)**: When `multiSelectMode` is active, shows CheckSquare/Square icon instead of unread dot on each email row.
+- **Floating action bar (line 1429-1478)**: Fixed bottom bar when emails selected. Shows count, "Aplicar Marcador" button with label dropdown, "Eliminar" button.
+- **Attachment cards in reading pane (line 1360-1405)**: Replaced plain list with grid of visual cards. Each card shows: file type icon (via getAttachmentIcon), filename, formatted size, download button. Grid: 1 column mobile, 2 columns sm+.
+- **Drag & drop zone in composer (line 1566-1638)**: Dashed-border drop zone before Textarea. Hidden file input with `multiple`. Drag & drop events handled. Upload progress indicator (Loader2 spinner). Uploaded files shown as removable cards with icon, name, size, X button.
+- **Dialog cleanup (line 1544-1551)**: `onOpenChange` clears `uploadAttachments` when dialog closes.
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/src/pages/WebmailPage.jsx` (1238 → 1761 linhas, +523)
+- 6 funcionalidades adicionadas ao webmail
+- Todas as APIs chamadas com try/catch — falhas silenciosas para endpoints ainda não disponíveis
+- Layout 3 colunas intacto, responsivo
+- Todo o texto em português
+
+---
+Task ID: 2-a
+Agent: Backend Agent
+Task: Implement Backend - Email Labels CRUD + S3 Attachment Upload/Download
+
+Work Log:
+- **`backend/models/email.py`**: Adicionados 3 modelos Pydantic:
+  - `LabelCreateRequest` (name, color) — payload para criar labels
+  - `LabelUpdateRequest` (name?, color?) — payload para atualizar labels
+  - `EmailSendRequest.attachment_ids: Optional[List[str]] = None` — campo opcional para IDs de anexos temporários
+- **`backend/routes/emails.py`**: Adicionados 7 novos endpoints e 1 endpoint modificado:
+  - **GET /labels** (line 928): Lista todas as labels do utilizador. Faz seed de 5 labels predefinidas (Urgente, A Aguardar, Concluído, Follow-up, Reunião) na primeira chamada.
+  - **POST /labels** (line 956): Cria nova label. Valida nome (max 30 chars), cor (hex), impede duplicados.
+  - **PUT /labels/{label_id}** (line 990): Atualiza nome e/ou cor de label existente. Valida duplicados (excluindo a própria).
+  - **DELETE /labels/{label_id}** (line 1026): Elimina label e remove-a de todos os emails via `$pull`.
+  - **POST /attachments/upload** (line 1054): Upload de 1-10 ficheiros (max 25MB cada) para `temp/attachments/{user_id}/{uuid}_{filename}` no S3. Guarda metadados em `temp_attachments` (MongoDB) para lookup durante envio.
+  - **GET /{email_id}/attachments/{file_id}/download** (line 1138): Gera URL pré-assinada (1h) para download de anexo via `s3_service.get_presigned_url()`. Suporta fallback para URL existente.
+  - **POST /send** modificado (line 2122): Processa `attachment_ids` — consulta `temp_attachments`, descarrega conteúdo do S3 temp, envia email com anexos, move ficheiros para `Emails/{email_id}/{filename}` via `s3_service.rename_file()`, atualiza documento do email com `id`, `s3_key` nos attachments, limpa temp do S3 e MongoDB.
+- **Imports adicionais**: `UploadFile, File, Form` (FastAPI), `re` (validação de hex color), `LabelCreateRequest, LabelUpdateRequest` (modelos).
+- **Helper**: `_validate_hex_color()` — valida formato `#fff` ou `#ffffff`.
+
+Stage Summary:
+- 2 ficheiros alterados: `backend/models/email.py` (+20), `backend/routes/emails.py` (+240)
+- 7 novos endpoints: 4 labels CRUD + 1 upload + 1 download + 1 send modificado
+- Rotas estáticas todas definidas ANTES do catch-all `/{email_id}`
+- Syntax verificado com py_compile: OK
+- Coleções MongoDB utilizadas: `email_labels` (labels CRUD), `temp_attachments` (upload temporário)
+
+---
 Task ID: 14
 Agent: Main Agent
 Task: SmartRichEditor — abstrair complexidade HTML de utilizadores não-admin

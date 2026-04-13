@@ -171,3 +171,16 @@ class EmailSendRequest(BaseModel):
     body_html: Optional[str] = None
     cc_emails: Optional[List[str]] = None
     process_id: Optional[str] = None
+    attachment_ids: Optional[List[str]] = None
+
+
+class LabelCreateRequest(BaseModel):
+    """Payload para criar uma label."""
+    name: str
+    color: str
+
+
+class LabelUpdateRequest(BaseModel):
+    """Payload para atualizar uma label."""
+    name: Optional[str] = None
+    color: Optional[str] = None
