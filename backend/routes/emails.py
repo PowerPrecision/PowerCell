@@ -27,7 +27,7 @@ from fastapi.responses import Response
 from database import db
 from models.email import (
     EmailCreate, EmailUpdate, EmailResponse, EmailDirection, EmailStatus,
-    EmailMarkType, EmailTemplateCreate, EmailTemplateResponse, EmailFilter
+    EmailMarkType, EmailTemplateCreate, EmailTemplateResponse, EmailFilter, EmailSendRequest
 )
 from services.auth import get_current_user
 from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails
@@ -1869,22 +1869,19 @@ async def search_emails(
 
 @router.post("/send")
 async def send_email_endpoint(
-    to_emails: List[str],
-    subject: str,
-    body: str,
-    body_html: Optional[str] = None,
-    cc_emails: Optional[List[str]] = None,
-    account: str = Query("precision", description="Conta de email"),
-    process_id: Optional[str] = None,
+    payload: EmailSendRequest,
+    account: str = Query("power", description="Conta de email"),
     current_user: dict = Depends(get_current_user)
 ):
     """Enviar email através de uma das contas configuradas."""
     # Sanitize inputs before sending and DB insert
-    to_emails = [e for e in (sanitize_email(e) for e in to_emails) if e]
-    if cc_emails:
-        cc_emails = [e for e in (sanitize_email(e) for e in cc_emails) if e]
-    subject = sanitize_string(subject, max_length=300)
-    body = sanitize_string(body, max_length=10000)
+    to_emails = [e for e in (sanitize_email(e) for e in payload.to_emails) if e]
+    cc_emails = None
+    if payload.cc_emails:
+        cc_emails = [e for e in (sanitize_email(e) for e in payload.cc_emails) if e]
+    subject = sanitize_string(payload.subject, max_length=300)
+    body = sanitize_string(payload.body, max_length=10000)
+    body_html = payload.body_html
 
     if not to_emails:
         raise HTTPException(status_code=400, detail="Pelo menos um email destinatário válido é necessário")
@@ -1896,7 +1893,7 @@ async def send_email_endpoint(
         body=body,
         body_html=body_html,
         cc_emails=cc_emails,
-        process_id=process_id,
+        process_id=payload.process_id,
         created_by=current_user["id"]
     )
     

@@ -161,3 +161,13 @@ class EmailTemplateResponse(BaseModel):
     created_at: str
     is_default: bool = False
     usage_count: int = 0
+
+
+class EmailSendRequest(BaseModel):
+    """Payload para envio de email via webmail."""
+    to_emails: List[str]
+    subject: str
+    body: str = ""
+    body_html: Optional[str] = None
+    cc_emails: Optional[List[str]] = None
+    process_id: Optional[str] = None
