@@ -21,13 +21,15 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import base64
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import Response
+import re
 
 from database import db
 from models.email import (
     EmailCreate, EmailUpdate, EmailResponse, EmailDirection, EmailStatus,
-    EmailMarkType, EmailTemplateCreate, EmailTemplateResponse, EmailFilter, EmailSendRequest
+    EmailMarkType, EmailTemplateCreate, EmailTemplateResponse, EmailFilter, EmailSendRequest,
+    LabelCreateRequest, LabelUpdateRequest
 )
 from services.auth import get_current_user
 from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails
@@ -905,6 +907,273 @@ async def send_documentation_email(
         "attachments_sent": len(email_attachments),
         "attachments_failed": len(failed_attachments) if failed_attachments else 0
     }
+
+
+# ==== LABELS CRUD (user-level labels) ====
+
+DEFAULT_LABELS = [
+    {"name": "Urgente", "color": "#ef4444"},
+    {"name": "A Aguardar", "color": "#f59e0b"},
+    {"name": "Concluído", "color": "#22c55e"},
+    {"name": "Follow-up", "color": "#3b82f6"},
+    {"name": "Reunião", "color": "#8b5cf6"},
+]
+
+
+def _validate_hex_color(color: str) -> bool:
+    """Validate hex color format like #e74c3c or #fff."""
+    return bool(re.match(r'^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$', color))
+
+
+@router.get("/labels")
+async def list_labels(
+    current_user: dict = Depends(get_current_user)
+):
+    """Listar todas as labels do utilizador. Cria labels predefinidas na primeira chamada."""
+    user_id = current_user["id"]
+    existing = await db.email_labels.find(
+        {"user_id": user_id}, {"_id": 0}
+    ).sort("created_at", 1).to_list(100)
+
+    # Seed default labels on first access
+    if not existing:
+        now = datetime.now(timezone.utc).isoformat()
+        for label_def in DEFAULT_LABELS:
+            await db.email_labels.insert_one({
+                "id": str(uuid.uuid4()),
+                "name": label_def["name"],
+                "color": label_def["color"],
+                "user_id": user_id,
+                "created_at": now,
+            })
+        existing = await db.email_labels.find(
+            {"user_id": user_id}, {"_id": 0}
+        ).sort("created_at", 1).to_list(100)
+
+    return {"labels": existing}
+
+
+@router.post("/labels")
+async def create_label(
+    payload: LabelCreateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Criar uma nova label."""
+    user_id = current_user["id"]
+    name = sanitize_string(payload.name.strip(), max_length=30)
+    color = payload.color.strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome da label é obrigatório")
+    if not _validate_hex_color(color):
+        raise HTTPException(status_code=400, detail="Cor inválida. Use formato hexadecimal (ex: #ef4444)")
+
+    # Check for duplicate name
+    dup = await db.email_labels.find_one({"user_id": user_id, "name": name})
+    if dup:
+        raise HTTPException(status_code=409, detail="Já existe uma label com esse nome")
+
+    label_doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "color": color,
+        "user_id": user_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.email_labels.insert_one(label_doc)
+    label_doc.pop("_id", None)
+
+    logger.info(f"Label criada: {name} ({color}) por {current_user['email']}")
+    return label_doc
+
+
+@router.put("/labels/{label_id}")
+async def update_label(
+    label_id: str,
+    payload: LabelUpdateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Atualizar nome e/ou cor de uma label."""
+    user_id = current_user["id"]
+    label = await db.email_labels.find_one({"id": label_id, "user_id": user_id})
+    if not label:
+        raise HTTPException(status_code=404, detail="Label não encontrada")
+
+    update_data = {}
+    if payload.name is not None:
+        new_name = sanitize_string(payload.name.strip(), max_length=30)
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Nome da label é obrigatório")
+        # Check duplicate name (excluding current label)
+        dup = await db.email_labels.find_one({"user_id": user_id, "name": new_name, "id": {"$ne": label_id}})
+        if dup:
+            raise HTTPException(status_code=409, detail="Já existe uma label com esse nome")
+        update_data["name"] = new_name
+    if payload.color is not None:
+        color = payload.color.strip()
+        if not _validate_hex_color(color):
+            raise HTTPException(status_code=400, detail="Cor inválida. Use formato hexadecimal (ex: #ef4444)")
+        update_data["color"] = color
+
+    if update_data:
+        await db.email_labels.update_one({"id": label_id}, {"$set": update_data})
+
+    updated = await db.email_labels.find_one({"id": label_id}, {"_id": 0})
+    logger.info(f"Label {label_id} atualizada por {current_user['email']}")
+    return updated
+
+
+@router.delete("/labels/{label_id}")
+async def delete_label(
+    label_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Eliminar label e remover de todos os emails do utilizador."""
+    user_id = current_user["id"]
+    label = await db.email_labels.find_one({"id": label_id, "user_id": user_id})
+    if not label:
+        raise HTTPException(status_code=404, detail="Label não encontrada")
+
+    label_name = label["name"]
+
+    # Remove label from all emails
+    await db.emails.update_many(
+        {"labels": label_name},
+        {"$pull": {"labels": label_name}}
+    )
+
+    # Delete label document
+    await db.email_labels.delete_one({"id": label_id})
+
+    logger.info(f"Label '{label_name}' ({label_id}) eliminada por {current_user['email']}")
+    return {"success": True, "message": f"Label '{label_name}' eliminada"}
+
+
+# ==== ATTACHMENT UPLOAD ====
+
+@router.post("/attachments/upload")
+async def upload_attachments(
+    files: List[UploadFile] = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Carregar um ou mais ficheiros para o S3 (pasta temporária).
+    Máximo 25MB por ficheiro, máximo 10 ficheiros.
+    Retorna lista de metadados com temp_key para referência futura.
+    """
+    from services.s3_storage import s3_service
+
+    if not files:
+        raise HTTPException(status_code=400, detail="Nenhum ficheiro enviado")
+
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="Máximo de 10 ficheiros por upload")
+
+    MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB
+    user_id = current_user["id"]
+    uploaded = []
+    errors = []
+
+    for file in files:
+        # Read content
+        content = await file.read()
+
+        if len(content) > MAX_FILE_SIZE:
+            errors.append(f"{file.filename}: ficheiro excede 25MB")
+            continue
+
+        if not content:
+            errors.append(f"{file.filename}: ficheiro vazio")
+            continue
+
+        file_id = str(uuid.uuid4())
+        safe_filename = file.filename or "unnamed"
+        temp_key = f"temp/attachments/{user_id}/{file_id}_{safe_filename}"
+
+        try:
+            import io
+            file_obj = io.BytesIO(content)
+            s3_service.s3_client.upload_fileobj(
+                file_obj,
+                s3_service.bucket_name,
+                temp_key,
+                ExtraArgs={'ContentType': file.content_type or 'application/octet-stream'}
+            )
+
+            attachment_meta = {
+                "id": file_id,
+                "file_name": safe_filename,
+                "file_size": len(content),
+                "mime_type": file.content_type or "application/octet-stream",
+                "temp_key": temp_key,
+                "user_id": user_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            # Store temp attachment metadata for lookup during send
+            await db.temp_attachments.insert_one(attachment_meta)
+
+            uploaded.append({
+                "id": file_id,
+                "file_name": safe_filename,
+                "file_size": len(content),
+                "mime_type": file.content_type or "application/octet-stream",
+                "temp_key": temp_key,
+            })
+            logger.info(f"Attachment upload: {safe_filename} -> {temp_key}")
+        except Exception as e:
+            errors.append(f"{file.filename}: erro no upload - {str(e)}")
+            logger.error(f"Erro no upload de attachment {safe_filename}: {e}")
+
+    if not uploaded:
+        raise HTTPException(status_code=500, detail=f"Nenhum ficheiro carregado: {'; '.join(errors)}")
+
+    return {
+        "attachments": uploaded,
+        "errors": errors if errors else None,
+    }
+
+
+# ==== ATTACHMENT DOWNLOAD (presigned URL) ====
+
+@router.get("/{email_id}/attachments/{file_id}/download")
+async def download_email_attachment(
+    email_id: str,
+    file_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Obter URL pré-assinada para download de anexo de email.
+    Procura o attachment pelo id no array de attachments do email.
+    Se tiver s3_key, gera presigned URL (1h). Caso contrário, retorna URL existente.
+    """
+    from services.s3_storage import s3_service
+
+    email = await db.emails.find_one({"id": email_id}, {"_id": 0})
+    if not email:
+        raise HTTPException(status_code=404, detail="Email não encontrado")
+
+    attachments = email.get("attachments", [])
+    attachment = next((a for a in attachments if a.get("id") == file_id), None)
+
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+
+    filename = attachment.get("filename", attachment.get("file_name", "anexo"))
+    content_type = attachment.get("content_type", attachment.get("mime_type", "application/octet-stream"))
+
+    # If has s3_key, generate presigned URL
+    s3_key = attachment.get("s3_key")
+    if s3_key:
+        url = s3_service.get_presigned_url(s3_key, expiration=3600)
+        if url:
+            return {"url": url, "filename": filename, "content_type": content_type}
+        raise HTTPException(status_code=500, detail="Erro ao gerar URL de download")
+
+    # Fallback: return existing URL or embedded content info
+    if attachment.get("url"):
+        return {"url": attachment["url"], "filename": filename, "content_type": content_type}
+
+    raise HTTPException(status_code=404, detail="Conteúdo do anexo não disponível para download")
 
 
 # ==== MARCAÇÃO DE EMAILS ====
@@ -1869,6 +2138,57 @@ async def send_email_endpoint(
     if not to_emails:
         raise HTTPException(status_code=400, detail="Pelo menos um email destinatário válido é necessário")
 
+    # ==== PROCESS TEMP ATTACHMENTS ====
+    email_attachments = []
+    temp_attachment_records = []  # Track for S3 move + cleanup
+    temp_keys_to_cleanup = []
+
+    if payload.attachment_ids:
+        # Look up temp attachments from MongoDB
+        temp_docs = await db.temp_attachments.find(
+            {"id": {"$in": payload.attachment_ids}, "user_id": current_user["id"]},
+            {"_id": 0}
+        ).to_list(20)
+
+        if len(temp_docs) != len(payload.attachment_ids):
+            found_ids = {d["id"] for d in temp_docs}
+            missing = [aid for aid in payload.attachment_ids if aid not in found_ids]
+            logger.warning(f"Temp attachments not found: {missing}")
+            # Continue with available attachments
+
+        from services.s3_storage import s3_service
+
+        for temp_doc in temp_docs:
+            temp_key = temp_doc["temp_key"]
+            file_name = temp_doc["file_name"]
+            mime_type = temp_doc.get("mime_type", "application/octet-stream")
+
+            try:
+                # Download content from temp S3 path
+                loop = asyncio.get_event_loop()
+                content_bytes = await loop.run_in_executor(
+                    None, lambda tk=temp_key: s3_service.get_file_content(tk)
+                )
+                if content_bytes:
+                    email_attachments.append({
+                        "filename": file_name,
+                        "content_bytes": content_bytes,
+                        "content_type": mime_type,
+                    })
+                    temp_attachment_records.append({
+                        "id": temp_doc["id"],
+                        "file_name": file_name,
+                        "file_size": temp_doc.get("file_size", len(content_bytes)),
+                        "mime_type": mime_type,
+                        "temp_key": temp_key,
+                    })
+                    temp_keys_to_cleanup.append(temp_key)
+                    logger.info(f"Temp attachment prepared for send: {file_name}")
+                else:
+                    logger.warning(f"Could not download temp attachment from S3: {temp_key}")
+            except Exception as e:
+                logger.error(f"Error downloading temp attachment {file_name}: {e}")
+
     result = await send_email(
         account_name=account,
         to_emails=to_emails,
@@ -1877,12 +2197,75 @@ async def send_email_endpoint(
         body_html=body_html,
         cc_emails=cc_emails,
         process_id=payload.process_id,
-        created_by=current_user["id"]
+        created_by=current_user["id"],
+        attachments=email_attachments if email_attachments else None
     )
     
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
-    
+
+    # ==== MOVE ATTACHMENTS FROM TEMP TO PERMANENT + UPDATE EMAIL DOC ====
+    if temp_attachment_records and payload.process_id:
+        from services.s3_storage import s3_service
+
+        # Find the most recently created sent email for this user+process
+        sent_email = await db.emails.find_one(
+            {
+                "process_id": payload.process_id,
+                "created_by": current_user["id"],
+                "direction": "sent",
+            },
+            sort=[("sent_at", -1)],
+        )
+
+        if sent_email:
+            permanent_attachments = []
+            for att_rec in temp_attachment_records:
+                permanent_s3_key = f"Emails/{sent_email['id']}/{att_rec['file_name']}"
+                try:
+                    loop = asyncio.get_event_loop()
+                    moved = await loop.run_in_executor(
+                        None,
+                        lambda sk=att_rec["temp_key"], pk=permanent_s3_key: s3_service.rename_file(sk, pk)
+                    )
+                    if moved:
+                        logger.info(f"Attachment moved: {att_rec['temp_key']} -> {permanent_s3_key}")
+                    else:
+                        logger.warning(f"Failed to move attachment: {att_rec['temp_key']}")
+                        permanent_s3_key = att_rec["temp_key"]  # Keep temp key as fallback
+                except Exception as e:
+                    logger.error(f"Error moving attachment {att_rec['temp_key']}: {e}")
+                    permanent_s3_key = att_rec["temp_key"]
+
+                permanent_attachments.append({
+                    "id": att_rec["id"],
+                    "filename": att_rec["file_name"],
+                    "file_name": att_rec["file_name"],
+                    "size": att_rec["file_size"],
+                    "content_type": att_rec["mime_type"],
+                    "s3_key": permanent_s3_key,
+                })
+
+            # Update email document with permanent attachment metadata
+            existing_attachments = sent_email.get("attachments", [])
+            await db.emails.update_one(
+                {"id": sent_email["id"]},
+                {"$set": {"attachments": existing_attachments + permanent_attachments}}
+            )
+
+        # Clean up temp attachment metadata from MongoDB
+        await db.temp_attachments.delete_many({"id": {"$in": [r["id"] for r in temp_attachment_records]}})
+
+        # Clean up temp files from S3 (for any that weren't moved)
+        from services.s3_storage import s3_service
+        for temp_key in temp_keys_to_cleanup:
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, lambda tk=temp_key: s3_service.delete_file(tk))
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp file {temp_key}: {e}")
+
+    result["attachments_sent"] = len(email_attachments)
     return result
 
 
