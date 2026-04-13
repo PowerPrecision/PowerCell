@@ -139,6 +139,10 @@ const WebmailPage = () => {
   // Mobile reading pane
   const [showMobileReading, setShowMobileReading] = useState(false);
 
+  // Sync state
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState(null);
+
   // Debounce search
   const searchTimeoutRef = useRef(null);
 
@@ -205,6 +209,49 @@ const WebmailPage = () => {
   const handleRefresh = useCallback(() => {
     fetchEmails(activeFolder, currentPage, searchQuery);
   }, [activeFolder, currentPage, searchQuery, fetchEmails]);
+
+  // ============================================================
+  // SYNC EMAILS (IMAP → DB)
+  // ============================================================
+  const handleSyncEmails = useCallback(async () => {
+    if (!token || syncing) return;
+    setSyncing(true);
+    try {
+      const params = new URLSearchParams({
+        account: account || "",
+        days: "7",
+      });
+      const response = await fetch(
+        `${API_URL}/api/emails/webmail/sync?${params.toString()}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || "Erro na sincronização");
+      }
+      const data = await response.json();
+      const synced = data.total_synced || 0;
+      const dups = data.total_duplicates || 0;
+      if (synced > 0) {
+        toast.success(`${synced} novo${synced !== 1 ? "s" : ""} email${synced !== 1 ? "s" : ""} sincronizado${synced !== 1 ? "s" : ""}${dups > 0 ? ` (${dups} duplicado${dups !== 1 ? "s" : ""})` : ""}`);
+      } else if (dups > 0) {
+        toast.info(`${dups} email${dups !== 1 ? "s" : ""} já sincronizado${dups !== 1 ? "s" : ""}. Tudo em dia!`);
+      } else {
+        toast.info("Nenhum email novo para sincronizar");
+      }
+      setLastSyncTime(new Date());
+      // Refresh the list
+      fetchEmails(activeFolder, currentPage, searchQuery);
+    } catch (error) {
+      console.error("Erro ao sincronizar emails:", error);
+      toast.error(error.message || "Erro ao sincronizar emails");
+    } finally {
+      setSyncing(false);
+    }
+  }, [token, account, syncing, activeFolder, currentPage, searchQuery, fetchEmails]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
@@ -534,13 +581,22 @@ const WebmailPage = () => {
             ${showMobileReading ? "hidden md:flex" : "flex"}
           `}>
             {/* Nova Mensagem */}
-            <div className="p-3">
+            <div className="p-3 space-y-2">
               <Button
                 className="w-full gap-2"
                 onClick={() => openComposer("new")}
               >
                 <Plus className="h-4 w-4" />
                 Nova Mensagem
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                onClick={handleSyncEmails}
+                disabled={syncing}
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "A sincronizar..." : "Sincronizar"}
               </Button>
             </div>
 
@@ -584,10 +640,15 @@ const WebmailPage = () => {
             </nav>
 
             {/* Footer info */}
-            <div className="p-3 border-t">
+            <div className="p-3 border-t space-y-1">
               <p className="text-[10px] text-muted-foreground">
                 {totalEmails} email{totalEmails !== 1 ? "s" : ""}
               </p>
+              {lastSyncTime && (
+                <p className="text-[10px] text-muted-foreground">
+                  Última sinc: {format(lastSyncTime, "HH:mm:ss")}
+                </p>
+              )}
             </div>
           </div>
 
