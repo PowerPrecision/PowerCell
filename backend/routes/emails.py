@@ -1493,6 +1493,10 @@ async def webmail_list(
     - trash: emails arquivados
     - drafts: emails com status=draft
     """
+    # Filtrar emails por utilizador logado: mostrar apenas emails onde o user
+    # é remetente, destinatário, ou em CC
+    user_email = (current_user.get("email") or "").lower().strip()
+    
     query = {"is_archived": False}
     
     if folder == "inbox":
@@ -1508,15 +1512,36 @@ async def webmail_list(
     elif folder == "drafts":
         query["status"] = "draft"
     
+    # Filtrar por email do utilizador (excepto para drafts que podem não ter destinatário)
+    if user_email and folder not in ("drafts", "trash"):
+        email_filter = [
+            {"from_email": {"$regex": user_email.replace(".", r"\."), "$options": "i"}},
+            {"to_emails": {"$regex": user_email.replace(".", r"\."), "$options": "i"}},
+            {"cc_emails": {"$regex": user_email.replace(".", r"\."), "$options": "i"}},
+        ]
+        if "$or" in query:
+            # Merge com pesquisa textual
+            query["$and"] = [
+                {"$or": query.pop("$or")},
+                {"$or": email_filter},
+            ]
+        else:
+            query["$or"] = email_filter
+    
     # Pesquisa textual
     if search:
         search = sanitize_string(search, max_length=200)
-        query["$or"] = [
+        search_or = [
             {"subject": {"$regex": search, "$options": "i"}},
             {"body": {"$regex": search, "$options": "i"}},
             {"from_email": {"$regex": search, "$options": "i"}},
             {"to_emails": {"$regex": search, "$options": "i"}},
         ]
+        if "$or" in query:
+            query["$and"] = query.get("$and", [])
+            query["$and"].append({"$or": search_or})
+        else:
+            query["$or"] = search_or
     
     skip = (page - 1) * limit
     total = await db.emails.count_documents(query)

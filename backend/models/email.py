@@ -99,7 +99,7 @@ class EmailUpdate(BaseModel):
 class EmailResponse(BaseModel):
     """Resposta de email."""
     id: str
-    process_id: str
+    process_id: Optional[str] = None
     client_name: Optional[str] = None
     direction: EmailDirection
     from_email: str

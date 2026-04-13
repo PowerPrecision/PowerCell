@@ -10,6 +10,7 @@ Suporta dois servidores: Precision Crédito e Power Real Estate.
 import logging
 import os
 import email
+import traceback
 import imaplib
 import smtplib
 import ssl
@@ -1291,6 +1292,7 @@ def _fetch_all_from_folder_sync(
             nums = nums[-max_emails:]
         
         logger.info(f"[Webmail Sync] {len(nums)} emails para processar em {folder}")
+        logger.info(f"[Webmail Sync] Code version: 086c502-fixed")
         
         for num in nums:
             try:
@@ -1352,6 +1354,7 @@ def _fetch_all_from_folder_sync(
                 
             except Exception as e:
                 logger.warning(f"[Webmail Sync] Erro ao processar email: {e}")
+                logger.warning(f"[Webmail Sync] Traceback: {traceback.format_exc()}")
                 continue
         
         mail.logout()
