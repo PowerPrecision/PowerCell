@@ -195,7 +195,8 @@ async def scheduler_loop():
     # Horários da última execução
     last_runs = {
         "scheduled": 0,
-        "matching": 0
+        "matching": 0,
+        "webmail": 0
     }
     
     while not shutdown_event.is_set():
@@ -214,6 +215,17 @@ async def scheduler_loop():
                 logger.info("Agendando matching automático...")
                 await task_queue.add_task("match_leads", {})
                 last_runs["matching"] = now
+
+            # Sincronização Webmail (a cada 15 minutos)
+            if now - last_runs["webmail"] > 900:
+                logger.info("Agendando sincronização de webmail...")
+                try:
+                    from services.email_service import sync_webmail_emails
+                    await sync_webmail_emails(days=7, max_emails=100)
+                    logger.info("Sincronização de webmail concluída")
+                except Exception as e:
+                    logger.error(f"Erro na sincronização de webmail: {e}")
+                last_runs["webmail"] = now
             
             await asyncio.sleep(60)  # Verificar a cada minuto
             
