@@ -19,7 +19,7 @@ from typing import List, Optional, Dict
 from io import BytesIO
 
 # Adicionados UploadFile, File, Form para o S3
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response, Body
 from fastapi.responses import JSONResponse
 
 from database import db
@@ -2519,7 +2519,7 @@ async def ai_analyze_documents(
 @router.post("/ai-apply-suggestions/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def apply_ai_suggestions(
     process_id: str,
-    suggestions: Dict = None,
+    suggestions: Dict = Body(default=None),
     user: dict = Depends(get_current_user)
 ):
     """
