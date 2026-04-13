@@ -296,6 +296,32 @@ def _fetch_and_parse_email(mail, num):
     return msg, msg_id
 
 
+
+def _extract_email_bytes_from_fetch(fetch_result):
+    """
+    Extrair bytes de um email de forma segura a partir de mail.fetch().
+    """
+    if not fetch_result or len(fetch_result) < 2:
+        return None
+    msg_data = fetch_result[1]
+    if not msg_data:
+        return None
+    if isinstance(msg_data, list) and len(msg_data) > 0:
+        item = msg_data[0]
+        if isinstance(item, tuple) and len(item) >= 2:
+            return item[1]
+        elif isinstance(item, bytes):
+            return item
+    return None
+
+
+def _safe_search_result(mail_result):
+    """Extrair message_numbers de mail.search() de forma segura."""
+    if not mail_result or len(mail_result) < 2:
+        return [b'']
+    return mail_result[1]
+
+
 def get_email_body(msg) -> tuple:
     """Extrair corpo do email (texto e HTML) com suporte a imagens embutidas."""
     body_text, body_html, _ = get_email_body_with_embedded_images(msg)
@@ -356,7 +382,8 @@ def _fetch_emails_by_name_sync(
         since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
         
         # 1. Procurar em subpastas que correspondam ao nome do cliente
-        _, folders = mail.list()
+        list_result = mail.list()
+        folders = list_result[1] if list_result and len(list_result) >= 2 else []
         matching_folders = []
         
         for folder_info in folders:
@@ -396,7 +423,7 @@ def _fetch_emails_by_name_sync(
                 if result != 'OK':
                     continue
                 
-                _, message_numbers = mail.search(None, 'ALL')
+                message_numbers = _safe_search_result(mail.search(None, 'ALL'))
                 
                 for num in message_numbers[0].split():
                     try:
@@ -460,14 +487,14 @@ def _fetch_emails_by_name_sync(
                 try:
                     # Tentar busca com UTF-8
                     search_query = f'(SUBJECT "{search_name}" SINCE {since_date})'
-                    _, message_numbers = mail.search('UTF-8', search_query.encode('utf-8'))
+                    message_numbers = _safe_search_result(mail.search('UTF-8', search_query.encode('utf-8')))
                 except:
                     # Fallback: buscar sem charset específico (pode não encontrar alguns resultados)
                     try:
                         # Remover caracteres especiais para busca básica
                         import unicodedata
                         search_name_ascii = unicodedata.normalize('NFKD', search_name).encode('ASCII', 'ignore').decode('ASCII')
-                        _, message_numbers = mail.search(None, f'(SUBJECT "{search_name_ascii}" SINCE {since_date})')
+                        message_numbers = _safe_search_result(mail.search(None, f'(SUBJECT "{search_name_ascii}" SINCE {since_date})'))
                     except:
                         message_numbers = [b'']
                 
@@ -529,7 +556,7 @@ def _fetch_emails_by_name_sync(
                 logger.warning(f"Não foi possível seleccionar pasta {folder} para busca por corpo")
                 raise Exception(f"SELECT failed: {result}")
             
-            _, message_numbers = mail.search(None, f'(SINCE {since_date})')
+            message_numbers = _safe_search_result(mail.search(None, f'(SINCE {since_date})'))
             
             # Limitar a 200 emails mais recentes para performance
             nums = message_numbers[0].split()[-200:] if message_numbers[0] else []
@@ -664,10 +691,10 @@ def _fetch_emails_from_account_sync(
                     # Tentar busca com UTF-8 para suportar caracteres especiais
                     try:
                         search_query = f'({search_type} "{client_email}" SINCE {since_date})'
-                        _, message_numbers = mail.search('UTF-8', search_query.encode('utf-8'))
+                        message_numbers = _safe_search_result(mail.search('UTF-8', search_query.encode('utf-8')))
                     except:
                         # Fallback para busca sem charset
-                        _, message_numbers = mail.search(None, f'({search_type} "{client_email}" SINCE {since_date})')
+                        message_numbers = _safe_search_result(mail.search(None, f'({search_type} "{client_email}" SINCE {since_date})'))
                     
                     for num in message_numbers[0].split():
                         try:
@@ -1274,7 +1301,7 @@ def _fetch_all_from_folder_sync(
             mail.logout()
             return emails_found
         
-        _, message_numbers = mail.search(None, f'(SINCE {since_date})')
+        message_numbers = _safe_search_result(mail.search(None, f'(SINCE {since_date})'))
         nums = message_numbers[0].split()
         
         # Limitar aos mais recentes (do fim para o início)
