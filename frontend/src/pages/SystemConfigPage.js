@@ -900,6 +900,7 @@ const SystemConfigPage = () => {
     }, [syncPolling]);
 
     return (
+      <>
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -1287,6 +1288,7 @@ const SystemConfigPage = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </>
     );
   };
 
