@@ -4,15 +4,16 @@ Script de Seed - Popular base de dados com dados iniciais
 Cria utilizadores, configurações e dados de exemplo.
 """
 import asyncio
+import os
 from datetime import datetime, timezone
 from passlib.context import CryptContext
 from motor.motor_asyncio import AsyncIOMotorClient
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Connection string
-MONGO_URL = "mongodb+srv://admin:y8aEj7BByvgeO2zO@cluster0.373e1eh.mongodb.net/?appName=Cluster0&retryWrites=true&w=majority"
-DB_NAME = "powercell_dev"
+# Connection string — usar variáveis de ambiente
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "powercell_dev")
 
 
 def hash_password(password: str) -> str:

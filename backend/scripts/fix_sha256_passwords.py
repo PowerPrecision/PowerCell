@@ -30,10 +30,7 @@ from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Configuração — ajustar conforme necessário
-MONGO_URL = os.environ.get(
-    "MONGO_URL",
-    "mongodb+srv://admin:y8aEj7BByvgeO2zO@cluster0.373e1eh.mongodb.net/?appName=Cluster0&retryWrites=true&w=majority"
-)
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "powercell_dev")
 
 
