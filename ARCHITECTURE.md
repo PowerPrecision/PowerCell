@@ -54,6 +54,8 @@ graph TB
             AdminR["/admin<br/>(Utilizadores, Impersonate)"]
             AuditR["/audit<br/>(Trilha de Auditoria)"]
             BackupR["/backup<br/>(Backups Automáticos)"]
+            SyncDBR["/admin/sync-database<br/>(Prod→Dev Restore)"]
+            AnnotationsR["/annotations<br/>(Anotações em PDFs)"]
             SystemConfigR["/system-config<br/>(RGPD, DSTI, Emails)"]
             OtherR["+30 rotas adicionais"]
         end
@@ -73,6 +75,8 @@ graph TB
             ScraperSvc["PropertyScraper<br/>(Idealista)"]
             AIConfidence["Confidence Scorer<br/>(Score por campo)"]
             OrganizerSvc["Document Organizer<br/>(Categorização automática)"]
+            EmailB2BSvc["EmailB2BService<br/>(Enviar p/ Balcões)"]
+            AnnotationSvc["AnnotationService<br/>(5 tipos de anotação)"]
         end
 
         subgraph Middleware_Backend["Middleware"]
@@ -97,6 +101,8 @@ graph TB
         ARQWorker["ARQ Worker<br/>(async tasks)"]
         JobMonitor["Job Monitor<br/>(Stuck Detection)"]
         BackupSched["Backup Scheduler<br/>(Diário 03:00 UTC)"]
+        RestorePipeline["restore_dev_from_backup<br/>(RGPD Fail-Safe)"]
+        SyncPipeline["sync_prod_to_dev<br/>(Sanitização PII)"]
     end
 
     subgraph Deploy["🚀 Deploy"]
@@ -153,7 +159,12 @@ graph TB
     ARQWorker --> Redis
     JobMonitor --> MongoDB
     BackupSched --> MongoDB
-    BackupSched --> S3
+    BackupSched -->|Upload ZIP| S3
+    RestorePipeline -->|Localizar backup| S3
+    RestorePipeline -->|Download ZIP| S3
+    RestorePipeline -->|Import temp + Swap| MongoDB
+    SyncPipeline -->|Leitura| MongoDB
+    SyncPipeline -->|Escrita sanitized| MongoDB
 
     %% Observabilidade
     SentryMW --> Sentry
@@ -500,6 +511,9 @@ erDiagram
 | **Blind Indexing** | `EncryptionService` — HMAC-SHA256 para pesquisa em campos encriptados |
 | **Dedicated Collection** | `history`, `audit_trail` — colecções separadas para evitar 16MB limit |
 | **Confidence Scoring** | `AIDocumentService` — score 0.0-1.0 por campo extraído, alertas para < 0.8 |
+| **Fail-Safe Swap** | `restore_dev_from_backup.py` — BD de Dev não é modificada se o backup estiver corrompido |
+| **Temporary Collection** | `_restore_temp_*` — coleções temporárias para migração atómica de dados |
+| **RGPD Sanitization Pipeline** | `sync_prod_to_dev.py`, `restore_dev_from_backup.py` — anonimização determinística de PII (nome, NIF, email, telefone, IBAN) |
 
 ---
 
@@ -537,6 +551,79 @@ flowchart TD
         WSPoll --> WSReconnect["Reconexão automática"]
     end
 ```
+
+---
+
+## Fluxo de Restauro Seguro (Dev ← S3 Backup)
+
+```mermaid
+sequenceDiagram
+    actor Admin as Admin (API/CLI)
+    participant Restore as restore_dev_from_backup
+    participant S3 as AWS S3
+    participant ProdDB as MongoDB Prod<br/>(backup_history)
+    participant DevDB as MongoDB Dev
+    participant TempCol as Coleções _restore_temp_*
+    participant RealCol as Coleções Reais (Dev)
+
+    Admin->>Restore: Trigger restauro<br/>(API: /admin/sync-database ou CLI)
+
+    %% Passo 1: Localizar backup
+    Restore->>ProdDB: Consultar backup_history<br/>(último com status=completed)
+    alt Encontrado via backup_history
+        ProdDB-->>Restore: s3_url do último backup
+    else Fallback
+        Restore->>S3: Listar objetos<br/>com prefix "backups/"
+        S3-->>Restore: Lista de ZIPs ordenada por data
+        Restore->>Restore: Selecionar mais recente
+    end
+
+    %% Passo 2: Download
+    Restore->>S3: GET backup ZIP
+    S3-->>Restore: Ficheiro ZIP (JSON por coleção)
+
+    %% Passo 3: Extrair e validar
+    Restore->>Restore: Extrair ZIP → Validar JSON
+    alt ZIP corrompido ou sem JSON
+        Restore-->>Admin: ❌ ERRO: Backup corrompido<br/>Dev DB NÃO foi modificada
+    end
+
+    %% Passo 4: Importar para temp
+    loop Para cada coleção
+        Restore->>Restore: Sanitização RGPD<br/>(anonimizar PII)
+        Restore->>TempCol: INSERT em _restore_temp_*
+    end
+
+    %% Passo 5: Validar integridade
+    Restore->>TempCol: count_documents (validação)
+    alt Inconsistência detetada
+        Restore->>TempCol: DROP _restore_temp_* (cleanup)
+        Restore-->>Admin: ❌ ERRO: Validação falhou<br/>Dev DB NÃO foi modificada
+    end
+
+    %% Passo 6: Swap atómico
+    loop Para cada coleção
+        Restore->>RealCol: DROP coleção real
+        Restore->>TempCol: RENAME _restore_temp_X → X
+    end
+
+    %% Passo 7: Pós-swap
+    Restore->>RealCol: Recriar índices<br/>(email, nif, status)
+    Restore->>DevDB: Cleanup de _restore_temp_* residuais
+    Restore->>Restore: Remover ficheiros temporários
+
+    Restore-->>Admin: ✅ Restauro concluído com sucesso
+```
+
+**Propriedades de segurança do pipeline:**
+
+| Propriedade | Descrição |
+|-------------|-----------|
+| **Fail-Safe** | A BD de Dev **nunca** é modificada se qualquer passo falhar |
+| **Não toca em Prod** | Não acede ao MongoDB de Produção diretamente (apenas S3) |
+| **Atomicidade** | Swap por rename garante consistência |
+| **Rastreabilidade** | Cada documento recebe `_sanitized_at` e `_sanitized_source` |
+| **Cleanup automático** | Coleções temporárias são removidas em caso de sucesso ou erro |
 
 ---
 
