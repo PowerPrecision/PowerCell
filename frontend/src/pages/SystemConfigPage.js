@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { toast } from "sonner";
 import {
   Settings,
@@ -1121,6 +1122,7 @@ const SystemConfigPage = () => {
     const [versions, setVersions] = useState([]);
     const [loadingVersions, setLoadingVersions] = useState(false);
     const [changelog, setChangelog] = useState("");
+    const [showRgpdPreview, setShowRgpdPreview] = useState(false);
     
     const isAdminOrCEO = user?.role === "admin" || user?.role === "ceo";
 
@@ -1337,6 +1339,13 @@ const SystemConfigPage = () => {
                   Restaurar Padrão
                 </Button>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowRgpdPreview(true)}
+                    className="gap-2"
+                  >
+                    👁️ Pré-visualizar RGPD
+                  </Button>
                   {hasChanges && (
                     <span className="text-sm text-amber-600 font-medium">
                       Alterações por guardar
@@ -1357,6 +1366,37 @@ const SystemConfigPage = () => {
                 Apenas utilizadores Admin ou CEO podem editar o template RGPD.
               </p>
             )}
+
+            {/* RGPD Preview Dialog */}
+            <Dialog open={showRgpdPreview} onOpenChange={setShowRgpdPreview}>
+              <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Pré-visualização RGPD</DialogTitle>
+                  <DialogDescription>
+                    Visualização do texto tal como o cliente final o verá
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="prose prose-sm max-w-none bg-white border rounded-lg p-6"
+                  dangerouslySetInnerHTML={{
+                    __html: (templateContent || "")
+                      .replace(/\{\{NOME_CLIENTE\}\}/g, "João Silva")
+                      .replace(/\{\{NOME_EMPRESA\}\}/g, "Power Real Estate")
+                      .replace(/\{\{CONTRIBUINTE\}\}/g, "123456789")
+                      .replace(/\{\{MORADA\}\}/g, "Rua Example, 123, Lisboa")
+                      .replace(/\{\{CODIGO_POSTAL\}\}/g, "1000-001")
+                      .replace(/\{\{TIPO_DOCUMENTO\}\}/g, "Cartão de Cidadão")
+                      .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, "CC 00000000")
+                      .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, "01/01/2030")
+                      .replace(/\{\{DATA_ASSINATURA\}\}/g, new Date().toLocaleDateString("pt-PT"))
+                  }}
+                />
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowRgpdPreview(false)}>
+                    Fechar
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </CardContent>
         </Card>
 

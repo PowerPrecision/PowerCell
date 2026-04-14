@@ -1,3 +1,4 @@
+import 'react-quill-new/dist/quill.snow.css';
 /**
  * DocumentRecipientsManager - Gestão visual de destinatários de documentação
  * 
@@ -53,6 +54,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import ReactQuill from 'react-quill-new';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -706,15 +708,30 @@ const DocumentRecipientsManager = ({ token, user }) => {
                   Restaurar Predefinição
                 </Button>
               </div>
-              <Textarea
-                value={emailTemplate}
-                onChange={(e) => {
-                  setEmailTemplate(e.target.value);
-                  setHasChanges(true);
-                }}
-                placeholder={defaultTemplate}
-                className="min-h-[200px] font-mono text-sm"
-              />
+              <div className="border rounded-md overflow-hidden">
+                <ReactQuill
+                  theme="snow"
+                  value={emailTemplate}
+                  onChange={(val) => {
+                    setEmailTemplate(val);
+                    setHasChanges(true);
+                  }}
+                  placeholder="Escreva o template do email..."
+                  modules={{
+                    toolbar: [
+                      [{ 'header': [1, 2, 3, false] }],
+                      ['bold', 'italic', 'underline', 'strike'],
+                      [{ 'color': [] }, { 'background': [] }],
+                      [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                      [{ 'align': [] }],
+                      ['link'],
+                      ['clean'],
+                    ],
+                  }}
+                  formats={['header', 'bold', 'italic', 'underline', 'strike', 'color', 'background', 'list', 'align', 'link']}
+                  style={{ minHeight: '200px' }}
+                />
+              </div>
               <div className="bg-muted p-3 rounded-lg">
                 <p className="text-xs font-medium mb-2">Variáveis disponíveis (clique para copiar):</p>
                 <div className="max-h-48 overflow-y-auto">
