@@ -46,7 +46,7 @@ import {
   Check,
 } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com/api';
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://powercell-1.onrender.com/api';
 
 // ====================================================================
 // STEPPER COMPONENT
