@@ -432,7 +432,10 @@ const WebmailPage = () => {
       const response = await fetch(`${API_URL}/api/emails/${email.id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error("Erro ao carregar email");
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || `Erro ${response.status} ao carregar email`);
+      }
       const data = await response.json();
       setEmailDetail(data);
 
