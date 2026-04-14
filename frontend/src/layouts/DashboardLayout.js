@@ -66,6 +66,7 @@ import {
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
 import MobileBottomNav from "../components/layout/MobileBottomNav";
+import ContextSwitcher from "../components/layout/ContextSwitcher";
 import GlobalSearchModal from "../components/GlobalSearchModal";
 import ChatPanel from "../components/ChatPanel";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
@@ -98,7 +99,7 @@ const roleColors = {
 };
 
 const DashboardLayout = ({ children, title }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, effectiveRole } = useAuth();
   const { theme, toggleTheme, isDark } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -157,7 +158,7 @@ const DashboardLayout = ({ children, title }) => {
 
   const getNavItems = () => {
     // Admin vai para /admin, CEO e outros staff vão para /processos
-    const dashboardHref = user?.role?.toLowerCase() === "admin" ? "/admin" : "/processos";
+    const dashboardHref = effectiveRole?.toLowerCase() === "admin" ? "/admin" : "/processos";
     
     const baseItems = [
       {
@@ -181,7 +182,7 @@ const DashboardLayout = ({ children, title }) => {
       href: "/definicoes",
     };
 
-    if (user?.role === "cliente") {
+    if (effectiveRole === "cliente") {
       return [
         ...baseItems,
         statsItem,
@@ -189,7 +190,7 @@ const DashboardLayout = ({ children, title }) => {
     }
 
     // CEO tem menu limitado
-    if (user?.role?.toLowerCase() === "ceo") {
+    if (effectiveRole?.toLowerCase() === "ceo") {
       return {
         main: [
           ...baseItems,
@@ -295,7 +296,7 @@ const DashboardLayout = ({ children, title }) => {
     }
 
     // Admin tem menu completo
-    if (user?.role?.toLowerCase() === "admin") {
+    if (effectiveRole?.toLowerCase() === "admin") {
       return {
         main: [
           ...baseItems,
@@ -458,7 +459,7 @@ const DashboardLayout = ({ children, title }) => {
     }
 
     // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
-    const userRole = user?.role?.toLowerCase();
+    const userRole = effectiveRole?.toLowerCase();
     const userPermissions = user?.permissions || {};
     const userPages = userPermissions?.pages || [];
     const userActions = userPermissions?.actions || [];
@@ -754,13 +755,20 @@ const DashboardLayout = ({ children, title }) => {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate text-white">{user?.name}</p>
-                <span
-                  className={`inline-block px-2 py-0.5 text-xs font-semibold rounded-full ${
-                    roleColors[user?.role]
-                  }`}
-                >
-                  {roleLabels[user?.role]}
-                </span>
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span
+                    className={`inline-block px-2 py-0.5 text-xs font-semibold rounded-full ${
+                      roleColors[user?.role]
+                    }`}
+                  >
+                    {roleLabels[user?.role]}
+                  </span>
+                  {effectiveRole !== user?.role && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${roleColors[effectiveRole] || 'bg-gray-200'} ml-1`}>
+                      {roleLabels[effectiveRole]}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -849,6 +857,9 @@ const DashboardLayout = ({ children, title }) => {
                 </Button>
               )}
               
+              {/* Context Switcher - Múltiplos Perfis */}
+              <ContextSwitcher />
+
               {/* Notificações - só para utilizadores autenticados (não clientes) */}
               {user?.role !== "cliente" && (
                 <>
