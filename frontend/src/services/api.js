@@ -506,6 +506,9 @@ export const deleteAutoDraft = (draftId) => api.delete(`/emails/drafts/${draftId
 export const createAutoDraft = (processId, docType) =>
   api.post("/emails/drafts/create", { process_id: processId, doc_type: docType });
 
+// Webmail Stats (per-user, isolated)
+export const getWebmailStats = () => api.get("/emails/webmail-stats");
+
 // Trello
 export const getTrelloStatus = () => api.get("/trello/status");
 export const syncProcessWithTrello = (processId) => api.post(`/trello/sync/${processId}`);
