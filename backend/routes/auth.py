@@ -631,7 +631,7 @@ def _detect_hash_format(hash_value: str) -> str:
 
 @router.get("/diagnose")
 @limiter.limit("5/minute")
-async def diagnose_login(request: Request, email: str):
+async def diagnose_login(request: Request, response: Response, email: str):
     """
     Diagnóstico público para verificar porque o login falha.
     Diz se o utilizador existe, se está activo, e o formato do hash.
