@@ -663,7 +663,8 @@ const ProfilePage = () => {
                   changingPassword ||
                   !passwordData.current_password ||
                   !passwordData.new_password ||
-                  passwordData.new_password !== passwordData.confirm_password
+                  passwordData.new_password !== passwordData.confirm_password ||
+                  !passwordStrength?.valid
                 }
               >
                 {changingPassword ? "A alterar..." : "Alterar Password"}
