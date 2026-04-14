@@ -2535,7 +2535,9 @@ async def sync_database(
     - properties: remove links S3, limpa dados financeiros, arredonda coordenadas
     - users: mantém emails e passwords reais para login, anonimiza dados pessoais
     """
-    global _sync_in_progress, _sync_result_cache
+    # Nota: `global` não é necessário aqui pois apenas lemos _sync_in_progress.
+    # A escrita (atribuição) acontece dentro de _execute_restore() que já
+    # declara o seu próprio `global`.
 
     # ─── SEGURANÇA 1: Bloquear em produção ───
     environment = os.environ.get("ENVIRONMENT", "development").lower()
