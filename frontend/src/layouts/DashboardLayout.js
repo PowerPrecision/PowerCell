@@ -793,9 +793,7 @@ const DashboardLayout = ({ children, title }) => {
               >
                 <Menu className="h-4 w-4" />
               </Button>
-              <h1 className={`font-semibold tracking-tight transition-all duration-300 truncate text-sm ${
-                headerCollapsed ? 'text-xs sm:text-sm lg:text-xl'
-              }`}>{title}</h1>
+              <h1 className={`font-semibold tracking-tight transition-all duration-300 truncate text-sm ${headerCollapsed ? 'text-xs sm:text-sm lg:text-xl' : ''}`}>{title}</h1>
             </div>
 
             <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
