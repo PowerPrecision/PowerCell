@@ -35,6 +35,7 @@
  * // Em qualquer componente protegido
  * const { user, token, logout } = useAuth();
  */
+import { createContext, useState, useEffect, useCallback, useRef, useContext } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 
 const AuthContext = createContext(null);
