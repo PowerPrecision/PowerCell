@@ -2786,12 +2786,20 @@ async def get_email(
 ):
     """Obter detalhes de um email."""
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
-    
+
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
-    
+
     enriched = await enrich_email(email)
-    return EmailResponse(**enriched)
+
+    try:
+        return EmailResponse(**enriched)
+    except Exception as e:
+        logger.error(f"Erro ao validar email {email_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar email {email_id}: {str(e)}"
+        )
 
 
 @router.put("/{email_id}", response_model=EmailResponse)
@@ -2831,7 +2839,15 @@ async def update_email(
     
     updated_email = await db.emails.find_one({"id": email_id}, {"_id": 0})
     enriched = await enrich_email(updated_email)
-    return EmailResponse(**enriched)
+
+    try:
+        return EmailResponse(**enriched)
+    except Exception as e:
+        logger.error(f"Erro ao validar email {email_id} após update: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar email {email_id}: {str(e)}"
+        )
 
 
 @router.delete("/{email_id}")
