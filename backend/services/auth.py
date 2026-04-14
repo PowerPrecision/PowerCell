@@ -110,21 +110,55 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    """Verifica se uma password em texto claro corresponde a um hash bcrypt.
+    """Verifica se uma password em texto claro corresponde a um hash.
 
-    Função crítica no fluxo de login — compara a password fornecida com o
-    hash armazenado na base de dados. Se o formato do hash for incompatível
-    (ex: versão diferente de bcrypt), passlib tenta automaticamente uma
-    verificação de contingência graças a ``deprecated="auto"``.
+    Aceita dois formatos de hash:
+    - bcrypt (``$2b$12$...``): formato padrão e recomendado.
+    - SHA-256 (64 hex chars): formato legacy do antigo seed_database.py.
+
+    Esta compatibilidade backward permite migrar gradualmente os hashes
+    sem resetar passwords. O login-v2 detecta hashes SHA-256 e re-hasha
+    automaticamente para bcrypt após login bem-sucedido.
 
     Args:
         password: Password em texto claro (fornecida pelo utilizador).
-        hashed: Hash bcrypt armazenado na base de dados.
+        hashed: Hash armazenado na base de dados (bcrypt ou SHA-256).
 
     Returns:
         bool: True se a password corresponde ao hash, False caso contrário.
     """
+    if not hashed:
+        return False
+
+    # bcrypt — formato padrão
+    if hashed.startswith("$2b$") or hashed.startswith("$2a$"):
+        return pwd_context.verify(password, hashed)
+
+    # SHA-256 legacy — compatibilidade backward com seed_database.py antigo
+    import hashlib
+    if len(hashed) == 64:
+        sha256_hash = hashlib.sha256(password.encode()).hexdigest()
+        return sha256_hash == hashed
+
+    # Fallback para passlib (cobre outros formatos suportados)
     return pwd_context.verify(password, hashed)
+
+
+def needs_rehash(hashed: str) -> bool:
+    """Verifica se o hash precisa de ser actualizado para bcrypt.
+
+    Quando um hash SHA-256 é detectado, indica que a password deve ser
+    re-hashada com bcrypt após o próximo login bem-sucedido.
+
+    Args:
+        hashed: Hash armazenado na base de dados.
+
+    Returns:
+        bool: True se o hash é SHA-256 ou outro formato não-bcrypt.
+    """
+    if not hashed:
+        return False
+    return not (hashed.startswith("$2b$") or hashed.startswith("$2a$"))
 
 
 def create_token(user_id: str, email: str, role: str) -> str:
