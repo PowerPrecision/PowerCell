@@ -1,8 +1,10 @@
+import os
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, BackgroundTasks
+from pydantic import BaseModel
 
 from database import db
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
@@ -2434,5 +2436,149 @@ async def get_stale_processes(
         "high": len([r for r in results if r["urgency"] == "high"]),
         "medium": len([r for r in results if r["urgency"] == "medium"]),
         "processes": results[:100]
+    }
+
+
+# ============== PROD → DEV DATABASE SYNC (RGPD SANITIZATION) ==============
+
+# In-memory lock to prevent concurrent sync operations
+_sync_in_progress = False
+_sync_result_cache = {"result": None, "timestamp": None}
+
+
+class SyncDatabaseRequest(BaseModel):
+    """Modelo para a requisição de sincronização de BD."""
+    prod_url: Optional[str] = None
+    prod_db_name: Optional[str] = None
+    dev_url: Optional[str] = None
+    dev_db_name: Optional[str] = None
+
+
+@router.get("/sync-database/status")
+async def get_sync_status(
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Obtém o estado da última sincronização Prod → Dev.
+    """
+    return {
+        "in_progress": _sync_in_progress,
+        "last_result": _sync_result_cache["result"],
+        "last_timestamp": _sync_result_cache["timestamp"],
+    }
+
+
+@router.post("/sync-database")
+async def sync_database(
+    request: SyncDatabaseRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Sincroniza dados de Produção para Desenvolvimento com anonimização RGPD.
+
+    SEGURANÇA:
+    - Só funciona se ENVIRONMENT != "production"
+    - Só pode ser executado por superadmin (role = admin)
+    - Executa em background (BackgroundTasks) para evitar timeouts
+    - Todos os dados pessoais são anonimizados (email, NIF, telefone, nome)
+
+    Correções aplicadas durante a transferência:
+    - clients: email → user{id}@powercell.dev, NIF → falso válido, phone → baralhado, apelido → ofuscado
+    - processes: remove links S3/AWS, limpa campos financeiros ultra-sensíveis
+    - properties: remove links S3/AWS, limpa dados financeiros, arredonda coordenadas
+    - users: mantém emails e passwords reais para login, anonimiza dados pessoais
+    """
+    global _sync_in_progress, _sync_result_cache
+
+    # ─── SEGURANÇA 1: Bloquear em produção ───
+    environment = os.environ.get("ENVIRONMENT", "development").lower()
+    if environment in ("production", "prod"):
+        logger.warning(f"Tentativa de sync em PRODUÇÃO bloqueada por utilizador {user.get('email')}")
+        raise HTTPException(
+            status_code=403,
+            detail="Este endpoint NÃO pode ser executado em produção. Ação bloqueada por segurança."
+        )
+
+    # ─── SEGURANÇA 2: Apenas superadmin ───
+    if user.get("role") != UserRole.ADMIN:
+        logger.warning(f"Tentativa de sync por não-admin bloqueada: {user.get('email')}")
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas o administrador (superadmin) pode executar esta operação."
+        )
+
+    # ─── PREVENIR CONCORRÊNCIA ───
+    if _sync_in_progress:
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe uma sincronização em curso. Aguarde a conclusão."
+        )
+
+    # ─── RESOLVER URIs ───
+    prod_url = request.prod_url or os.getenv("PROD_MONGO_URL") or os.getenv("MONGO_URL")
+    prod_db_name = request.prod_db_name or os.getenv("PROD_DB_NAME") or os.getenv("DB_NAME")
+    dev_url = request.dev_url or os.getenv("DEV_MONGO_URL")
+    dev_db_name = request.dev_db_name or os.getenv("DEV_DB_NAME")
+
+    if not prod_url or not prod_db_name:
+        raise HTTPException(
+            status_code=400,
+            detail="URL e nome da BD de Produção são obrigatórios. Defina PROD_MONGO_URL/PROD_DB_NAME ou envie no body."
+        )
+    if not dev_url or not dev_db_name:
+        raise HTTPException(
+            status_code=400,
+            detail="URL e nome da BD de Desenvolvimento são obrigatórios. Defina DEV_MONGO_URL/DEV_DB_NAME ou envie no body."
+        )
+
+    # ─── REGISTAR AUDIT LOG ───
+    await _audit_log(
+        "prod_to_dev_sync_started",
+        "database",
+        "sync",
+        user,
+        {
+            "prod_db": prod_db_name,
+            "dev_db": dev_db_name,
+            "environment": environment,
+            "anonymization": True,
+        }
+    )
+
+    # ─── EXECUTAR EM BACKGROUND ───
+    async def _execute_sync():
+        global _sync_in_progress, _sync_result_cache
+        _sync_in_progress = True
+        try:
+            from scripts.sync_prod_to_dev import run_sync
+            result = await run_sync(prod_url, prod_db_name, dev_url, dev_db_name)
+            _sync_result_cache = {"result": result, "timestamp": datetime.now(timezone.utc).isoformat()}
+        except Exception as e:
+            logger.error(f"Erro crítico no sync Prod→Dev: {e}", exc_info=True)
+            _sync_result_cache = {
+                "result": {
+                    "success": False,
+                    "error": str(e),
+                    "total_documents": 0,
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        finally:
+            _sync_in_progress = False
+
+    background_tasks.add_task(_execute_sync)
+
+    return {
+        "success": True,
+        "message": "Sincronização iniciada em background. Use GET /admin/sync-database/status para acompanhar o progresso.",
+        "details": {
+            "prod_db": prod_db_name,
+            "dev_db": dev_db_name,
+            "anonymization": True,
+            "environment": environment,
+            "started_by": user.get("email"),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
     }
 
