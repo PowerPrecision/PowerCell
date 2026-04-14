@@ -39,6 +39,19 @@ def sanitize_folder_name(name: str) -> str:
 
 
 class S3Service:
+    """
+    Serviço de armazenamento de documentos em Amazon S3 para o CRM de crédito habitação.
+
+    Gestiona toda a documentação dos clientes (pessoal, financeira, imobiliária, RGPD)
+    numa estrutura hierárquica organizada por cliente e categoria. O S3 substitui
+    o OneDrive como repositório principal, oferecendo melhor integração com pre-signed
+    URLs (uploads diretos do frontend sem passar pelo backend) e maior fiabilidade.
+
+    Caminhos seguem o formato: ``Documentação Clientes/{Nome_Cliente}/{Categoria}/{Ficheiro}``
+
+    Categorias padrão: Documentos Pessoais, Financeiros, Imóvel, Bancários, RGPD, Outros.
+    """
+
     def __init__(self):
         self.s3_client = None
         self.bucket_name = AWS_BUCKET_NAME
@@ -300,20 +313,30 @@ class S3Service:
         s3_folder: str = None
     ) -> Optional[str]:
         """
-        Faz upload de um ficheiro para a pasta do cliente numa categoria específica.
-        
+        Carrega um ficheiro para a pasta do cliente numa categoria específica no S3.
+
+        Este é o método principal de persistência de documentos do CRM. Todos os
+        ficheiros enviados pelos consultores ou extraídos por IA passam por aqui.
+        A organização por categoria (Pessoais, Financeiros, etc.) reflete a
+        estrutura exigida pelos bancos no processo de crédito habitação.
+
+        Se ``s3_folder`` for fornecido, é utilizado como caminho base (prioridade
+        máxima), permitindo sobrescrever a localização automática quando o
+        consultor configura manualmente a pasta do cliente.
+
         Args:
-            file_obj: Objeto de ficheiro
-            client_id: ID do processo/cliente
-            client_name: Nome do cliente
-            category: Categoria (ex: "Financeiros", "Documentos Pessoais")
-            filename: Nome do ficheiro
-            content_type: MIME type do ficheiro
-            second_client_name: Nome do segundo titular (opcional)
-            s3_folder: Pasta S3 configurada manualmente (prioridade máxima)
-            
+            file_obj: Objeto de ficheiro aberto em modo binário.
+            client_id: ID do processo/cliente (usado para resolução de conflitos).
+            client_name: Nome do primeiro titular para construção do caminho.
+            category: Categoria de destino (ex: "Financeiros", "Documentos Pessoais").
+            filename: Nome do ficheiro (ex: "recibo_vencimento_dez2024.pdf").
+            content_type: Tipo MIME do ficheiro (ex: "application/pdf").
+            second_client_name: Nome do segundo titular (para compras conjuntas).
+            s3_folder: Caminho S3 configurado manualmente (substitui path automático).
+
         Returns:
-            Caminho S3 do ficheiro ou None se falhar
+            str: Caminho S3 completo do ficheiro carregado, ou ``None`` se
+                o serviço não estiver configurado ou ocorrer um erro de upload.
         """
         if not self.is_configured():
             logger.error("S3 não configurado")
@@ -662,21 +685,28 @@ class S3Service:
         second_client_name: str = None
     ) -> tuple:
         """
-        Cria a estrutura de pastas padrão para um novo cliente.
-        No S3, cria-se um ficheiro vazio '.keep' para marcar a pasta.
-        
-        IMPORTANTE: Primeiro verifica se já existe pasta para o cliente
-        antes de criar nova, para evitar duplicados.
-        
+        Cria a estrutura de pastas padrão para um novo cliente no S3.
+
+        Chamado automaticamente quando um novo processo é criado. A estrutura
+        pré-definida (Pessoais, Financeiros, Imóvel, Bancários, RGPD, Outros)
+        espelha os requisitos documentais do processo de crédito habitação,
+        permitindo ao consultor organizar documentos desde o primeiro dia.
+
+        O S3 não tem o conceito de "pastas" — cada categoria é representada
+        por um ficheiro marcador ``.keep`` vazio. A função verifica primeiro
+        se já existe pasta para o cliente (matching case-insensitive) para
+        evitar duplicados quando o mesmo cliente tem múltiplos processos.
+
         Args:
-            client_id: ID do processo/cliente
-            client_name: Nome do cliente
-            second_client_name: Nome do segundo titular (opcional)
-            
+            client_id: ID do processo/cliente.
+            client_name: Nome do primeiro titular.
+            second_client_name: Nome do segundo titular (opcional).
+
         Returns:
-            Tuplo (success: bool, folder_path: str ou None)
-            - (True, "Documentação Clientes/Nome_Cliente") se criado com sucesso
-            - (False, None) se falhou
+            tuple: ``(success, folder_path)`` onde:
+                - success (bool): True se as pastas foram criadas/verificadas.
+                - folder_path (str | None): Caminho base S3
+                    (ex: "Documentação Clientes/Joao_Silva").
         """
         if not self.is_configured():
             return (False, None)

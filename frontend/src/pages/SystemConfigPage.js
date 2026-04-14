@@ -1,6 +1,31 @@
 /**
- * SystemConfigPage - Página de Configurações do Sistema
- * Permite ao admin configurar integrações e definições
+ * SystemConfigPage — Página de configurações do sistema, exclusiva para Admin/CEO.
+ *
+ * PORQUÊ: O PowerCell tem múltiplas integrações externas (AWS S3, OpenAI, Gmail,
+ * Trello, envio de emails) que precisam de configuração centralizada. Esta página
+ * permite ao administrador configurar credenciais, activar/desactivar funcionalidades
+ * e executar tarefas de manutenção sem aceder directamente ao backend ou a variáveis
+ * de ambiente. Inclui ferramentas de diagnóstico (reparação de índices, limpeza de logs)
+ * e sincronização entre ambientes de produção e desenvolvimento.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Configuração dinâmica: os campos são definidos pelo backend via /api/system-config,
+ * permitindo adicionar novas secções sem alterar o frontend.
+ * - Secção de manutenção incluída como tab separada com ferramentas de DB, migrações
+ * e mapeamento S3.
+ * - DocumentRecipientsManager integrado como tab para gestão visual de destinatários
+ * de documentação bancária.
+ * - Protecção de passwords: campos do tipo "password" são mascarados com reveal sob
+ * demanda (endpoint /reveal-secrets).
+ * - Acesso restrito a roles admin e ceo — redireciona com mensagem clara para outros.
+ *
+ * @context {AuthContext} — Consome token, user para verificar permissões de acesso
+ *
+ * @route /admin/config — Página acessível apenas a admin/ceo
+ *
+ * @example
+ * <SystemConfigPage />
+ * // Acesso via rota protegida: /admin/config?tab=storage
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";

@@ -228,15 +228,35 @@ async def analyze_document_with_ai(
     mime_type: str
 ) -> Dict[str, Any]:
     """
-    Analisa um documento usando GPT-4o-mini.
-    
+    Analisa um documento usando GPT-4o-mini com extração de dados estruturados e
+    scoring de confiança por campo.
+
+    Este endpoint é o núcleo do pipeline de automatização documental do CRM.
+    Permite ao consultor carregar um documento (CC, IRS, recibo de vencimento, etc.)
+    e obter instantaneamente os dados relevantes sem digitação manual, reduzindo
+    o tempo de onboard de clientes e erros de transcrição.
+
+    Fluxo de segurança PII:
+    - temperatura=0.1 para minimizar alucinações do modelo
+    - response_format=json_object para garantir output estruturado
+    - opt-out de treino da OpenAI verificado no get_openai_client()
+
+    - Texto de PDFs sanitizado antes de envio ao LLM
+
     Args:
-        file_content: Conteúdo binário do ficheiro
-        file_name: Nome do ficheiro
-        mime_type: Tipo MIME do ficheiro
-        
+        file_content: Conteúdo binário do ficheiro (máx ~50KB para PDFs).
+        file_name: Nome original do ficheiro (usado para context no prompt).
+        mime_type: Tipo MIME — suporta image/jpeg, image/png, image/webp, application/pdf.
+
     Returns:
-        Dados extraídos do documento
+        dict: Resultado da análise com as chaves:
+            - success (bool): Indica se a análise foi concluída.
+            - tipo_documento (str): Classificação ("cc", "irs", "recibo_vencimento", etc.).
+            - confianca (float): Confiança geral (0.0–1.0).
+            - dados_extraidos (dict): Campos extraídos por tipo de documento.
+            - confianca_campos (dict): Confiança por campo individual.
+            - observacoes (str): Notas adicionais do LLM.
+            - error (str): Mensagem de erro se success=False.
     """
     try:
         client = get_openai_client()
@@ -389,14 +409,28 @@ def compare_extracted_with_existing(
     existing_data: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Compara dados extraídos com dados existentes do cliente.
-    
+    Compara dados extraídos pelo LLM com dados existentes do cliente para identificar
+    discrepâncias, campos em falta e oportunidades de preenchimento automático.
+
+    Esta função é fundamental para o UX de importação: permite ao consultor
+    aprovar com um clique valores sugeridos pelo AI, reduzindo trabalho manual.
+    O mapeamento de campos (field_mapping) traduz nomes do domínio do LLM
+    (ex: "nome_completo") para campos internos do processo (ex: "client_name").
+
+    A comparação é case-insensitive para tolerar diferenças de capitalização
+    entre o que o LLM extrai e o que está na base de dados.
+
     Args:
-        extracted_data: Dados extraídos do documento
-        existing_data: Dados existentes do cliente na BD
-        
+        extracted_data: Dados extraídos pelo analyze_document_with_ai, incluindo
+            "dados_extraidos" e "confianca_campos".
+        existing_data: Dados atuais do cliente na BD (normalmente do processo).
+
     Returns:
-        Comparação com campos diferentes, iguais e novos
+        dict: Comparação estruturada com quatro categorias:
+            - matching (list): Campos que coincidem entre documento e BD.
+            - different (list): Campos com valores divergentes (para aprovação manual).
+            - new_fields (list): Campos no documento ausentes na BD.
+            - empty_fields (list): Campos vazios na BD preenchíveis pelo AI (auto-fill).
     """
     comparison = {
         "matching": [],      # Campos que coincidem
@@ -502,15 +536,31 @@ async def analyze_multiple_documents(
     log_id: str = None
 ) -> Dict[str, Any]:
     """
-    Analisa múltiplos documentos e compara com dados do cliente.
-    
+    Orquestra a análise em lote de múltiplos documentos de um cliente, agregando
+    resultados de comparação e gerando sugestões de organização por pasta.
+
+    Este é o ponto de entrada principal do pipeline de importação com IA.
+    Para cada documento, executa: análise → comparação → sugestão de pasta.
+    Ao final, produz um resumo com:
+    - Sugestões de auto-fill (campos vazios preenchíveis com um clique)
+    - Organização por pastas (Pessoais, Financeiros, Imóvel, etc.)
+    - Confiança agregada por campo (usa o maior score entre múltiplos docs)
+    - Rascunhos automáticos de pedidos de documentos em falta
+
     Args:
-        documents: Lista de documentos [{content, name, mime_type}, ...]
-        existing_client_data: Dados existentes do cliente
-        log_id: ID do log de importação (opcional)
-        
+        documents: Lista de documentos, cada um com "content" (bytes),
+            "name" (str) e "mime_type" (str).
+        existing_client_data: Dados actuais do cliente na BD para comparação.
+        log_id: Se fornecido, regista progresso na coleção ai_import_logs.
+
     Returns:
-        Resultado da análise com comparações e sugestões
+        dict: Resumo completo incluindo:
+            - documents_analyzed: Lista de resultados individuais por documento.
+            - comparison: Agregação de matching/different/new/empty_fields.
+            - organization_suggestions: Sugestões de organização por pasta.
+            - auto_fill_suggestions: Campos preenchíveis com valor e fonte.
+            - field_confidence: Maior score de confiança por campo.
+            - duration_ms: Tempo total de processamento em milissegundos.
     """
     import time
     from routes.ai_import_logs import update_ai_import_log

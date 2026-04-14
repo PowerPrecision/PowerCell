@@ -166,11 +166,28 @@ PowerCell/
 - **Anonimização de dados**: Eliminação de PII conforme GDPR
 - **RGPD Migration**: Ferramenta de migração para processos legados
 
+### Backup e Restauro Seguro (RGPD)
+- **Backup automático diário**: Pipeline que corre às 03:00 UTC, cria ZIP JSON por coleção e faz upload para S3
+- **Restauro seguro de Dev** (`restore_dev_from_backup.py`): Restaura a BD de Desenvolvimento a partir do backup mais recente de Produção no S3
+- **Arquitetura fail-safe**: A BD de Dev **nunca é modificada** se o backup estiver corrompido (ZIP inválido, JSON inválido, validação de integridade falhar)
+- **Fluxo**: S3 → Download ZIP → Extrair JSON → Importar para coleções `_restore_temp_*` → Sanitização RGPD → Validação de integridade → Swap atómico → Recriar índices → Cleanup
+- **Disponível via API** (`/api/admin/sync-database`) e **CLI standalone**
+
+### Pipeline de Sanitização de Dados (Prod → Dev)
+- **Sincronização direta** (`sync_prod_to_dev.py`): Cópia de Produção para Dev com anonimização total de PII
+- **Anonimização por coleção**:
+  - **Clientes**: Nome (mantém primeiro nome, ofusca apelido), email (mascara para `@powercell.dev`), NIF (gera NIF falso com dígito de controlo válido), telefone (baralha mantendo prefixo)
+  - **Utilizadores**: Mantém email e password para login, anonimiza telefone
+  - **Processos**: Remove links S3, limpa campos financeiros ultra-sensíveis (IBAN, salários)
+  - **Propriedades**: Arredonda coordenadas para ~1km de precisão
+- **Metadados de rastreabilidade**: Cada documento recebe `_sanitized_at`, `_sanitized_source` e flags de anonimização
+- **Disponível via API** e **CLI standalone** com suporte a `PROD_MONGO_URL`, `PROD_DB_NAME`, `DEV_MONGO_URL`, `DEV_DB_NAME`
+
 ### Documentos
 - **Explorador S3**: Vista lista/grelha, preview lateral, renomear, mover
 - **Organização automática IA**: Categorização por tipo (Financeiros, Identificação, etc.)
-- **Anotações contextuais**: Notas em PDFs com 5 tipos (Nota, Questão, Aviso, Financeiro, Aprovação)
-- **Enviar para Balcões**: Envio de documentação para bancos com gestão de destinatários
+- **Anotações contextuais em PDFs**: 5 tipos de anotação (Nota, Questão, Aviso, Financeiro, Aprovação) em documentos, com resolução e estatísticas por processo
+- **Enviar Documentação para Balcões (Email B2B)**: Envio de documentação para bancos com editor de texto rico (HTML), templates de email personalizáveis, gestão de destinatários BCC, validação de bloqueio por banco, e anexação automática de documentos
 - **Links temporários**: Upload/download seguro por link único (sem login)
 
 ### Portal do Cliente
@@ -220,6 +237,13 @@ O perfil de **Indexação** foi projetado para operadores focados na organizaç�
 - CORS fail-secure (sem wildcards)
 - OpenAI PII opt-out (sem treino com dados)
 - Impersonate control com restauro automático de sessão
+
+#### Context Switcher / Impersonate
+- **Admin visualiza como qualquer utilizador**: Gera novo JWT com a role do utilizador-alvo
+- **Restauro automático**: O token original do admin é guardado no `localStorage` (`originalToken`)
+- **Barra visual**: `ImpersonateBanner` exibe permanentemente o modo de visualização ativo
+- **Terminar sessão**: Parar impersonate restaura automaticamente a conta de admin (via `/api/admin/stop-impersonate`)
+- **Fallback em token expirado**: Se o token de impersonate expirar (401), o sistema restaura automaticamente a sessão original
 
 #### Blind Indexing (Pesquisa de Dados Encriptados)
 
@@ -321,24 +345,57 @@ O histórico de processos NÃO é guardado em arrays embebidos no documento prin
 
 ### Variáveis de Ambiente
 
-Backend (`.env`):
-- `MONGO_URL` - URL de conexão MongoDB
-- `DB_NAME` - Nome da base de dados
-- `JWT_SECRET` - Chave secreta para JWT
-- `CORS_ORIGINS` - Origens permitidas
-- `SENTRY_DSN` - DSN do Sentry (opcional)
-- `UPSTASH_REDIS_REST_URL` - URL Redis (opcional)
-- `UPSTASH_REDIS_REST_TOKEN` - Token Redis (opcional)
-- `AWS_ACCESS_KEY_ID` - Chave de acesso AWS S3
-- `AWS_SECRET_ACCESS_KEY` - Chave secreta AWS S3
-- `AWS_REGION` - Região AWS (default: eu-west-1)
-- `S3_BUCKET_NAME` - Nome do bucket S3
-- `OPENAI_API_KEY` - Chave API OpenAI (opcional)
-- `SENDGRID_API_KEY` - Chave API SendGrid (opcional)
+> Consulte o ficheiro [`.env.example`](.env.example) para a lista completa e organizada por categoria.
 
-Frontend (`.env`):
-- `VITE_BACKEND_URL` - URL do backend API
-- `VITE_SENTRY_DSN` - DSN do Sentry (opcional)
+#### Backend — Obrigatórias
+| Variável | Descrição |
+|----------|-----------|
+| `MONGO_URL` | URL de conexão MongoDB |
+| `DB_NAME` | Nome da base de dados |
+| `JWT_SECRET` | Chave secreta para JWT (mín. 32 caracteres) |
+| `CORS_ORIGINS` | Origens permitidas (vírgulas, sem wildcards) |
+| `ENVIRONMENT` | Ambiente: `production` / `development` |
+
+#### Backend — Opcional (mas recomendado)
+| Variável | Descrição | Predefinição |
+|----------|-----------|--------------|
+| `DSN_SENTRY_BACKEND` | DSN do Sentry (backend) | — |
+| `SENTRY_ENVIRONMENT` | Ambiente Sentry | `development` |
+| `AWS_ACCESS_KEY_ID` | Chave de acesso AWS S3 | — |
+| `AWS_SECRET_ACCESS_KEY` | Chave secreta AWS S3 | — |
+| `AWS_REGION` | Região AWS | `eu-north-1` |
+| `AWS_BUCKET_NAME` | Nome do bucket S3 | — |
+| `REDIS_URL` | URL de conexão Redis | `redis://localhost:6379` |
+| `EMAIL_PROVIDER` | Provedor: `sendgrid` / `resend` / `smtp` | `sendgrid` |
+| `EMAIL_API_KEY` | API key do provedor de email | — |
+| `EMAIL_FROM` | Endereço de remetente | `noreply@powerealestate.pt` |
+| `EMAIL_FROM_NAME` | Nome do remetente | `Power Real Estate...` |
+| `OPENAI_API_KEY` | Chave API OpenAI (legado) | — |
+| `EMERGENT_LLM_KEY` | Chave API LLM (GPT-4o/4o-mini) | — |
+| `GEMINI_API_KEY` | Chave API Gemini | — |
+| `ONEDRIVE_TENANT_ID` | Tenant ID do OneDrive | — |
+| `ONEDRIVE_CLIENT_ID` | Client ID do OneDrive | — |
+| `ONEDRIVE_CLIENT_SECRET` | Client Secret do OneDrive | — |
+| `TRELLO_API_KEY` | API Key do Trello | — |
+| `TRELLO_TOKEN` | Token do Trello | — |
+| `TRELLO_BOARD_ID` | Board ID do Trello | — |
+
+#### Backend — Sincronização Prod ↔ Dev (pipelines)
+| Variável | Descrição |
+|----------|-----------|
+| `PROD_MONGO_URL` | URL MongoDB de Produção (fallback: `MONGO_URL`) |
+| `PROD_DB_NAME` | Nome da BD de Produção (fallback: `DB_NAME`) |
+| `DEV_MONGO_URL` | URL MongoDB de Desenvolvimento |
+| `DEV_DB_NAME` | Nome da BD de Desenvolvimento |
+
+#### Frontend (`.env`)
+| Variável | Descrição |
+|----------|-----------|
+| `REACT_APP_BACKEND_URL` | URL do backend API |
+| `REACT_APP_ENVIRONMENT` | Ambiente: `production` / `development` |
+| `REACT_APP_VAPID_PUBLIC_KEY` | Chave pública para Push Notifications |
+| `VITE_DSN_SENTRY_FRONTEND` | DSN do Sentry (frontend, preferido) |
+| `VITE_SENTRY_DSN` | DSN do Sentry (frontend, legado) |
 
 ## Credenciais de Teste
 

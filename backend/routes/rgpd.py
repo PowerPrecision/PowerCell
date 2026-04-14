@@ -81,11 +81,27 @@ async def request_rgpd(
     user: dict = Depends(require_staff())
 ):
     """
-    Solicitar consentimento RGPD para um processo.
-    
-    Envia um email para o cliente com um link temporário (24h) para assinar o RGPD.
-    
-    Permissões: Todos os staff podem solicitar.
+    Solicita consentimento RGPD para um processo, enviando um email
+    com link temporário (24h) para o cliente assinar digitalmente.
+
+    Porquê email com link temporário: o RGPD deve ser assinado pelo titular
+    dos dados, não pelo consultor. O link temporário garante que apenas o
+    destinatário do email pode aceder ao formulário, e a expiração de 24h
+    limita a janela de vulnerabilidade se o email for intercetado.
+
+    Se já existir um pedido RGPD para o processo, retorna o estado atual
+    em vez de criar duplicado (idempotência).
+
+    Args:
+        data: Dados do pedido contendo process_id, client_name, client_email.
+        user: Utilizador staff autenticado (injetado pelo Depends).
+
+    Returns:
+        RGPDResponse: Dados do pedido criado ou existente, incluindo
+            status, token_expires_at e created_by_name.
+
+    Raises:
+        HTTPException: 404 se processo não encontrado, 500 se erro ao criar.
     """
     try:
         # Verificar se o processo existe
@@ -201,12 +217,26 @@ async def sign_rgpd_form(
     consent_data: RGPDConsentData
 ):
     """
-    Assinar o RGPD.
-    
-    Este endpoint é público (sem autenticação) para permitir que
-    o cliente assine o RGPD através do link no email.
-    Após assinatura, regista a versão do template RGPD utilizado
-    para prova legal da versão assinada pelo cliente.
+    Assina digitalmente o consentimento RGPD usando um token temporário.
+
+    Porquê registar a versão do template: em caso de litígio, é crucial
+    provar qual versão do texto RGPD o cliente assinou. Após a assinatura,
+    este endpoint guarda o ID e número da versão ativa do template no
+    pedido RGPD para prova legal (audit trail).
+
+    Este endpoint é público (sem autenticação) por design — o token
+    temporário é a única proteção necessária.
+
+    Args:
+        token: Token temporário enviado por email (UUID composto).
+        consent_data: Dados de consentimento do cliente (nome, contribuinte,
+            morada, assinatura digital, etc.).
+
+    Returns:
+        dict: Resultado com success, message e process_id.
+
+    Raises:
+        HTTPException: 400 se token inválido, expirado ou erro na assinatura.
     """
     result = await sign_rgpd(token, consent_data.model_dump())
     
@@ -308,11 +338,26 @@ async def get_rgpd_status(
 @router.get("/data/{token}")
 async def get_rgpd_form_data(token: str):
     """
-    Obter dados para preencher o formulário de RGPD.
-    
-    Este endpoint é público e retorna os dados do processo
-    para pré-preencher o formulário de RGPD.
-    Inclui o texto do template RGPD renderizado com variáveis dinâmicas.
+    Obtém dados para pré-preencher o formulário de RGPD e o texto
+    do template renderizado com variáveis dinâmicas do processo.
+
+    Porquê pré-preenchimento: melhora a experiência do cliente ao
+    evitar que tenha de introduzir manualmente dados que a empresa
+    já possui (NIF, morada, tipo de documento). Apenas pede confirmação.
+
+    Renderiza variáveis como {{NOME_CLIENTE}}, {{CONTRIBUINTE}}, etc.
+    no template RGPD ativo para que o cliente veja o texto final antes de
+    assinar.
+
+    Args:
+        token: Token temporário do pedido RGPD.
+
+    Returns:
+        dict: Dados do cliente para pré-preenchimento (client_name,
+            nif, morada, numero_documento, etc.) e rgpd_text renderizado.
+
+    Raises:
+        HTTPException: 400 se token inválido ou expirado.
     """
     request = await validate_token(token)
     

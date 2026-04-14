@@ -1,4 +1,34 @@
-import { useState, useEffect, useCallback, useRef, forwardRef } from "react";
+/**
+ * PublicClientForm — Formulário público multi-passo para registo de novos clientes.
+ *
+ * PORQUÊ: O PowerCell capta novos clientes potenciais via formulário público no site.
+ * Este formulário recolhe todos os dados necessários para iniciar um processo de
+ * crédito habitação em 6 passos organizados: dados pessoais, 2º titular, imóvel,
+ * situação profissional/financeira, bancos e consentimentos. A experiência multi-passo
+ * reduz a taxa de abandono comparativamente a um formulário longo numa só página.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Auto-save com debounce (2s) para localStorage — o cliente pode fechar e retomar
+ *   sem perder dados preenchidos.
+ * - Validação progressiva por passo com erros por campo (fieldErrors) e scroll
+ *   automático para o primeiro campo com erro.
+ * - Validação de NIF português com checksum (algoritmo oficial de 2 dígitos).
+ * - Deteção de duplicados no backend (bloqueia registo com mesmo email/NIF),
+ * com reporte ao Sentry para análise de friction de conversão.
+ * - Suporte a campos personalizados dinâmicos (configuráveis via backend).
+ * - Modo preview para testes internos e simulação com dados MOCK_DATA.
+ * - Mercado-alvo: 90% dos clientes acedem via telemóvel (mobile-first).
+ * - Bancos portugueses pré-definidos com cores institucionais.
+ *
+ * @param {Object} props
+ * @param {boolean} [props.previewMode=false] — Se verdadeiro, desactiva submissão e auto-save
+ *
+ * @route / — Rota pública (landing page do formulário)
+ *
+ * @example
+ * <PublicClientForm previewMode={false} />
+ * // No modo normal, submete para /api/public/client-registration
+ */
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";

@@ -1,3 +1,35 @@
+/**
+ * ProcessDetails — Página de detalhes completos de um processo de crédito habitação.
+ *
+ * PORQUÊ: Cada processo no PowerCell requer uma vista centralizada onde consultores,
+ * mediadores e administradores podem consultar e editar todos os dados do cliente,
+ * documentos financeiros, imóvel, crédito bancário e prazos. Esta página é o "hub"
+ * operacional do CRM — substitui o acesso disperso a múltiplas ferramentas externas.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Tabs por domínio (pessoais, financeiros, imóvel, crédito) para organizar
+ *   a complexidade sem sobrecarregar o utilizador.
+ * - Permissões granulares por role (consultor, mediador, indexacao, cliente)
+ *   e por actions (sistema de permissões dinâmicas do backend).
+ * - Extração automática de dados por IA (OCR de documentos) com sistema de
+ *   conflitos — quando a IA detecta divergências entre documentos, o utilizador
+ *   escolhe manualmente o valor correcto.
+ * - Auto-save do status com debounce de 500ms para evitar perda de dados.
+ * - Validação de NIF português (9 dígitos, checksum, exclusão de NIFs empresariais).
+ * - Integração com RGPD (pedido de consentimento via email).
+ * - Geração de CPCV, minutas, e DSTI automática integrada nos tabs.
+ * - Processos em status terminal (eliminados, desistências, concluídos) ficam
+ *   bloqueados em modo de leitura para proteger a integridade dos dados.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ *
+ * @route /processo/:id — Rota parametrizada pelo ID do processo
+ *
+ * @example
+ * // Acesso via navegação
+ * <Route path="/processo/:id" element={<ProcessDetails />} />
+ * // O ID é obtido via useParams() internamente
+ */
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";

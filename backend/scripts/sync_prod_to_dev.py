@@ -179,7 +179,23 @@ async def _get_collections_to_sync(prod_db) -> list:
 
 
 async def _sync_clients(prod_collection, dev_collection, stats: dict):
-    """Sincroniza a coleção 'clients' com anonimização."""
+    """
+    Sincroniza a coleção 'clients' com anonimização completa de dados PII.
+
+    Preserva a estrutura do cliente para testes de UI, mas substitui todos os dados
+    pessoais identificáveis: NIF (gerado com check digit válido), email
+    (dev_{id}@powercell.dev), telefone (prefixo mantido, resto aleatório) e
+    nome (primeiro nome mantido, apelido substituído por apelido falso).
+
+    Remove também links S3 (evita custos e rastreio) e campos financeiros
+    ultra-sensíveis (IBAN, saldos, credit scores). O racional: um Dev nunca
+    precisa de aceder a dados bancários reais para testar a interface.
+
+    Args:
+        prod_collection: Cursor da coleção 'clients' em Produção.
+        dev_collection: Referência à coleção 'clients' em Desenvolvimento.
+        stats: Dicionário (mutável) para contagem de documentos sincronizados.
+    """
     docs = await prod_collection.find({}).to_list(length=None)
     if not docs:
         logger.info("  clients: 0 documentos encontrados")
@@ -227,8 +243,21 @@ async def _sync_clients(prod_collection, dev_collection, stats: dict):
 
 async def _sync_users(prod_collection, dev_collection, stats: dict):
     """
-    Sincroniza a coleção 'users' (Consultores).
-    Mantém emails reais para login, mas transfere hashes em segurança.
+    Sincroniza a coleção ``users`` (consultores) preservando credenciais de acesso.
+
+    Ao contrário dos clientes, os consultores precisam de conseguir fazer login
+    no ambiente de Desenvolvimento com as mesmas credenciais (email + hash de
+    password). Por isso, os campos ``email`` e ``password`` NÃO são anonimizados.
+    Apenas dados pessoais secundários (telefone) são baralhados e links S3
+    são removidos para evitar referências acidentais a ficheiros de Produção.
+
+    O nome real do consultor é mantido para a UI do CRM — é necessário
+    para identificar quem é o responsável por cada processo.
+
+    Args:
+        prod_collection: Cursor da coleção ``users`` em Produção.
+        dev_collection: Referência à coleção ``users`` em Desenvolvimento.
+        stats: Dicionário (mutável) para contagem de documentos sincronizados.
     """
     docs = await prod_collection.find({}).to_list(length=None)
     if not docs:
@@ -263,7 +292,22 @@ async def _sync_users(prod_collection, dev_collection, stats: dict):
 
 
 async def _sync_processes(prod_collection, dev_collection, stats: dict):
-    """Sincroniza a coleção 'processes' com limpeza de links e dados financeiros."""
+    """
+    Sincroniza a coleção ``processes`` com limpeza de links S3 e dados financeiros.
+
+    Os processos são o núcleo do CRM de crédito habitação. O objetivo é ter
+    dados realistas em Dev para testar a interface, sem expor informação
+    financeira real (salários, IBANs, credit scores) ou URLs S3 de Produção.
+
+    A sanitização percorre sub-documentos e listas aninhadas (``documents``,
+    ``activities``) para garantir que nenhum link para o S3 de Produção
+    permaneça nos dados de Desenvolvimento.
+
+    Args:
+        prod_collection: Cursor da coleção ``processes`` em Produção.
+        dev_collection: Referência à coleção ``processes`` em Desenvolvimento.
+        stats: Dicionário (mutável) para contagem de documentos sincronizados.
+    """
     docs = await prod_collection.find({}).to_list(length=None)
     if not docs:
         logger.info("  processes: 0 documentos encontrados")
@@ -379,10 +423,30 @@ async def run_sync(
     dev_db_name: str,
 ) -> dict:
     """
-    Executa o pipeline completo de sincronização Produção → Dev com anonimização.
+    Executa o pipeline completo de sincronização Produção → Dev com anonimização RGPD.
+
+    ATENÇÃO: Este pipeline acede diretamente à BD de Produção. Se preferir não
+    sobrecarregar o servidor live, use restore_dev_from_backup.run_restore()
+    que usa backups S3 como fonte (sem impacto no Mongo de Produção).
+
+    O pipeline faz TRUNCATE completo da BD de Dev (drop de todas as colecções)
+    antes de inserir dados sanitizados. Isto garante que dados órfãos de sincronizações
+    anteriores não se acumulem. Cada colecção recebe sanitização específica:
+    - clients: anonimização completa (NIF, email, telefone, nome, links S3).
+    - users: preserva credenciais de acesso (email + password hash) para login.
+    - processes: remove URLs S3 e dados financeiros ultra-sensíveis.
+    - properties: arredonda coordenadas para ~1km (RGPD: localização é dado pessoal).
+
+    Args:
+        prod_url: URI de conexão ao MongoDB de Produção.
+        prod_db_name: Nome da base de dados de Produção.
+        dev_url: URI de conexão ao MongoDB de Desenvolvimento.
+        dev_db_name: Nome da base de dados de Desenvolvimento.
 
     Returns:
-        dict com estatísticas da sincronização
+        dict: Estatísticas incluindo collections (docs por coleção), total_documents,
+            duration_seconds, success (False se qualquer colecção falhou) e
+            errors (lista de mensagens de erro por coleção).
     """
     started_at = datetime.now(timezone.utc)
     logger.info("=" * 70)

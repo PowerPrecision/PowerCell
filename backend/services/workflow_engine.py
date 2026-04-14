@@ -60,7 +60,30 @@ async def get_rule(rule_id: str) -> Optional[dict]:
 
 
 async def create_rule(data: dict, user: dict) -> dict:
-    """Criar uma nova regra de automação."""
+    """
+    Cria uma nova regra de automação no-code no sistema.
+
+    Permite aos utilizadores configurar comportamentos automatizados sem
+    escrever código, seguindo o padrão "Se X, Então Y". Cada regra fica
+    registada com rastreabilidade (criador, contagem de execuções, última
+    execução) para auditoria.
+
+    Args:
+        data: Dicionário com a definição da regra, contendo:
+            - name (str): Nome descritivo da regra.
+            - description (str, opcional): Descrição detalhada.
+            - trigger (str): Tipo de trigger (ver VALID_TRIGGERS).
+            - trigger_config (dict, opcional): Configuração do trigger
+              (ex: target_status, stale_days).
+            - action (str): Tipo de ação (ver VALID_ACTIONS).
+            - action_config (dict, opcional): Configuração da ação
+              (ex: target_role, new_status, message).
+            - is_active (bool, opcional): Se a regra fica ativa imediatamente.
+        user: Dicionário do utilizador autenticado que cria a regra.
+
+    Returns:
+        dict: Regra criada com id, timestamps e contadores inicializados.
+    """
     rule = {
         "id": str(uuid.uuid4()),
         "name": data["name"],
@@ -110,8 +133,26 @@ async def delete_rule(rule_id: str) -> bool:
 
 async def evaluate_trigger(trigger_type: str, context: dict) -> list:
     """
-    Avaliar todas as regras ativas para um determinado trigger.
-    Retorna lista de regras que devem ser executadas.
+    Avalia todas as regras de automação ativas para um determinado trigger e retorna
+    as regras que devem ser executadas.
+
+    Cada regra é avaliada com filtros específicos por tipo de trigger:
+    - process_status_changed: verifica transição de estado (from_status → target_status).
+    - process_stale: verifica threshold de dias sem atualização.
+    - document_uploaded: verifica categoria do documento.
+
+    As regras são armazenadas na coleção automation_rules e podem ser
+    criadas/geridas via interface no-code no frontend.
+
+    Args:
+        trigger_type: Tipo de trigger (ex: "process_status_changed").
+        context: Dicionário com dados do evento, incluindo:
+            - new_status, old_status (para mudanças de estado).
+            - process_id, client_name (para registo de histórico).
+            - days_since_update (para processos parados).
+
+    Returns:
+        list: Lista de regras (dicts) que passaram nos filtros e devem ser executadas.
     """
     rules = await db.automation_rules.find({
         "trigger": trigger_type,
@@ -150,7 +191,33 @@ async def evaluate_trigger(trigger_type: str, context: dict) -> list:
 
 
 async def execute_action(rule: dict, context: dict) -> bool:
-    """Executar a ação de uma regra."""
+    """
+    Executa a ação definida numa regra de automação, aplicando substituição
+    de variáveis de contexto no corpo de mensagens e comentários.
+
+    Esta função é o coração do motor de automação: traduz a configuração
+    abstrata da regra (criada via UI no-code) em operações concretas na
+    base de dados (envio de notificações, alteração de estados, atribuição
+    de processos, registo de comentários automáticos).
+
+    Garante rastreabilidade ao:
+    - Atualizar a contagem de execuções (execution_count) da regra.
+    - Registar o timestamp da última execução.
+    - Capturar e registar erros sem propagar exceções (fail-safe).
+
+    Args:
+        rule: Dicionário da regra de automação contendo:
+            - action (str): Tipo de ação a executar.
+            - action_config (dict): Parâmetros da ação.
+            - id (str): ID da regra (para atualizar estatísticas).
+            - name (str): Nome da regra (para logging e comentários).
+        context: Dicionário com dados do evento para substituição de
+            variáveis como {client_name}, {status}, {process_id}.
+
+    Returns:
+        bool: True se a ação foi executada com sucesso, False em caso
+            de erro (nunca levanta exceção — fail-safe).
+    """
     action = rule["action"]
     config = rule.get("action_config", {})
     
@@ -255,10 +322,19 @@ async def execute_action(rule: dict, context: dict) -> bool:
 
 async def process_trigger(trigger_type: str, context: dict) -> int:
     """
-    Processar um trigger: avaliar regras e executar ações.
-    Ponto de entrada principal do motor de automação.
-    
-    Returns: número de ações executadas com sucesso
+    Processa um trigger: avalia regras e executa ações. Ponto de entrada
+    principal do motor de automação no-code.
+
+    Chamado por outros serviços sempre que um evento relevante ocorre
+    (ex: mudança de estado, upload de documento, criação de processo).
+
+    Args:
+        trigger_type: Tipo de trigger (ex: "process_status_changed").
+        context: Contexto do evento com dados para template de ações
+            (ex: {"client_name": "João", "new_status": "em_analise"}).
+
+    Returns:
+        int: Número de ações executadas com sucesso.
     """
     matching_rules = await evaluate_trigger(trigger_type, context)
     executed = 0

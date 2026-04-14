@@ -108,7 +108,21 @@ async def check_redis_available() -> bool:
 # ====================================================================
 
 async def cache_get(key: str) -> Optional[dict]:
-    """Get cached value by key. Returns None if not found, error, or Redis offline."""
+    """
+    Obtém um valor do cache Redis por chave, com desserialização JSON
+    automática e circuit breaker integrado.
+
+    Se o Redis estiver offline (circuit breaker), retorna None silenciosamente.
+    Isto permite que a aplicação funcione sem cache (cache-miss → query
+    à base de dados) sem degradar a experiência do utilizador.
+
+    Args:
+        key: Chave do cache a consultar (ex: "stats:global:kpis").
+
+    Returns:
+        Optional[dict]: Valor em cache desserializado, ou None se não
+            encontrado, erro ou Redis offline.
+    """
     redis = get_redis()
     if not redis:
         return None
@@ -124,7 +138,22 @@ async def cache_get(key: str) -> Optional[dict]:
 
 
 async def cache_set(key: str, value: dict, ttl: int = 300) -> bool:
-    """Set cache value with TTL (default 5 minutes). Returns True on success."""
+    """
+    Armazena um valor no cache Redis com TTL (Time-To-Live) e
+    serialização JSON automática.
+
+    Porquê TTL curto (5 min por defeito): os dashboards de KPIs mostram
+    dados que mudam ao longo do dia. Um TTL longo causaria dados
+    desatualizados visíveis aos consultores e direção.
+
+    Args:
+        key: Chave do cache (ex: "stats:user:{user_id}:kpis").
+        value: Dicionário a armazenar (será serializado em JSON).
+        ttl: Tempo de vida em segundos (default: 300 = 5 minutos).
+
+    Returns:
+        bool: True se armazenado com sucesso, False se Redis offline.
+    """
     redis = get_redis()
     if not redis:
         return False
@@ -241,7 +270,20 @@ async def invalidate_stats_cache(user_id: str = None) -> int:
 # ====================================================================
 
 async def health_check() -> dict:
-    """Check Redis connection health."""
+    """
+    Verifica o estado da ligação ao Redis, retornando um diagnóstico
+    detalhado para monitorização e troubleshooting.
+
+    Porquê existir: o Redis é opcional (a app funciona sem ele), pelo
+    que é importante distinguir entre "não configurado" (credenciais
+    em falta) e "erro de ligação" (problema de rede ou serviço).
+
+    Returns:
+        dict: Estado da ligação:
+            - status (str): "connected", "disconnected" ou "error".
+            - ping (str, opcional): Resposta do PING se conectado.
+            - reason (str, opcional): Motivo da desconexão.
+    """
     redis = get_redis()
     if not redis:
         return {

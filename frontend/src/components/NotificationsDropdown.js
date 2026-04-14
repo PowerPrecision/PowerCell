@@ -1,4 +1,27 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+/**
+ * NotificationsDropdown — Dropdown de notificações em tempo real com polling adaptativo.
+ *
+ * PORQUÊ: O PowerCell gera notificações automaticamente (novos registos, prazos,
+ * expiração de documentos, processos estagnados, emails recebidos, etc.). Este
+ * componente apresenta-as num dropdown acessível a partir da barra de navegação,
+ * com feedback sonoro para notificações críticas e polling inteligente para não
+ * sobrecarregar o servidor.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Polling com exponential backoff: começa a 30s, duplica em cada erro 429 até
+ *   um máximo de 5 minutos. Volta ao normal após 3 sucessos consecutivos.
+ * - Som de notificação via Web Audio API (sem dependências externas) com toggle
+ *   para activar/desactivar.
+ * - Ícones e cores por tipo de notificação para identificação visual rápida.
+ * - Navegação directa para o processo quando a notificação tem process_id associado.
+ * - Marcar todas como lidas em batch para poupar cliques ao utilizador.
+ *
+ * Sem props — componente autónomo que gerencia o seu próprio estado via polling.
+ *
+ * @example
+ * // Colocado na barra de navegação
+ * <NotificationsDropdown />
+ */
 import { useNavigate } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
