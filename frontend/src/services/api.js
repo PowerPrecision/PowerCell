@@ -466,8 +466,8 @@ export const deleteAdminUser = (id) => api.delete(`/admin/users/${id}`);
 export const getTasks = (params = {}) => api.get("/tasks", { params });
 export const getMyTasks = (includeCompleted = false) => 
   api.get("/tasks/my-tasks", { params: { include_completed: includeCompleted } });
-export const getProcessTasks = (processId) => 
-  api.get("/tasks", { params: { process_id: processId } });
+export const getProcessTasks = (processId, includeCompleted = false) => 
+  api.get("/tasks", { params: { process_id: processId, include_completed: includeCompleted } });
 export const createTask = (data) => api.post("/tasks", data);
 export const updateTask = (id, data) => api.put(`/tasks/${id}`, data);
 export const completeTask = (id) => api.put(`/tasks/${id}/complete`);
