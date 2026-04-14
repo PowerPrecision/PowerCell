@@ -47,6 +47,7 @@ class JobType(str, Enum):
     EXCEL_IMPORT = "excel_import"
     BULK_ANALYSIS = "bulk_analysis"
     DATA_EXPORT = "data_export"
+    EMAIL_SYNC = "email_sync"
 
 
 class BackgroundJobService:

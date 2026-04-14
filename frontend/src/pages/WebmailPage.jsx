@@ -350,10 +350,7 @@ const WebmailPage = () => {
     if (!token || syncing) return;
     setSyncing(true);
     try {
-      const params = new URLSearchParams({
-        days: "7",
-      });
-      // Não enviar account param vazio — sync todas as contas por defeito
+      const params = new URLSearchParams({ days: "7" });
       if (account) {
         params.append("account", account);
       }
@@ -366,44 +363,31 @@ const WebmailPage = () => {
       );
       const data = await response.json().catch(() => ({}));
 
-      // Erro HTTP (500, etc)
       if (!response.ok) {
         toast.error(data.detail || "Erro na sincronização");
         return;
       }
 
-      // Erro de negócio (success: false mas 200 OK)
       if (data.success === false) {
         toast.error(data.error || "Erro na sincronização");
         return;
       }
 
-      const synced = data.total_synced || 0;
-      const dups = data.total_duplicates || 0;
-      const errs = data.total_errors || 0;
-      if (synced > 0) {
-        toast.success(`${synced} novo${synced !== 1 ? "s" : ""} email${synced !== 1 ? "s" : ""} sincronizado${synced !== 1 ? "s" : ""}${dups > 0 ? ` (${dups} duplicado${dups !== 1 ? "s" : ""})` : ""}${errs > 0 ? ` | ${errs} erro${errs !== 1 ? "s" : ""}` : ""}`);
-      } else if (dups > 0) {
-        toast.info(`${dups} email${dups !== 1 ? "s" : ""} já sincronizado${dups !== 1 ? "s" : ""}. Tudo em dia!`);
-      } else if (errs > 0) {
-        toast.error(`${errs} erro${errs !== 1 ? "s" : ""} na sincronização. Verifique as configurações de email.`);
-      } else {
-        toast.info("Nenhum email novo para sincronizar");
-      }
+      // Background sync started — show info toast
+      toast.info("Sincronização iniciada em background. Pode acompanhar o progresso em Tarefas em Background.");
       setLastSyncTime(new Date());
-      // Refresh the list
-      if (activeCustomFolder) {
-        fetchEmails("custom", currentPage, searchQuery, null, activeCustomFolder);
-      } else {
-        fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
-      }
+
+      // Auto-refresh after a delay to pick up synced emails
+      setTimeout(() => {
+        handleRefresh();
+      }, 5000);
     } catch (error) {
       console.error("Erro ao sincronizar emails:", error);
       toast.error("Erro de ligação ao servidor");
     } finally {
       setSyncing(false);
     }
-  }, [token, account, syncing, activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel, activeCustomFolder]);
+  }, [token, account, syncing, handleRefresh]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
@@ -1688,7 +1672,6 @@ const WebmailPage = () => {
                         {emailDetail.body || ""}
                       </pre>
                     )}
-                  </div>
 
                     {/* Attachments - Visual Cards */}
                     {emailDetail.attachments?.length > 0 && (
