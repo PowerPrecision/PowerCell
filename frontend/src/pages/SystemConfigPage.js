@@ -882,13 +882,9 @@ const SystemConfigPage = () => {
           body: JSON.stringify({}),
         });
 
-        if (response.status === 403) {
-          toast.error("Ação bloqueada: só disponível em ambiente de Desenvolvimento");
-          setSyncing(false);
-          return;
-        }
-        if (response.status === 409) {
-          toast.error("Já existe uma sincronização em curso");
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          toast.error(data.detail || `Erro ${response.status}: Não foi possível iniciar a sincronização`);
           setSyncing(false);
           return;
         }
