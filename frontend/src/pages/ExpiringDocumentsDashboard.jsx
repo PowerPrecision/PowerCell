@@ -1,3 +1,13 @@
+/**
+ * ExpiringDocumentsDashboard — Dashboard de documentos com validade próxima a expirar.
+ *
+ * PORQUÊ: Documentos como CC, declarações de IRS, e comprovativos de morada têm data de validade.
+ * Este dashboard alerta proactivamente sobre documentos prestes a expirar, permitindo ao
+ * consultor solicitar renovação antes que cause atrasos no processo.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -402,3 +412,4 @@ const ExpiringDocumentsDashboard = () => {
 };
 
 export default ExpiringDocumentsDashboard;
+

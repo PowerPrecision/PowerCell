@@ -1,3 +1,13 @@
+/**
+ * AuditTrailPage — Página de registo de auditoria do sistema.
+ *
+ * PORQUÊ: Por exigência RGPD, todas as acções relevantes são registadas. Esta página permite ao
+ * administrador consultar o histórico completo de acções (quem fez o quê, quando), essencial
+ * para investigação de incidentes e conformidade regulatória.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import React, { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import {
@@ -512,3 +522,4 @@ const AuditTrailPage = () => {
 };
 
 export default AuditTrailPage;
+

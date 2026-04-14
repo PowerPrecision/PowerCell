@@ -1,3 +1,12 @@
+/**
+ * ProcessesPage — Página de listagem paginada de todos os processos do CRM.
+ *
+ * PORQUÊ: Vista tabular alternativa ao Kanban. Mostra processos com filtros por estado,
+ * pesquisa por nome ou email, e paginação. Suporta toggle entre ativos e arquivo via view_mode na URL.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -438,3 +447,4 @@ const ProcessesPage = () => {
 };
 
 export default ProcessesPage;
+

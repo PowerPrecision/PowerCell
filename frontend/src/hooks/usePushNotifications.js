@@ -1,6 +1,30 @@
 /**
- * usePushNotifications Hook
- * Hook React para gerir notificações push
+ * usePushNotifications — Hook para gestão de notificações push via Web Push API.
+ *
+ * PORQUÊ: O PowerCell precisa de notificar os utilizadores de eventos importantes
+ * (novos processos, prazos próximos, mensagens) mesmo quando o browser está minimizado.
+ * As notificações push via Service Worker permitem isto sem necessidade de polling contínuo.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Registo automático do Service Worker: ao montar, verifica suporte e regista o SW.
+ * - Verificação de subscrição existente: não cria uma nova subscrição se já existe uma
+ *   activa (evita subscrições duplicadas no backend).
+ * - Verificação do backend: consulta /api/notifications/push/status para confirmar se a
+ *   subscrição está válida do lado do servidor (pode ter sido revogada).
+ * - Silenciar erros de VAPID: se a chave VAPID não está configurada, o hook funciona
+ *   em modo degradado sem crashar.
+ * - Interface explícita enable/disable: o utilizador tem controlo total sobre as notificações.
+ *
+ * @context {AuthContext} — Consome token para autenticação no backend
+ *
+ * @returns {Object} Estado e funções de controlo:
+ *   - isSupported {boolean} — true se o browser suporta notificações push
+ *   - permission {string} — "default", "granted" ou "denied"
+ *   - isSubscribed {boolean} — true se há subscrição activa
+ *   - loading {boolean} — true durante operações assíncronas
+ *   - enableNotifications {Function} — Pedir permissão e subscrever
+ *   - disableNotifications {Function} — Cancelar subscrição
+ *   - showNotification {Function} — Mostrar notificação local
  */
 import { useState, useEffect, useCallback } from 'react';
 import pushService from '../services/pushNotifications';

@@ -1,3 +1,18 @@
+/**
+ * ContextSwitcher — Selector de perfil activo para utilizadores com múltiplos papéis (Context Switcher de Perfis).
+ *
+ * PORQUÊ: Utilizadores com additional_roles (ex: um consultor que é também mediador) precisam de alternar
+ * entre perfis sem fazer re-login. Este componente exibe os papéis disponíveis e permite o switch,
+ * actualizando o activeRole em AuthContext e sessionStorage. Renderiza null silenciosamente se o
+ * utilizador não tiver papéis adicionais.
+ *
+ * @context {AuthContext} — Consome user, effectiveRole, switchActiveRole
+ *
+ * @example
+ * // No header da aplicação
+ * <ContextSwitcher />
+ * // Mostra dropdown apenas se user.additional_roles.length > 0
+ */
 import React from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Button } from "../ui/button";

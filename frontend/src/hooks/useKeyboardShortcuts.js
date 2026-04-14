@@ -1,6 +1,26 @@
 /**
- * useKeyboardShortcuts - Hook para atalhos de teclado
- * Suporta combinações com Ctrl, Alt, Shift
+ * useKeyboardShortcuts — Hook para atalhos de teclado globais com suporte a modificadores.
+ *
+ * PORQUÊ: O PowerCell é usado intensivamente por consultores que precisam de eficiência.
+ * Atalhos como Ctrl+K (pesquisa) e Escape (fechar modais) reduzem o tempo de navegação.
+ * Este hook centraliza a gestão de atalhos para evitar duplicação e conflitos.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Ignora atalhos quando o foco está em INPUT/TEXTAREA/SELECT: evita conflitos com
+ *   a escrita normal (excepto Escape, que funciona em qualquer contexto).
+ * - Suporta modificadores Ctrl, Alt e Shift: cobertura completa de combinações comuns.
+ * - Atalhos padrão embutidos (Ctrl+K=pesquisa, Ctrl+/=ajuda, Escape=fechar): consistência
+ *   com padrões da indústria (VS Code, Slack, etc.).
+ * - Handlers customizáveis: componentes podem registar os seus próprios atalhos.
+ *
+ * @param {Object} [customHandlers={}] — Mapa de atalhos customizados (formato: "ctrl+k": handler)
+ *
+ * @returns {Object} Estado e funções:
+ *   - showHelpModal {boolean} — Estado do modal de ajuda
+ *   - setShowHelpModal {Function} — Alternar modal de ajuda
+ *   - showSearchModal {boolean} — Estado do modal de pesquisa
+ *   - setShowSearchModal {Function} — Alternar modal de pesquisa
+ *   - shortcuts {Object} — Mapa de atalhos padrão registados
  */
 import { useEffect, useCallback, useState } from "react";
 

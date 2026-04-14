@@ -1,3 +1,13 @@
+/**
+ * DSTICalculator — Calculadora automática de DSTI (Debt Service To Income) para processos de crédito habitação.
+ *
+ * PORQUÊ: O DSTI é a métrica regulatória fundamental usada pelo Banco de Portugal para avaliar a capacidade de
+ * endividamento do cliente. Esta componente calcula automaticamente o rácio entre as prestações mensais totais
+ * e o rendimento mensal, garantindo que o processo cumpre os limites legais (actualmente 60% do rendimento líquido).
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect } from "react";
 import {
   Dialog,
@@ -561,3 +571,4 @@ const DSTICalculator = ({ trigger, clientData, onCalculate }) => {
 };
 
 export default DSTICalculator;
+

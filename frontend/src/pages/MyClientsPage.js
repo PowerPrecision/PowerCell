@@ -1,3 +1,12 @@
+/**
+ * MyClientsPage — Página de clientes atribuídos ao utilizador actual.
+ *
+ * PORQUÊ: Cada consultor/mediador precisa de uma vista filtrada dos seus próprios clientes,
+ * sem ver os de outros utilizadores. Lista apenas clientes associados ao utilizador autenticado.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -404,3 +413,4 @@ const MyClientsPage = () => {
 };
 
 export default MyClientsPage;
+

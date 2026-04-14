@@ -1,3 +1,12 @@
+/**
+ * StatisticsPage — Página de estatísticas e relatórios do CRM.
+ *
+ * PORQUÊ: Fornece dados agregados sobre o estado do sistema (processos por estado, tempos médios,
+ * distribuição por consultor). Essencial para acompanhar produtividade e identificar gargalos.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -489,3 +498,4 @@ const StatisticsPage = () => {
 };
 
 export default StatisticsPage;
+

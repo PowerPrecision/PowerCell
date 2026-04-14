@@ -1,3 +1,13 @@
+/**
+ * ProcessAlerts — Painel de alertas e avisos associados a um processo.
+ *
+ * PORQUÊ: Processos de crédito têm múltiplos pontos de atenção (documentos em falta, prazos próximos,
+ * validações pendentes). Este componente agrega e exibe alertas de forma visual, permitindo
+ * ao consultor actuar rapidamente sobre os problemas mais críticos.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -181,3 +191,4 @@ const ProcessAlerts = ({ processId, className = "" }) => {
 };
 
 export default ProcessAlerts;
+

@@ -1,3 +1,11 @@
+/**
+ * ProfilePage — Página de perfil do utilizador autenticado.
+ *
+ * PORQUÊ: Permite ao utilizador consultar e editar dados pessoais e alterar a password.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -695,3 +703,4 @@ const ProfilePage = () => {
 };
 
 export default ProfilePage;
+

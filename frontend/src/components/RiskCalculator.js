@@ -1,3 +1,13 @@
+/**
+ * RiskCalculator — Calculadora de risco de crédito para avaliação de processos.
+ *
+ * PORQUÊ: Permite ao consultor/mediador avaliar o risco de crédito de forma estruturada,
+ * considerando factores como LTV, DSTI, rendimento, e histórico. O resultado ajuda
+ * na decisão de recomendar ou não a aprovação do crédito.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect } from "react";
 import {
   Dialog,
@@ -688,3 +698,4 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
 };
 
 export default RiskCalculator;
+
