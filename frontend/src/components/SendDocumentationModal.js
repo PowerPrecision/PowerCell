@@ -82,8 +82,9 @@ const SendDocumentationModal = ({
   }, [open, processId]);
 
   // Carregar preview do HTML quando os documentos selecionados mudam
+  // O preview deve carregar para TODOS os utilizadores (não só admin/CEO)
   useEffect(() => {
-    if (open && processId && selectedDocs.length > 0 && canEditTemplate) {
+    if (open && processId && selectedDocs.length > 0) {
       loadPreview();
     }
   }, [open, processId, selectedDocs]);

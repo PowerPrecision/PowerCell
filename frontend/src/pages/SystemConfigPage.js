@@ -599,6 +599,13 @@ const SystemConfigPage = () => {
     const [autoMapping, setAutoMapping] = useState(false);
     const [fixingNames, setFixingNames] = useState(false);
     
+    // Estado para Sincronização Prod → Dev
+    const [syncing, setSyncing] = useState(false);
+    const [showSyncModal, setShowSyncModal] = useState(false);
+    const [showSyncConfirmModal, setShowSyncConfirmModal] = useState(false);
+    const [syncStatus, setSyncStatus] = useState(null);
+    const [syncPolling, setSyncPolling] = useState(false);
+    
     // Filtrar clientes para exibição
     const filteredS3Clients = s3MappingData?.processes?.filter(p => {
       const matchesSearch = !s3SearchTerm || 
@@ -817,7 +824,83 @@ const SystemConfigPage = () => {
       }
     };
 
+    // ─── Sincronização Prod → Dev ───
+    const isDevEnvironment = process.env.REACT_APP_ENVIRONMENT === "development" || 
+                             process.env.REACT_APP_ENVIRONMENT === "dev" || 
+                             !process.env.REACT_APP_ENVIRONMENT;
+
+    const fetchSyncStatus = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/admin/sync-database/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setSyncStatus(data);
+          return data;
+        }
+      } catch (error) {
+        console.error("Erro ao obter status do sync:", error);
+      }
+      return null;
+    };
+
+    const handleStartSync = async () => {
+      setSyncing(true);
+      try {
+        const response = await fetch(`${API_URL}/api/admin/sync-database`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        });
+
+        if (response.status === 403) {
+          toast.error("Ação bloqueada: só disponível em ambiente de Desenvolvimento");
+          setSyncing(false);
+          return;
+        }
+        if (response.status === 409) {
+          toast.error("Já existe uma sincronização em curso");
+          setSyncing(false);
+          return;
+        }
+
+        const data = await response.json();
+        if (data.success) {
+          toast.success("Sincronização iniciada em background");
+          setShowSyncConfirmModal(false);
+          setSyncPolling(true);
+        } else {
+          toast.error(data.detail || "Erro ao iniciar sincronização");
+        }
+      } catch (error) {
+        toast.error("Erro de conexão ao iniciar sincronização");
+      } finally {
+        setSyncing(false);
+      }
+    };
+
+    useEffect(() => {
+      if (!syncPolling) return;
+      const interval = setInterval(async () => {
+        const status = await fetchSyncStatus();
+        if (status && !status.in_progress && status.last_result) {
+          setSyncPolling(false);
+          if (status.last_result.success) {
+            toast.success(`Sincronização concluída! ${status.last_result.total_documents} documentos copiados.`);
+          } else {
+            toast.error(`Erros na sincronização: ${status.last_result.errors?.length || 1} erro(s)`);
+          }
+        }
+      }, 5000);
+      return () => clearInterval(interval);
+    }, [syncPolling]);
+
     return (
+      <>
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -1102,8 +1185,110 @@ const SystemConfigPage = () => {
               </div>
             )}
           </div>
+
+          {/* ═══ Sincronização Produção → Desenvolvimento (RGPD) ═══ */}
+          {isDevEnvironment && user?.role === "admin" && (
+            <div className="border rounded-lg p-4 border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/30">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h4 className="font-medium flex items-center gap-2">
+                    <Database className="h-4 w-4 text-red-600" />
+                    Sincronizar BD com Produção (Anonimizado)
+                  </h4>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Copia dados de Produção para Dev com anonimização RGPD. 
+                    Dados pessoais (email, NIF, telefone) são mascarados automaticamente.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 mb-3">
+                <Button
+                  variant="destructive"
+                  onClick={() => setShowSyncConfirmModal(true)}
+                  disabled={syncing || syncPolling}
+                >
+                  {syncing || syncPolling ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Database className="h-4 w-4 mr-2" />
+                  )}
+                  {syncPolling ? "Sincronizando..." : "Sincronizar BD com Produção"}
+                </Button>
+                {syncStatus?.last_result && (
+                  <span className="text-xs text-muted-foreground">
+                    Última: {syncStatus.last_result.success ? "Sucesso" : "Com erros"} — {syncStatus.last_result.total_documents || 0} docs
+                  </span>
+                )}
+              </div>
+
+              <div className="bg-red-100 dark:bg-red-900/30 rounded p-3 text-xs space-y-1 text-red-800 dark:text-red-200">
+                <p className="font-semibold">⚠️ Atenção — Esta ação é irreversível:</p>
+                <ul className="list-disc list-inside space-y-0.5 ml-1">
+                  <li>Todos os dados atuais de Desenvolvimento serão <strong>apagados</strong></li>
+                  <li>Dados de clientes serão <strong>anonimizados</strong> (email, NIF, telefone)</li>
+                  <li>Links S3/AWS serão <strong>removidos</strong></li>
+                  <li>Dados financeiros ultra-sensíveis serão <strong>limpos</strong></li>
+                  <li>Consultores mantêm credenciais de login reais</li>
+                </ul>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* ═══ Modal de Confirmação Dupla para Sync ═══ */}
+      <Dialog open={showSyncConfirmModal} onOpenChange={setShowSyncConfirmModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Confirmação de Sincronização
+            </DialogTitle>
+            <DialogDescription>
+              Esta operação vai apagar todos os dados de Desenvolvimento e substituí-los por uma cópia anonimizada de Produção.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-4 space-y-2 text-sm">
+            <p className="font-medium text-red-800 dark:text-red-200">
+              ⚠️ AVISO: Ação irreversível
+            </p>
+            <p>
+              Isto vai <strong>apagar todos os dados atuais de Desenvolvimento</strong> e importar uma 
+              cópia <strong>mascarada de Produção</strong>.
+            </p>
+            <ul className="list-disc list-inside space-y-1 ml-1 text-muted-foreground">
+              <li>Emails de clientes → <code className="text-xs bg-muted px-1 rounded">user{id}@powercell.dev</code></li>
+              <li>NIFs → NIFs falsos mas válidos</li>
+              <li>Telefones → Números baralhados</li>
+              <li>Nomes → Apelidos ofuscados</li>
+              <li>Links S3 → Removidos</li>
+              <li>Dados financeiros → Limpos</li>
+              <li>Consultores → Emails e passwords mantidos para login</li>
+            </ul>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowSyncConfirmModal(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleStartSync}
+              disabled={syncing}
+            >
+              {syncing ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Database className="h-4 w-4 mr-2" />
+              )}
+              Confirmar e Sincronizar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      </>
     );
   };
 

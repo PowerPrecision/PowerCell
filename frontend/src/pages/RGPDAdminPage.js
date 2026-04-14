@@ -604,20 +604,34 @@ const RGPDTemplateTab = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="bg-white dark:bg-gray-900 border rounded-lg p-4 min-h-[400px] overflow-auto">
-              <div 
-                className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap text-sm leading-relaxed"
+            <div className="bg-white dark:bg-gray-900 border rounded-lg p-6 min-h-[400px] overflow-auto">
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed"
                 dangerouslySetInnerHTML={{
-                  __html: templateContent
-                    .replace(/\{\{NOME\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
-                    .replace(/\{\{CONTRIBUINTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">123456789</span>')
-                    .replace(/\{\{MORADA\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">Rua das Flores, 123</span>')
-                    .replace(/\{\{CODIGO_POSTAL\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">1000-001</span>')
-                    .replace(/\{\{TIPO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">Cartão de Cidadão</span>')
-                    .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">12345678</span>')
-                    .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900 px-1 rounded font-medium text-blue-800 dark:text-blue-200">31/12/2030</span>')
-                    .replace(/\{\{DATA_ASSINATURA\}\}/g, '<span class="bg-green-100 dark:bg-green-900 px-1 rounded font-medium text-green-800 dark:text-green-200">15/01/2025</span>')
-                    .replace(/\n/g, '<br/>')
+                  __html: (() => {
+                    // 1. Escape HTML entities first to prevent template text from breaking formatting
+                    let safe = templateContent
+                      .replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;');
+                    // 2. Replace RGPD variables with highlighted example spans
+                    safe = safe
+                      .replace(/\{\{NOME\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
+                      .replace(/\{\{CONTRIBUINTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">123456789</span>')
+                      .replace(/\{\{MORADA\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Rua das Flores, 123</span>')
+                      .replace(/\{\{CODIGO_POSTAL\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">1000-001</span>')
+                      .replace(/\{\{TIPO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Cartão de Cidadão</span>')
+                      .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">12345678</span>')
+                      .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">31/12/2030</span>')
+                      .replace(/\{\{DATA_ASSINATURA\}\}/g, '<span class="bg-green-100 dark:bg-green-900/60 px-1.5 py-0.5 rounded font-medium text-green-800 dark:text-green-200">15/01/2025</span>')
+                      .replace(/\{\{NOME_CLIENTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
+                      .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate, Lda.</span>');
+                    // 3. Convert newlines to <br> and blank lines to paragraph spacing
+                    safe = safe.replace(/\n/g, '<br/>');
+                    // 4. Wrap numbered sections and headings for better formatting
+                    safe = safe.replace(/^(\d+\.\s[A-ZÀ-Ú][^\n]*)/gm, '<span class="font-semibold text-foreground">$1</span>');
+                    return safe;
+                  })()
                 }}
               />
             </div>
