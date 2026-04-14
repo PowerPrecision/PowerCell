@@ -750,6 +750,7 @@ async def _import_to_temp_collections(
                 logger.error(f"  Erro a sanitizar {coll_name} doc: {e}")
                 continue
 
+        # Criar a coleção temporária mesmo se vazia (para o rename funcionar)
         if sanitized_docs:
             # Inserir em batches de 1000 para evitar memory issues
             batch_size = 1000
@@ -757,6 +758,12 @@ async def _import_to_temp_collections(
                 batch = sanitized_docs[i:i + batch_size]
                 await temp_coll.insert_many(batch)
                 logger.info(f"  {temp_coll_name}: insertados {len(batch)} docs (batch {i // batch_size + 1})")
+        else:
+            # Garantir que a coleção temporária existe (mesmo vazia)
+            # para que o rename no swap não falhe com NamespaceNotFound
+            await temp_coll.insert_one({"_restore_placeholder": True})
+            await temp_coll.delete_many({"_restore_placeholder": True})
+            logger.info(f"  {temp_coll_name}: criada vazia (nenhum doc importado)")
 
         stats[coll_name] = len(sanitized_docs)
 
@@ -827,8 +834,17 @@ async def _swap_collections(dev_db, collections: List[str]) -> None:
     """
     logger.info("A fazer swap das coleções...")
 
+    existing = await dev_db.list_collection_names()
+
     for coll_name in collections:
         temp_coll_name = f"_restore_temp_{coll_name}"
+
+        # Verificar se a coleção temporária existe
+        if temp_coll_name not in existing:
+            logger.warning(
+                f"  ⚠ {temp_coll_name} não existe — saltando swap de {coll_name}"
+            )
+            continue
 
         # 1. Drop da coleção real
         try:
