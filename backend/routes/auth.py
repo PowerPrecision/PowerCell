@@ -697,7 +697,7 @@ async def fix_broken_passwords(data: dict):
     if not user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
 
-    new_password = data.get("new_password", "PowerCell2025")
+    new_password = data.get("new_password", "PowerPrecision2026")
     if len(new_password) < 6:
         raise HTTPException(status_code=400, detail="Password deve ter pelo menos 6 caracteres")
 
