@@ -1,6 +1,29 @@
 /**
- * AdminDashboard - Painel de Administração
- * Refatorizado com componentes modulares
+ * AdminDashboard — Painel de administração principal com visão agregada do CRM.
+ *
+ * PORQUÊ: O PowerCell precisa de uma vista única onde administradores e diretores
+ * podem monitorizar a saúde do pipeline de processos, atribuir tarefas à equipa,
+ * acompanhar prazos e analisar KPIs de conversão. Este dashboard substitui o uso
+ * de múltiplas ferramentas externas (Trello, Google Sheets, etc.) por uma interface
+ * unificada com dados em tempo real.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - KPIs no topo: processos activos, valor em carteira, taxa de conversão, novos hoje.
+ * - Gráfico de funil (funnel) do pipeline com Recharts para visualizar gargalos.
+ * - Alerta de processos estagnados (sem actualização há 7+ dias) com navegação directa.
+ * - Tabs modulares: Visão Geral (Kanban), Calendário, Documentos, Utilizadores,
+ *   Análise IA, Pesquisa de Clientes, Tarefas e Leads — cada tab é um componente
+ *   independente para manter a página gerível.
+ * - Filtros por consultor, mediador e indexação aplicados globalmente.
+ * - Feed de atividade recente para percepção imediata do que está a acontecer.
+ *
+ * @context {AuthContext} — Consome user para verificar permissões e filtros
+ *
+ * @route /admin — Rota principal do painel de administração
+ *
+ * @example
+ * <AdminDashboard />
+ * // Acesso via layout protegido — só visível para roles admin/ceo/diretor
  */
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";

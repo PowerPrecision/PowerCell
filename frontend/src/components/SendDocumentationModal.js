@@ -1,14 +1,38 @@
 /**
- * SendDocumentationModal - Modal para enviar documentação para balcões/bancos
- * 
- * Funcionalidades:
- * - Seleção de documentos do processo
- * - Seleção de destinatários (BCC)
- * - Validação contra contas ativas e simulações do cliente
- * - Preview do email com template pré-preenchido
- * - Rich Text Editor (WYSIWYG) para edição do HTML pelo Admin/CEO
- * 
- * ATUALIZADO: Integração com RichTextEditor para edição visual de HTML
+ * SendDocumentationModal — Modal para envio de documentação de clientes para balcões/bancos.
+ *
+ * PORQUÊ: No setor de crédito habitação em Portugal, a intermediação com balcões
+ * bancários é uma operação crítica e frequente. Este modal centraliza o envio de
+ * documentos, eliminando o processo manual de compor emails, anexar ficheiros
+ * e gerir múltiplos destinatários. Inclui validação contra conflitos de interesse
+ * (bloqueia envio para bancos onde o cliente já tem conta activa ou simulação)
+ * e suporta edição visual do email pelo Admin/CEO via SmartRichEditor.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Pré-seleção automática de documentos RGPD assinados (categoria "RGPD").
+ * - Validação de destinatários bloqueados: compara o nome do balcão com a lista
+ *   de bancos_creditos e bancos_simulacoes do cliente (case-insensitive).
+ * - TO/BCC/CC separados para controlo de visibilidade (BCC protege a privacidade).
+ * - Preview do HTML gerado pelo backend antes do envio.
+ * - SmartRichEditor disponível apenas para Admin/CEO (edição visual ou HTML bruto).
+ *
+ * @param {Object} props
+ * @param {boolean} props.open — Controla se o modal está visível
+ * @param {Function} props.onOpenChange — Callback quando o estado de abertura muda
+ * @param {string} props.processId — ID do processo para carregar documentos
+ * @param {Object} props.process — Dados completos do processo (para validação de bancos)
+ * @param {string} props.token — Token JWT de autenticação
+ * @param {Object} props.user — Utilizador autenticado ({ role, … })
+ *
+ * @example
+ * <SendDocumentationModal
+ *   open={isModalOpen}
+ *   onOpenChange={setIsModalOpen}
+ *   processId="proc-123"
+ *   process={currentProcess}
+ *   token={jwtToken}
+ *   user={currentUser}
+ * />
  */
 import React, { useState, useEffect } from "react";
 import {

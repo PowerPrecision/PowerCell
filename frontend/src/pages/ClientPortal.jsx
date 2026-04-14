@@ -1,13 +1,32 @@
 /**
- * CLIENT PORTAL - Passwordless Magic Link Interface
- * ==================================================
- * Página pública que o cliente acede via Magic Link.
- * Não requer login nem registo.
- * 
- * Mobile-First Design:
- * - 90% dos clientes abrem no telemóvel
- * - Interface limpa, sem navegação complexa
- * - Focus no estado do processo e upload de documentos
+ * ClientPortal — Portal do cliente (passwordless) acedido via Magic Link.
+ *
+ * PORQUÊ: Nem todos os clientes têm ou querem ter conta no PowerCell. O Magic Link
+ * permite enviar um link seguro (válido por 90 dias) para o email do cliente,
+ * dando-lhe acesso directo ao estado do seu processo sem necessidade de registo
+ * ou password. Isto é essencial para cumprir boas práticas de UX — o cliente não
+ * precisa de memorizar credenciais apenas para acompanhar o seu processo.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Mobile-first: 90% dos clientes acedem via telemóvel. Interface minimalista
+ *   sem navegação complexa — foco no progresso, documentos pendentes e contacto
+ *   do consultor.
+ * - Token na URL (path-based, não query param) para simplicidade.
+ * - Token armazenado em sessionStorage (não localStorage) para evitar conflitos
+ *   quando o mesmo navegador acede a portais de clientes diferentes.
+ * - Upload directo para S3 via pre-signed URLs em 3 passos: gerar URL → upload
+ *   binário → confirmar metadados no backend.
+ * - Stepper visual das etapas do processo com cores dinâmicas por estado.
+ * - Cartão de contacto do consultor com links para telefone, email e WhatsApp.
+ * - Subcomponentes modulares (ProgressStepper, PendingDocumentsCard, ConsultantCard,
+ *   UploadedDocumentsList) para manter o ficheiro gerível.
+ *
+ * @route /portal/:token — Rota pública parametrizada pelo token do Magic Link
+ *
+ * @example
+ * // O cliente recebe um link como: https://app.powercell.pt/portal/abc123def
+ * <ClientPortal />
+ * // O token é extraído automaticamente da URL
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {

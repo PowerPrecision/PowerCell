@@ -1,28 +1,42 @@
 /**
- * SmartRichEditor - Editor de texto rico com abstração de complexidade HTML
+ * SmartRichEditor — Editor de texto rico com abstração de complexidade HTML.
  *
- * - Modo Visual (default): Editor WYSIWYG — o utilizador vê o texto formatado normalmente.
- * - Modo HTML (admin-only): Textarea com código-fonte HTML puro para edição avançada.
+ * PORQUÊ: O PowerCell utiliza templates de email com variáveis Handlebars ({{var}})
+ * que podem ser corrompidas por editores WYSIWYG ao transitar entre modos visual/HTML.
+ * Este componente resolve esse problema mantendo uma camada de abstração: o modo
+ * visual (WYSIWYG) é o padrão para utilizadores comuns, enquanto o modo HTML bruto
+ * fica acessível apenas a administradores para edições avançadas.
  *
- * O botão para alternar para HTML é INVISÍVEL para utilizadores não-admin.
- * Protege variáveis tipo {{HANDLEBARS}} de corrupção ao transitar entre modos.
- */
-import React, { useState, useCallback, useMemo } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import RichTextEditor, { RichTextViewer } from "./RichTextEditor";
-import { Button } from "./button";
-import { Code2, Eye } from "lucide-react";
-
-/**
- * @param {string}      value          - HTML content (controlled)
- * @param {function}    onChange        - (html: string) => void
- * @param {boolean}     readOnly        - Entire editor is read-only
- * @param {string}      placeholder    - Placeholder text for empty editor
- * @param {number}      minHeight      - Min height in px
- * @param {boolean}     advanced       - Show advanced Quill toolbar
- * @param {boolean}     allowHtmlAdmin - Allow admin toggle even if role check (prop override)
- * @param {string}      className      - Extra classes on outer wrapper
- * @param {string}      label          - Optional label above the editor
+ * DECISÕES ARQUITECTURAIS:
+ * - Dois modos de edição: Visual (WYSIWYG via ReactQuill) e HTML (textarea mono).
+ * - O botão de alternância para HTML é invisível para não-admins, evitando que
+ *   utilizadores inadvertidamente corrompam templates com variáveis.
+ * - Controlo de estado separado (htmlDraft) para evitar que o Quill re-analise
+ *   o HTML em cada tecla quando em modo de edição bruta.
+ * - Sincronização bidireccional: alterações no modo visual propagam-se para o
+ *   modo HTML e vice-versa.
+ *
+ * @param {Object} props
+ * @param {string}   [props.value='']        — Conteúdo HTML (componente controlado)
+ * @param {Function} [props.onChange]          — Callback (html: string) => void
+ * @param {boolean}  [props.readOnly=false]   — Editor completamente em modo de leitura
+ * @param {string}   [props.placeholder]      — Texto quando o editor está vazio
+ * @param {number}   [props.minHeight=250]    — Altura mínima em pixéis
+ * @param {boolean}  [props.advanced=false]   — Mostra toolbar avançada do Quill
+ * @param {boolean}  [props.allowHtmlAdmin=true] — Permite toggle HTML mesmo com role check
+ * @param {string}   [props.className='']     — Classes CSS adicionais no wrapper
+ * @param {string}   [props.label]            — Rótulo opcional acima do editor
+ *
+ * @context {AuthContext} — Consome user.role para decidir visibilidade do modo HTML
+ *
+ * @example
+ * <SmartRichEditor
+ *   value={emailHtml}
+ *   onChange={setEmailHtml}
+ *   placeholder="Edite o conteúdo do email..."
+ *   minHeight={300}
+ *   advanced
+ * />
  */
 const SmartRichEditor = ({
   value = "",

@@ -1,4 +1,40 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+/**
+ * AuthContext — Contexto de autenticação centralizado com JWT, refresh tokens e impersonificação.
+ *
+ * PORQUÊ: O PowerCell suporta múltiplos perfis por utilizador (consultor, mediador,
+ * admin, CEO) e a funcionalidade de impersonate permite ao admin visualizar o sistema
+ * como outro utilizador sem partilhar credenciais. O refresh token garante sessões
+ * longas sem que o utilizador tenha de fazer login repetidamente.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - JWT com refresh tokens: o access token tem curta duração e é renovado automaticamente
+ *   2 minutos antes de expirar via scheduleTokenRefresh (setTimeout recursivo).
+ * - Impressonate: o admin pode assumir a identidade de qualquer utilizador. O token
+ *   original é guardado em localStorage ("originalToken") para restauração segura.
+ * - Context switching (múltiplos perfis): utilizadores com additional_roles podem alternar
+ *   entre perfis sem re-login. O role activo é persistido em sessionStorage.
+ * - Logout revoga o refresh token no servidor para segurança.
+ * - Tokens armazenados em localStorage (persistência) e activeRole em sessionStorage
+ *   (sessão do browser).
+ *
+ * @context {AuthContext} — Fornecido via AuthProvider em App.js
+ * @hook {useAuth} — Hook para consumir o contexto em componentes React
+ *
+ * @returns {Object} Estado e funções do contexto de autenticação:
+ *   - user, token, loading, login, register, logout,
+ *   - isImpersonating, originalAdminName,
+ *   - impersonate, stopImpersonating,
+ *   - activeRole, switchActiveRole, effectiveRole
+ *
+ * @example
+ * // No componente raiz (App.js)
+ * <AuthProvider>
+ *   <AppRoutes />
+ * </AuthProvider>
+ *
+ * // Em qualquer componente protegido
+ * const { user, token, logout } = useAuth();
+ */
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 
 const AuthContext = createContext(null);

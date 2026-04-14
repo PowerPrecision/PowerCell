@@ -1,6 +1,39 @@
 /**
- * S3FileManager - Gestor de Ficheiros AWS S3
- * Componente para listar, fazer upload e gerir ficheiros no S3
+ * S3FileManager — Gestor de documentos AWS S3 com capacidades de IA e anotações.
+ *
+ * PORQUÊ: O PowerCell migrou do OneDrive para AWS S3 para armazenamento de documentos
+ * dos clientes. Este componente é a interface central para upload, organização,
+ * visualização e análise de documentos (PDF, imagens, etc.). A integração com IA permite
+ * extrair automaticamente dados de documentos (NIF, morada, salário, etc.) e
+ * pré-preencher fichas de processo, reduzindo trabalho manual da equipa de indexação.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Categorias de documentos (Pessoais, Financeiros, Imóvel, Bancários, Outros)
+ *   para organização automática por IA.
+ * - Download via proxy backend para evitar problemas de CORS do S3 directo.
+ * - Upload com detecção de conflitos (ficheiros duplicados) e diálogo de resolução.
+ * - Drag-and-drop para mover ficheiros entre categorias.
+ * - Renomeação inteligente por IA para nomes descritivos em português.
+ * - Anotações em PDF via PDFAnnotationViewer para marcação de campos relevantes.
+ * - Geração de minutas/templates (CPCV, contrato mediação, etc.) com dados do processo.
+ * - Para utilizadores de indexação, é obrigatório fornecer o NIF da empresa no upload.
+ * - Mapeamento S3 individual disponível apenas para admins.
+ *
+ * @param {Object} props
+ * @param {string} props.processId — ID do processo para gerir documentos
+ * @param {string} [props.clientName] — Nome do cliente (para mapeamento S3)
+ * @param {Function} [props.onAIDataExtracted] — Callback quando a IA extrai dados dos documentos
+ *
+ * @context {AuthContext} — Consome token, user para autenticação e permissões de role
+ *
+ * @example
+ * <S3FileManager
+ *   processId="proc-123"
+ *   clientName="João Silva"
+ *   onAIDataExtracted={(data) => {
+ *     setPersonalData(prev => ({ ...prev, ...data.extractedData }));
+ *   }}
+ * />
  */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";

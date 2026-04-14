@@ -1,19 +1,41 @@
 /**
- * KanbanBoard Component (Orchestrator) - Refatorado com TanStack Query
- * 
- * Componente principal do Quadro Kanban - agora um ORQUESTRADOR.
- * 
- * MELHORIAS COM REACT QUERY:
- * - Caching automático com staleTime
- * - Refetch on window focus
- * - Integração WebSocket com setQueryData
- * - Eliminação de useEffect/useState "esparguete"
- * 
- * ARQUITETURA:
- * - KanbanBoard (orquestrador) → KanbanColumn → KanbanCard
- * - useKanbanQuery: Fetch com caching
- * - useKanbanRealtime: WebSocket + React Query integration
- * - useMoveProcessMutation: Drag & Drop com optimistic update
+ * KanbanBoard — Quadro Kanban principal (orquestrador) com drag-drop e tempo real.
+ *
+ * PORQUÊ: O PowerCell gere processos de crédito habitação que fluem por múltiplas
+ * fases (documentação, análise, aprovação bancária, CPCV, escritura). Este quadro
+ * visual permite à equipa acompanhar e mover processos entre fases de forma intuitiva,
+ * substituindo planilhas e emails internos. A arquitectura orquestrador delega a
+ * lógica de apresentação para subcomponentes (KanbanColumn → KanbanCard), mantendo
+ * apenas estado de UI local e delegando server state ao TanStack Query.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - TanStack Query para caching com staleTime e refetch on window focus.
+ * - Integração WebSocket via useKanbanRealtime para actualizações em tempo real
+ *   sem polling (setQueryData para optimistic updates).
+ * - Drag-and-drop nativo (HTML5) em vez de biblioteca externa, simplificando
+ *   a cadeia de dependências.
+ * - Filtros por consultor, mediador, indexação e parceiro para visão personalizada.
+ * - Locking de processos via WebSocket para evitar conflitos de edição simultânea.
+ *
+ * @param {Object} props
+ * @param {string} props.token — Token JWT de autenticação
+ * @param {Object} props.user — Utilizador autenticado ({ id, role, name, … })
+ * @param {string} [props.consultorFilter='all'] — Filtrar por ID do consultor
+ * @param {string} [props.mediadorFilter='all'] — Filtrar por ID do mediador
+ * @param {string} [props.indexacaoFilter='all'] — Filtrar por ID de indexação
+ * @param {string} [props.parceiroFilter='all'] — Filtrar por ID do parceiro
+ *
+ * @hook {useKanbanQuery} — Busca dados do quadro com caching TanStack Query
+ * @hook {useKanbanRealtime} — Integração WebSocket + React Query para tempo real
+ * @hook {useMoveProcessMutation} — Mutação de movimentação com optimistic update
+ *
+ * @example
+ * <KanbanBoard
+ *   token={jwtToken}
+ *   user={currentUser}
+ *   consultorFilter="consultor-123"
+ *   mediadorFilter="all"
+ * />
  */
 import { useState, useCallback, useRef } from 'react';
 import { ScrollArea, ScrollBar } from './ui/scroll-area';

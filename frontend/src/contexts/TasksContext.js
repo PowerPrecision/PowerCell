@@ -1,4 +1,36 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+/**
+ * TasksContext — Contexto de tarefas assíncronas com circuit breaker e polling inteligente.
+ *
+ * PORQUÊ: O PowerCell executa operações demoradas em segundo plano (geração de PDF,
+ * análise IA de documentos, envio de emails, upload S3, etc.). Este contexto fornece
+ * uma camada unificada para monitorizar essas tarefas, mostrar progresso ao utilizador
+ * e notificar quando terminam. Sem ele, cada componente teria de gerir o seu próprio
+ * estado de polling, duplicando pedidos e criando inconsistências.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Circuit breaker: após 3 falhas consecutivas no endpoint de polling, para
+ *   automaticamente por 60 segundos para evitar spam de erros no console.
+ * - Polling inteligente: 5 segundos quando há tarefas activas, 30 segundos em idle,
+ *   com retoma imediata quando a aba volta a ser visível (visibilitychange listener).
+ * - Toast com debounce: cada tarefa só gera um toast por mudança de estado,
+ *   evitando notificações duplicadas.
+ * - Tipos de tarefas definidos em TaskTypes (PDF_GEN, AI_ANALYSIS, EMAIL_SEND, etc.)
+ *   com labels amigáveis em português para facilitar a identificação.
+ * - Contador de referência (reference counting) implícito via useEffect cleanup.
+ *
+ * @context {TasksContext} — Fornecido via TasksProvider em App.js
+ * @context {AuthContext} — Consome user para filtrar tarefas por utilizador
+ * @hook {useTasks} — Hook para consumir o contexto em componentes React
+ *
+ * @example
+ * // No componente raiz
+ * <TasksProvider>
+ *   <AppRoutes />
+ * </TasksProvider>
+ *
+ * // Mostrar contagem de tarefas activas no header
+ * const { activeCount, tasks } = useTasks();
+ */
 import { toast } from "sonner";
 import api from "../services/api";
 import { useAuth } from "./AuthContext";

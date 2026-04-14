@@ -1,17 +1,42 @@
 /**
- * ====================================================================
- * API SERVICE - CREDITOIMO
- * ====================================================================
- * Serviço centralizado para comunicação com a API Backend.
- * 
- * FUNCIONALIDADES:
- * - Instância Axios configurada com interceptors
- * - Global Error Handling (401, 403, 429, 500, etc.)
- * - Retry automático para erros de rede
- * - Toast notifications para erros
- * - Gestão automática de tokens
- * 
- * ====================================================================
+ * api.js — Serviço centralizado de comunicação com a API Backend do PowerCell.
+ *
+ * PORQUÊ: Todas as comunicações frontend→backend passam por este módulo. Centralizar
+ * em vez de usar axios diretamente em cada componente permite: (1) tratamento global
+ * de erros consistente (401 sessão expirada, 429 rate limiting, 500 erros do servidor),
+ * (2) retry automático com exponential backoff para pedidos rate-limited,
+ * (3) gestão unificada de tokens JWT, e (4) feedback ao utilizador via toasts.
+ * Sem esta camada, cada componente teria tratamento de erros duplicado e inconsistente.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Instância Axios singleton com baseURL configurada via env var.
+ * - Interceptor de request: injecta automaticamente o token JWT do localStorage.
+ * - Interceptor de response com tratamento por código de estado:
+ *   - 401: limpa tokens e redireciona para login (restaura sessão original se em
+ *     modo impersonate).
+ *   - 403: toast de acesso negado.
+ *   - 429: retry automático até 3x com exponential backoff (2s → 4s → 8s) e jitter
+ *     aleatório, respeitando o header Retry-When se presente.
+ *   - 404: silencioso (pode ser normal em operações condicionais).
+ *   - 422: mostra mensagens de validação Pydantic amigáveis.
+ *   - 500+: toast genérico de erro de servidor.
+ * - Timeout de 90s para operações longas (sincronização de email, uploads grandes).
+ * - Upload directo para S3 via pre-signed URLs (3 passos) com suporte a progress via XHR.
+ * - Todas as funções de API exportadas como named exports para descoberta automática
+ *   em IDEs.
+ *
+ * @example
+ * import { getProcess, updateProcess, getDocuments } from '../services/api';
+ *
+ * // Uso normal
+ * const { data } = await getProcess(processId);
+ *
+ * // Direct S3 Upload
+ * const result = await directS3Upload({
+ *   processId: 'proc-123',
+ *   file: myFile,
+ *   category: 'Financeiros',
+ * });
  */
 import axios from "axios";
 import { toast } from "../hooks/use-toast";

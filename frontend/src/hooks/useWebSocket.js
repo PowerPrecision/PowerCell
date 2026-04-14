@@ -1,20 +1,51 @@
 /**
- * ====================================================================
- * WEBSOCKET SINGLETON MANAGER + HOOK - CREDITOIMO
- * ====================================================================
- * 
- * ARQUITECTURA:
- * - WebSocketManager: Singleton module-level que gere uma única ligação
- * - useWebSocket(): Hook React que se subscreve ao singleton
- * 
- * VANTAGENS:
- * - Uma única ligação WebSocket por sessão (não importa quantos
- *   componentes chamem useWebSocket())
- * - Reference counting: conecta no 1º subscriber, desconecta no último
- * - Exponential backoff na reconexão
- * - Heartbeat para manter ligação activa
- * - Proteção contra React StrictMode double-mount
- * ====================================================================
+ * useWebSocket — Hook WebSocket singleton com exponential backoff, heartbeat e polling fallback.
+ *
+ * PORQUÊ: O PowerCell precisa de actualizações em tempo real (novos processos, mudanças
+ * de estado, notificações, presença de utilizadores). O WebSocket é a forma mais
+ * eficiente de obter isso, mas tem fragilidades (desconexões de rede, tokens expirados).
+ * Este módulo resolve esses problemas com uma arquitectura singleton + polling fallback.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - WebSocketManager (singleton module-level): garante uma única ligação por sessão
+ *   independentemente de quantos componentes chamem useWebSocket(). Usa reference
+ *   counting para ligar no 1º subscriber e desligar no último.
+ * - Exponential backoff na reconexão: começa a 1s, duplica até 30s máximo.
+ * - Heartbeat a cada 30s para manter a ligação activa e detectar desconexões silenciosas.
+ * - Polling fallback: quando o WebSocket falha 3 vezes consecutivas, comuta para
+ *   polling via REST (/api/notifications) até a ligação ser restabelecida.
+ * - Refresh de token automático: quando o servidor fecha com código 4001 (token expirado),
+ *   tenta renovar via /api/auth/refresh e reconectar. Com código 4002 (token inválido),
+ *   desiste e mantém polling.
+ * - Proteção contra React StrictMode double-mount via verificação de estado.
+ * - Tipos de eventos tipados (WSEventType) para processos, documentos, notificações,
+ *   prazos e presença de utilizadores.
+ *
+ * @context {AuthContext} — Consome token para autenticar a ligação WebSocket
+ *
+ * @param {Object} [options={}] — Opções de configuração
+ * @param {Function} [options.onProcessUpdate] — Callback para mudanças em processos (todos os tipos)
+ * @param {Function} [options.onNotification] — Callback para novas notificações
+ * @param {Function} [options.onDeadlineReminder] — Callback para lembretes de prazos
+ * @param {Function} [options.onUserOnline] — Callback quando utilizador fica online
+ * @param {Function} [options.onUserOffline] — Callback quando utilizador fica offline
+ * @param {boolean} [options.autoConnect=true] — Conectar automaticamente ao montar
+ *
+ * @returns {Object} Estado e funções do WebSocket:
+ *   - isConnected, isPolling, lastMessage, connectionError,
+ *   - connect, disconnect, sendMessage,
+ *   - markNotificationRead, markAllNotificationsRead,
+ *   - on, off
+ *
+ * @example
+ * const { isConnected, sendMessage, on } = useWebSocket({
+ *   onProcessUpdate: (type, data) => {
+ *     console.log('Processo actualizado:', data);
+ *   },
+ *   onNotification: (notification) => {
+ *     toast.info(notification.message);
+ *   },
+ * });
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';

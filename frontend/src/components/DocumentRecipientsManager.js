@@ -1,9 +1,35 @@
 import 'react-quill-new/dist/quill.snow.css';
 /**
- * DocumentRecipientsManager - Gestão visual de destinatários de documentação
- * 
- * Permite adicionar, editar, remover e activar/desactivar destinatários
- * de forma fácil sem precisar de editar JSON.
+ * DocumentRecipientsManager — Gestão visual de destinatários para envio de documentação bancária.
+ *
+ * PORQUÊ: O envio de documentação para balcões bancários é uma operação frequente no
+ * crédito habitação. Antes deste componente, os destinatários eram configurados via JSON
+ * no backend, o que era propenso a erros e pouco acessível para administradores.
+ * Este componente oferece uma interface visual para adicionar, editar, remover e
+ * activar/desactivar destinatários sem tocar em JSON. Também inclui um editor de
+ * templates de email com variáveis de template ({client_name}, {process_number}, etc.)
+ * e gestão de múltiplos emails TO (destinatário principal).
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Auto-save em cada operação (toggle activo, eliminar, adicionar) — sem botão de
+ *   "guardar" explícito, reduzindo o risco de perda de dados.
+ * - Múltiplos emails TO com adição individual ou em lote (vírgula/ponto-e-vírgula/espaço).
+ * - Template de email com ReactQuill (WYSIWYG) e variáveis de template clicáveis para
+ *   copia rápida (1º proponente, 2º proponente, crédito, remetente).
+ * - Validação automática de email em cada destinatário antes de guardar.
+ * - Permissões restritas a admin/CEO — outros utilizadores veem apenas o formulário.
+ * - Template padrão HTML profissional pré-preenchido com campos de crédito habitação.
+ *
+ * @param {Object} props
+ * @param {string} props.token — Token JWT de autenticação
+ * @param {Object} props.user — Utilizador autenticado ({ role, … }) para verificação de permissões
+ *
+ * @example
+ * <DocumentRecipientsManager
+ *   token={jwtToken}
+ *   user={currentUser}
+ * />
+ * // Usado dentro de SystemConfigPage como tab
  */
 import React, { useState, useEffect } from "react";
 import {
