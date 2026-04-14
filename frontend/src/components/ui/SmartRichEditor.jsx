@@ -38,6 +38,12 @@
  *   advanced
  * />
  */
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Code2, Eye } from "lucide-react";
+import { Button } from "./button";
+import { useAuth } from "../../contexts/AuthContext";
+import RichTextEditor from "./RichTextEditor";
+
 const SmartRichEditor = ({
   value = "",
   onChange,
@@ -61,7 +67,7 @@ const SmartRichEditor = ({
   const [htmlDraft, setHtmlDraft] = useState(value);
 
   // Sync external value changes into htmlDraft when not actively editing HTML
-  React.useEffect(() => {
+  useEffect(() => {
     if (viewMode === "visual") {
       // In visual mode, value is managed by Quill directly via onChange
     } else {

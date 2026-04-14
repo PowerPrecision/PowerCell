@@ -234,7 +234,7 @@ export const ExpiringDocumentsList = ({ expiries, onNavigate }) => {
  */
 export const AddExpiryDialog = ({ isOpen, onClose, formData, setFormData, onSubmit, loading, documentTypes }) => (
   <Dialog open={isOpen} onOpenChange={onClose}>
-    <DialogContent>
+    <DialogContent className="sm:max-w-md w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>Adicionar Data de Validade de Documento</DialogTitle>
         <DialogDescription>

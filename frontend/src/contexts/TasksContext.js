@@ -31,6 +31,7 @@
  * // Mostrar contagem de tarefas activas no header
  * const { activeCount, tasks } = useTasks();
  */
+import { createContext, useState, useEffect, useCallback, useRef, useContext } from "react";
 import { toast } from "sonner";
 import api from "../services/api";
 import { useAuth } from "./AuthContext";

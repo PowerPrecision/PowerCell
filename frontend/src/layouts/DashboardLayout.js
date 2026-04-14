@@ -787,15 +787,13 @@ const DashboardLayout = ({ children, title }) => {
               <Button
                 variant="ghost"
                 size="icon"
-                className="lg:hidden flex-shrink-0 h-8 w-8"
+                className="lg:hidden flex-shrink-0 h-9 w-9 sm:h-10 sm:w-10"
                 onClick={() => setSidebarOpen(true)}
                 aria-label="Abrir menu"
               >
                 <Menu className="h-4 w-4" />
               </Button>
-              <h1 className={`font-semibold tracking-tight transition-all duration-300 truncate text-sm ${
-                headerCollapsed ? 'text-xs' : 'text-sm lg:text-xl'
-              }`}>{title}</h1>
+              <h1 className={`font-semibold tracking-tight transition-all duration-300 truncate text-sm ${headerCollapsed ? 'text-xs sm:text-sm lg:text-xl' : ''}`}>{title}</h1>
             </div>
 
             <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
@@ -806,7 +804,7 @@ const DashboardLayout = ({ children, title }) => {
                 onClick={() => setShowSearchModal(true)}
                 title="Pesquisar (Ctrl+K)"
                 aria-label="Pesquisar"
-                className="h-8 w-8"
+                className="h-9 w-9 sm:h-10 sm:w-10"
               >
                 <Search className="h-4 w-4" />
               </Button>
@@ -818,7 +816,7 @@ const DashboardLayout = ({ children, title }) => {
                 onClick={toggleTheme}
                 title={isDark ? "Modo Claro" : "Modo Escuro"}
                 aria-label={isDark ? "Ativar modo claro" : "Ativar modo escuro"}
-                className="h-8 w-8"
+                className="h-9 w-9 sm:h-10 sm:w-10"
               >
                 {isDark ? (
                   <Sun className="h-4 w-4" />
@@ -867,7 +865,7 @@ const DashboardLayout = ({ children, title }) => {
                     variant="ghost"
                     size="icon"
                     onClick={() => setChatOpen(true)}
-                    className="relative h-8 w-8"
+                    className="relative h-9 w-9 sm:h-10 sm:w-10"
                     title="Chat Interno"
                     aria-label="Chat interno"
                     data-testid="open-chat-btn"
@@ -882,7 +880,7 @@ const DashboardLayout = ({ children, title }) => {
               
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="rounded-full h-8 w-8" aria-label="Menu do utilizador">
+                  <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 sm:h-10 sm:w-10" aria-label="Menu do utilizador">
                     <User className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -922,7 +920,7 @@ const DashboardLayout = ({ children, title }) => {
       
       {/* Keyboard Shortcuts Help Modal */}
       <Dialog open={showHelpModal} onOpenChange={setShowHelpModal}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Keyboard className="h-5 w-5" />

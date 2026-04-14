@@ -22,6 +22,7 @@
  * // Colocado na barra de navegação
  * <NotificationsDropdown />
  */
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";

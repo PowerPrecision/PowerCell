@@ -463,8 +463,8 @@ const AdminDashboard = () => {
                 </Button>
               </div>
               {showStaleList && staleStats.processes && (
-                <div className="mt-4 border-t border-orange-200 dark:border-orange-800 pt-3 space-y-1 max-h-[400px] overflow-y-auto" data-testid="stale-processes-list">
-                  <div className="grid grid-cols-12 gap-2 px-2 py-1.5 text-xs font-medium text-orange-800 dark:text-orange-300 border-b border-orange-200 dark:border-orange-700">
+                <div className="mt-4 border-t border-orange-200 dark:border-orange-800 pt-3 space-y-1 max-h-[400px] overflow-x-auto overflow-y-auto" data-testid="stale-processes-list">
+                  <div className="grid grid-cols-12 gap-2 px-2 py-1.5 text-xs font-medium text-orange-800 dark:text-orange-300 border-b border-orange-200 dark:border-orange-700 min-w-[700px]">
                     <div className="col-span-3">Cliente</div>
                     <div className="col-span-2">Estado</div>
                     <div className="col-span-3">Consultor</div>
@@ -474,7 +474,7 @@ const AdminDashboard = () => {
                   {staleStats.processes.map((p) => (
                     <div
                       key={p.id}
-                      className="grid grid-cols-12 gap-2 px-2 py-2 items-center rounded hover:bg-orange-100 dark:hover:bg-orange-900/30 cursor-pointer transition-colors"
+                      className="grid grid-cols-12 gap-2 px-2 py-2 items-center rounded hover:bg-orange-100 dark:hover:bg-orange-900/30 cursor-pointer transition-colors min-w-[700px]"
                       onClick={() => navigate(`/process/${p.id}`)}
                       data-testid={`stale-process-${p.id}`}
                     >
