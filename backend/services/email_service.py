@@ -1070,19 +1070,45 @@ async def send_email(
     attachments: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
-    Enviar email através de uma das contas configuradas.
-    
+    Envia um email através de uma das contas SMTP configuradas (Precision Crédito
+    ou Power Real Estate) e regista automaticamente a comunicação no histórico
+    do processo.
+
+    Esta função é o ponto central de saída de emails do CRM. É utilizada por
+    todos os módulos que necessitam de enviar comunicações (RGPD, pedidos de
+    documentos, rascunhos automáticos, notificações). O registo automático no
+    histórico do processo garante auditoria completa de todas as comunicações
+    enviadas — requisito legal para intermediários de crédito (BdP).
+
+    Se a conta solicitada não estiver configurada, a função tenta usar a
+    primeira conta disponível como fallback. O envio é feito via SMTP_SSL
+    com TLS para garantir a confidencialidade das comunicações.
+
     Args:
-        account_name: "precision" ou "power"
-        to_emails: Lista de destinatários
-        subject: Assunto
-        body: Corpo do email (texto)
-        body_html: Corpo do email (HTML)
-        cc_emails: CC
-        bcc_emails: BCC
-        process_id: ID do processo (para guardar no histórico)
-        created_by: ID do utilizador que enviou
-        attachments: Lista de anexos [{"filename": "...", "content_bytes": b"...", "content_type": "..."}]
+        account_name: Nome da conta de email ("precision" ou "power").
+        to_emails: Lista de endereços de email dos destinatários.
+        subject: Assunto do email.
+        body: Corpo do email em texto simples (obrigatório).
+        body_html: Corpo do email em HTML (opcional — se fornecido, o email
+            é enviado como multipart/alternative).
+        cc_emails: Lista de endereços para envio em cópia (CC).
+        bcc_emails: Lista de endereços para envio em cópia oculta (BCC).
+        process_id: ID do processo para registo no histórico. Se fornecido,
+            o email é guardado na coleção ``emails`` da BD.
+        created_by: Email ou ID do utilizador que originou o envio.
+        attachments: Lista de anexos, cada um com:
+            - filename (str): Nome do ficheiro.
+            - content_bytes (bytes): Conteúdo binário.
+            - content_type (str): Tipo MIME (ex: "application/pdf").
+
+    Returns:
+        dict: Resultado da operação:
+            - success (bool): True se o email foi enviado com sucesso.
+            - account (str): Nome da conta utilizada (se sucesso).
+            - error (str): Mensagem de erro (se falha).
+
+    Raises:
+        smtplib.SMTPException: Se a autenticação ou o envio SMTP falharem.
     """
     accounts = get_email_accounts()
     account = next((a for a in accounts if a.name == account_name), None)

@@ -33,7 +33,17 @@ class TempLinkService:
 
     @staticmethod
     def generate_secure_token() -> str:
-        """Gera um token seguro e único."""
+        """
+        Gera um token criptograficamente seguro e único para links temporários.
+
+        Combina UUID v4 (aleatoriedade garantida) com bytes aleatórios do
+        módulo ``secrets`` (CSPRNG) para obter 32 caracteres hexadecimais.
+        Esta dupla camada de entropia reduz significativamente a probabilidade
+        de colisões e ataques de força bruta em comparação com apenas UUID.
+
+        Returns:
+            str: Token de 32 caracteres hexadecimais (16 do UUID + 16 do secrets).
+        """
         # Combinar UUID + secrets para maior segurança
         unique_id = str(uuid.uuid4())
         random_bytes = secrets.token_hex(16)
@@ -173,13 +183,24 @@ class TempLinkService:
     @staticmethod
     async def validate_link(token: str) -> Dict[str, Any]:
         """
-        Valida se um link pode ser usado.
+        Valida se um link temporário pode ser utilizado, verificando
+        existência, estado, expiração e limite de utilizações.
+
+        Porquê esta validação multi-camada:
+        - Evita que links expirados continuem acessíveis.
+        - Impede reutilização além do limite configurado (segurança).
+        - Atualiza automaticamente o estado para EXPIRED quando detetado,
+          evitando checks repetidos dispendiosos.
 
         Args:
-            token: Token do link
+            token: Token único do link temporário.
 
         Returns:
-            Dict com validade e mensagem de erro se aplicável
+            Dict[str, Any]: Dicionário com:
+                - valid (bool): Se o link pode ser utilizado.
+                - error (str, opcional): Motivo da rejeição.
+                - link (dict, opcional): Dados do link (se válido).
+                - remaining_uses (int, opcional): Utilizações restantes.
         """
         link = await db.temp_links.find_one({"token": token}, {"_id": 0})
 
@@ -223,14 +244,26 @@ class TempLinkService:
         uploaded_files: List[dict] = None
     ) -> Dict[str, Any]:
         """
-        Marca um link como utilizado.
+        Regista a utilização de um link temporário, incrementando o contador
+        de usos e marcando como USED quando o limite é atingido.
+
+        Este ponto de registo é crítico para a rastreabilidade: permite à
+        equipa saber quando e por quem o link foi utilizado, e quais os
+        ficheiros foram carregados (no caso de links de upload). Sem este
+        registo, seria impossível auditar o fluxo de documentação.
 
         Args:
-            token: Token do link
-            uploaded_files: Lista de ficheiros carregados (para upload links)
+            token: Token único do link temporário.
+            uploaded_files: Lista de ficheiros carregados (apenas para
+                links do tipo UPLOAD). Cada ficheiro deve ser um dict com
+                metadados como nome e tamanho.
 
         Returns:
-            Dict com resultado da operação
+            Dict[str, Any]: Resultado da operação:
+                - success (bool): Se a operação foi concluída.
+                - message (str): Mensagem descritiva.
+                - process_id (str): ID do processo associado (se válido).
+                - client_name (str): Nome do cliente (se válido).
         """
         # Validar primeiro
         validation = await TempLinkService.validate_link(token)

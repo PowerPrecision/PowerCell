@@ -56,16 +56,28 @@ async def create_rgpd_request(
     user: dict
 ) -> Dict[str, Any]:
     """
-    Cria um novo pedido de consentimento RGPD.
-    
+    Cria um pedido de consentimento RGPD e envia email com link temporário ao cliente.
+
+    Este fluxo é um requisito legal para intermediação de crédito habitação: antes de
+    processar dados pessoais, o cliente deve dar consentimento explícito (Art. 6º, n.º 1, alínea a) do RGPD.
+
+    A função implementa deduplicação: se já existir um pedido ativo (pending ou signed)
+    para o mesmo processo, reutiliza-o em vez de criar duplicado. O token tem
+    validade de 24h por segurança — após expirar, o cliente deve solicitar novo consentimento.
+
     Args:
-        process_id: ID do processo
-        client_name: Nome do cliente
-        client_email: Email do cliente
-        user: Utilizador que está a solicitar
-    
+        process_id: ID do processo de crédito habitação.
+        client_name: Nome completo do cliente (aparece no documento RGPD).
+        client_email: Email do cliente para receber o link de assinatura.
+        user: Dicionário do utilizador autenticado que solicita o consentimento.
+
     Returns:
-        Dicionário com o pedido criado
+        dict: Resultado com chaves:
+            - success (bool): True se o pedido foi criado ou reutilizado.
+            - existing (bool): True se um pedido ativo já existia.
+            - request_id (str): ID do pedido RGPD.
+            - token (str): Token de assinatura (só se novo pedido).
+            - expires_at (str): Data/hora de expiração ISO 8601.
     """
     # Verificar se já existe um pedido ativo
     existing = await db[RGPD_REQUESTS_COLLECTION].find_one({
@@ -143,13 +155,20 @@ async def create_rgpd_request(
 
 async def validate_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    Valida um token de RGPD.
-    
+    Valida um token de consentimento RGPD verificando existência, expiração e estado.
+
+    O token é o mecanismo de segurança que impede que terceiros acedam ao
+    formulário de consentimento: sem um token válido (não expirado, não
+    já utilizado), o cliente não pode preencher o RGPD. A validação marca
+    automaticamente tokens expirados como ``status=expired`` para auditoria.
+
     Args:
-        token: Token a validar
-    
+        token: Cadeia hexagonal gerada pelo ``create_rgpd_request``.
+
     Returns:
-        Dados do pedido se válido, None caso contrário
+        dict: Documento completo do pedido RGPD se o token for válido, ou
+            ``None`` se o token não existir, estiver expirado ou já tiver
+            sido utilizado (``status=signed``).
     """
     request = await db[RGPD_REQUESTS_COLLECTION].find_one({"token": token})
     
@@ -176,13 +195,26 @@ async def validate_token(token: str) -> Optional[Dict[str, Any]]:
 
 async def get_rgpd_by_process(process_id: str) -> Optional[Dict[str, Any]]:
     """
-    Obtém o estado do RGPD para um processo.
-    
+    Consulta o estado do consentimento RGPD de um processo.
+
+    Utilizado pela UI para apresentar o badge de estado (pendente, assinado,
+    ausente) sem expor dados sensíveis do consentimento. A pesquisa prioriza
+    registos assinados (``status=signed``) sobre pendentes, garantindo que
+    um processo com RGPD completo não é marcado como pendente por causa de
+    um pedido anterior não expirado.
+
     Args:
-        process_id: ID do processo
-    
+        process_id: Identificador único do processo de crédito habitação.
+
     Returns:
-        Dados do RGPD ou None
+        dict: Estado do RGPD com as chaves:
+            - has_rgpd (bool): True se existe consentimento assinado.
+            - status (str | None): "signed", "pending" ou None.
+            - signed_at (str | None): Data/hora da assinatura (se signed).
+            - pdf_url (str | None): URL do PDF assinado no S3 (se signed).
+            - request_id (str | None): ID do pedido RGPD.
+            - expires_at (str | None): Data/hora de expiração (se pending).
+        Em caso de erro de BD, retorna ``{"has_rgpd": False, "status": None}``.
     """
     try:
         # Validar entrada
@@ -247,14 +279,24 @@ async def sign_rgpd(
     consent_data: dict
 ) -> Dict[str, Any]:
     """
-    Processa a assinatura do RGPD.
-    
+    Processa a assinatura do RGPD e gera PDF assinado.
+
+    Valida o token, regista os dados de consentimento e gera um PDF legal
+    do RGPD assinado que é guardado nos documentos do cliente no S3. Este PDF
+    serve como prova legal do consentimento dado pelo cliente.
+
+    Após a assinatura, notifica o consultor por email e regista a atividade
+    no histórico do processo para auditoria.
+
+    O PDF é gerado em background — se falhar, a assinatura NÃO é revertida.
+
     Args:
-        token: Token do pedido
-        consent_data: Dados preenchidos pelo cliente
-    
+        token: Token de validação do pedido (gerado pelo create_rgpd_request).
+        consent_data: Dicionário com dados preenchidos pelo cliente, incluindo
+            nome, contribuinte, tipo de documento, número, morada e assinatura (base64).
+
     Returns:
-        Resultado da operação
+        dict: Resultado com chaves success, request_id e process_id.
     """
     # Validar token
     request = await validate_token(token)

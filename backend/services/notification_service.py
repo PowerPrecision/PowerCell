@@ -47,7 +47,19 @@ NOTIFICATION_TYPE_MAP = {
 
 async def get_user_notification_prefs(user_email: str) -> Dict[str, Any]:
     """
-    Obtém as preferências de notificação de um utilizador pelo email.
+    Obtém as preferências de notificação de um utilizador, aplicando merge
+    com valores por defeito para garantir compatibilidade retroativa.
+
+    Porquê o merge com defaults: quando novos tipos de notificação são
+    adicionados ao sistema, utilizadores existentes não têm essa chave
+    nas suas preferências. O merge garante que novos campos assumem o
+    valor seguro (normalmente False) sem eliminar preferências antigas.
+
+    Args:
+        user_email: Email do utilizador para procurar preferências.
+
+    Returns:
+        Dict[str, Any]: Preferências completas (defaults + personalização).
     """
     # Procurar utilizador pelo email
     user = await db.users.find_one({"email": user_email}, {"_id": 0, "id": 1})
@@ -115,18 +127,27 @@ async def send_notification_with_preference_check(
     html_body: str = None
 ) -> bool:
     """
-    Envia email apenas se o utilizador tem a preferência activada.
-    
+    Envia email apenas se o destinatário tem a preferência desse tipo
+    de notificação ativada. Esta é a função principal que todas as
+    notificações do sistema devem usar como gateway.
+
+    Porquê um gateway centralizado:
+    - Evita spam: respeita as preferências de cada utilizador.
+    - Protege utilizadores de teste (is_test_user nunca recebe emails).
+    - Urgências bypassam preferências normais para garantir entrega.
+    - Simplifica auditoria: toda a lógica de filtragem está num só lugar.
+
     Args:
-        to_email: Email do destinatário
-        subject: Assunto do email
-        body: Corpo do email (texto)
-        notification_type: Tipo de notificação para verificar preferências
-        is_urgent: Se é urgente (bypass algumas preferências)
-        html_body: Corpo em HTML (opcional)
-    
+        to_email: Email do destinatário.
+        subject: Assunto do email.
+        body: Corpo do email em texto simples.
+        notification_type: Tipo de notificação (ver NOTIFICATION_TYPE_MAP).
+        is_urgent: Se True, bypass preferências não-urgentes.
+        html_body: Corpo do email em HTML (opcional, para emails formatados).
+
     Returns:
-        True se enviou, False se bloqueado por preferências
+        bool: True se o email foi enviado, False se bloqueado por
+            preferências ou erro no envio.
     """
     # Verificar preferências
     if not await should_send_email(to_email, notification_type, is_urgent):
@@ -150,10 +171,20 @@ async def send_to_admins(
     html_body: str = None
 ) -> int:
     """
-    Envia notificação para todos os admins que aceitam esse tipo.
-    
+    Envia notificação para todos os administradores (Admin e CEO) que
+    aceitam esse tipo de notificação, respeitando preferências individuais.
+
+    Útil para alertas do sistema que requerem atenção da gestão, como
+    erros críticos, novos processos ou alertas de segurança.
+
+    Args:
+        subject: Assunto do email.
+        body: Corpo do email em texto simples.
+        notification_type: Tipo de notificação para filtragem.
+        html_body: Corpo em HTML (opcional).
+
     Returns:
-        Número de emails enviados
+        int: Número de emails efetivamente enviados.
     """
     from models.auth import UserRole
     

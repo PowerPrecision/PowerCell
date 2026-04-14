@@ -766,10 +766,30 @@ async def delete_user(user_id: str, user: dict = Depends(require_roles([UserRole
 @router.post("/impersonate/{user_id}")
 async def impersonate_user(user_id: str, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """
-    Permite ao admin ver o sistema como outro utilizador.
-    Gera um token temporário com os dados do utilizador alvo.
-    
-    O token inclui informação sobre o admin original para auditoria.
+    Permite ao admin/CEO ver o sistema como outro utilizador, gerando
+    um token temporário com os dados e permissões do utilizador alvo.
+
+    Porquê este endpoint existe: essencial para suporte técnico e
+    troubleshooting — permite ao admin reproduzir exatamente o que o
+    utilizador vê (permissões, dados visíveis, interface) sem precisar
+    de partilhar passwords ou usar a conta de outro utilizador.
+
+    Garantias de segurança:
+    - Impedir personificação de outros admins (autoproteção).
+    - Token inclui campos de auditoria (impersonated_by, is_impersonated).
+    - Toda a ação realizada durante impersonate é registada no histórico.
+
+    Args:
+        user_id: ID do utilizador a personificar.
+        user: Utilizador admin/CEO autenticado (injetado pelo Depends).
+
+    Returns:
+        dict: Novo access_token e dados do utilizador personificado,
+            incluindo campos de auditoria (impersonated_by, is_impersonated).
+
+    Raises:
+        HTTPException: 404 se utilizador não encontrado, 403 se tentar
+            personificar outro administrador.
     """
     from services.auth import create_access_token
     
@@ -827,8 +847,24 @@ async def impersonate_user(user_id: str, user: dict = Depends(require_roles([Use
 @router.post("/stop-impersonate")
 async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO]))):
     """
-    Terminar sessão de impersonate e voltar à conta original.
-    Requer o token do admin original.
+    Termina a sessão de personificação e restaura a conta original do admin.
+
+    Porquê um endpoint dedicado: o token do utilizador personificado não
+    contém a password do admin original, pelo que não é possível fazer
+    login diretamente. Este endpoint usa o campo ``impersonated_by`` do
+    token atual para identificar o admin original e gerar um novo token.
+
+    Args:
+        user: Utilizador atualmente em modo de personificação (o token
+            contém o campo impersonated_by com o ID do admin original).
+
+    Returns:
+        dict: Novo access_token para a conta original do admin e dados
+            do administrador (sem campos de personificação).
+
+    Raises:
+        HTTPException: 400 se não está em modo de personificação,
+            404 se o admin original não foi encontrado.
     """
     from services.auth import create_access_token
     

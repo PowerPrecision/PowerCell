@@ -61,8 +61,29 @@ _sync_status = {}
 
 def _extract_email_variables(process: dict, user: dict, documents_list: str) -> dict:
     """
-    Extrai todas as variáveis disponíveis para uso em templates de email.
-    Retorna um dicionário com todas as variáveis que podem ser usadas em templates personalizados.
+    Extrai todas as variáveis disponíveis para uso em templates de email,
+    agregando dados de múltiplas secções do processo num dicionário plano.
+
+    Porquê centralizar a extração: o mesmo conjunto de variáveis é usado
+    pelo preview, pelo envio, e por templates personalizados. Centralizar
+    evita duplicação de lógica e garante consistência entre preview e envio.
+
+    Inclui formatação automática de moeda (pt-PT), datas (DD/MM/AAAA),
+    mapeamento de vínculos laborais e estado civil/regime de casamento.
+
+    Args:
+        process: Documento do processo da MongoDB contendo personal_data,
+            titular2_data, financial_data e real_estate_data.
+        user: Dicionário do utilizador autenticado (para dados do remetente).
+        documents_list: String com lista de documentos (\n separados).
+
+    Returns:
+        dict: Variáveis para substituição em templates, incluindo:
+            - Dados básicos (client_name, process_number, documents_list).
+            - 1º proponente (p1_nome, p1_nif, p1_salario, etc.).
+            - 2º proponente (p2_nome, p2_email, etc.).
+            - Crédito (banco_atual, montante_divida, etc.).
+            - Remetente (sender_name, sender_email, sender_phone).
     """
     personal_data = process.get("personal_data", {}) or {}
     titular2_data = process.get("titular2_data", {}) or {}
@@ -234,9 +255,25 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
 
 def _build_professional_email_html(process: dict, user: dict, documents_list: str) -> str:
     """
-    Constrói o corpo do email em HTML profissional para envio de documentação B2B.
-    
-    Extrai dados do 1º e 2º proponente, dados financeiros e assinatura.
+    Constrói o corpo do email em HTML profissional para envio de
+    documentação B2B a balcões bancários e parceiros de crédito.
+
+    Porquê HTML formatado: os parceiros bancários esperam dados
+    estruturados em tabelas, não texto corrido. O HTML profissional
+    transmite credibilidade e facilita a leitura dos dados do crédito
+    pelo destinatário (nome, NIF, vínculo, salário, situação bancária).
+
+    Extraí dados do 1º e 2º proponente, dados financeiros do crédito
+    atual e da transferência pretendida, e assinatura do consultor.
+
+    Args:
+        process: Documento do processo com personal_data, titular2_data,
+            financial_data e real_estate_data.
+        user: Dicionário do utilizador autenticado (nome, email, telefone).
+        documents_list: String com lista de documentos anexados.
+
+    Returns:
+        str: Corpo HTML formatado pronto para envio.
     """
     personal_data = process.get("personal_data", {}) or {}
     titular2_data = process.get("titular2_data", {}) or {}
@@ -537,12 +574,27 @@ async def preview_documentation_email(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Gerar preview do HTML do email de documentação.
-    
-    Este endpoint gera e devolve a string HTML final do template
-    (já com os dados do cliente e utilizador injetados), mas NÃO envia o email.
-    
-    Útil para o utilizador visualizar e editar o conteúdo antes de enviar.
+    Gera e devolve o HTML final do email de documentação sem o enviar.
+
+    Porquê um preview separado: permite ao consultor/admin visualizar
+    exatamente o que o destinatário receberá, incluindo a renderização
+    de variáveis com dados reais do cliente. Isto evita erros
+    embaraçosos (dados errados, formatação quebrada) antes do envio.
+
+    Suporta tanto o template personalizado da configuração como o
+    template HTML profissional por defeito.
+
+    Args:
+        process_id: ID do processo cuja documentação será enviada.
+        current_user: Utilizador autenticado (injetado pelo Depends).
+
+    Returns:
+        dict: Contém html (string), subject, template_vars, e
+            available_variables (lista de chaves para documentação do template).
+
+    Raises:
+        HTTPException: 404 se processo não encontrado, 400 se envio
+            de documentação não está ativado na configuração.
     """
     from services.system_config import get_system_config
     
@@ -624,7 +676,31 @@ async def send_documentation_email(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Enviar documentação do processo para balcões/bancos.
+    Envia documentação do processo para balcões/bancos com anexos
+    descarregados do S3 e validação de destinatários contra conflitos.
+
+    Porquê a validação de destinatários: impede o envio acidental de
+    documentação a bancos onde o cliente já tem conta ativa ou simulação
+    em curso (conflito de interesse regulado por legislação bancária).
+
+    A construção do corpo do email segue uma prioridade decrescente:
+    1. custom_html_body (Rich Text Editor do admin/CEO).
+    2. custom_message (texto com variáveis).
+    3. email_template (template da configuração).
+    4. Template HTML profissional por defeito.
+
+    Args:
+        process_id: ID do processo.
+        data: Body com document_ids, s3_paths, bcc_recipients, cc_emails,
+            custom_message, custom_html_body, to_emails.
+        current_user: Utilizador autenticado (injetado pelo Depends).
+
+    Returns:
+        dict: Resultado do envio incluindo success, message, e warnings.
+
+    Raises:
+        HTTPException: 404 se processo não encontrado, 400 se parâmetros
+            inválidos, 500 se falha no envio de email.
     """
     from services.system_config import get_system_config
     

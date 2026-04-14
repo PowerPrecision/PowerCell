@@ -112,8 +112,24 @@ async def auto_categorize_document_background(
     file_content: bytes
 ):
     """
-    Categoriza um documento automaticamente em background após upload.
-    Esta função é chamada de forma assíncrona para não bloquear o upload.
+    Categoriza automaticamente um documento com IA em background,
+    extraindo texto do PDF e aplicando classificação com GPT.
+
+    Porquê em background: a categorização com IA demora 3-10 segundos.
+    Executá-la de forma síncrona no upload atrasaria a resposta ao
+    utilizador significativamente. O utilizador vê o ficheiro
+    imediatamente, e a categoria aparece segundos depois via polling.
+
+    Garante resiliência ao capturar TODOS os erros internamente
+    (nunca crasha a tarefa de background) e registar no log para
+    troubleshooting sem afetar a experiência do utilizador.
+
+    Args:
+        process_id: ID do processo associado ao documento.
+        client_name: Nome do cliente (para metadados).
+        s3_path: Caminho do ficheiro no S3.
+        filename: Nome do ficheiro para análise do nome.
+        file_content: Conteúdo binário do ficheiro (para extração de texto).
     """
     from services.document_categorization import extract_text_from_pdf, categorize_document_with_ai
     
@@ -295,19 +311,32 @@ async def upload_file_s3(
     user: dict = Depends(get_current_user)
 ):
     """
-    Faz upload de um ficheiro físico para o S3.
-    
-    Funcionalidades automáticas:
-    - Normalização do nome do ficheiro
-    - Conversão de imagens (JPG, PNG) para PDF
-    - Categorização automática com IA (em background)
-    
-    Parâmetros:
-    - custom_filename: Nome personalizado para o ficheiro (usado quando há conflito de nomes)
-    
-    Nota para utilizadores "indexacao":
-    - O campo empresa_nif é OBRIGATÓRIO
-    - Deve conter o NIF da empresa onde o cliente trabalha
+    Faz upload de um ficheiro para o S3 com pipeline automático completo.
+
+    Este endpoint é o ponto de entrada principal para upload de documentos
+    e executa automaticamente as seguintes etapas:
+    1. Validação de MIME type por magic bytes (segurança contra executáveis).
+    2. Extração de conteúdo de wrappers (Java serialization, base64).
+    3. Conversão automática de imagens (JPG, PNG) para PDF.
+    4. Normalização do nome do ficheiro para armazenamento seguro.
+    5. Upload para o S3 e categorização IA em background.
+    6. Registo no histórico de atividades do processo.
+
+    Porquê o pipeline completo: sem automação, os consultores precisavam
+    de converter ficheiros manualmente e categorizar cada documento,
+    causando atrasos significativos no processo de crédito.
+
+    Args:
+        client_id: ID do processo/cliente.
+        file: Ficheiro a carregar (UploadFile do FastAPI).
+        category: Categoria do documento (ex: "Financeiros", "Imóvel").
+        empresa_nif: NIF da empresa empregadora (para indexação).
+        custom_filename: Nome personalizado para evitar conflitos.
+        user: Utilizador autenticado (injetado pelo Depends).
+
+    Returns:
+        JSONResponse: Dados do upload incluindo path, normalized_filename,
+            converted_to_pdf, e auto_categorization status.
     """
     try:
         # Verificar se S3 está configurado
@@ -959,14 +988,21 @@ async def get_download_url_by_path(
     user: dict = Depends(get_current_user)
 ):
     """
-    Gera URL temporário para download/preview de ficheiro por path S3.
-    Tenta variações de path (underscore <-> espaço) se o original falhar.
-    
+    Gera URL temporário (pre-signed) para download ou preview de um
+    ficheiro por caminho S3 direto.
+
+    Porquê pre-signed URLs em vez de servir o ficheiro pelo backend:
+    - Reduz drasticamente o consumo de RAM e largura de banda do servidor.
+    - O ficheiro vai diretamente do S3 para o browser do utilizador.
+    - A URL expira automaticamente (segurança temporal).
+    - Permite preview inline de PDFs no browser sem download completo.
+
     Args:
-        file_path: Path completo do ficheiro no S3 (URL encoded)
-        
+        file_path: Caminho completo do ficheiro no S3.
+        user: Utilizador autenticado (injetado pelo Depends).
+
     Returns:
-        URL presigned para acesso temporário
+        dict: URL temporário para download/preview.
     """
     import asyncio
     

@@ -334,19 +334,23 @@ BLIND_INDEX_SALT = os.environ.get("BLIND_INDEX_SALT", "creditoimo-blind-index-sa
 
 def generate_blind_index(value: str, index_type: str = "general") -> str:
     """
-    Gera um hash determinístico (blind index) para um valor sensível.
-    
-    Este hash permite pesquisar dados encriptados na base de dados:
-    - Mesmo valor = mesmo hash (determinístico)
-    - Não é reversível (não dá para obter o valor original)
-    - Usa salt específico para cada tipo de índice
-    
+    Gera um hash determinístico (blind index) para pesquisa de dados encriptados.
+
+    No PowerCell, os dados sensíveis (NIF, telefone) estão encriptados com Fernet,
+    impossibilitando pesquisas por igualdade direta. O blind index resolve isto:
+    gera um hash SHA-256 determinístico do valor, que permite pesquisas por igualdade
+    sem expor o valor real em plain text na base de dados.
+
+    O hash usa salt específico por tipo de índice para evitar colisões entre
+    diferentes campos (ex: NIF "123456789" não colide com telefone "123456789").
+
     Args:
-        value: Valor a gerar hash (NIF, telefone, etc.)
-        index_type: Tipo de índice ("nif", "telefone", "email", "general")
-        
+        value: Valor sensível a indexar (NIF, telefone, email, etc.).
+        index_type: Tipo de índice ("nif", "telefone", "email", "general") para
+            salt específico. Tipos diferentes geram hashes diferentes.
+
     Returns:
-        Hash SHA-256 em formato hexadecimal (64 caracteres)
+        str: Hash SHA-256 hexadecimal (64 caracteres) ou string vazia se valor inválido.
     """
     if not value:
         return ""
@@ -366,7 +370,25 @@ def generate_blind_index(value: str, index_type: str = "general") -> str:
 
 
 def generate_nif_hash(nif: str) -> str:
-    """Gera hash determinístico para NIF português."""
+    """
+    Gera um hash determinístico para pesquisa de NIF português encriptado.
+
+    O NIF é o identificador fiscal principal em Portugal e é usado como chave
+    de pesquisa de duplicados no CRM. Como o NIF está encriptado em repouso
+    (Fernet), não é possível pesquisá-lo diretamente. Este hash permite
+    verificar se um cliente com o mesmo NIF já existe sem expor o valor real.
+
+    Valida que o NIF tem exatamente 9 dígitos antes de gerar o hash — NIFs
+    inválidos não são indexados, evitando falsos positivos na pesquisa
+    de duplicados.
+
+    Args:
+        nif: NIF português (pode conter pontos e espaços que são removidos).
+
+    Returns:
+        str: Hash SHA-256 hexadecimal (64 caracteres), ou string vazia
+            se o NIF for inválido ou vazio.
+    """
     if not nif:
         return ""
     # Limpar NIF (apenas dígitos)
@@ -377,7 +399,24 @@ def generate_nif_hash(nif: str) -> str:
 
 
 def generate_telefone_hash(telefone: str) -> str:
-    """Gera hash determinístico para número de telefone."""
+    """
+    Gera um hash determinístico para pesquisa de número de telefone encriptado.
+
+    O telefone é um campo de pesquisa secundário no CRM (além do NIF e email).
+    Este blind index permite identificar clientes pelo número de telefone
+    sem armazená-lo em texto claro na base de dados.
+
+    Valida que o número tem pelo menos 9 dígitos após limpeza (formato
+    português padrão), rejeitando números demasiado curtos que poderiam
+    gerar colisões acidentais.
+
+    Args:
+        telefone: Número de telefone (pode conter espaços, hífens e parênteses).
+
+    Returns:
+        str: Hash SHA-256 hexadecimal (64 caracteres), ou string vazia
+            se o telefone for inválido ou tiver menos de 9 dígitos.
+    """
     if not telefone:
         return ""
     # Limpar telefone (apenas dígitos)
@@ -388,7 +427,25 @@ def generate_telefone_hash(telefone: str) -> str:
 
 
 def generate_email_hash(email: str) -> str:
-    """Gera hash determinístico para email."""
+    """
+    Gera um hash determinístico para pesquisa de endereço de email.
+
+    O email é o principal identificador de contato no CRM e serve como chave
+    de pesquisa em múltiplos fluxos (login, deduplicação, sincronização IMAP).
+    Este blind index permite consultas rápidas por email sem expor o endereço
+    real em índices de base de dados.
+
+    O email é normalizado para minúsculas antes da geração do hash para
+    evitar que "Cliente@Exemplo.com" e "cliente@exemplo.com" gerem
+    hashes diferentes.
+
+    Args:
+        email: Endereço de email (normalizado para minúsculas internamente).
+
+    Returns:
+        str: Hash SHA-256 hexadecimal (64 caracteres), ou string vazia
+            se o email for vazio.
+    """
     if not email:
         return ""
     return generate_blind_index(email.lower().strip(), "email")
@@ -408,26 +465,27 @@ CLIENT_SENSITIVE_FIELDS = {
 
 def encrypt_client_data(data: dict) -> dict:
     """
-    Encripta campos sensíveis de um cliente antes de guardar na BD.
-    
-    Inclui:
-    - Encriptação dos campos sensíveis (NIF, telefones, etc.)
-    - Geração de blind indexes (nif_hash, telefone_hash) para pesquisa
-    
-    Campos encriptados:
-    - dados_pessoais.nif, documento_id, morada_fiscal, telefone
-    - contacto.telefone, telefone_secundario
-    - titular2_data.nif, documento_id, telefone
-    
+    Encripta campos sensíveis de um cliente e gera blind indexes para pesquisa.
+
+    Função de entrada principal para escrita — deve ser chamada antes de guardar
+    um cliente na base de dados. Garante que dados PII (NIF, telefone, morada
+    fiscal, documento de identificação) ficam protegidos em repouso.
+
+    A encriptação é feita ANTES da geração dos blind indexes: os hashes são
+    calculados a partir dos valores originais, antes de os mesmos serem
+    encriptados. Isto é essencial para que a pesquisa funcione corretamente.
+
     Blind indexes gerados:
-    - dados_pessoais.nif_hash (para pesquisa de NIF)
-    - contacto.telefone_hash (para pesquisa de telefone)
-    
+    - dados_pessoais.nif_hash (para pesquisa de duplicados por NIF).
+    - contacto.telefone_hash (para pesquisa por telefone).
+
     Args:
-        data: Dicionário com dados do cliente
-        
+        data: Dicionário com dados do cliente (dados_pessoais, contacto,
+            titular2_data, etc.).
+
     Returns:
-        Dicionário com campos sensíveis encriptados e blind indexes
+        dict: Mesmo dicionário com campos sensíveis encriptados (prefixo "ENC:")
+            e blind indexes adicionados.
     """
     if not encryption_service.is_available() or not data:
         # Mesmo sem encriptação, gerar blind indexes

@@ -21,7 +21,17 @@ AWS_REGION = os.environ.get("AWS_REGION", "eu-north-1")
 
 
 class BackupConfig:
-    """Configuração do sistema de backup."""
+    """
+    Configuração centralizada do sistema de backup.
+
+    Define períodos de retenção (local vs. cloud), tamanho máximo e
+    diretório de armazenamento local. Os valores podem ser
+    sobrescritos por variáveis de ambiente, permitindo configurar
+    políticas distintas para ambientes de Dev e Produção.
+
+    A retenção cloud (30 dias) é mais longa que a local (7 dias) porque
+    o S3 é o repositório de_backup autoritativo em caso de desastre.
+    """
     BACKUP_DIR = Path(tempfile.gettempdir()) / "creditoimo_backups"
     ONEDRIVE_BACKUP_FOLDER = os.environ.get("ONEDRIVE_BACKUP_FOLDER", "Backups")
     LOCAL_RETENTION_DAYS = int(os.environ.get("BACKUP_LOCAL_RETENTION_DAYS", "7"))
@@ -39,7 +49,25 @@ class BackupService:
         self.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
     async def create_backup(self):
-        """Cria um backup completo da base de dados em JSON."""
+        """
+        Cria um backup completo da base de dados, exportando todas as colecções
+        para ficheiros JSON individuais comprimidos num ZIP.
+
+        Este é o primeiro passo do pipeline de disaster recovery — sem backup local,
+        não há ponto de restauro caso o MongoDB de Produção fique indisponível.
+        A exportação por coleção (um JSON por coleção) permite restaurações
+        granulares e diagnósticos mais fáceis em caso de corrupção parcial.
+
+        Usa bson.json_util para preservar tipos BSON nativos (ObjectId, datetime)
+        sem perda de informação. O ZIP final é guardado em BACKUP_DIR com timestamp
+        UTC para ordenação cronológica.
+
+        Returns:
+            str: Caminho absoluto do ficheiro ZIP, ou None em caso de erro.
+
+        Raises:
+            RuntimeError: Se não for possível ligar ao MongoDB ou listar colecções.
+        """
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         backup_path = self.BACKUP_DIR / f"backup_{timestamp}"
         backup_path.mkdir(exist_ok=True)
@@ -98,14 +126,29 @@ def get_s3_client():
 
 async def upload_backup_to_s3(zip_path: str) -> dict:
     """
-    Upload backup para AWS S3.
-    
-    Args:
-        zip_path: Caminho do ficheiro ZIP
-        
-    Returns:
-        Dict com resultado do upload
-    """
+        Carrega um ficheiro ZIP de backup para o bucket S3 da organização.
+
+        O S3 é o repositório de backup autoritativo para disaster recovery.
+        Mesmo que o servidor de aplicação falhe completamente, os backups
+        persistem na cloud com retenção de 30 dias (config.CLOUD_RETENTION_DAYS).
+
+        O ficheiro é colocado sob o prefixo ``backups/`` com o nome original
+        (contém timestamp UTC), garantindo ordem cronológica e unicidade.
+
+        Args:
+            zip_path: Caminho absoluto do ficheiro ZIP local gerado por
+                ``BackupService.create_backup``.
+
+        Returns:
+            dict: Resultado da operação com as chaves:
+                - success (bool): True se o upload foi concluído com sucesso.
+                - s3_key (str | None): Chave S3 (ex: ``backups/backup_20250101_030000.zip``).
+                - s3_url (str | None): URL S3 completa (ex: ``s3://bucket/backups/...``).
+                - error (str | None): Mensagem de erro se success=False.
+
+        Raises:
+            ClientError: Se as credenciais AWS forem inválidas ou o bucket não existir.
+        """
     result = {
         "success": False,
         "s3_key": None,
@@ -248,14 +291,26 @@ async def get_backup_statistics() -> dict:
 
 async def full_backup_workflow(upload_to_cloud: bool = True, cleanup_after: bool = True) -> dict:
     """
-    Executa o workflow completo de backup.
-    
-    1. Cria backup local
-    2. (Opcional) Upload para S3
-    3. (Opcional) Limpa backups antigos (local e cloud)
-    
+    Executa o workflow completo de backup: criação local, upload para S3 e
+    limpeza de ficheiros antigos.
+
+    Este é o workflow orquestrador chamado tanto pelo scheduler automático (03:00 UTC)
+    como manualmente via endpoint de admin. A estratégia de "backup local primeiro"
+    garante que existe sempre uma cópia recente, mesmo que o S3 esteja indisponível.
+
+    Passos:
+        1. Cria backup local (ZIP com JSON por coleção).
+        2. Upload para S3 (opcional — falha silenciosamente sem comprometer o backup local).
+        3. Remove backups locais com mais de BACKUP_LOCAL_RETENTION_DAYS dias.
+        4. Remove backups S3 com mais de BACKUP_CLOUD_RETENTION_DAYS dias.
+
+    Args:
+        upload_to_cloud: Se True, faz upload do ZIP para o S3.
+        cleanup_after: Se True, aplica políticas de retenção (local + cloud).
+
     Returns:
-        Dict com resultado do backup
+        dict: Resultado com chaves success, backup_path, size_bytes, uploaded,
+            s3_url, cleaned_up e error.
     """
     result = {
         "success": False,
@@ -320,8 +375,15 @@ _scheduled_backup_running = False
 
 async def scheduled_backup_job():
     """
-    Job de backup agendado que corre periodicamente.
-    Executa às 03:00 UTC diariamente.
+    Job de backup agendado que corre diariamente às 03:00 UTC.
+
+    O horário das 03:00 foi escolhido propositadamente: é fora do horário de
+    expediente (minimiza interferência com operações), quando a carga no
+    MongoDB de Produção é mais baixa, reduzindo o risco de lentidão
+    noutras operações durante o dump da base de dados.
+
+    Implementa proteção contra execuções concorrentes (_scheduled_backup_running)
+    e regista cada execução na coleção backup_history para auditoria.
     """
     global _scheduled_backup_running
     

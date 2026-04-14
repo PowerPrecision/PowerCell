@@ -114,7 +114,32 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 
 def require_roles(allowed_roles: List[str]):
-    """Check if user has one of the allowed roles (primary or additional)"""
+    """
+    Dependency do FastAPI que verifica se o utilizador autenticado possui
+    pelo menos um dos roles permitidos, incluindo roles adicionais.
+
+    Porquê uma hierarquia de permissões implícita: em vez de exigir
+    que cada endpoint liste explicitamente todos os roles com acesso,
+    esta função implementa herança de permissões:
+    - Admin: acesso total a tudo.
+    - CEO: acesso a rotas de consultor, mediador e CEO.
+    - Diretor: acesso a rotas de consultor, mediador e diretor.
+    - Administrativo: acesso a rotas de consultor, mediador e administrativo.
+    - Outros: verificação direta contra roles primário + adicionais.
+
+    Isto simplifica a manutenção — ao adicionar um novo nível
+    hierárquico, basta atualizar este ponto central.
+
+    Args:
+        allowed_roles: Lista de roles que têm permissão para aceder
+            ao endpoint (ex: [UserRole.ADMIN, UserRole.CEO]).
+
+    Returns:
+        Callable: Dependency function para uso com ``Depends()``.
+
+    Raises:
+        HTTPException: 403 se o utilizador não tiver nenhum dos roles permitidos.
+    """
     async def role_checker(user: dict = Depends(get_current_user)):
         user_role = user.get("role", "")
         additional_roles = user.get("additional_roles", [])

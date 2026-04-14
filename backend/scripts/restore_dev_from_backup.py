@@ -275,14 +275,33 @@ def _sanitize_doc(coll_name: str, doc: dict) -> dict:
 
 async def _find_latest_backup_s3() -> Optional[Dict[str, Any]]:
     """
-    Procura no S3 o backup automático mais recente e bem-sucedido.
+    Localiza o backup automático mais recente e bem-sucedido no S3.
+
+    Este passo é crítico para garantir que o restauro usa dados íntegros.
+    A estratégia dupla (BD → listagem S3) existe porque a BD de Produção
+    pode não estar acessível a partir do ambiente de Dev (firewalls, IPs),
+    pelo que a listagem direta do S3 serve como fallback confiável.
+
+    A consulta à BD de Produção é preferida porque contém metadados de
+    auditoria (backup_id, triggered_by) que permitem rastrear o backup.
 
     Estratégia (em ordem de prioridade):
-    1. Consultar backup_history na BD para encontrar o último com status=completed e s3_key
-    2. Fallback: listar objetos S3 com prefix "backups/" e ordenar por data
+        1. Consultar ``backup_history`` na BD de Produção para encontrar o
+           último registo com ``status=completed`` e ``s3_url`` presente.
+        2. Fallback: listar objetos S3 com prefixo ``backups/`` e ordenar
+           por ``LastModified`` descendente.
 
     Returns:
-        Dict com s3_key, last_modified, size ou None se não encontrado.
+        dict: Informação do backup selecionado com as chaves:
+            - s3_key (str): Chave S3 do ficheiro ZIP.
+            - s3_url (str): URL S3 completa.
+            - source (str): "backup_history" ou "s3_list".
+            - started_at (str): Timestamp ISO 8601 do backup.
+        Ou ``None`` se nenhum backup for encontrado.
+
+    Raises:
+        RuntimeError: Se as credenciais AWS não estiverem configuradas
+            ou se ocorrer um erro irrecuperável ao listar o S3.
     """
     import boto3
     from botocore.exceptions import ClientError
@@ -531,10 +550,25 @@ async def _import_to_temp_collections(
     collections_data: Dict[str, List[dict]],
 ) -> Dict[str, int]:
     """
-    Importa documentos para coleções temporárias (_restore_temp_*) já com sanitização RGPD.
+    Importa documentos para coleções temporárias ``_restore_temp_*`` com
+    sanitização RGPD aplicada a cada documento.
+
+    Esta é a barreira de segurança central do pipeline: os dados reais de
+    Produção nunca são escritos diretamente nas coleções de Dev. A sanitização
+    acontece **antes** da inserção, garantindo que mesmo uma falha posterior
+    não expõe dados PII na base de Desenvolvimento.
+
+    A inserção é feita em batches de 1000 documentos para evitar exaustão
+    de memória do MongoDB ao processar colecções grandes (ex: processes).
+
+    Args:
+        dev_db: Instância de base de dados de Desenvolvimento (Motor AsyncIOMotorDatabase).
+        collections_data: Dicionário ``{nome_coleção: [doc1, doc2, ...]}`` obtido
+            pelo ``_extract_backup_zip``.
 
     Returns:
-        Dict {collection_name: count}
+        dict: Contagem de documentos importados por coleção
+            ``{nome_coleção: número_de_documentos}``.
     """
     import bson
     from bson import ObjectId
@@ -608,11 +642,24 @@ async def _validate_temp_collections(dev_db, expected_stats: Dict[str, int]) -> 
 
 async def _swap_collections(dev_db, collections: List[str]) -> None:
     """
-    Substitui as coleções reais pelas temporárias (sanitized).
+    Substitui atomicamente as coleções reais de Dev pelas temporárias sanitizadas.
 
-    Para cada coleção:
-    1. Drop da coleção real
-    2. Rename da _restore_temp_X → X
+    Esta operação é o momento de maior risco do pipeline: se falhar a meio,
+    a base de dados fica em estado inconsistente (algumas coleções novas,
+    outras antigas). Por isso, o ``run_restore`` executa a limpeza das
+    coleções temporárias residuais em caso de erro (fallback no except).
+
+    O rename no MongoDB (``renameCollection``) é uma operação atómica a nível
+    de coleção individual, o que minimiza a janela de indisponibilidade.
+
+    Args:
+        dev_db: Instância de base de dados de Desenvolvimento.
+        collections: Lista de nomes de coleções a substituir
+            (ex: ["clients", "users", "processes"]).
+
+    Raises:
+        RuntimeError: Se o drop ou rename de alguma coleção falhar,
+            interrompendo o swap das restantes.
     """
     logger.info("A fazer swap das coleções...")
 
