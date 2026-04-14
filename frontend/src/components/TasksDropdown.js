@@ -1,3 +1,12 @@
+/**
+ * TasksDropdown — Dropdown de tarefas pendentes associadas ao utilizador actual.
+ *
+ * PORQUÊ: Cada utilizador do CRM tem tarefas atribuídas (validar documentos, contactar cliente, etc.).
+ * Este dropdown no header permite acesso rápido às tarefas pendentes sem navegar para outra página.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import React, { useState } from "react";
 import { useTasks, TaskStatus, TaskTypeLabels } from "../contexts/TasksContext";
 import { Button } from "./ui/button";
@@ -330,3 +339,4 @@ const TasksDropdown = ({ compact = false }) => {
 };
 
 export default TasksDropdown;
+

@@ -67,10 +67,27 @@ class CDCListener:
 
     @property
     def is_running(self) -> bool:
-        return self._running
+        """Indica se o listener de CDC está atualmente ativo.
+
+        Returns:
+            bool: True se o listener está no loop principal de monitorização.
+        """
 
     @property
     def stats(self) -> dict:
+        """Estatísticas operacionais do listener de CDC.
+
+        Útil para monitorização e debugging — expõe contadores internos
+        sem expor detalhes sensíveis.
+
+        Returns:
+            dict: Dicionário com chaves:
+                - running (bool): Se o listener está ativo.
+                - started_at (str | None): Timestamp de início (ISO-8601).
+                - processed_count (int): Total de eventos processados com sucesso.
+                - ghost_discarded_count (int): Eventos descartados (modo fantasma).
+                - consecutive_failures (int): Falhas consecutivas atuais.
+        """
         return {
             "running": self._running,
             "started_at": self._started_at.isoformat() if self._started_at else None,
@@ -82,9 +99,16 @@ class CDCListener:
     # ==== PONTO DE ENTRADA PRINCIPAL ====
 
     async def start(self):
-        """
-        Inicia o listener de CDC para todas as colecções monitorizadas.
-        Executa como coroutine infinita com reconexão automática.
+        """Inicia o listener de CDC para todas as colecções monitorizadas.
+
+        Executa como coroutine infinita com reconexão automática. Para cada
+        coleção em ``WATCHED_COLLECTIONS``, estabelece um Change Stream que
+        monitoriza apenas operações de ``update`` (inserts e deletes são
+        registados explicitamente nas rotas da API).
+
+        Garante índices necessários na coleção de auditoria antes de começar
+        a monitorizar. Em caso de falha consecutiva excessiva, o circuit breaker
+        desliga o listener para evitar loops de erro infinitos.
         """
         self._running = True
         self._started_at = datetime.now(timezone.utc)
@@ -112,7 +136,13 @@ class CDCListener:
                 await asyncio.sleep(RESTART_DELAY_SECONDS)
 
     def stop(self):
-        """Para o listener de forma graciosa."""
+        """Para o listener de forma graciosa.
+
+        Define ``_running = False``, o que faz com que o loop principal
+        e os change streams saiam na próxima iteração. Não força a interrupção
+        de operações em curso — espera que o processamento do evento atual
+        termine antes de parar.
+        """
         self._running = False
         logger.info("🛑 CDC Audit Listener parado")
 
@@ -180,15 +210,23 @@ class CDCListener:
     async def _process_change_event(
         self, change_event: dict, collection_name: str
     ):
-        """
-        Processa um evento individual do Change Stream.
+        """Processa um evento individual do Change Stream.
 
-        FLUXO:
-        1. ✅ GHOST MODE CHECK (primeira validação — bypass imediato)
-        2. Extrair metadata do evento
-        3. Construir documento de auditoria
-        4. Inserir na coleção compliance_audit_logs
-        5. Limpar campos efémeros via $unset
+        FLUXO DE PROCESSAMENTO:
+        1. **Ghost Mode Check**: Verifica se o utilizador que fez o update
+           está em modo fantasma (role "indexacao"). Se sim, descarta
+           imediatamente sem registo de auditoria.
+        2. **Extração de metadata**: Extrai document_id, business_id,
+           updated_by, timestamp do cluster.
+        3. **Construção do documento de auditoria**: Monta o documento
+           com todos os campos relevantes, removendo campos efémeros.
+        4. **Inserção na coleção compliance_audit_logs**: Registra o evento.
+        5. **Limpeza de campos efémeros**: Remove ``_updated_by_role``,
+           ``_ghost_mode`` e ``_updated_by`` do documento original via $unset.
+
+        Args:
+            change_event: Evento bruto do MongoDB Change Stream.
+            collection_name: Nome da coleção que gerou o evento.
         """
         # ================================================================
         # 1. GHOST MODE — PRIMEIRA VALIDAÇÃO

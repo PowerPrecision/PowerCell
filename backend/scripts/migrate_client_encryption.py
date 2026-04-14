@@ -354,6 +354,24 @@ async def verify_migration():
 
 
 def main():
+    """Ponto de entrada CLI para migração de encriptação RGPD de clientes.
+
+    Suporta dois modos de operação:
+
+    - Modo migração (predefinição): Percorre todos os clientes e aplica
+      encriptação aos campos sensíveis (NIF, documento_id, telefone, etc.)
+      e gera blind indexes para pesquisa. Processa em lotes configuráveis
+      via ``--batch-size``.
+    - Modo verificação (``--verify-only``): Apenas reporta o estado atual
+      da migração (percentagem de clientes com hashes e campos encriptados).
+
+    O modo ``--dry-run`` simula a migração sem alterar a base de dados,
+    sendo recomendado para validar antes de executar em Produção.
+
+    Raises:
+        SystemExit: Implicitamente via ``argparse`` se os argumentos forem
+            inválidos. O script não propaga erros — regista-os no logger.
+    """
     parser = argparse.ArgumentParser(
         description="Migração RGPD - Encriptação de dados de clientes"
     )

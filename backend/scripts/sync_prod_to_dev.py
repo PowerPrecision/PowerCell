@@ -567,6 +567,22 @@ async def run_sync(
 # ======================================================================
 
 def main():
+    """Ponto de entrada CLI para o pipeline de sincronização Produção → Dev.
+
+    Parseia argumentos de linha de comando (--prod-url, --prod-db, --dev-url,
+    --dev-db) ou recorre a variáveis de ambiente (``PROD_MONGO_URL``,
+    ``PROD_DB_NAME``, ``DEV_MONGO_URL``, ``DEV_DB_NAME``, com fallback para
+    ``MONGO_URL`` e ``DB_NAME``). Invoca ``run_sync`` de forma síncrona via
+    ``asyncio.run`` e termina com código de saída 1 se a sincronização falhar.
+
+    Nota: Este pipeline acede diretamente ao MongoDB de Produção. Para uma
+    alternativa que usa backups S3 sem impacto no servidor live, utilize
+    ``restore_dev_from_backup.py``.
+
+    Raises:
+        SystemExit: Com código 1 se as credenciais não forem fornecidas
+            ou se ``run_sync`` retornar ``success=False``.
+    """
     parser = argparse.ArgumentParser(
         description="Pipeline de Sanitização: Produção → Dev (RGPD-compliant)",
         formatter_class=argparse.RawDescriptionHelpFormatter,

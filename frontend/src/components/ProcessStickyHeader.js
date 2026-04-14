@@ -1,3 +1,13 @@
+/**
+ * ProcessStickyHeader — Cabeçalho fixo (sticky) da página de detalhes do processo.
+ *
+ * PORQUÊ: A página de ProcessDetails é longa com múltiplos tabs. Este header mantém visível
+ * o nome do cliente, estado actual e acções rápidas enquanto o utilizador navega entre tabs,
+ * melhorando a usabilidade sem necessidade de scroll até ao topo.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -294,3 +304,4 @@ const ProcessStickyHeader = ({
 };
 
 export default ProcessStickyHeader;
+

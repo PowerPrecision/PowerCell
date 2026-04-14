@@ -340,9 +340,19 @@ def shutdown_executor():
 
 # Classe wrapper para uso mais conveniente
 class FileProcessor:
-    """
-    Wrapper para funções de processamento de ficheiros.
-    Fornece interface consistente e gestão de recursos.
+    """Wrapper para funções de processamento de ficheiros.
+
+    Fornece interface assíncrona consistente para processamento de Excel e PDF
+    usando ThreadPoolExecutor internamente. Isto permite ao resto da aplicação
+    chamar métodos async sem se preocupar com a gestão do executor.
+
+    A instância global ``file_processor`` é usada em toda a aplicação.
+
+    PORQUÊ ThreadPoolExecutor:
+    Operações com pandas (Excel) e PyPDF2 são CPU-bound e I/O-bound. Executá-las
+    diretamente numa coroutine bloquearia o event loop do FastAPI, causando
+    latência em todas as requests simultâneas. O executor isola cada operação
+    numa thread separada, mantendo o event loop responsivo.
     """
     
     @staticmethod
@@ -351,6 +361,23 @@ class FileProcessor:
         filename: str,
         force_client_id: Optional[str] = None
     ) -> Dict[str, Any]:
+        """Processa ficheiro Excel de forma assíncrona (via ThreadPoolExecutor).
+
+        Lê o Excel com ``pandas.read_excel(engine='openpyxl')``, converte para
+        lista de dicts e preenche valores NaN com string vazia.
+
+        Args:
+            file_content: Conteúdo binário do ficheiro Excel (.xlsx, .xls).
+            filename: Nome do ficheiro (para logging e erro).
+            force_client_id: ID do cliente para associar (opcional).
+
+        Returns:
+            dict: Resultado com chaves:
+                - success (bool): True se processado com sucesso.
+                - rows_processed (int): Número de linhas no Excel.
+                - data (list[dict]): Dados extraídos (lista de registos).
+                - errors (list[str]): Lista de erros (vazia se sucesso).
+        """
         return await process_excel_async(file_content, filename, force_client_id)
     
     @staticmethod
@@ -360,6 +387,25 @@ class FileProcessor:
         force_client_id: Optional[str] = None,
         extract_text: bool = True
     ) -> Dict[str, Any]:
+        """Processa ficheiro PDF de forma assíncrona (via ThreadPoolExecutor).
+
+        Extrai texto do PDF com PyPDF2 (fallback para pypdf) e aplica
+        sanitização anti prompt-injection via ``sanitize_pdf_text``.
+        Respeita os mesmos limites de segurança do ai_document.py.
+
+        Args:
+            file_content: Conteúdo binário do ficheiro PDF.
+            filename: Nome do ficheiro (para logging).
+            force_client_id: ID do cliente para associar (opcional).
+            extract_text: Se True, extrai texto do PDF.
+
+        Returns:
+            dict: Resultado com chaves:
+                - success (bool): True se processado com sucesso.
+                - pages (int): Número de páginas do PDF.
+                - text (str): Texto extraído e sanitizado.
+                - errors (list[str]): Lista de erros.
+        """
         return await process_pdf_async(file_content, filename, force_client_id, extract_text)
     
     @staticmethod
@@ -369,6 +415,21 @@ class FileProcessor:
         document_type: str,
         force_client_id: Optional[str] = None
     ) -> Dict[str, Any]:
+        """Extrai dados de um documento de forma assíncrona, auto-detectando o tipo.
+
+        Detecta o tipo de ficheiro pela extensão (.xlsx, .xls → Excel;
+        .pdf → PDF) e delega para o processador adequado. Outros tipos
+        retornam erro "Tipo de ficheiro não suportado".
+
+        Args:
+            file_content: Conteúdo binário do ficheiro.
+            filename: Nome do ficheiro (usado para determinar tipo).
+            document_type: Tipo de documento esperado (para logging).
+            force_client_id: ID do cliente para associar (opcional).
+
+        Returns:
+            dict: Resultado do processamento (estrutura depende do tipo).
+        """
         return await extract_document_data_async(file_content, filename, document_type, force_client_id)
 
 

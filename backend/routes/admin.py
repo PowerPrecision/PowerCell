@@ -1,3 +1,63 @@
+"""
+====================================================================
+ROTAS DE ADMINISTRAÇÃO — POWERCELL CRM
+====================================================================
+
+Este módulo concentra todas as operações administrativas do sistema,
+organizadas nos seguintes domínios:
+
+1. **Gestão de Utilizadores** — CRUD completo de utilizadores (criar,
+   atualizar, eliminar, desativar). Inclui lógica especial para o role
+   PARCEIRO (ghost user sem password) e sincronização automática de
+   permissões quando o role muda.
+
+2. **Permissões e Roles** — Leitura de permissões disponíveis,
+   padrões por role, e redefinição de permissões personalizadas.
+
+3. **Workflow de Fases** — Gestão das fases do pipeline (kanban)
+   de processos: criar, editar, eliminar e corrigir duplicados.
+   A eliminação de uma fase com processos associados migra esses
+   processos para "Clientes em Espera".
+
+4. **Operações de Base de Dados** — Restauro de BD a partir de backup
+   S3 (DEV-only), migração de números de processo, correção de
+   duplicados, e verificação de índices. Estas operações são
+   intencionalmente restritas ao role ADMIN porque alteram dados
+   em massa e podem causar perda irreversível de informação.
+
+5. **Personificação (Impersonate)** — Permite ao admin/CEO ver o
+   sistema como outro utilizador para troubleshooting. Inclui
+   proteção contra personificação de outros admins e registo
+   completo de auditoria.
+
+6. **Dados de Treino IA** — CRUD de entradas de treino para
+   personalizar o agente IA (classificação de documentos,
+   mapeamentos de campos, padrões de clientes).
+
+7. **Preferências de Notificação** — Gestão de preferências de
+   notificação por utilizador (email e in-app).
+
+8. **Registos de Clientes** — Visualização e gestão dos registos
+   públicos submetidos pelo formulário.
+
+9. **Logs e Auditoria** — Consulta de audit logs, system error logs,
+   e AI import logs.
+
+SEGURANÇA:
+- A maioria dos endpoints requer role ADMIN ou CEO.
+- Algumas operações destrutivas (sync-database, fix-duplicates,
+  migrate-process-numbers) são DEV-only (bloqueadas em produção).
+- Todas as operações sensíveis são registadas no audit log.
+
+PORQUÊ as operações são DEV-only:
+- sync-database: restaura dados de produção para dev, o que poderia
+  sobrescrever dados de desenvolvimento acidentalmente em produção.
+- fix-duplicates: modifica dados em massa e pode eliminar processos.
+- Estas operações existem para facilitar o ciclo de desenvolvimento
+  e correção de anomalias, não para uso operacional regular.
+====================================================================
+"""
+
 import os
 import uuid
 import logging
@@ -59,8 +119,20 @@ async def get_default_permissions_for_role_endpoint(
     role: str, 
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    """
-    Retorna as permissões padrão para um role específico.
+    """Retorna as permissões padrão para um role específico.
+
+    Usado pelo frontend para pré-preencher as permissões quando o
+    admin seleciona um role ao criar ou editar um utilizador.
+
+    Args:
+        role: Nome do role (ex: "consultor", "admin").
+        user: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        dict: success, role, permissions (lista de chaves).
+
+    Raises:
+        HTTPException(400): Se role não existir no mapeamento.
     """
     if role not in DEFAULT_PERMISSIONS_BY_ROLE:
         raise HTTPException(status_code=400, detail="Role inválido")
@@ -77,8 +149,20 @@ async def reset_user_permissions(
     user_id: str, 
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    """
-    Redefine as permissões de um utilizador para o padrão do seu role.
+    """Redefine as permissões de um utilizador para o padrão do seu role.
+
+    Útil quando um utilizador tem permissões personalizadas incorretas
+    e o admin quer restaurar os valores por defeito do role.
+
+    Args:
+        user_id: ID do utilizador cujas permissões serão redefinidas.
+        user: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        dict: success, message, permissions (nova lista de permissões).
+
+    Raises:
+        HTTPException(404): Se utilizador não encontrado.
     """
     target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     if not target_user:
@@ -111,14 +195,41 @@ async def reset_user_permissions(
 
 @router.get("/workflow-statuses", response_model=List[WorkflowStatusResponse])
 async def get_workflow_statuses(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))):
-    """Get all workflow statuses ordered by order field"""
+    """Lista todas as fases do workflow ordenadas pelo campo order.
+
+    Porquê acessível a todos os roles: as fases do workflow são
+    necessárias para renderizar o kanban e os filtros de estado em
+    toda a aplicação, não apenas no painel de admin.
+
+    Args:
+        user: Utilizador autenticado com qualquer role válido (injetado).
+
+    Returns:
+        List[WorkflowStatusResponse]: Lista de fases ordenadas por order.
+    """
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     return [WorkflowStatusResponse(**s) for s in statuses]
 
 
 @router.post("/workflow-statuses", response_model=WorkflowStatusResponse)
 async def create_workflow_status(data: WorkflowStatusCreate, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
-    """Create a new workflow status"""
+    """Cria uma nova fase no workflow do pipeline de processos.
+
+    Verifica que não existe outra fase com o mesmo nome antes de criar.
+    O campo ``internal_code`` é gerado automaticamente a partir do order
+    (ex: order=3 → internal_code="03").
+
+    Args:
+        data: Dados da fase (WorkflowStatusCreate com name, label, order,
+            color, description).
+        user: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        WorkflowStatusResponse: Fase criada.
+
+    Raises:
+        HTTPException(400): Se já existe uma fase com o mesmo nome.
+    """
     existing = await db.workflow_statuses.find_one({"name": data.name})
     if existing:
         raise HTTPException(status_code=400, detail="Estado já existe")
@@ -140,7 +251,23 @@ async def create_workflow_status(data: WorkflowStatusCreate, user: dict = Depend
 
 @router.put("/workflow-statuses/{status_id}", response_model=WorkflowStatusResponse)
 async def update_workflow_status(status_id: str, data: WorkflowStatusUpdate, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
-    """Update a workflow status"""
+    """Atualiza os dados de uma fase do workflow existente.
+
+    Apenas os campos fornecidos no body são atualizados (atualização
+    parcial). Se nenhum campo for enviado, não efetua qualquer alteração.
+
+    Args:
+        status_id: ID da fase a atualizar.
+        data: Campos a atualizar (WorkflowStatusUpdate com label, order,
+            color, description — todos opcionais).
+        user: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        WorkflowStatusResponse: Fase atualizada com todos os campos.
+
+    Raises:
+        HTTPException(404): Se fase não encontrada.
+    """
     status = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
     if not status:
         raise HTTPException(status_code=404, detail="Estado não encontrado")
@@ -438,7 +565,20 @@ async def fix_duplicate_processes(user: dict = Depends(require_roles([UserRole.A
 
 @router.get("/users", response_model=List[UserResponse])
 async def get_users(role: Optional[str] = None, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))):
-    """Lista utilizadores. Acessível a Admin, CEO, Diretor, Consultor e Intermediário."""
+    """Lista utilizadores do sistema, opcionalmente filtrados por role.
+
+    O campo password é excluído da resposta por segurança.
+    Acessível a Admin, CEO, Diretor, Consultor e Intermediário porque
+    estes roles precisam de ver informações de utilizadores para
+    atribuição de processos e colaboração.
+
+    Args:
+        role: Filtro opcional por role (ex: "consultor", "admin").
+        user: Utilizador autenticado com role permitido (injetado).
+
+    Returns:
+        List[UserResponse]: Lista de utilizadores (sem password).
+    """
     query = {}
     if role:
         query["role"] = role
@@ -449,6 +589,41 @@ async def get_users(role: Optional[str] = None, user: dict = Depends(require_rol
 
 @router.post("/users", response_model=UserResponse)
 async def create_user(data: UserCreate, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """Cria um novo utilizador no sistema com lógica diferenciada por role.
+
+    Este endpoint suporta dois fluxos distintos de criação:
+
+    **Utilizadores normais** (Consultor, Intermediário, Diretor, etc.):
+    - Valida presença de email, password e role válido.
+    - Verifica unicidade do email.
+    - Envia email de boas-vindas com credenciais (não falha a criação
+      se o email não for enviado).
+    - Associa automaticamente processos do Trello cujo nome do membro
+      corresponda ao nome do utilizador criado.
+
+    **Parceiros** (ghost users):
+    - Apenas requer nome. Email/password não são necessários porque
+      parceiros não acedem ao sistema diretamente — servem apenas para
+      associação a processos como entidades externas.
+    - Gera um email placeholder único para satisfazer a constraint de
+      unicidade sem reservar emails reais.
+
+    Porquê o CLIENTE não pode ser criado aqui: no PowerCell, clientes
+    são representados por processos (não por utilizadores do sistema).
+    Um cliente submete o formulário público e é criado como processo.
+
+    Args:
+        data: Dados do utilizador (UserCreate com email, name, phone,
+            password, role, onedrive_folder).
+        user: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        UserResponse: Dados do utilizador criado (sem password).
+
+    Raises:
+        HTTPException(400): Se role é CLIENTE, role inválido, email já
+            registado, password em falta, ou nome em falta (parceiro).
+    """
     # Sanitizar inputs (sem validação restritiva — aceitar qualquer valor)
     clean_email = (data.email or "").strip().lower()
     clean_name = (data.name or "").strip()
@@ -663,7 +838,27 @@ Equipa PowerCell
 
 
 async def _audit_log(action: str, entity: str, entity_id: str, performed_by: dict, details: dict = None):
-    """O18 - Regista uma acção crítica no audit log."""
+    """Regista uma ação crítica no audit log para rastreabilidade.
+
+    O audit log é usado para manter um histórico permanente de
+    operações sensíveis (criação/eliminação de utilizadores,
+    restauros de BD, reset de permissões, etc.).
+
+    Este método é tolerante a falhas: se a escrita no audit log
+    falhar (ex: problema de conexão à BD), o erro é registado no
+    logger mas NÃO é propagado — evitando que uma falha de auditoria
+    bloqueie a operação principal.
+
+    Args:
+        action: Identificador da ação (ex: "user_created", "user_deleted",
+            "restore_dev_from_backup", "permissions_reset").
+        entity: Tipo de entidade afetada (ex: "user", "database").
+        entity_id: ID da entidade afetada.
+        performed_by: Dicionário do utilizador que executou a ação
+            (deve conter "id", "name", "email").
+        details: Dicionário opcional com metadados adicionais sobre
+            a ação executada.
+    """
     try:
         await db.audit_logs.insert_one({
             "id": str(uuid.uuid4()),
@@ -682,6 +877,41 @@ async def _audit_log(action: str, entity: str, entity_id: str, performed_by: dic
 
 @router.put("/users/{user_id}", response_model=UserResponse)
 async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """Atualiza os dados de um utilizador existente.
+
+    Este endpoint suporta a atualização de todos os campos editáveis
+    do utilizador, com regras de negócio específicas:
+
+    - **Email**: Verifica unicidade contra outros utilizadores.
+    - **Role**: Se alterado, sincroniza automaticamente as permissões
+      com o novo role (a menos que o utilizador tenha permissões
+      personalizadas — nesse caso mantém as personalizadas).
+    - **is_active**: Protege o utilizador administrador de ser
+      desativado (um admin desativado não poderia ser reativado).
+    - **Password**: Hasha a nova password antes de guardar.
+    - **Permissões explícitas**: Se o admin fornecer permissões no
+      body, essas sobrepõem-se às padrão do role.
+
+    Porquê a sincronização automática de permissões: quando o role
+    de um utilizador muda (ex: Consultor → Diretor), as suas
+    permissões devem refletir as capacidades do novo cargo. No
+    entanto, se o admin definiu permissões personalizadas manualmente,
+    essas são preservadas para não destruir configurações deliberadas.
+
+    Args:
+        user_id: ID do utilizador a atualizar.
+        data: Campos a atualizar (UserUpdate com name, phone, email,
+            role, is_active, password, permissions, onedrive_folder).
+        user: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        UserResponse: Dados atualizados do utilizador (sem password).
+
+    Raises:
+        HTTPException(404): Se utilizador não encontrado.
+        HTTPException(400): Se email já existe noutro utilizador,
+            role inválido, ou tentativa de desativar um admin.
+    """
     from services.permissions import (
         get_default_permissions_for_role, 
         should_sync_permissions,
@@ -749,6 +979,27 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
 
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: str, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """Elimina permanentemente um utilizador do sistema.
+
+    Este endpoint remove o utilizador da base de dados de forma
+    irreversível. Por segurança, impede que um utilizador elimine
+    a sua própria conta (o que causaria sessão órfã).
+
+    Nota: a eliminação não remove processos, documentos, ou histórico
+    associados ao utilizador. Esses dados permanecem no sistema para
+    preservar a integridade do histórico de processos.
+
+    Args:
+        user_id: ID do utilizador a eliminar.
+        user: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        dict: Mensagem de confirmação ``{"message": "Utilizador eliminado"}``.
+
+    Raises:
+        HTTPException(400): Se tentar eliminar a própria conta.
+        HTTPException(404): Se utilizador não encontrado.
+    """
     if user_id == user["id"]:
         raise HTTPException(status_code=400, detail="Não pode eliminar a própria conta")
     
@@ -902,9 +1153,22 @@ async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, U
 
 @router.post("/migrate-process-numbers")
 async def migrate_process_numbers(user: dict = Depends(require_roles([UserRole.ADMIN]))):
-    """
-    Atribuir números sequenciais a todos os processos que não têm.
-    Os processos são ordenados por data de criação (mais antigos primeiro).
+    """Atribui números sequenciais a processos que ainda não têm.
+
+    Os processos sem ``process_number`` são ordenados por data de
+    criação (mais antigos primeiro) e recebem números a partir do
+    último número existente + 1.
+
+    Porquê uma migração dedicada: durante a migração de dados do
+    Trello, muitos processos foram criados sem número sequencial.
+    Este endpoint resolve essa lacuna de forma controlada e idempotente
+    (pode ser executado múltiplas vezes sem duplicar números).
+
+    Args:
+        user: Utilizador admin autenticado (injetado).
+
+    Returns:
+        dict: Relatório com message, updated, first_number, last_number.
     """
     # Buscar processos sem número, ordenados por data de criação
     processes_without_number = await db.processes.find(
@@ -943,9 +1207,20 @@ async def migrate_process_numbers(user: dict = Depends(require_roles([UserRole.A
 
 @router.post("/update-process-active-status")
 async def update_process_active_status(user: dict = Depends(require_roles([UserRole.ADMIN]))):
-    """
-    Atualizar o campo is_active de todos os processos baseado no status.
-    Processos em 'desistencias' ou 'concluidos' são marcados como inativos.
+    """Recalcula o campo ``is_active`` de todos os processos baseado no status.
+
+    Processos com status "desistencias" ou "concluidos" são marcados como
+    ``is_active=False``. Todos os restantes são marcados como ``is_active=True``.
+
+    Porquê este endpoint existe: durante a migração do Trello e desenvolvimento
+    iterativo, o campo ``is_active`` pode ficar dessincronizado do status.
+    Este endpoint corrige essa inconsistência em massa.
+
+    Args:
+        user: Utilizador admin autenticado (injetado).
+
+    Returns:
+        dict: Relatório com inactive_updated, active_updated, total_updated.
     """
     # Status que devem ser marcados como inativos
     inactive_statuses = ["desistencias", "concluidos"]
@@ -2590,6 +2865,33 @@ async def sync_database(
 
     # ─── EXECUTAR EM BACKGROUND ───
     async def _execute_restore():
+        """Executa o restauro da BD de desenvolvimento a partir do backup S3.
+
+        Esta função interna é executada em background (via BackgroundTasks)
+        e coordena todo o pipeline de restauro:
+
+        1. Download do backup ZIP mais recente do S3.
+        2. Extração dos ficheiros JSON de cada coleção.
+        3. Sanitização RGPD (anonimização de dados pessoais).
+        4. Validação de integridade dos dados.
+        5. Escrita para coleções temporárias (_temp).
+        6. Swap atómico das coleções temporárias para as reais.
+        7. Limpeza das coleções temporárias.
+
+        Porquê em background: o restauro pode demorar vários minutos
+        dependendo do tamanho da base de dados. Executar de forma
+        síncrona causaria timeout no FastAPI.
+
+        Garantias de segurança:
+        - FALHA SEGURA: se qualquer etapa falhar, a BD de dev não é
+          modificada (usa coleções _temp como intermediário).
+        - Regista resultado (sucesso ou erro) em ``_sync_result_cache``.
+        - Sempre define ``_sync_in_progress = False`` no finally.
+
+        Raises:
+            Exception: Qualquer erro durante o restauro é capturado e
+                registado em ``_sync_result_cache`` sem propagar.
+        """
         global _sync_in_progress, _sync_result_cache
         _sync_in_progress = True
         try:

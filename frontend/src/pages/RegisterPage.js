@@ -1,3 +1,12 @@
+/**
+ * RegisterPage — Página de registo de novos utilizadores no CRM.
+ *
+ * PORQUÊ: Permite auto-registo quando configurado. Valida passwords iguais, formato de
+ * email, e redireciona para login após registo bem-sucedido.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -212,3 +221,4 @@ const RegisterPage = () => {
 };
 
 export default RegisterPage;
+

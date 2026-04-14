@@ -1,3 +1,13 @@
+/**
+ * AIDataReviewPage — Página de revisão de dados extraídos por IA de documentos.
+ *
+ * PORQUÊ: Quando a IA extrai dados de documentos (OCR), pode gerar conflitos entre valores de
+ * diferentes documentos. Esta página permite ao utilizador rever, comparar e validar os dados
+ * extraídos antes de os aplicar ao processo, garantindo a precisão dos dados no CRM.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Button } from "../components/ui/button";
@@ -1199,3 +1209,4 @@ const AIDataReviewPage = () => {
 };
 
 export default AIDataReviewPage;
+

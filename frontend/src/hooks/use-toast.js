@@ -1,5 +1,23 @@
-"use client";
-// Inspired by react-hot-toast library
+/**
+ * useToast — Hook para sistema de notificações toast (inspirado em react-hot-toast).
+ *
+ * PORQUÊ: O PowerCell precisa de feedback visual imediato para ações do utilizador
+ * (criar processo, enviar email, eliminar documento, etc.). Os toasts são não intrusivos
+ * — aparecem temporariamente sem bloquear a interface, ao contrário de modais/alerts.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Estado em memória (memoryState) partilhado entre todas as instâncias via listeners:
+ *   isto permite que toasts sejam disparados fora do React (em services, utils).
+ * - Limite de 1 toast visível (TOAST_LIMIT): evita spam visual em operações em massa.
+ * - Ciclo de vida: ADD → UPDATE → DISMISS → REMOVE com timeouts configuráveis.
+ * - Dispatch pattern centralizado: semelhante a Redux, todas as mudanças passam por
+ *   dispatch() que notifica todos os listeners subscritos.
+ *
+ * @returns {Object} Estado e funções do sistema de toasts:
+ *   - toasts {Array} — Lista de toasts activos
+ *   - toast {Function} — Criar novo toast (suporta variantes via toasts.info(), etc.)
+ *   - dismiss {Function} — Descartar um toast pelo ID
+ */
 import * as React from "react"
 
 const TOAST_LIMIT = 1

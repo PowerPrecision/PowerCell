@@ -97,6 +97,19 @@ async def migrate_encryption(
     from services.migrate_encryption import migrate_processes_encryption
     
     async def run_migration():
+        """Executa a migração de encriptação de dados sensíveis dos processos.
+
+        Porquê este endpoint existe: durante o desenvolvimento, os campos
+        sensíveis (NIF, email, telefone) foram armazenados em texto claro.
+        Este endpoint migra esses dados para encriptação AES-256, criando
+        blind indexes para pesquisa.
+
+        O dry_run=True permite validar sem modificar dados.
+
+        Args:
+            Nenhum parâmetro direto — usa variáveis do closure
+            (dry_run, user).
+        """
         try:
             stats = await migrate_processes_encryption(dry_run=dry_run, batch_size=50)
             logger.info(f"Migração concluída: {stats}")

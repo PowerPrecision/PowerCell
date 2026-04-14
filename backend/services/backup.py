@@ -1,3 +1,34 @@
+"""
+====================================================================
+SERVIÇO DE BACKUP — CREDITOIMO
+====================================================================
+Sistema de backup completo da base de dados MongoDB com archive para S3.
+
+ARQUITECTURA DE BACKUP:
+1. Exportação local: Cada coleção MongoDB é exportada como um ficheiro JSON
+   individual (usando ``bson.json_util`` para preservar ObjectId, datetime e
+   outros tipos BSON nativos). Todos os JSONs são comprimidos num único ZIP
+   com timestamp UTC.
+2. Upload para S3: O ZIP local é carregado para o bucket S3 sob o prefixo
+   ``backups/``, servindo como repositório autoritativo de disaster recovery.
+3. Retenção: Backups locais são mantidos por 7 dias; backups S3 por 30 dias.
+   A retenção cloud mais longa reflete o facto de o S3 ser o fallback final
+   em caso de falha total do servidor.
+
+PORQUÊ ZIP COM JSON POR COLEÇÃO:
+- Um JSON por coleção permite restaurações granulares (restaurar apenas
+  ``processes`` sem tocar em ``users``).
+- O ZIP reduz significativamente o tamanho (JSONs de texto comprimem bem).
+- ``bson.json_util`` preserva tipos BSON que ``json.dumps`` padrão perderia,
+  evitando corrupção de ObjectId ou datas durante o restauro.
+
+CONFIGURAÇÃO:
+- Variáveis de ambiente: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+  AWS_BUCKET_NAME, AWS_REGION.
+- Retenção configurável via: BACKUP_LOCAL_RETENTION_DAYS,
+  BACKUP_CLOUD_RETENTION_DAYS, BACKUP_MAX_SIZE_MB.
+====================================================================
+"""
 import os
 import logging
 import shutil
@@ -43,9 +74,28 @@ config = BackupConfig()
 
 
 class BackupService:
+    """Serviço de backup da base de dados MongoDB.
+
+    Responsável por exportar todas as coleções MongoDB para ficheiros JSON,
+    comprimir num ZIP com timestamp UTC e guardar no diretório local de backup.
+
+    O serviço é inicializado como singleton (``backup_service``) e usa um
+    ``AsyncIOMotorClient`` dedicado (não partilha a ligação da aplicação)
+    para evitar interferir com as operações normais da API durante o dump.
+
+    A exportação usa ``bson.json_util.dumps`` em vez de ``json.dumps`` para
+    preservar tipos BSON nativos (ObjectId, datetime, Binary) sem perda.
+    """
+
     BACKUP_DIR = config.BACKUP_DIR
 
     def __init__(self):
+        """Inicializa o diretório de backup local.
+
+        Cria ``BACKUP_DIR`` se não existir. O diretório usa o tempdir do
+        sistema operativo por padrão, permitindo múltiplas instâncias da
+        aplicação em ambientes cloud (Vercel, Railway, etc.) sem conflitos.
+        """
         self.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
     async def create_backup(self):
@@ -112,7 +162,18 @@ backup_service = BackupService()
 
 
 def get_s3_client():
-    """Cria cliente S3 com credenciais do ambiente."""
+    """Cria cliente S3 com credenciais do ambiente.
+
+    Verifica se todas as credenciais necessárias (AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY, AWS_BUCKET_NAME) estão definidas antes de
+    criar o cliente. Retorna ``None`` silenciosamente se faltar alguma —
+    isto permite que o sistema funcione em modo "backup local only" quando
+    o S3 não está configurado (ex: ambientes de desenvolvimento).
+
+    Returns:
+        boto3.client | None: Cliente S3 configurado, ou None se faltar
+            credenciais.
+    """
     if not all([AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_BUCKET_NAME]):
         return None
     
@@ -191,14 +252,22 @@ async def upload_backup_to_s3(zip_path: str) -> dict:
 
 
 async def cleanup_old_s3_backups(retention_days: int = None) -> dict:
-    """
-    Remove backups antigos do S3.
-    
+    """Remove backups antigos do S3, respeitando a política de retenção.
+
+    Esta função complementa ``cleanup_old_s3_backups`` do workflow — enquanto
+    o workflow limpa backups locais (sistema de ficheiros), esta função limpa
+    backups na cloud. A retenção cloud (30 dias) é deliberadamente mais longa
+    que a local (7 dias) porque o S3 é o repositório de disaster recovery.
+
     Args:
-        retention_days: Dias para manter (default: config.CLOUD_RETENTION_DAYS)
-        
+        retention_days: Dias para manter (default: config.CLOUD_RETENTION_DAYS
+            que é 30). Permite executar limpezas agressivas passando um valor
+            menor (ex: 7 para teste).
+
     Returns:
-        Dict com resultado da limpeza
+        dict: Resultado da limpeza com chaves:
+            - deleted (int): Número de backups removidos.
+            - errors (list[str]): Lista de erros (se houver).
     """
     if retention_days is None:
         retention_days = config.CLOUD_RETENTION_DAYS
@@ -244,11 +313,19 @@ async def cleanup_old_s3_backups(retention_days: int = None) -> dict:
 
 
 async def get_backup_statistics() -> dict:
-    """
-    Obtém estatísticas dos backups.
-    
+    """Obtém estatísticas agregadas dos backups (local + histórico na BD).
+
+    Consulta a coleção ``backup_history`` para calcular taxa de sucesso e
+    informação do último backup. Calcula também o tamanho total dos ficheiros
+    locais de backup.
+
     Returns:
-        Dict com estatísticas de backups
+        dict: Estatísticas com chaves:
+            - total_backups (int): Total de backups registados.
+            - successful_backups (int): Total com status "completed".
+            - success_rate (float): Percentagem de backups bem sucedidos.
+            - total_size_bytes (int): Soma do tamanho dos ZIPs locais.
+            - last_backup (dict | None): Informação do backup mais recente.
     """
     from database import db
     
@@ -441,9 +518,17 @@ async def scheduled_backup_job():
 
 
 async def start_backup_scheduler():
-    """
-    Inicia o scheduler de backups automáticos.
-    Corre em background e executa backup diário às 03:00 UTC.
+    """Inicia o scheduler de backups automáticos como coroutine infinita.
+
+    Calcula o próximo horário às 03:00 UTC e usa ``asyncio.sleep`` para
+    esperar até essa hora. Após cada execução, agenda a próxima. Em caso de
+    erro, espera 1 hora antes de tentar novamente (para evitar loops rápidos
+    em caso de falha persistente).
+
+    Esta função deve ser iniciada como background task no startup do servidor
+    (``server.py``). O uso de ``asyncio.sleep`` em vez de cron/schedule é
+    deliberado: evita dependências externas e funciona correctamente em
+    ambientes serverless com warm pool.
     """
     logger.info("[BACKUP SCHEDULER] Iniciado - backup diário às 03:00 UTC")
     

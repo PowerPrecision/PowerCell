@@ -202,6 +202,18 @@ async def get_migration_status(
     
     # Calcular percentagens
     def pct(count, total):
+        """Calcula a percentagem arredondada de count/total.
+
+        Usado para gerar estatísticas de migração no formato legível.
+        Retorna 0 se total for 0 para evitar divisão por zero.
+
+        Args:
+            count: Numerador (quantidade observada).
+            total: Denominador (quantidade total).
+
+        Returns:
+            float: Percentagem arredondada a 1 casa decimal.
+        """
         return round(count / total * 100, 1) if total > 0 else 0
     
     return {

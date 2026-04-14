@@ -79,6 +79,23 @@ async def websocket_notifications(
     websocket: WebSocket,
     token: str = Query(...)
 ):
+    """Endpoint WebSocket para receber notificações em tempo real.
+
+    Este endpoint estabelece uma ligação WebSocket persistente que
+    envia notificações ao utilizador conforme eventos ocorrem:
+    - Novos processos, alterações de status, atribuições.
+    - Atualizações de tarefas e comentários.
+
+    O token JWT é validado no handshake. Se expirado, fecha com
+    código 4001 para o frontend fazer refresh do token.
+
+    Args:
+        websocket: Instância WebSocket do FastAPI.
+        token: Token JWT para autenticação.
+
+    Returns:
+        None (stream contínuo de mensagens JSON via WebSocket).
+    """
     user = await verify_websocket_token(token)
     
     # Token expirado — código 4001 para o frontend saber que deve fazer refresh
@@ -262,6 +279,14 @@ async def websocket_notifications(
 
 @router.get("/ws/status")
 async def websocket_status():
+    """Retorna o estado atual das ligações WebSocket ativas.
+
+    Usado pelo frontend para verificar se o servidor de WebSocket
+    está a funcionar e quantos utilizadores estão ligados.
+
+    Returns:
+        dict: total_connections, connected_users, user_ids.
+    """
     return {
         "total_connections": manager.get_total_connections(),
         "connected_users": len(manager.get_connected_users()),

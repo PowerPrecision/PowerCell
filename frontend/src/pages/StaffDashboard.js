@@ -1,3 +1,12 @@
+/**
+ * StaffDashboard — Dashboard principal para utilizadores de equipa (consultores, mediadores).
+ *
+ * PORQUÊ: Vista centralizada do dia-a-dia da equipa, mostrando processos atribuídos, tarefas
+ * pendentes, alertas urgentes, e acesso rápido a ações comuns.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -940,3 +949,4 @@ const StaffDashboard = () => {
 };
 
 export default StaffDashboard;
+

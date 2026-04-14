@@ -1,3 +1,12 @@
+/**
+ * FinanceDashboard — Dashboard financeiro com métricas de negócio do CRM.
+ *
+ * PORQUÊ: Permite à equipa de gestão visualizar KPIs como volume de processos, comissões,
+ * valor total de crédito, e evolução temporal. Essencial para tomada de decisão estratégica.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -915,3 +924,4 @@ const FinanceDashboard = () => {
 };
 
 export default FinanceDashboard;
+

@@ -1,3 +1,12 @@
+/**
+ * LoginPage — Página de autenticação do CRM PowerCell.
+ *
+ * PORQUÊ: Ponto de entrada do sistema com design split-screen. Suporta autenticação por
+ * email/password com redirecionamento baseado no role do utilizador.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -162,3 +171,4 @@ const LoginPage = () => {
 };
 
 export default LoginPage;
+

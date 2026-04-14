@@ -89,22 +89,57 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
     titular2_data = process.get("titular2_data", {}) or {}
     financial_data = process.get("financial_data", {}) or {}
     real_estate_data = process.get("real_estate_data", {}) or {}
-    
+
     # Helper para formatação segura
     def safe_val(value, default="N/A"):
+        """Retorna uma representação segura de um valor para templates.
+
+        Converte o valor para string; se for None ou vazio, retorna
+        o valor padrão. Evita erros de template ao aceder a campos
+        opcionais do processo que podem não existir.
+
+        Args:
+            value: Valor a formatar (qualquer tipo).
+            default: Texto alternativo quando valor é nulo/vazio.
+
+        Returns:
+            str: Valor formatado ou default.
+        """
         if value is None or value == "":
             return default
         return str(value)
-    
+
     def format_currency(value):
+        """Formata um valor numérico como moeda europeia (pt-PT).
+
+        Exemplo: 150000.50 → "150.000,50 €".
+
+        Args:
+            value: Valor numérico (int, float, str conversível).
+
+        Returns:
+            str: Valor formatado como moeda, ou "N/A" se inválido.
+        """
         if value is None or value == "":
             return "N/A"
         try:
             return f"{float(value):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
         except (ValueError, TypeError):
             return str(value)
-    
+
     def format_date(date_str):
+        """Converte uma data ISO (AAAA-MM-DD) para formato pt-PT (DD/MM/AAAA).
+
+        Também aceita datas com componente de tempo (T) e as
+        trunca antes de converter.
+
+        Args:
+            date_str: String de data em formato ISO ou parcial.
+
+        Returns:
+            str: Data em formato DD/MM/AAAA, ou valor original se
+                não for possível converter.
+        """
         if not date_str:
             return "N/A"
         try:
@@ -279,22 +314,34 @@ def _build_professional_email_html(process: dict, user: dict, documents_list: st
     titular2_data = process.get("titular2_data", {}) or {}
     financial_data = process.get("financial_data", {}) or {}
     real_estate_data = process.get("real_estate_data", {}) or {}
-    
-    # Helper para formatação segura
+
+    # Helper para formatação segura (mesma lógica de _extract_email_variables)
     def safe_val(value, default="N/A"):
+        """Retorna uma representação segura de um valor para templates.
+
+        Ver documentação em ``_extract_email_variables`` para detalhes.
+        """
         if value is None or value == "":
             return default
         return str(value)
-    
+
     def format_currency(value):
+        """Formata um valor numérico como moeda europeia (pt-PT).
+
+        Ver documentação em ``_extract_email_variables`` para detalhes.
+        """
         if value is None or value == "":
             return "N/A"
         try:
             return f"{float(value):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
         except (ValueError, TypeError):
             return str(value)
-    
+
     def format_date(date_str):
+        """Converte uma data ISO (AAAA-MM-DD) para formato pt-PT (DD/MM/AAAA).
+
+        Ver documentação em ``_extract_email_variables`` para detalhes.
+        """
         if not date_str:
             return "N/A"
         try:
@@ -484,7 +531,21 @@ def _build_professional_email_html(process: dict, user: dict, documents_list: st
 
 
 async def enrich_email(email: dict) -> dict:
-    """Adicionar nomes ao email."""
+    """Enriquece um registo de email com nomes de processo e criador.
+
+    Adiciona ``client_name`` (nome do cliente do processo associado)
+    e ``created_by_name`` (nome do utilizador que criou o email).
+
+    Porquê este enriquecimento: a lista de emails no frontend precisa
+    de mostrar nomes legíveis em vez de apenas IDs.
+
+    Args:
+        email: Dicionário do documento de email da MongoDB.
+
+    Returns:
+        dict: Mesmo dicionário com campos client_name e
+            created_by_name adicionados (se encontrado).
+    """
     # Nome do processo/cliente
     if email.get("process_id"):
         process = await db.processes.find_one(
@@ -743,6 +804,19 @@ async def send_documentation_email(
     bancos_simulacoes = financial_data.get("bancos_simulacoes", []) or []
     
     def normalize_bank_name(name):
+        """Normaliza o nome de um banco para comparação case-insensitive.
+
+        Remove espaços e converte para minúsculas para permitir
+        comparação fiável entre nomes de bancos dos destinatários
+        e a lista de bancos com crédito/simulação do cliente.
+
+        Args:
+            name: Nome do banco (str ou None).
+
+        Returns:
+            str: Nome normalizado em minúsculas sem espaços nas
+                extremidades, ou string vazia se name for falsy.
+        """
         return name.lower().strip() if name else ""
     
     blocked_banks = [normalize_bank_name(b) for b in bancos_creditos + bancos_simulacoes]
@@ -2259,6 +2333,18 @@ async def sync_process_emails(
         return result
     else:
         async def run_sync():
+            """Executa a sincronização de emails em background para o processo.
+
+            Atualiza ``_sync_status`` com o estado (running/completed/failed)
+            para que o frontend possa fazer polling do progresso.
+
+            Args:
+                Nenhum parâmetro direto — usa variáveis do closure
+                (process_id, days, user_email).
+
+            Returns:
+                None. Resultado é guardado em ``_sync_status[process_id]``.
+            """
             try:
                 _sync_status[process_id] = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
                 result = await sync_emails_for_process(process_id, days, user_email=user_email)

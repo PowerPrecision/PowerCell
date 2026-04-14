@@ -1,3 +1,33 @@
+"""
+====================================================================
+SERVIÇO DE AUTENTICAÇÃO — CREDITOIMO
+====================================================================
+Módulo central de autenticação e autorização do PowerCell CRM.
+
+ARQUITETURA:
+- JWT (JSON Web Tokens) para autenticação stateless.
+  Cada token contém: user_id (sub), email, role e timestamp de expiração.
+  O token é assinado com HMAC-SHA256 usando JWT_SECRET.
+- bcrypt (via passlib) para hashing de passwords.
+  O bcrypt é usado deliberadamente (em vez de argon2) por ser o standard
+  da indústria, ter ampla compatibilidade com libs de autenticação externas
+  (ex: seed.py, scripts de migração) e oferecer salt automático com custo
+  de trabalho configurável.
+- Role-based access control (RBAC) implementado como FastAPI Dependencies.
+  Isto permite proteger endpoints com ``Depends(require_roles([...]))``
+  sem lógica de autorização inline.
+
+DECISÕES ARQUITECTURAIS:
+- Passlib com bcrypt em vez de bcrypt directo: evita incompatibilidades
+  de formato entre módulos (seed.py, auth.py) que possam usar versões
+  diferentes da lib bcrypt.
+- ``deprecated="auto"`` no CryptContext: permite migrar para hashers
+  mais recentes (ex: argon2) sem quebrar passwords existentes.
+- Token com expiração curta (JWT_EXPIRATION_HOURS): compromise entre
+  segurança (token curto = menor janela de exploração) e UX
+  (token longo = menos re-logins).
+====================================================================
+"""
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Tuple
 from fastapi import Depends, HTTPException
@@ -62,14 +92,59 @@ def validate_password_strength(password: str) -> Tuple[bool, str]:
 
 
 def hash_password(password: str) -> str:
+    """Gera um hash bcrypt seguro para uma password em texto claro.
+
+    Utiliza passlib (que internamente delega no bcrypt) para garantir
+    compatibilidade de formato com outros módulos do sistema (ex: seed.py).
+    Cada invocação gera um salt aleatório — hashes diferentes para a mesma
+    password, mas ``verify_password()`` consegue comparar corretamente.
+
+    Args:
+        password: Password em texto claro. Deve ser validada por
+            ``validate_password_strength()`` antes de chamar esta função.
+
+    Returns:
+        str: Hash bcrypt com formato ``$2b$12$...`` (pronto para guardar na BD).
+    """
     return pwd_context.hash(password)
 
 
 def verify_password(password: str, hashed: str) -> bool:
+    """Verifica se uma password em texto claro corresponde a um hash bcrypt.
+
+    Função crítica no fluxo de login — compara a password fornecida com o
+    hash armazenado na base de dados. Se o formato do hash for incompatível
+    (ex: versão diferente de bcrypt), passlib tenta automaticamente uma
+    verificação de contingência graças a ``deprecated="auto"``.
+
+    Args:
+        password: Password em texto claro (fornecida pelo utilizador).
+        hashed: Hash bcrypt armazenado na base de dados.
+
+    Returns:
+        bool: True se a password corresponde ao hash, False caso contrário.
+    """
     return pwd_context.verify(password, hashed)
 
 
 def create_token(user_id: str, email: str, role: str) -> str:
+    """Cria um token JWT com os dados essenciais do utilizador autenticado.
+
+    O token é usado em todas as requests subsequentes como mecanismo de
+    autenticação stateless. Contém o user_id como ``sub`` (subject), email
+    e role para autorização rápida sem consulta à BD. A expiração é definida
+    por ``JWT_EXPIRATION_HOURS`` para limitar a janela de exploração em caso
+    de roubo de token.
+
+    Args:
+        user_id: Identificador único do utilizador (campo ``id`` na BD).
+        email: Email do utilizador (usado para identificação e logs).
+        role: Role do utilizador (ex: ``UserRole.ADMIN``, ``UserRole.CONSULTOR``).
+            É incluída no token para evitar lookup à BD em cada request.
+
+    Returns:
+        str: Token JWT codificado (string base64url).
+    """
     payload = {
         "sub": user_id,
         "email": email,
@@ -92,6 +167,33 @@ def create_access_token(data: Dict[str, Any]) -> str:
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Dependency do FastAPI que extrai e valida o utilizador a partir do JWT.
+
+    Esta é a dependency de autenticação principal — é injetada em todos os
+    endpoints protegidos do CRM. O fluxo é:
+
+    1. Extrai o token do header ``Authorization: Bearer <token>``.
+    2. Decodifica e valida o JWT (assinatura + expiração).
+    3. Procura o utilizador na BD pelo ``sub`` (user_id).
+    4. Verifica se a conta está ativa.
+    5. Se o token contém metadados de impersonate, adiciona-os ao utilizador.
+
+    O suporte a impersonate permite que um admin assuma a identidade de outro
+    utilizador para troubleshooting, sem revelar a password real.
+
+    Args:
+        credentials: Credenciais HTTP Bearer extraídas automaticamente pelo
+            FastAPI (``HTTPBearer``).
+
+    Returns:
+        dict: Documento do utilizador da BD (sem ``_id``), com campos
+            adicionais ``is_impersonated``, ``impersonated_by`` e
+            ``impersonated_by_name`` se aplicável.
+
+    Raises:
+        HTTPException: 401 se o token estiver expirado, inválido, o utilizador
+            não existir ou a conta estiver desativada.
+    """
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
@@ -174,7 +276,22 @@ def require_roles(allowed_roles: List[str]):
 
 
 def require_staff():
-    """Require any staff role (not cliente)"""
+    """Dependency do FastAPI que restringe acesso a membros da equipa (staff).
+
+    Um utilizador é considerado "staff" se o seu role não for "cliente".
+    Isto é usado para endpoints internos (ex: dashboard administrativo,
+    gestão de utilizadores) que nunca devem ser acessíveis por clientes.
+
+    Retorna uma dependency function para uso com ``Depends()`` — o FastAPI
+    injeta automaticamente o resultado de ``get_current_user`` como argumento
+    da função interna.
+
+    Returns:
+        Callable: Função async que retorna o utilizador autenticado.
+
+    Raises:
+        HTTPException: 403 se o utilizador autenticado tiver role "cliente".
+    """
     async def staff_checker(user: dict = Depends(get_current_user)):
         if not UserRole.is_staff(user["role"]):
             raise HTTPException(status_code=403, detail="Permissão negada")

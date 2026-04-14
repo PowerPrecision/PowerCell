@@ -1,3 +1,13 @@
+/**
+ * DocumentRecipientsManager — Gestor de destinatários para envio de documentação por email.
+ *
+ * PORQUÊ: No processo de crédito habitação, múltiplos destinatários precisam receber documentação
+ * (banco, solicitor, mediador, cliente). Este componente centraliza a gestão de destinatários
+ * com validação de emails e templates personalizados.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import 'react-quill-new/dist/quill.snow.css';
 /**
  * DocumentRecipientsManager — Gestão visual de destinatários para envio de documentação bancária.
@@ -891,3 +901,4 @@ const DocumentRecipientsManager = ({ token, user }) => {
 };
 
 export default DocumentRecipientsManager;
+

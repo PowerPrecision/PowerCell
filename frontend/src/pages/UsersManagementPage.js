@@ -1,3 +1,11 @@
+/**
+ * UsersManagementPage — Página de gestão de utilizadores (apenas admin).
+ *
+ * PORQUÊ: O administrador gere contas, define roles e permissões granulares por páginas e ações.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { TableSkeleton } from "../components/ui/skeletons";
@@ -701,3 +709,4 @@ const UsersManagementPage = () => {
 };
 
 export default UsersManagementPage;
+

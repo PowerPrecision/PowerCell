@@ -1,3 +1,12 @@
+/**
+ * DiagnosticsPage — Página de diagnósticos e verificação de saúde do sistema.
+ *
+ * PORQUÊ: Ferramenta administrativa para verificar o estado dos serviços externos (MongoDB, Redis, S3,
+ * OpenAI), conexões WebSocket, e configurações do sistema.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -484,3 +493,4 @@ const DiagnosticsPage = () => {
 };
 
 export default DiagnosticsPage;
+

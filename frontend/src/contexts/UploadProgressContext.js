@@ -1,8 +1,29 @@
 /**
- * UploadProgressContext - Gestão global de progresso de uploads
- * 
- * Permite que uploads continuem em background enquanto o utilizador
- * navega para outras páginas, mostrando sempre o progresso.
+ * UploadProgressContext — Contexto global de progresso de uploads com navegação persistente.
+ *
+ * PORQUÊ: No PowerCell, os uploads de documentos podem demorar (ficheiros grandes, upload S3,
+ * processamento IA). Sem este contexto, o utilizador perderia o feedback de progresso ao
+ * navegar para outra página durante um upload. Este contexto mantém o estado globalmente,
+ * permitindo que qualquer componente mostre o progresso independente da rota activa.
+ *
+ * DECISÕES ARQUITECTURAIS:
+ * - Estado por jobId: cada upload é identificado por um ID único, permitindo uploads
+ *   paralelos com progresso independente.
+ * - Auto-remoção em sucesso: uploads concluídos são removidos automaticamente após 5s
+ *   para não poluir a interface. Uploads com erro persistem até descarte manual.
+ * - startUpdate/updateProgress/finishUpload API: interface explícita em vez de estado
+ *   directo, garantindo transições de estado válidas (running → success/error).
+ * - ProgressBar global (GlobalUploadProgress): consome este contexto para mostrar uma
+ *   barra fixa no topo da página durante uploads activos.
+ *
+ * @context {UploadProgressContext} — Fornecido via UploadProgressProvider em App.js
+ * @hook {useUploadProgress} — Hook para consumir o contexto em componentes React
+ *
+ * @returns {Object} Estado e funções do progresso:
+ *   - activeUploads {Object} — Mapa de uploads activos por jobId
+ *   - uploadList {Array} — Lista formatada com percentagem de progresso
+ *   - hasActiveUploads {boolean} — true se há uploads em curso
+ *   - startUpload, updateProgress, finishUpload, dismissUpload {Function}
  */
 import { createContext, useContext, useState, useCallback } from "react";
 

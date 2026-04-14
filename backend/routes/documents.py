@@ -1065,6 +1065,17 @@ async def proxy_s3_file(
     
     # Função auxiliar para obter ficheiro do S3
     def get_s3_object(key):
+        """Obtém um objeto do S3 pela chave (bucket e key configurados no serviço).
+
+        Args:
+            key: Caminho completo do objeto no S3 (ex: "clients/123/Financeiros/doc.pdf").
+
+        Returns:
+            dict: Resposta do botocore get_object com Body, ContentType, etc.
+
+        Raises:
+            botocore.exceptions.ClientError: Se o objeto não existir ou acesso negado.
+        """
         return s3_service.s3_client.get_object(
             Bucket=s3_service.bucket_name,
             Key=key
@@ -1593,6 +1604,22 @@ async def get_expiry_calendar_events(user: dict = Depends(get_current_user)):
 
 @router.delete("/expiry/{doc_id}", responses={404: HTTP_404_RESPONSE})
 async def delete_document_expiry(doc_id: str, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INDEXACAO]))):
+    """Remove uma regra de validade de documento.
+
+    Porquê um endpoint dedicado: permite ao admin ou consultor remover
+    regras de validade incorretamente configuradas (ex: data de validade
+    errada ou documento que já não é necessário).
+
+    Args:
+        doc_id: ID da regra de validade a eliminar.
+        user: Utilizador autenticado com role permitido (injetado).
+
+    Returns:
+        dict: ``{"message": "Eliminado"}``.
+
+    Raises:
+        HTTPException(404): Se registo de validade não encontrado.
+    """
     delete_result = await db.document_expiries.delete_one({"id": doc_id})
     if delete_result.deleted_count == 0:
         raise HTTPException(status_code=404, detail=ERROR_RECORD_NOT_FOUND)
@@ -1608,6 +1635,20 @@ DOCUMENT_TYPES = [
 
 @router.get("/types", responses={500: HTTP_500_RESPONSE})
 async def get_document_types(user: dict = Depends(get_current_user)):
+    """Retorna a lista de tipos de documentos suportados com prazos de validade.
+
+    Os tipos incluem informação sobre o tempo de validade padrão
+    (ex: CC = 5 anos, IRS = 1 ano, Recibo = 3 meses). Esta informação
+    é usada para calcular automaticamente a data de alerta de validade
+    quando um documento é categorizado.
+
+    Args:
+        user: Utilizador autenticado (injetado).
+
+    Returns:
+        list[dict]: Lista de tipos com type, name, validity_years e
+            validity_months.
+    """
     return DOCUMENT_TYPES
 
 
@@ -3398,6 +3439,14 @@ async def bulk_download_documents(
     
     # Criar generator para streaming
     def iter_zip():
+        """Generator que produz o conteúdo do ficheiro ZIP em memória.
+
+        Porquê um generator: permite ao StreamingResponse enviar o ficheiro
+        em chunks sem carregar todo o ZIP na memória do request.
+
+        Yields:
+            bytes: Conteúdo completo do ficheiro ZIP.
+        """
         yield zip_buffer.getvalue()
     
     from urllib.parse import quote

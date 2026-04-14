@@ -1,3 +1,12 @@
+/**
+ * ClientsPage — Página de gestão de clientes do CRM PowerCell.
+ *
+ * PORQUÊ: Centraliza a listagem, pesquisa e gestão de todos os clientes. Permite ao admin e
+ * consultores visualizar dados de contacto, NIF, e número de processos associados.
+ *
+ * @context {AuthContext} — Consome user, token para autenticação e permissões
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -961,3 +970,4 @@ export default function ClientsPage() {
     </DashboardLayout>
   );
 }
+

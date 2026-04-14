@@ -46,6 +46,20 @@ logger = logging.getLogger(__name__)
 # CONFIGURAÇÃO
 # ====================================================================
 class EmailProviderType(str, Enum):
+    """Enumeração dos tipos de provider de email suportados.
+
+    Usado para determinar qual provider inicializar com base na variável
+    de ambiente ``EMAIL_PROVIDER``. A ordem de prioridade é:
+
+    1. **SENDGRID**: Provider principal — melhor deliverability e analytics.
+    2. **RESEND**: Alternativa moderna com API mais simples e pricing competitivo.
+    3. **SMTP**: Fallback legado — bloqueante, sem analytics, sem retry automático.
+
+    Attributes:
+        SENDGRID: Provider SendGrid (API REST v3).
+        RESEND: Provider Resend (API REST moderna).
+        SMTP: Fallback SMTP (bloqueante, via thread pool).
+    """
     SENDGRID = "sendgrid"
     RESEND = "resend"
     SMTP = "smtp"
@@ -139,11 +153,16 @@ class EmailProvider(ABC):
 # SENDGRID PROVIDER
 # ====================================================================
 class SendGridProvider(EmailProvider):
+    """Provider SendGrid usando API v3.
+
+    SendGrid é o provider principal do CRM. Oferece melhor deliverability
+    graças a IPs com boa reputação, analytics de abertura/clique, e rate
+    limiting automático. Documentação: https://docs.sendgrid.com/api-reference/mail-send
+
+    O construtor recebe apenas a API key; todas as configurações (remetente,
+    timeout) são globais via variáveis de ambiente.
     """
-    Provider SendGrid usando API v3.
-    Documentação: https://docs.sendgrid.com/api-reference/mail-send
-    """
-    
+
     API_URL = "https://api.sendgrid.com/v3/mail/send"
     
     def __init__(self, api_key: str):
@@ -151,9 +170,15 @@ class SendGridProvider(EmailProvider):
     
     @property
     def name(self) -> str:
+        """Retorna o identificador do provider ('sendgrid')."""
         return "sendgrid"
     
     def is_configured(self) -> bool:
+        """Verifica se a API key do SendGrid está definida.
+
+        Returns:
+            bool: True se ``self.api_key`` não é uma string vazia.
+        """
         return bool(self.api_key)
     
     async def send(self, message: EmailMessage) -> EmailResult:
@@ -241,11 +266,15 @@ class SendGridProvider(EmailProvider):
 # RESEND PROVIDER (Alternativa moderna)
 # ====================================================================
 class ResendProvider(EmailProvider):
+    """Provider Resend — alternativa moderna ao SendGrid.
+
+    Resend é uma alternativa com API REST mais simples e pricing competitivo.
+    Suporta os mesmos campos essenciais (to, from, subject, html, cc, bcc)
+    e tem suporte nativo a tags. Documentação: https://resend.com/docs/api-reference
+
+    Utilizado quando ``EMAIL_PROVIDER=resend``.
     """
-    Provider Resend - alternativa moderna ao SendGrid.
-    Documentação: https://resend.com/docs/api-reference
-    """
-    
+
     API_URL = "https://api.resend.com/emails"
     
     def __init__(self, api_key: str):
@@ -253,9 +282,15 @@ class ResendProvider(EmailProvider):
     
     @property
     def name(self) -> str:
+        """Retorna o identificador do provider ('resend')."""
         return "resend"
     
     def is_configured(self) -> bool:
+        """Verifica se a API key do Resend está definida.
+
+        Returns:
+            bool: True se ``self.api_key`` não é uma string vazia.
+        """
         return bool(self.api_key)
     
     async def send(self, message: EmailMessage) -> EmailResult:
@@ -332,11 +367,16 @@ class ResendProvider(EmailProvider):
 # SMTP PROVIDER (FALLBACK LEGADO)
 # ====================================================================
 class SMTPProvider(EmailProvider):
+    """Provider SMTP legado — usado como fallback quando APIs não estão configuradas.
+
+    AVISO: O envio SMTP é bloqueante (smtplib não suporta async). Esta classe
+    usa ``run_in_executor`` para não bloquear o event loop do FastAPI. No entanto,
+    não é recomendado como provider principal porque não oferece retry automático,
+    analytics, nem tracking de abertura/clique.
+
+    Utilizado apenas quando nem SendGrid nem Resend estão configurados.
     """
-    Provider SMTP legado - usado como fallback.
-    NOTA: Este provider é bloqueante e roda num executor.
-    """
-    
+
     def __init__(self, server: str, port: int, email: str, password: str):
         self.server = server
         self.port = port
@@ -345,9 +385,15 @@ class SMTPProvider(EmailProvider):
     
     @property
     def name(self) -> str:
+        """Retorna o identificador do provider ('smtp')."""
         return "smtp"
     
     def is_configured(self) -> bool:
+        """Verifica se todas as credenciais SMTP estão definidas.
+
+        Returns:
+            bool: True se servidor, porto, email e password estão preenchidos.
+        """
         return all([self.server, self.port, self.email, self.password])
     
     def _send_sync(self, message: EmailMessage) -> EmailResult:

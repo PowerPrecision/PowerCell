@@ -17,6 +17,21 @@ router = APIRouter(prefix="/admin/automation", tags=["Automation"])
 
 
 class RuleCreate(BaseModel):
+    """Payload para criar uma nova regra de automação.
+
+    Uma regra de automação define um trigger (evento que a ativa)
+    e uma ação (o que fazer quando ativada). Ex: "Quando o status
+    muda para X, enviar notificação ao consultor".
+
+    Attributes:
+        name: Nome descritivo da regra (1-200 carateres).
+        description: Descrição detalhada da regra.
+        trigger: Tipo de trigger (ex: "status_change", "deadline_approaching").
+        trigger_config: Configuração específica do trigger.
+        action: Tipo de ação (ex: "send_notification", "assign_user").
+        action_config: Configuração específica da ação.
+        is_active: Se a regra está ativa.
+    """
     name: str = Field(..., min_length=1, max_length=200)
     description: str = ""
     trigger: str = Field(..., description="Tipo de trigger")
@@ -27,6 +42,19 @@ class RuleCreate(BaseModel):
 
 
 class RuleUpdate(BaseModel):
+    """Payload para atualizar uma regra de automação existente.
+
+    Apenas os campos fornecidos são atualizados (atualização parcial).
+
+    Attributes:
+        name: Novo nome da regra.
+        description: Nova descrição.
+        trigger: Novo tipo de trigger.
+        trigger_config: Nova configuração do trigger.
+        action: Novo tipo de ação.
+        action_config: Nova configuração da ação.
+        is_active: Novo estado ativo/inativo.
+    """
     name: Optional[str] = None
     description: Optional[str] = None
     trigger: Optional[str] = None

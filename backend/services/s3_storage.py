@@ -70,6 +70,12 @@ class S3Service:
             logger.warning("Credenciais S3 não encontradas. O serviço não funcionará.")
 
     def is_configured(self) -> bool:
+        """Verifica se o serviço S3 está pronto para operações.
+
+        Returns:
+            bool: True se o cliente S3 foi inicializado com sucesso e
+                ``bucket_name`` está definido.
+        """
         return self.s3_client is not None and bool(self.bucket_name)
 
     def _get_client_base_path(
