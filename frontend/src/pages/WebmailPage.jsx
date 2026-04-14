@@ -618,16 +618,22 @@ const WebmailPage = () => {
       setLinkSearchLoading(true);
       try {
         const response = await fetch(
-          `${API_URL}/api/clients/search?q=${encodeURIComponent(query.trim())}`,
+          `${API_URL}/api/processes?search=${encodeURIComponent(query.trim())}&size=10`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }
         );
         if (!response.ok) throw new Error("Erro na pesquisa");
         const data = await response.json();
-        setLinkSearchResults(data.clients || []);
+        const items = data.items || data || [];
+        setLinkSearchResults(items.map(p => ({
+          id: p.id,
+          name: p.client_name,
+          email: p.client_email,
+          number: p.process_number,
+        })));
       } catch {
-        toast.error("Erro ao pesquisar clientes");
+        toast.error("Erro ao pesquisar processos");
       } finally {
         setLinkSearchLoading(false);
       }
@@ -746,6 +752,25 @@ const WebmailPage = () => {
       toast.error("Erro ao eliminar emails");
     }
   }, [selectedEmails, token, selectedEmail, handleRefresh]);
+
+  const handleDeleteSingle = useCallback(async () => {
+    if (!selectedEmail) return;
+    if (!confirm("Tem a certeza que deseja eliminar este email?")) return;
+    try {
+      const response = await fetch(`${API_URL}/api/emails/${selectedEmail.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("Erro ao eliminar");
+      toast.success("Email eliminado");
+      setSelectedEmail(null);
+      setEmailDetail(null);
+      setShowMobileReading(false);
+      handleRefresh();
+    } catch {
+      toast.error("Erro ao eliminar email");
+    }
+  }, [selectedEmail, token, handleRefresh]);
 
   // ============================================================
   // FILE UPLOAD (Composer)
@@ -1117,12 +1142,12 @@ const WebmailPage = () => {
                   </div>
                   <div className="space-y-0.5">
                     {labels.map((label) => {
-                      const isLabelActive = selectedLabel === label.id;
+                      const isLabelActive = selectedLabel === label.name;
                       return (
                         <button
                           key={label.id}
                           onClick={() => {
-                            setSelectedLabel(isLabelActive ? null : label.id);
+                            setSelectedLabel(isLabelActive ? null : label.name);
                             setCurrentPage(1);
                             setActiveFolder("inbox");
                           }}
@@ -1624,23 +1649,46 @@ const WebmailPage = () => {
                         Ver Processo
                       </Button>
                     )}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={handleDeleteSingle}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Eliminar email</TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
 
                 {/* Body */}
                 <ScrollArea className="flex-1">
                   <div className="p-5">
-                    <div className="prose prose-sm max-w-none dark:prose-invert email-content">
-                      {sanitizedBodyHtml ? (
-                        <div
-                          dangerouslySetInnerHTML={{ __html: sanitizedBodyHtml }}
-                        />
-                      ) : (
-                        <pre className="whitespace-pre-wrap font-sans text-sm">
-                          {emailDetail.body || ""}
-                        </pre>
-                      )}
-                    </div>
+                    {sanitizedBodyHtml ? (
+                      <iframe
+                        srcDoc={sanitizedBodyHtml}
+                        className="w-full border-0 rounded-md"
+                        style={{ minHeight: "200px", maxHeight: "600px" }}
+                        title="Email content"
+                        sandbox="allow-same-origin"
+                        onLoad={(e) => {
+                          const doc = e.target.contentDocument;
+                          if (doc) {
+                            const h = doc.body?.scrollHeight || 200;
+                            e.target.style.height = Math.min(h + 20, 600) + "px";
+                          }
+                        }}
+                      />
+                    ) : (
+                      <pre className="whitespace-pre-wrap font-sans text-sm">
+                        {emailDetail.body || ""}
+                      </pre>
+                    )}
+                  </div>
 
                     {/* Attachments - Visual Cards */}
                     {emailDetail.attachments?.length > 0 && (
@@ -1977,7 +2025,7 @@ const WebmailPage = () => {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Pesquisar por nome do cliente..."
+                  placeholder="Pesquisar por nome do cliente ou processo..."
                   value={linkSearchQuery}
                   onChange={(e) => handleSearchClients(e.target.value)}
                   className="pl-9"
@@ -2004,7 +2052,7 @@ const WebmailPage = () => {
                     >
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">
-                          {client.nome}
+                          {client.name}{client.number ? ` (${client.number})` : ""}
                         </p>
                         {client.email && (
                           <p className="text-xs text-muted-foreground truncate">
@@ -2026,7 +2074,7 @@ const WebmailPage = () => {
                 linkSearchQuery.trim().length >= 2 &&
                 linkSearchResults.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    Nenhum cliente encontrado
+                    Nenhum processo encontrado
                   </p>
                 )}
 

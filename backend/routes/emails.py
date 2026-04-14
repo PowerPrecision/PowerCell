@@ -2129,6 +2129,10 @@ async def webmail_list(
             raise HTTPException(status_code=400, detail="ID da pasta não especificado")
         query["folder_id"] = custom_folder
     
+    # Filtro por label
+    if label:
+        query["labels"] = label
+    
     # Pesquisa textual
     if search:
         search = sanitize_string(search, max_length=200)
@@ -2138,10 +2142,18 @@ async def webmail_list(
             {"from_email": {"$regex": search, "$options": "i"}},
             {"to_emails": {"$regex": search, "$options": "i"}},
         ]
+        # Build $and: base conditions + $or conditions + search $or + label
+        and_conditions = []
+        # Add all base (non-$or) conditions
+        base_keys = {k: v for k, v in query.items() if k != "$or"}
+        if base_keys:
+            and_conditions.append(base_keys)
+        # Add account $or conditions
         if or_conditions:
-            query["$and"] = [{"$or": or_conditions}, {"$or": search_or}]
-        else:
-            query["$or"] = search_or
+            and_conditions.append({"$or": or_conditions})
+        # Add search $or
+        and_conditions.append({"$or": search_or})
+        query = {"$and": and_conditions}
     elif or_conditions:
         query["$or"] = or_conditions
     
