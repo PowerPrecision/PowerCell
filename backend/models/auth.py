@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List
 from enum import Enum
 
 
@@ -158,6 +158,7 @@ class UserResponse(BaseModel):
     created_at: Optional[str] = None
     onedrive_folder: Optional[str] = None
     permissions: Optional[dict] = None  # Permissões específicas do utilizador
+    additional_roles: Optional[List[str]] = []
 
 
 class TokenResponse(BaseModel):
@@ -174,6 +175,7 @@ class UserCreate(BaseModel):
     role: str
     company: Optional[str] = None  # Empresa do utilizador
     onedrive_folder: Optional[str] = None
+    additional_roles: Optional[List[str]] = []
 
 
 class UserUpdate(BaseModel):
@@ -186,3 +188,4 @@ class UserUpdate(BaseModel):
     onedrive_folder: Optional[str] = None
     password: Optional[str] = None  # Nova password (apenas admin pode alterar)
     permissions: Optional[dict] = None  # Permissões específicas do utilizador
+    additional_roles: Optional[List[str]] = None

@@ -134,7 +134,8 @@ async def get_me(user: dict = Depends(get_current_user)):
         "created_at": user["created_at"],
         "onedrive_folder": user.get("onedrive_folder"),
         "is_active": user.get("is_active", True),
-        "permissions": synced_perms
+        "permissions": synced_perms,
+        "additional_roles": user.get("additional_roles", [])
     }
     
     # Incluir informação de impersonate se presente
@@ -387,7 +388,8 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
                     "phone": user.get("phone"),
                     "role": user["role"],
                     "created_at": user["created_at"],
-                    "onedrive_folder": user.get("onedrive_folder")
+                    "onedrive_folder": user.get("onedrive_folder"),
+                    "additional_roles": user.get("additional_roles", [])
                 }
             }
         )

@@ -114,9 +114,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 
 def require_roles(allowed_roles: List[str]):
-    """Check if user has one of the allowed roles"""
+    """Check if user has one of the allowed roles (primary or additional)"""
     async def role_checker(user: dict = Depends(get_current_user)):
-        user_role = user["role"]
+        user_role = user.get("role", "")
+        additional_roles = user.get("additional_roles", [])
+        
+        # Combine primary role with additional roles for checking
+        all_user_roles = [user_role] + (additional_roles if additional_roles else [])
         
         # Admin and CEO have access to most things
         if user_role == UserRole.ADMIN:
@@ -137,8 +141,8 @@ def require_roles(allowed_roles: List[str]):
             if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.ADMINISTRATIVO]):
                 return user
         
-        # Standard role check
-        if user_role not in allowed_roles:
+        # Standard role check - check against ALL user roles (primary + additional)
+        if not any(r in allowed_roles for r in all_user_roles):
             raise HTTPException(status_code=403, detail="Permissão negada")
         return user
     return role_checker

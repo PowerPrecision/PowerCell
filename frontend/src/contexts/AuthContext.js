@@ -16,7 +16,9 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [isImpersonating, setIsImpersonating] = useState(false);
   const [originalAdminName, setOriginalAdminName] = useState(null);
+  const [activeRole, setActiveRole] = useState(null);
   const refreshTimeoutRef = useRef(null);
+  const activeRoleInitialized = useRef(false);
 
   // Função para decodificar JWT e obter expiração
   const getTokenExpiry = useCallback((token) => {
@@ -107,6 +109,19 @@ export const AuthProvider = ({ children }) => {
       const response = await api.get("/auth/me");
       const userData = response.data;
       setUser(userData);
+
+      // Initialize activeRole only once (not on every fetchUser call)
+      if (!activeRoleInitialized.current) {
+        const savedRole = sessionStorage.getItem("activeRole");
+        const allRoles = [userData.role, ...(userData.additional_roles || [])];
+        if (savedRole && allRoles.includes(savedRole)) {
+          setActiveRole(savedRole);
+        } else {
+          setActiveRole(userData.role);
+          sessionStorage.setItem("activeRole", userData.role);
+        }
+        activeRoleInitialized.current = true;
+      }
       
       // Verificar se está em modo impersonate
       if (userData.is_impersonated) {
@@ -144,6 +159,12 @@ export const AuthProvider = ({ children }) => {
     setUser(userData);
     setIsImpersonating(false);
     setOriginalAdminName(null);
+
+    // Reset activeRole to primary role on login
+    const primaryRole = userData.role;
+    setActiveRole(primaryRole);
+    sessionStorage.setItem("activeRole", primaryRole);
+    activeRoleInitialized.current = true;
     
     // Agendar refresh
     scheduleTokenRefresh(access_token);
@@ -191,6 +212,11 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     setIsImpersonating(false);
     setOriginalAdminName(null);
+
+    // Clear active role on logout
+    sessionStorage.removeItem("activeRole");
+    setActiveRole(null);
+    activeRoleInitialized.current = false;
   };
 
   // Impersonate - ver como outro utilizador
@@ -246,6 +272,14 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Context Switching - Múltiplos Perfis
+  const switchActiveRole = useCallback((newRole) => {
+    if (!newRole) return;
+    setActiveRole(newRole);
+    // Persist to sessionStorage for reload survival
+    sessionStorage.setItem("activeRole", newRole);
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{ 
@@ -258,7 +292,10 @@ export const AuthProvider = ({ children }) => {
         isImpersonating,
         originalAdminName,
         impersonate,
-        stopImpersonating
+        stopImpersonating,
+        activeRole,
+        switchActiveRole,
+        effectiveRole: activeRole || user?.role,  // The role currently being used for UI rendering
       }}
     >
       {children}
