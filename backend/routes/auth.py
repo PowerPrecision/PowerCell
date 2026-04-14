@@ -630,8 +630,7 @@ def _detect_hash_format(hash_value: str) -> str:
 
 
 @router.get("/diagnose")
-@limiter.limit("5/minute")
-async def diagnose_login(request: Request, email: str):
+async def diagnose_login(email: str):
     """
     Diagnóstico público para verificar porque o login falha.
     Diz se o utilizador existe, se está activo, e o formato do hash.
@@ -676,8 +675,7 @@ async def diagnose_login(request: Request, email: str):
 
 
 @router.post("/fix-passwords")
-@limiter.limit("1/minute")
-async def fix_broken_passwords(request: Request, data: dict):
+async def fix_broken_passwords(data: dict):
     """
     Corrige passwords com hash SHA-256 para bcrypt.
     Como SHA-256 não é reversível, reseta a password para um valor default.
