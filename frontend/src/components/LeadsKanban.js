@@ -582,10 +582,11 @@ const LeadsKanban = () => {
     setExtracting(true);
     try {
       const response = await fetch(
-        `${API_URL}/api/leads/extract-url?url=${encodeURIComponent(formData.url)}`,
+        `${API_URL}/api/leads/extract-url`,
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ url: formData.url }),
         }
       );
 

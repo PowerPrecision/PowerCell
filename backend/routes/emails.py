@@ -2206,11 +2206,16 @@ async def webmail_sync(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Sincronizar emails do IMAP para o Webmail.
+    Sincronizar emails do IMAP para o Webmail (background).
     
     Faz pull de TODOS os emails recentes das pastas INBOX e Enviados,
     sem filtro de processo. Deduplica por Message-ID + conta.
+    
+    Executa em background — o progresso pode ser acompanhado na página
+    de Tarefas em Background.
     """
+    from services.background_jobs import BackgroundJobService, JobType
+    
     # Verificar contas configuradas primeiro
     accounts = await get_email_accounts_async()
     if not accounts:
@@ -2232,14 +2237,44 @@ async def webmail_sync(
                 "available_accounts": available
             }
     
-    result = await sync_webmail_emails(
-        account_name=account,
-        days=days,
-        max_emails=150
+    # Criar job em background
+    job_service = BackgroundJobService()
+    job_id = await job_service.create_job(
+        job_type=JobType.EMAIL_SYNC,
+        user_id=current_user["id"],
+        user_email=current_user.get("email", ""),
+        metadata={"account": account, "days": days}
     )
     
-    # Sempre retornar resultado, mesmo com erro (para dar feedback ao utilizador)
-    return result
+    # Executar sincronização em background
+    async def run_sync():
+        try:
+            await job_service.update_progress(job_id, 0, 1, "A sincronizar emails...")
+            result = await sync_webmail_emails(
+                account_name=account,
+                days=days,
+                max_emails=150
+            )
+            # Extract summary
+            synced = result.get("emails_synced", result.get("synced", 0))
+            total = result.get("emails_found", result.get("total", 0))
+            msg = f"Sincronização concluída: {synced} emails"
+            if result.get("success") == False:
+                await job_service.fail_job(job_id, result.get("error", "Erro na sincronização"))
+            else:
+                await job_service.complete_job(job_id, {"synced": synced, "total": total, "details": result})
+        except Exception as e:
+            logger.error(f"Erro na sincronização webmail: {e}", exc_info=True)
+            await job_service.fail_job(job_id, str(e))
+    
+    asyncio.create_task(run_sync())
+    
+    return {
+        "success": True,
+        "message": "Sincronização iniciada em background",
+        "job_id": job_id,
+        "status": "started"
+    }
 
 
 @router.get("/process/{process_id}", response_model=List[EmailResponse])
