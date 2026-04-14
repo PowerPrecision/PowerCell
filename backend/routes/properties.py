@@ -690,6 +690,18 @@ async def _process_excel_import(job_id: str, df, filename: str, user: dict):
             try:
                 # Helper function para obter valor da linha de forma segura
                 def get_value(keys, default=''):
+                    """Obtém o valor de uma coluna do Excel, tentando múltiplas chaves.
+
+                    Útil quando o Excel pode ter variações no nome das colunas
+                    (ex: "titulo" ou "título"). Aceita string única ou lista.
+
+                    Args:
+                        keys: Nome da coluna (str) ou lista de nomes a tentar.
+                        default: Valor a retornar se nenhum for encontrado.
+
+                    Returns:
+                        str: Primeiro valor não-vazio encontrado, ou default.
+                    """
                     if isinstance(keys, str):
                         keys = [keys]
                     for key in keys:
@@ -705,6 +717,18 @@ async def _process_excel_import(job_id: str, df, filename: str, user: dict):
                 
                 # Helper para converter preço (remove € e espaços, trata formato europeu)
                 def parse_price(price_str):
+                    """Converte uma string de preço para float.
+
+                    Suporta formatos europeus (700.000,00€, 700 000€) e americanos
+                    (700000.00). Remove o símbolo €, trata separadores de milhares
+                    e decimais automaticamente.
+
+                    Args:
+                        price_str: String de preço ou valor pandas.
+
+                    Returns:
+                        float: Valor numérico do preço, ou None se inválido.
+                    """
                     if price_str is None:
                         return None
                     # Se é uma Series, pegar o primeiro valor
@@ -738,6 +762,16 @@ async def _process_excel_import(job_id: str, df, filename: str, user: dict):
                 
                 # Helper para extrair quartos de tipologia (T0, T1, T2, etc.)
                 def parse_tipologia(tipologia):
+                    """Extrai o número de quartos de uma tipologia T{N}.
+
+                    Exemplos: "T2" → 2, "t3" → 3, "Studio" → None.
+
+                    Args:
+                        tipologia: String de tipologia (ex: "T2", "T0+1").
+
+                    Returns:
+                        int: Número de quartos, ou None se não for parseável.
+                    """
                     if pd.isna(tipologia):
                         return None
                     tip = str(tipologia).upper().strip()
@@ -811,6 +845,16 @@ async def _process_excel_import(job_id: str, df, filename: str, user: dict):
                 
                 # Extrair áreas com helper
                 def parse_float(val):
+                    """Converte um valor para float, tratando formato europeu.
+
+                    Substitui vírgula decimal por ponto antes de converter.
+
+                    Args:
+                        val: Valor numérico, string ou valor pandas.
+
+                    Returns:
+                        float: Valor convertido, ou None se inválido.
+                    """
                     if pd.isna(val):
                         return None
                     try:
@@ -819,6 +863,17 @@ async def _process_excel_import(job_id: str, df, filename: str, user: dict):
                         return None
                 
                 def parse_int(val):
+                    """Converte um valor para int, tratando formato europeu.
+
+                    Primeiro converte para float (para handle decimais residuais),
+                    depois para int.
+
+                    Args:
+                        val: Valor numérico, string ou valor pandas.
+
+                    Returns:
+                        int: Valor convertido, ou None se inválido.
+                    """
                     if pd.isna(val):
                         return None
                     try:

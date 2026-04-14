@@ -628,6 +628,21 @@ async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN, UserRol
     ]
     
     def mask_sensitive(obj, parent_key=""):
+        """Mascara campos sensíveis de um dicionário de configuração.
+
+        Substitui valores de campos sensíveis (API keys, tokens, passwords)
+        por "••••••••" antes de devolver ao frontend, para evitar
+        exposição de credenciais em respostas HTTP.
+
+        A recursão permite mascarar campos em dicionários aninhados.
+
+        Args:
+            obj: Dicionário a mascarar (modificado in-place).
+            parent_key: Chave do pai (para logging, não usado na lógica).
+
+        Returns:
+            dict: Mesmo dicionário com valores sensíveis mascarados.
+        """
         if isinstance(obj, dict):
             for key, value in obj.items():
                 if key in sensitive_fields and value:

@@ -16,6 +16,25 @@ router = APIRouter(prefix="/admin/form-config", tags=["form-config"])
 
 
 class FormFieldConfig(BaseModel):
+    """Configuração de um campo individual do formulário público.
+
+    Cada instância define como um campo deve ser renderizado no
+    formulário de registo público: visibilidade, obrigatoriedade,
+    tipo de input, ordem, e opções (para selects/checkboxes).
+
+    Attributes:
+        field_key: Identificador único do campo (ex: "nome", "nif").
+        label: Etiqueta visível para o utilizador.
+        step: Número do passo do formulário (1-6).
+        is_visible: Se o campo é mostrado no formulário.
+        is_required: Se o campo é obrigatório para submissão.
+        field_type: Tipo de input ("text", "select", "checkbox", etc.).
+        options: Lista de opções para selects/checkboxes/radios.
+        order: Ordem de apresentação dentro do passo.
+        is_custom: Se o campo foi criado pelo admin (vs padrão).
+        placeholder: Texto placeholder para o campo.
+        hint: Texto de ajuda abaixo do campo.
+    """
     field_key: str
     label: str
     step: int
@@ -30,10 +49,32 @@ class FormFieldConfig(BaseModel):
 
 
 class FormConfigUpdate(BaseModel):
+    """Payload para atualizar a configuração completa do formulário.
+
+    Envia a lista completa de campos com as suas configurações.
+    Os campos não incluídos são removidos da configuração.
+
+    Attributes:
+        fields: Lista de dicionários com a configuração de cada campo.
+    """
     fields: list[dict]
 
 
 class CustomFieldCreate(BaseModel):
+    """Payload para criar um campo personalizado no formulário.
+
+    Campos personalizados permitem ao admin recolher informações
+    adicionais não previstas no formulário padrão.
+
+    Attributes:
+        label: Etiqueta visível do campo.
+        step: Número do passo onde o campo aparece (1-6).
+        field_type: Tipo de input ("text", "select", "checkbox", "radio", "date", "number").
+        is_required: Se o campo é obrigatório.
+        options: Lista de opções para selects/checkboxes/radios.
+        placeholder: Texto placeholder.
+        hint: Texto de ajuda.
+    """
     label: str
     step: int  # 1-6
     field_type: str  # text, select, checkbox, radio, date, number
@@ -44,6 +85,14 @@ class CustomFieldCreate(BaseModel):
 
 
 class TemplateSave(BaseModel):
+    """Payload para guardar uma configuração de formulário como template.
+
+    Permite ao admin guardar e reutilizar configurações do formulário.
+
+    Attributes:
+        name: Nome do template.
+        description: Descrição opcional do template.
+    """
     name: str
     description: Optional[str] = None
 

@@ -349,18 +349,57 @@ async def process_document_upload(
 # ====================================================================
 
 class DocumentProcessor:
-    """Classe wrapper para as funções de processamento."""
-    
+    """Classe wrapper para as funções de processamento de documentos.
+
+    Fornece uma interface orientada a objetos sobre as funções modulares,
+    permitindo uso consistente e futura injeção de dependências. A instância
+    global ``document_processor`` é usada em toda a aplicação.
+    """
+
     async def convert_to_pdf(self, image_data: bytes, filename: str) -> Tuple[bytes, str]:
+        """Converte uma imagem para PDF (delegação para ``convert_image_to_pdf``).
+
+        Args:
+            image_data: Bytes da imagem original (JPEG, PNG, TIFF).
+            filename: Nome do ficheiro original (para determinar extensão).
+
+        Returns:
+            Tuple[bytes, str]: (pdf_bytes, novo_nome_ficheiro.pdf).
+        """
         return await convert_image_to_pdf(image_data, filename)
     
     def check_validity(self, doc_type: str, data_emissao: Optional[datetime] = None) -> Dict[str, Any]:
+        """Verifica validade de um documento (delegação para ``check_document_validity``).
+
+        Args:
+            doc_type: Tipo de documento (ex: 'irs', 'recibo_vencimento', 'cc').
+            data_emissao: Data de emissão do documento.
+
+        Returns:
+            dict: Resultado com ``is_valid``, ``days_remaining``, ``warning``, ``error``.
+        """
         return check_document_validity(doc_type, data_emissao)
     
     async def process_upload(self, *args, **kwargs) -> Dict[str, Any]:
+        """Processa upload de documento (delegação para ``process_document_upload``).
+
+        Combina conversão para PDF e validação de data num único passo.
+
+        Returns:
+            dict: Resultado com ``processed_data``, ``validity``, ``warnings``.
+        """
         return await process_document_upload(*args, **kwargs)
     
     def validate_process_documents(self, documents: List[Dict]) -> Dict[str, Any]:
+        """Valida todos os documentos de um processo (delegação para ``validate_document_for_process``).
+
+        Args:
+            documents: Lista de documentos com tipo e data de emissão.
+
+        Returns:
+            dict: Resultado com ``all_valid``, ``warnings``, ``errors``,
+                ``expired_documents``, ``expiring_soon``.
+        """
         return validate_document_for_process(documents)
 
 

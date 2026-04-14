@@ -142,6 +142,22 @@ router = APIRouter(prefix="/ai/bulk", tags=["AI Bulk Analysis"])
 # ====================================================================
 
 class SingleAnalysisResult(BaseModel):
+    """Resultado da análise de um único documento pela IA.
+
+    Usado como response model do endpoint /analyze-single. Contém
+    informação sobre o sucesso da análise, campos extraídos, e
+    potenciais conflitos com dados existentes do cliente.
+
+    Attributes:
+        success: Se a análise foi concluída com sucesso.
+        client_name: Nome do cliente identificado (ou "N/A").
+        filename: Nome do ficheiro analisado.
+        document_type: Tipo de documento identificado pela IA.
+        fields_extracted: Lista de nomes dos campos extraídos.
+        updated: Se os dados do processo foram atualizados.
+        error: Mensagem de erro (se houver).
+        conflicts: Detalhes de conflitos com dados existentes.
+    """
     success: bool
     client_name: str
     filename: str
@@ -153,17 +169,39 @@ class SingleAnalysisResult(BaseModel):
 
 
 class ImportSessionRequest(BaseModel):
+    """Request para iniciar uma sessão de importação de documentos.
+
+    Attributes:
+        total_files: Número total de ficheiros a processar.
+        folder_name: Nome da pasta no S3 (opcional).
+        client_id: ID do cliente associado (opcional).
+    """
     total_files: int
     folder_name: Optional[str] = None
     client_id: Optional[str] = None
 
 
 class ImportSessionResponse(BaseModel):
+    """Response da criação de uma sessão de importação.
+
+    Attributes:
+        session_id: Identificador único da sessão.
+        message: Mensagem de confirmação.
+    """
     session_id: str
     message: str
 
 
 class UpdateSessionRequest(BaseModel):
+    """Request para atualizar o progresso de uma sessão de importação.
+
+    Enviado pelo frontend periodicamente para reportar progresso.
+
+    Attributes:
+        processed: Número de ficheiros já processados.
+        errors: Número de ficheiros com erro.
+        error_message: Mensagem de erro do último ficheiro falhado.
+    """
     processed: Optional[int] = None
     errors: Optional[int] = None
     error_message: Optional[str] = None
@@ -1440,6 +1478,17 @@ async def diagnose_client_data(
     real_estate = process.get("real_estate_data", {})
     
     def count_filled(data: dict) -> Tuple[int, int, list]:
+        """Conta campos preenchidos num dicionário de dados do processo.
+
+        Um campo é considerado preenchido se não for None nem string vazia.
+
+        Args:
+            data: Dicionário (ex: personal_data, financial_data).
+
+        Returns:
+            Tuple[int, int, list]: (campos_preenchidos, total_campos,
+                lista_de_chaves_preenchidas).
+        """
         if not data:
             return 0, 0, []
         filled = [(k, v) for k, v in data.items() if v is not None and v != ""]

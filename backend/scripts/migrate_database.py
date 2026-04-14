@@ -39,8 +39,29 @@ load_dotenv()
 
 
 class JSONEncoder(json.JSONEncoder):
-    """Custom JSON encoder para tipos MongoDB"""
+    """Codificador JSON personalizado para tipos MongoDB (ObjectId, datetime).
+
+    Utilizado pela API de exportação para serializar documentos MongoDB
+    em ficheiros JSON legíveis, convertendo ``ObjectId`` e ``datetime``
+    em representações compatíveis com o formato MongoDB Extended JSON.
+
+    Attributes:
+        See ``json.JSONEncoder``.
+    """
+
     def default(self, obj):
+        """Converte tipos MongoDB para representações JSON serializáveis.
+
+        Converte ``ObjectId`` em ``{"$oid": "..."}`` e ``datetime`` em
+        ``{"$date": "..."}``. Tipos não reconhecidos são delegados ao
+        método ``default`` da classe pai.
+
+        Args:
+            obj: Objeto a serializar.
+
+        Returns:
+            dict: Representação JSON do objeto, ou delegação ao pai.
+        """
         if isinstance(obj, ObjectId):
             return {"$oid": str(obj)}
         if isinstance(obj, datetime):
@@ -384,6 +405,22 @@ class DatabaseMigrator:
 
 
 def main():
+    """Ponto de entrada CLI para o script de migração de base de dados.
+
+    Suporta 4 subcomandos:
+
+    - ``export``: Exporta todas as coleções da BD atual para ficheiros JSON.
+    - ``import``: Importa ficheiros JSON para uma BD de destino.
+    - ``migrate``: Migra diretamente entre duas instâncias MongoDB.
+    - ``verify``: Compara contagens de documentos entre origem e destino.
+
+    A BD de origem é configurada via variáveis de ambiente ``MONGO_URL``
+    e ``DB_NAME``. A BD de destino é especificada via argumentos.
+
+    Raises:
+        ValueError: Se ``MONGO_URL`` não estiver definido no ambiente.
+        SystemExit: Se nenhum subcomando for fornecido (mostra ajuda).
+    """
     parser = argparse.ArgumentParser(
         description="Script de Migração de Base de Dados MongoDB",
         formatter_class=argparse.RawDescriptionHelpFormatter,

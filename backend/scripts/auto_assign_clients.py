@@ -331,6 +331,19 @@ async def run_auto_assignment(
 # ====================================================================
 
 def main():
+    """Ponto de entrada CLI para atribuição automática de processos.
+
+    Distribui processos sem consultor/mediador atribuído por um algoritmo
+    round-robin entre utilizadores ativos com capacidade disponível.
+    Suporta os seguintes argumentos:
+
+    - ``--dry-run``: Simula as atribuições sem persistir na base de dados.
+    - ``--role ROLE``: Filtra utilizadores elegíveis por role específico.
+    - ``--limit N``: Limita o número de processos a processar (default: 10000).
+    - ``--verbose``: Mostra detalhe de cada atribuição.
+
+    Processos com ``client_name == "Cliente"`` são excluídos (dados de teste).
+    """
     parser = argparse.ArgumentParser(
         description="Atribuição automática de processos a utilizadores"
     )

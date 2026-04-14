@@ -156,10 +156,22 @@ async def assign_multiple_clients(client_ids: list, user_id: str, create_process
 
 
 def main():
+    """Ponto de entrada CLI para atribuição manual de clientes a consultores.
+
+    Suporta várias operações:
+
+    - ``--list-users``: Lista utilizadores ativos com roles elegíveis.
+    - ``--list-unassigned``: Lista clientes sem atribuição.
+    - ``--client ID --user ID``: Atribui um cliente específico a um utilizador.
+    - ``--clients ID1,ID2 --user ID``: Atribui múltiplos clientes em lote.
+    - ``--no-process``: Impede a criação automática de processo ao atribuir.
+
+    Por predefinição, ao atribuir um cliente é criado automaticamente um
+    processo associado (status ``"novo"``) se este não existir ainda.
+    """
     parser = argparse.ArgumentParser(
         description="Atribuir clientes específicos a utilizadores"
     )
-    
     parser.add_argument("--list-users", action="store_true", help="Listar utilizadores disponíveis")
     parser.add_argument("--list-unassigned", action="store_true", help="Listar clientes não atribuídos")
     parser.add_argument("--client", type=str, help="ID do cliente a atribuir")
@@ -171,6 +183,12 @@ def main():
     args = parser.parse_args()
     
     async def run():
+        """Executa a operação assíncrona selecionada pelos argumentos CLI.
+
+        Encaminha para a função correta com base nos argumentos parseados:
+        ``list_users``, ``list_unassigned``, ``assign_client``, ou
+        ``assign_multiple_clients``.
+        """
         if args.list_users:
             await list_users()
         elif args.list_unassigned:

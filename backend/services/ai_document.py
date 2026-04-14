@@ -1717,6 +1717,31 @@ async def process_bulk_documents(
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_ANALYSIS)
     
     async def analyze_with_semaphore(file_data: Dict) -> Dict:
+        """Analisa um documento individual com rate limiting via semáforo.
+
+        Wrapper interno de ``analyze_single_document`` que usa o semáforo
+        ``asyncio.Semaphore(MAX_CONCURRENT_ANALYSIS)`` para limitar o número
+        de análises em paralelo. Isto é essencial porque:
+
+        1. **Rate limiting da API OpenAI**: O GPT-4o-mini tem limites de
+           requests por minuto. Sem o semáforo, um bulk analysis de 20
+           ficheiros dispararia 20 requests simultâneos, causando erros 429.
+        2. **Gestão de memória**: Cada análise carrega o ficheiro em memória
+           para extração de texto. Limitar a concorrência evita OOM.
+        3. **Previsibilidade**: Garante que o progresso é reportado
+           sequencialmente ao callback, facilitando a UI de progresso.
+
+        Args:
+            file_data: Dicionário com chaves obrigatórias:
+                - content (bytes): Conteúdo do ficheiro.
+                - filename (str): Nome do ficheiro original.
+                - client_name (str): Nome do cliente (para log).
+                - process_id (str): ID do processo (para log).
+
+        Returns:
+            Dict: Resultado de ``analyze_single_document`` — contém
+                ``success``, ``extracted_data``, ``error``, etc.
+        """
         async with semaphore:
             result = await analyze_single_document(
                 content=file_data["content"],
@@ -1779,6 +1804,22 @@ def build_update_data_from_extraction(
     
     # Função para verificar se é valor placeholder
     def is_placeholder(value):
+        """Verifica se um valor extraído pela IA é um placeholder (não é dados reais).
+
+        Quando a IA não consegue extrair um campo, por vezes preenche com valores
+        genéricos como "YYYY-MM-DD" para datas ou "N/A" para campos opcionais.
+        Estes placeholders devem ser filtrados antes de atualizar o processo porque:
+        - Datas placeholder ("YYYY-MM-DD") causam erros de validação.
+        - NIFs placeholder ("123456789") são inválidos mas passam na validação
+          de formato (9 dígitos), podendo corromper o registo do cliente.
+        - Valores "N/A" ou "NULL" poluem campos de texto livre.
+
+        Args:
+            value: Valor extraído pela IA (qualquer tipo).
+
+        Returns:
+            bool: True se o valor é um placeholder reconhecido.
+        """
         if not value:
             return True
         val_str = str(value).strip().upper()
@@ -1790,6 +1831,18 @@ def build_update_data_from_extraction(
     
     # Função para limpar valor
     def clean_value(value):
+        """Limpa um valor extraído pela IA, removendo placeholders e espaços.
+
+        Esta função é o primeiro passo de limpeza antes de inserir dados na BD.
+        Retorna ``None`` para valores vazios ou placeholder, e strips espaços
+        em branco de strings. Valores numéricos são passados tal qual.
+
+        Args:
+            value: Valor extraído pela IA (str, int, float, None).
+
+        Returns:
+            Valor limpo (str sem espaços, número, ou None se inválido).
+        """
         if value is None or is_placeholder(value):
             return None
         if isinstance(value, str):
@@ -1798,6 +1851,23 @@ def build_update_data_from_extraction(
     
     # Função para validar NIF (pessoas singulares)
     def is_valid_nif(nif):
+        """Valida um NIF português de pessoa singular extraído pela IA.
+
+        No contexto do crédito habitação, apenas são aceites NIFs de pessoas
+        singulares (começados por 1, 2, 6 ou 9). NIFs de empresas (começados
+        por 5) são rejeitados porque campos de pessoas (personal_data.nif)
+        não devem conter NIFs empresariais.
+
+        A validação é mais restritiva que a oficial de Portugal porque inclui
+        a rejeição de NIFs claramente fictícios ("123456789", "000000000")
+        que a IA por vezes gera quando não consegue extrair o NIF real.
+
+        Args:
+            nif: NIF extraído pela IA (pode conter espaços/pontos).
+
+        Returns:
+            bool: True se o NIF é válido para pessoa singular.
+        """
         if not nif:
             return False
         nif_clean = re.sub(r'\D', '', str(nif))
@@ -1881,6 +1951,22 @@ def build_update_data_from_extraction(
         
         # Função para converter valor monetário
         def parse_money(value):
+            """Converte um valor monetário extraído pela IA para float.
+
+            A IA pode retornar valores monetários em formatos diversos:
+            ``"1.500,00 €"``, ``"1500.00"``, ``1500`` (int), etc.
+            Esta função normaliza todos para float, removendo símbolos de euro,
+            substituindo vírgulas por pontos e removendo espaços.
+
+            É usada antes de guardar valores financeiros (salário, rendimento,
+            prestação) para garantir consistência no tipo de dados.
+
+            Args:
+                value: Valor monetário (int, float, str ou None).
+
+            Returns:
+                float | None: Valor numérico normalizado, ou None se inválido.
+            """
             if not value:
                 return None
             try:
@@ -2615,6 +2701,25 @@ def build_update_data_from_extraction(
         
         # Função auxiliar para extrair valores de estruturas aninhadas (mais robusta)
         def extract_nested(data, keys_to_find, depth=0):
+            """Extrai valores de estruturas aninhadas usando matching fuzzy por chave.
+
+            Quando a IA analisa documentos genéricos ("outro"), o JSON retornado
+            pode ter estruturas profundamente aninhadas com chaves em formatos
+            variados (ex: "nif", "NIF", "numero_contribuinte"). Esta função faz
+            matching case-insensitive e normaliza underscores/hífenes para encontrar
+            o valor correto independentemente da variação usada pela IA.
+
+            A recursão é limitada a 5 níveis de profundidade para evitar
+            stack overflow em documentos com estruturas muito aninhadas.
+
+            Args:
+                data: Dados extraídos pela IA (dict, list ou valor primitivo).
+                keys_to_find: Dicionário de mapeamento ``{chave_busca: campo_destino}``.
+                depth: Nível atual de recursão (usado internamente).
+
+            Returns:
+                dict: Valores encontrados com chaves de destino.
+            """
             if depth > 5:  # Limitar profundidade de recursão
                 return {}
             results = {}
@@ -2767,6 +2872,26 @@ def collect_unmapped_data(extracted_data: Dict[str, Any], mapped_fields: set, do
     }
     
     def extract_unmapped(data: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
+        """Extrai recursivamente campos não mapeados de um dicionário.
+
+        Após o mapeamento direto (field_mapping), dados extraídos pela IA que
+        não correspondem a nenhum campo conhecido do processo podem conter
+        informação valiosa (ex: campos específicos de documentos de instituições
+        financeiras que não existem no esquema do CRM).
+
+        Esta função recolhe esses "orphans" e formata-os com o caminho completo
+        (ex: "credito.taxa_juro") para serem adicionados às notas do processo
+        (campo ``ai_extracted_notes``), garantindo que dados úteis não são
+        silenciosamente descartados.
+
+        Args:
+            data: Dicionário com dados extraídos pela IA.
+            prefix: Prefixo para chaves aninhadas (usado na recursão).
+
+        Returns:
+            dict: Campos não mapeados com chaves hierárquicas como
+                "credito.taxa_juro" e valores primitivos ou strings.
+        """
         result = {}
         if not isinstance(data, dict):
             return result

@@ -17,6 +17,16 @@ logger = logging.getLogger(__name__)
 
 
 class JobStatus(str, Enum):
+    """Estados possíveis de um job em background.
+
+    O ciclo de vida de um job é: PENDING → PROCESSING → COMPLETED/FAILED.
+
+    Attributes:
+        PENDING: Job criado mas ainda não iniciado.
+        PROCESSING: Job em execução.
+        COMPLETED: Job terminou com sucesso.
+        FAILED: Job terminou com erro.
+    """
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -24,6 +34,16 @@ class JobStatus(str, Enum):
 
 
 class JobType(str, Enum):
+    """Tipos de jobs em background suportados pelo CRM.
+
+    Cada tipo define um fluxo de processamento específico. O tipo é
+    armazenado na BD para permitir filtragem e estatísticas.
+
+    Attributes:
+        EXCEL_IMPORT: Importação de dados a partir de ficheiro Excel.
+        BULK_ANALYSIS: Análise em lote de documentos com IA.
+        DATA_EXPORT: Exportação de dados para ficheiro (Excel/CSV).
+    """
     EXCEL_IMPORT = "excel_import"
     BULK_ANALYSIS = "bulk_analysis"
     DATA_EXPORT = "data_export"
@@ -192,10 +212,21 @@ class BackgroundJobService:
         return result.deleted_count
     
     def run_in_background(self, job_id: str, coroutine):
-        """
-        Executa uma coroutine em background.
+        """Executa uma coroutine em background como asyncio Task.
+
+        Cria uma wrapper que captura exceções e atualiza automaticamente o
+        status do job para FAILED em caso de erro. A Task é armazenada em
+        ``_running_jobs`` para possível cancelamento futuro.
+
+        Args:
+            job_id: ID do job (usado para atualizar status em caso de erro).
+            coroutine: Coroutine a executar em background.
+
+        Returns:
+            asyncio.Task: Task criada (pode ser cancelada com ``task.cancel()``).
         """
         async def wrapper():
+            """Wrapper interno que captura erros e atualiza o job no MongoDB."""
             try:
                 await coroutine
             except Exception as e:

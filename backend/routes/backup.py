@@ -95,6 +95,12 @@ async def trigger_backup(
     
     # Executar em background
     async def run_backup():
+        """Executa o workflow completo de backup em background.
+
+        Inclui: exportação de todas as coleções MongoDB, compressão
+        em ZIP, e opcionalmente upload para S3. Atualiza o registo
+        em backup_history com o resultado (completed/failed).
+        """
         try:
             result = await full_backup_workflow(
                 upload_to_cloud=request.upload_to_cloud,
@@ -267,6 +273,11 @@ async def run_backup_now(
     })
     
     async def run_backup():
+        """Executa backup imediato com upload obrigatório para S3.
+
+        Semelhante ao ``run_backup`` do endpoint agendado, mas com
+        upload_to_cloud=True e cleanup_after=True forçados.
+        """
         try:
             result = await full_backup_workflow(
                 upload_to_cloud=True,

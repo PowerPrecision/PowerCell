@@ -279,11 +279,25 @@ import uuid
 from datetime import datetime, timezone
 
 class LinkCreate(BaseModel):
+    """Payload para criar uma ligação OneDrive para um processo.
+
+    Attributes:
+        name: Nome descritivo da ligação (ex: "Pasta Documentos").
+        url: URL completa da pasta OneDrive.
+        description: Descrição opcional da ligação.
+    """
     name: str
     url: str
     description: Optional[str] = ""
 
 class LinkUpdate(BaseModel):
+    """Payload para atualizar uma ligação OneDrive existente.
+
+    Attributes:
+        name: Novo nome da ligação.
+        url: Nova URL da ligação.
+        description: Nova descrição.
+    """
     name: Optional[str] = None
     url: Optional[str] = None
     description: Optional[str] = None

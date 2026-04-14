@@ -28,7 +28,16 @@ TRELLO_BASE_URL = "https://api.trello.com/1"
 
 
 class TrelloService:
-    """Serviço de integração com o Trello."""
+    """Serviço de integração com o Trello para sincronização bidirecional.
+
+    Gestiona a comunicação com a API REST do Trello, incluindo CRUD de cards,
+    gestão de webhooks e cache de listas. O mapeamento entre listas Trello e
+    estados do CRM é feito pelos dicionários TRELLO_TO_STATUS e STATUS_TO_TRELLO.
+
+    O serviço suporta inicialização a partir de variáveis de ambiente ou
+    configuração na base de dados (via ``init_trello_from_config()``), permitindo
+    atualização em runtime sem reiniciar o servidor.
+    """
     
     def __init__(self, api_key: str = None, token: str = None, board_id: str = None):
         self.api_key = api_key or TRELLO_API_KEY
@@ -39,10 +48,31 @@ class TrelloService:
     
     @property
     def auth_params(self) -> Dict[str, str]:
+        """Parâmetros de autenticação para a API do Trello.
+
+        Returns:
+            dict: ``{"key": api_key, "token": token}`` para inclusão
+                em todas as requests à API Trello como query params.
+        """
         return {"key": self.api_key, "token": self.token}
     
     async def _request(self, method: str, endpoint: str, **kwargs) -> Any:
-        """Fazer pedido à API do Trello."""
+        """Faz pedido autenticado à API do Trello.
+
+        Injeta automaticamente ``auth_params`` (key + token) em todos os
+        pedidos. Usa httpx.AsyncClient com timeout de 30 segundos.
+
+        Args:
+            method: Método HTTP (GET, POST, PUT, DELETE).
+            endpoint: Path do endpoint (ex: "/boards/{id}/lists").
+            **kwargs: Argumentos adicionais para ``client.request()``.
+
+        Returns:
+            Any: Resposta JSON da API, ou None se a resposta estiver vazia.
+
+        Raises:
+            httpx.HTTPStatusError: Se a API retornar status code de erro.
+        """
         url = f"{TRELLO_BASE_URL}{endpoint}"
         params = kwargs.pop("params", {})
         params.update(self.auth_params)
@@ -57,7 +87,18 @@ class TrelloService:
         return await self._request("GET", f"/boards/{self.board_id}")
     
     async def get_lists(self, force_refresh: bool = False) -> List[Dict]:
-        """Obter listas (colunas) do board com cache."""
+        """Obtém listas (colunas) do board com cache de 5 minutos.
+
+        O cache evita chamadas redundantes à API Trello quando múltiplas
+        operações precisam da lista de colunas num curto espaço de tempo
+        (ex: sincronização de vários processos em sequência).
+
+        Args:
+            force_refresh: Se True, ignora o cache e faz pedido à API.
+
+        Returns:
+            list[dict]: Lista de listas Trello com campos id, name, etc.
+        """
         now = datetime.now()
         
         # Cache por 5 minutos
@@ -91,7 +132,21 @@ class TrelloService:
     
     async def create_card(self, list_id: str, name: str, desc: str = "", 
                           labels: List[str] = None, due: str = None) -> Dict:
-        """Criar um novo card no Trello."""
+        """Cria um novo card no Trello.
+
+        Usado quando um novo processo é criado no CRM para refletir
+        automaticamente no board Trello.
+
+        Args:
+            list_id: ID da lista (coluna) de destino.
+            name: Título do card (normalmente nome do cliente).
+            desc: Descrição detalhada (gerada por ``build_card_description()``).
+            labels: Lista de IDs de labels do Trello (opcional).
+            due: Data limite no formato ISO-8601 (opcional).
+
+        Returns:
+            dict: Card criado com campos id, name, url, etc.
+        """
         data = {
             "idList": list_id,
             "name": name,
@@ -297,7 +352,21 @@ def parse_card_description(desc: str) -> Dict[str, str]:
 
 
 def build_card_description(process: Dict) -> str:
-    """Construir descrição do card a partir dos dados do processo."""
+    """Constrói descrição formatada do card Trello a partir dos dados do processo.
+
+    Formata os dados mais relevantes do processo (contacto, dados pessoais,
+    dados financeiros, dados do imóvel) com emojis para legibilidade.
+    Esta descrição é usada como corpo do card Trello, permitindo ao consultor
+    ver rapidamente os dados essenciais sem abrir o processo no CRM.
+
+    Args:
+        process: Dicionário com dados do processo (campos como client_email,
+            client_phone, personal_data, financial_data, real_estate_data).
+
+    Returns:
+        str: Texto formatado com uma linha por campo, usando emojis como
+            prefixos visuais (📧, 📱, 🆔, 💰, 🏠, etc.).
+    """
     lines = []
     
     # Dados principais

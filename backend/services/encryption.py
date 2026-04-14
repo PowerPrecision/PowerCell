@@ -301,7 +301,24 @@ def encrypt_value(value: str) -> str:
 
 
 def decrypt_value(value: str) -> str:
-    """Desencripta um valor simples."""
+    """Desencripta um valor simples usando o serviço de encriptação global.
+
+    Função de conveniência que delega em ``encryption_service.decrypt``.
+    Se o valor não tiver o prefixo "ENC:" ou o serviço não estiver disponível,
+    retorna o valor original sem alterações.
+
+    IMPORTANTE: Se a chave de encriptação atual for diferente da usada para
+    encriptar, a desencriptação falha silenciosamente e o valor encriptado é
+    retornado tal qual. Isto é deliberado — o log de erro contém instruções
+    para diagnosticar o problema, mas não interrompe a aplicação.
+
+    Args:
+        value: Valor possivelmente encriptado (com prefixo "ENC:" se encriptado).
+
+    Returns:
+        str: Valor desencriptado, ou o valor original se não estava encriptado
+            ou se a desencriptação falhou.
+    """
     return encryption_service.decrypt(value)
 
 

@@ -30,11 +30,22 @@ router = APIRouter(prefix="/trello", tags=["Trello Integration"])
 # === Modelos para mapeamento manual ===
 
 class MemberMapping(BaseModel):
+    """Mapeamento entre um username do Trello e um utilizador do PowerCell.
+
+    Attributes:
+        trello_username: Username do membro no Trello.
+        user_id: ID do utilizador correspondente no PowerCell.
+    """
     trello_username: str
     user_id: str
 
 
 class MemberMappingList(BaseModel):
+    """Lista de mapeamentos Trello → PowerCell para importação em lote.
+
+    Attributes:
+        mappings: Lista de mapeamentos individuais.
+    """
     mappings: List[MemberMapping]
 
 
@@ -144,12 +155,28 @@ async def find_matching_user(trello_members: list) -> dict:
 
 
 class TrelloConfig(BaseModel):
+    """Configuração da integração com o Trello.
+
+    Attributes:
+        api_key: Chave da API do Trello.
+        token: Token de autorização do Trello.
+        board_id: ID do quadro (board) do Trello.
+    """
     api_key: str
     token: str
     board_id: str
 
 
 class SyncResult(BaseModel):
+    """Resultado de uma operação de sincronização Trello → PowerCell.
+
+    Attributes:
+        success: Se a sincronização foi concluída com sucesso.
+        created: Número de processos criados.
+        updated: Número de processos atualizados.
+        errors: Lista de mensagens de erro (se houver).
+        message: Mensagem descritiva do resultado.
+    """
     success: bool
     created: int = 0
     updated: int = 0
@@ -887,6 +914,15 @@ async def full_sync(
 # === Importar comentários e atividades do Trello ===
 
 class ImportCommentsResult(BaseModel):
+    """Resultado da importação de comentários do Trello.
+
+    Attributes:
+        success: Se a importação foi concluída com sucesso.
+        total_processes: Número total de processos verificados.
+        processes_with_comments: Número de processos com comentários importados.
+        total_comments_imported: Número total de comentários importados.
+        errors: Lista de erros encontrados durante a importação.
+    """
     success: bool
     total_processes: int
     processes_with_comments: int

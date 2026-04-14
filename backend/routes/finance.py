@@ -627,6 +627,18 @@ async def get_finance_performance(
     config = await _get_finance_config()
 
     async def _calc_year_metrics(yr: int) -> dict:
+        """Calcula métricas financeiras agregadas para um ano.
+
+        Busca processos do ano, calcula métricas de imobiliária e crédito
+        separadamente, e agrega receita, lucro e valor de imóveis.
+
+        Args:
+            yr: Ano para calcular métricas.
+
+        Returns:
+            dict: Métricas do ano (receita, lucro, valor_imoveis,
+                num_processos, receitas/lucros por área).
+        """
         processes = await _get_processes(yr)
         imob = _calc_area_metrics(processes, "imobiliaria", config)
         cred = _calc_area_metrics(processes, "credito", config)
@@ -646,6 +658,19 @@ async def get_finance_performance(
     previous = await _calc_year_metrics(previous_year)
 
     def _calc_variation(current_val, previous_val) -> Optional[float]:
+        """Calcula a variação percentual entre dois valores.
+
+        Se o valor anterior for 0, retorna 100.0 (crescimento de 100%)
+        ou None (ambos zero). Evita divisão por zero.
+
+        Args:
+            current_val: Valor atual.
+            previous_val: Valor do período anterior.
+
+        Returns:
+            Optional[float]: Variação percentual (ex: 15.5), ou None
+                se ambos os valores forem zero.
+        """
         if previous_val == 0:
             return None if current_val == 0 else 100.0
         return round(((current_val - previous_val) / previous_val) * 100, 1)

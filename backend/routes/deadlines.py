@@ -306,6 +306,23 @@ async def get_calendar_deadlines(
 
 @router.put("/{deadline_id}", response_model=DeadlineResponse)
 async def update_deadline(deadline_id: str, data: DeadlineUpdate, user: dict = Depends(get_current_user)):
+    """Atualiza um prazo existente.
+
+    Clientes não podem editar prazos (proteção contra manipulação).
+    Apenas campos fornecidos são atualizados (atualização parcial).
+
+    Args:
+        deadline_id: ID do prazo a atualizar.
+        data: Campos a atualizar (DeadlineUpdate).
+        user: Utilizador autenticado (injetado).
+
+    Returns:
+        dict: Prazo atualizado.
+
+    Raises:
+        HTTPException(403): Se utilizador é cliente.
+        HTTPException(404): Se prazo não encontrado.
+    """
     if user["role"] == UserRole.CLIENTE:
         raise HTTPException(status_code=403, detail="Clientes não podem editar prazos")
     
@@ -340,6 +357,20 @@ async def update_deadline(deadline_id: str, data: DeadlineUpdate, user: dict = D
 
 @router.delete("/{deadline_id}")
 async def delete_deadline(deadline_id: str, user: dict = Depends(require_roles([UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.ADMIN]))):
+    """Elimina um prazo existente.
+
+    Apenas consultores, intermediários e admins podem eliminar prazos.
+
+    Args:
+        deadline_id: ID do prazo a eliminar.
+        user: Utilizador autenticado com role permitido (injetado).
+
+    Returns:
+        dict: Mensagem de confirmação.
+
+    Raises:
+        HTTPException(404): Se prazo não encontrado.
+    """
     result = await db.deadlines.delete_one({"id": deadline_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Prazo não encontrado")

@@ -36,6 +36,26 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 @router.post("/register", response_model=TokenResponse)
 @limiter.limit("3/hour")
 async def register(request: Request, response: Response, data: UserRegister):
+    """Regista um novo utilizador a partir do formulário público.
+
+    Este endpoint é acessível sem autenticação e permite que novos
+    utilizadores se registem no sistema. O role padrão é CLIENTE.
+
+    Porquê sem autenticação: este é o ponto de entrada para novos
+    utilizadores que ainda não têm conta. A validação é feita via
+    campos obrigatórios (email, nome) e verificação de unicidade.
+
+    Args:
+        request: Objeto Request do FastAPI (para definir cookies).
+        response: Objeto Response do FastAPI (para definir cookies).
+        data: Dados de registo (UserRegister com email, name, phone, password).
+
+    Returns:
+        dict: Dados do utilizador registado com access_token.
+
+    Raises:
+        HTTPException(400): Se email em falta, já existe, ou dados inválidos.
+    """
     # Normalizar inputs (sem validação de formato)
     clean_email = (data.email or "").strip().lower()
     if not clean_email:

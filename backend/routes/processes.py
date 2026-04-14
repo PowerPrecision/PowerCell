@@ -1238,6 +1238,18 @@ async def get_my_clients(
     
     # Ordenar processos por fase (order do status) e depois por nome
     def get_sort_key(p):
+        """Gera chave de ordenação para processos no kanban.
+
+        Ordena primeiro pela ordem da fase no workflow (phase_order),
+        depois por nome do cliente em ordem alfabética. Isto garante
+        que processos na mesma fase apareçam ordenados por nome.
+
+        Args:
+            p: Dicionário do processo.
+
+        Returns:
+            tuple: (phase_order, client_name_lower).
+        """
         status_info = status_map.get(p.get("status"), {})
         phase_order = status_info.get("order", 999)
         client_name = p.get("client_name", "").lower()
@@ -1615,6 +1627,27 @@ async def get_dsti_high_risk_processes(
 
 @router.get("/{process_id}", response_model=ProcessResponse)
 async def get_process(process_id: str, user: dict = Depends(get_current_user)):
+    """Obtém os detalhes completos de um processo.
+
+    Verifica permissões de visualização (can_view_process) antes de
+    devolver os dados. Dados sensíveis (NIF, telefone, email do cliente)
+    são desencriptados antes da resposta.
+
+    Porquê a verificação de permissões: um intermediário só pode ver
+    processos que lhe estão atribuídos, enquanto um admin pode ver
+    todos os processos.
+
+    Args:
+        process_id: ID do processo.
+        user: Utilizador autenticado (injetado).
+
+    Returns:
+        ProcessResponse: Dados completos do processo (desencriptados).
+
+    Raises:
+        HTTPException(404): Se processo não encontrado.
+        HTTPException(403): Se utilizador não tem permissão para ver.
+    """
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -1660,6 +1693,34 @@ async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_
 
 @router.put("/{process_id}", response_model=ProcessResponse)
 async def update_process(process_id: str, data: ProcessUpdate, request: Request, user: dict = Depends(get_current_user)):
+    """Atualiza os dados de um processo existente com controlo de acesso por role.
+
+    Este endpoint implementa controlo granular de edição por role:
+    - **Admin/CEO**: Podem editar todos os campos.
+    - **Consultor/Diretor**: Podem editar dados pessoais, imóvel e crédito.
+    - **Intermediário**: Pode editar dados financeiros e de crédito.
+    - **Indexação**: Pode editar APENAS dados financeiros.
+    - **Clientes**: Não podem editar processos por este endpoint.
+
+    Processos em estados terminais (eliminados, desistências, concluídos)
+    não podem ser editados.
+
+    Regista alterações no histórico (CDC — Change Data Capture) para
+    auditoria completa de quem mudou o quê e quando.
+
+    Args:
+        process_id: ID do processo.
+        data: Campos a atualizar (ProcessUpdate).
+        request: Objeto Request do FastAPI (para ler body raw).
+        user: Utilizador autenticado (injetado).
+
+    Returns:
+        ProcessResponse: Processo atualizado (desencriptado).
+
+    Raises:
+        HTTPException(404): Se processo não encontrado.
+        HTTPException(403): Se processo em estado terminal ou sem permissão.
+    """
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")

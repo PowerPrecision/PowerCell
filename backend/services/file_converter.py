@@ -359,6 +359,23 @@ def analyze_with_ai(content: bytes, filename: str, detected_type: str) -> Dict[s
     import asyncio
     
     async def _analyze():
+        """Analisa ficheiro desconhecido com IA para determinar tipo e possibilidade de conversão.
+
+        Envia uma amostra do ficheiro (primeiros 10KB e hex dump dos primeiros
+        100 bytes) para o GPT-4o-mini com instruções para:
+        1. Identificar o tipo real do ficheiro.
+        2. Determinar se é possível converter para PDF.
+        3. Avaliar se contém dados úteis.
+        4. Verificar se é seguro processar.
+
+        O prompt é estruturado para obter resposta em JSON com campos específicos,
+        permitindo decisão automática sobre o método de conversão.
+
+        Returns:
+            dict: Análise da IA com chaves real_type, can_convert, is_safe,
+                recommendation, extracted_text (ou valores de fallback em caso
+                de erro).
+        """
         try:
             client = AsyncOpenAI()
             

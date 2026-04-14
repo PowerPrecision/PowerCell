@@ -1,31 +1,64 @@
 #!/usr/bin/env python3
 """
-restore_dev_from_backup.py — Pipeline de Restauro Seguro (RGPD-compliant)
+restore_dev_from_backup.py — Pipeline de Restauro Seguro (RGPD-compliant).
 
 Restaura a base de dados de Desenvolvimento a partir do backup automático
 mais recente de Produção, com anonimização total de dados pessoais.
 
-Arquitetura:
-    Produção Backup (S3) → Download ZIP → Extract JSON → Import temp collections
-    → Sanitize (RGPD) → Validate integrity → Swap into real collections → Cleanup
+Arquitetura do Pipeline (7 etapas sequenciais):
 
-Diferença face a sync_prod_to_dev.py:
-    - NÃO acede ao MongoDB de Produção diretamente (sem carga no servidor live)
-    - Usa os backups automáticos (ZIP com JSON por coleção) como fonte
-    - Implementa falha segura: Dev DB NÃO é apagada se o backup estiver corrompido
+    1. S3 Backup → Localiza o backup mais recente no S3 (via
+       ``backup_history`` na BD de Produção ou listagem direta do S3).
+    2. Download → Descarrega o ficheiro ZIP para um diretório temporário local.
+    3. Extract JSON → Extrai os ficheiros JSON de cada coleção do ZIP.
+    4. Temp Collections + RGPD Sanitize → Importa os dados para coleções
+       temporárias ``_restore_temp_*``, aplicando anonimização a cada
+       documento **antes** da inserção (NIF falso, email mascarado,
+       telefone baralhado, links S3 removidos, campos financeiros limpos).
+    5. Validate → Verifica que as coleções temporárias contêm o número
+       esperado de documentos e que todos são dicts válidos.
+    6. Swap → Substitui atomicamente as coleções reais de Dev pelas
+       temporárias (drop + renameCollection por coleção).
+    7. Cleanup → Remove coleções temporárias residuais, recria índices
+       importantes e apaga ficheiros temporários do disco.
+
+Porquê coleções temporárias antes do swap:
+    O uso de coleções ``_restore_temp_*`` é a barreira de segurança central
+    deste pipeline. Os dados de Produção NUNCA são escritos diretamente nas
+    coleções de Dev. Isto garante que:
+
+    - Se o backup estiver corrompido (ZIP inválido, JSON malformado), a
+      base de Dev permanece intacta — o erro é detetado antes do swap.
+    - Se a sanitização RGPD falhar num documento, a inserção é abortada
+      e a base de Dev não é afetada.
+    - Se a validação de integridade falhar (contagens inconsistentes),
+      as coleções temporárias são limpas e Dev fica inalterada.
+    - O swap (drop + rename) é atómico a nível de coleção individual,
+      minimizando a janela de indisponibilidade.
+
+    Em resumo: a base de dados de Desenvolvimento **nunca é modificada** se
+    qualquer etapa anterior ao swap falhar (falha segura).
+
+Diferença face a ``sync_prod_to_dev.py``:
+    - NÃO acede ao MongoDB de Produção diretamente (sem carga no servidor live).
+    - Usa os backups automáticos (ZIP com JSON por coleção) como fonte.
+    - Implementa falha segura: Dev DB NÃO é apagada se o backup estiver corrompido.
+    - Adequado para ambientes onde o Mongo de Produção não é acessível por rede.
 
 Uso standalone:
+
     python backend/scripts/restore_dev_from_backup.py \\
         --dev-url "mongodb+srv://..." \\
         --dev-db "powercell_dev"
 
-Uso via API (endpoint /api/admin/sync-database):
+Uso via API (endpoint ``/api/admin/sync-database``):
+
     from scripts.restore_dev_from_backup import run_restore
     result = await run_restore(dev_url, dev_db_name)
 
 Variáveis de ambiente:
-    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_BUCKET_NAME, AWS_REGION
-    DEV_MONGO_URL, DEV_DB_NAME
+    ``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, ``AWS_BUCKET_NAME``,
+    ``AWS_REGION``, ``DEV_MONGO_URL``, ``DEV_DB_NAME``.
 """
 
 import asyncio
@@ -62,7 +95,18 @@ logger = logging.getLogger(__name__)
 # ======================================================================
 
 def _get_s3_config() -> dict:
-    """Retorna configuração S3 do ambiente."""
+    """Retorna a configuração S3 a partir das variáveis de ambiente.
+
+    Centraliza a leitura das credenciais AWS para que todas as funções
+    que acedem ao S3 usem um ponto único de configuração. Se as credenciais
+    não estiverem definidas, os valores ficam em branco (string vazia),
+    sendo validados mais tarde em ``_find_latest_backup_s3``.
+
+    Returns:
+        dict: Dicionário com as chaves ``aws_access_key_id``,
+            ``aws_secret_access_key``, ``bucket_name``, ``region``
+            (default ``"eu-north-1```) e ``backup_prefix`` (default ``"backups/"``).
+    """
     return {
         "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID", ""),
         "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
@@ -87,7 +131,16 @@ _TEST_DOMAIN = "powercell.dev"
 
 
 def _generate_fake_nif() -> str:
-    """Gera um NIF falso mas válido (9 dígitos com check digit correto)."""
+    """Gera um NIF (Número de Identificação Fiscal) falso mas estruturalmente válido.
+
+    O NIF gerado tem 9 dígitos e passa na validação de check digit (módulo 11
+    com pesos 9,8,7,6,5,4,3,2), o que é necessário para que a UI do CRM não
+    rejeite o documento por formatação. O primeiro dígito é gerado entre 1-9
+    (nunca 0) para respeitar a regra oficial portuguesa.
+
+    Returns:
+        str: NIF com 9 dígitos em formato de string.
+    """
     digits = [random.randint(1, 9)] + [random.randint(0, 9) for _ in range(7)]
     weights = [9, 8, 7, 6, 5, 4, 3, 2]
     total = sum(d * w for d, w in zip(digits, weights))
@@ -99,7 +152,20 @@ def _generate_fake_nif() -> str:
 
 
 def _scramble_phone(phone: str) -> str:
-    """Baralha um número de telefone mantendo o formato base."""
+    """Baralha um número de telefone mantendo o formato original.
+
+    Preserva os 3 primeiros dígitos (prefixo operador PT) e substitui
+    os restantes por dígitos aleatórios, mantendo separadores (espaços,
+    traços, parênteses) nas mesmas posições. Isto permite testar a UI
+    sem expor números reais de clientes.
+
+    Args:
+        phone: Número de telefone original.
+
+    Returns:
+        str: Número de telefone baralhado com o mesmo formato, ou
+            string vazia se o input for vazio/falso.
+    """
     if not phone:
         return ""
     digits = [c for c in phone if c.isdigit()]
@@ -120,7 +186,21 @@ def _scramble_phone(phone: str) -> str:
 
 
 def _anonymize_client_email(original_email: str, client_id: str) -> str:
-    """Gera email de teste: dev_client_{id}@powercell.dev"""
+    """Gera um email de teste determinístico baseado no ID do cliente.
+
+    O email gerado segue o formato ``dev_client_{id}@powercell.dev``, onde
+    ``{id}`` são os primeiros 8 caracteres do ``client_id``. Isto garante que
+    o mesmo cliente gera sempre o mesmo email anonimizado, permitindo
+    rastrear correspondências em Dev sem expor emails reais.
+
+    Args:
+        original_email: Email original do cliente (usado apenas como
+            referência; o valor não é incluído no resultado).
+        client_id: ID único do cliente. Se vazio, gera um ID aleatório.
+
+    Returns:
+        str: Email anonimizado no domínio ``powercell.dev``.
+    """
     short_id = client_id[:8] if client_id else "".join(
         random.choices(string.ascii_lowercase + string.digits, k=8)
     )
@@ -128,7 +208,19 @@ def _anonymize_client_email(original_email: str, client_id: str) -> str:
 
 
 def _obfuscate_surname(full_name: str) -> str:
-    """Mantém o primeiro nome, ofusca o apelido."""
+    """Mantém o primeiro nome e substitui o apelido por um falso.
+
+    O primeiro nome é preservado para manter o contexto realista na UI,
+    enquanto o apelido é substituído por um valor aleatório da lista
+    ``_FAKE_SURNAMES`` (apelidos portugueses comuns).
+
+    Args:
+        full_name: Nome completo do cliente.
+
+    Returns:
+        str: Nome com primeiro nome preservado e apelido ofuscado,
+            ou ``"Cliente Teste"`` se o input for vazio.
+    """
     if not full_name:
         return "Cliente Teste"
     parts = full_name.strip().split()
@@ -139,7 +231,20 @@ def _obfuscate_surname(full_name: str) -> str:
 
 
 def _remove_s3_links(doc: dict) -> dict:
-    """Remove links reais para S3/AWS de um documento."""
+    """Remove todas as referências a S3/AWS de um documento e sub-documentos.
+
+    Elimina campos como ``s3_url``, ``s3_key``, ``document_url``, etc.
+    tanto no nível raiz como em sub-documentos comuns
+    (``personal_data``, ``real_estate_data``, ``financial_data``).
+    Isto é necessário para evitar que o ambiente de Dev aceda
+    acidentalmente a ficheiros reais de Produção no S3.
+
+    Args:
+        doc: Documento MongoDB a limpar (modificado in-place).
+
+    Returns:
+        dict: O mesmo documento, sem campos S3/AWS.
+    """
     s3_fields = [
         "s3_url", "s3_key", "s3_bucket", "s3_folder",
         "document_url", "file_url", "upload_url",
@@ -157,7 +262,19 @@ def _remove_s3_links(doc: dict) -> dict:
 
 
 def _sanitize_financial_fields(doc: dict) -> dict:
-    """Remove campos financeiros ultra-sensíveis não essenciais para testar a UI."""
+    """Remove ou zera campos financeiros ultra-sensíveis não essenciais para testar a UI.
+
+    Campos como IBAN, SWIFT/BIC, salários e credit scores são **removidos**
+    (não há motivo legítimo para existirem em Dev). Montantes como
+    ``property_value`` e ``loan_amount`` são zerados (valor 0) para
+    permitir testar cálculos e layouts sem expor valores reais.
+
+    Args:
+        doc: Documento MongoDB a sanitizar (modificado in-place).
+
+    Returns:
+        dict: O mesmo documento com campos financeiros limpos.
+    """
     sensitive_remove = [
         "iban", "swift_bic", "bank_account", "bank_name",
         "salary", "gross_income", "net_income", "irs_return",
@@ -200,8 +317,23 @@ _EXCLUDED_COLLECTIONS = {
 # ======================================================================
 
 def _sanitize_doc(coll_name: str, doc: dict) -> dict:
-    """
-    Aplica sanitização RGPD a um documento baseado na coleção de origem.
+    """Aplica sanitização RGPD a um documento baseado na coleção de origem.
+
+    Cada tipo de coleção tem regras específicas: ``clients`` recebe
+    anonimização completa (NIF, email, telefone, nome); ``users`` preserva
+    credenciais de acesso mas limpa PII; ``processes`` remove URLs S3 e
+    dados financeiros; ``properties`` arredonda coordenadas para ~1km.
+    Coleções genéricas recebem apenas limpeza de links S3.
+
+    Todos os documentos recebem metadados ``_sanitized_at`` e
+    ``_sanitized_source`` para rastreabilidade.
+
+    Args:
+        coll_name: Nome da coleção de origem (ex: ``"clients"``, ``"users"``).
+        doc: Documento MongoDB a sanitizar (modificado in-place).
+
+    Returns:
+        dict: Documento sanitizado com o ``_id`` removido.
     """
     doc.pop("_id", None)  # Remover sempre
 
@@ -399,11 +531,22 @@ async def _find_latest_backup_s3() -> Optional[Dict[str, Any]]:
 # ======================================================================
 
 async def _download_backup(s3_key: str) -> Path:
-    """
-    Faz o download do backup ZIP do S3 para um diretório temporário.
+    """Faz o download do backup ZIP do S3 para um diretório temporário.
+
+    Cria um diretório temporário com prefixo ``restore_dev_`` e
+    descarrega o ficheiro ZIP completo para disco. O download é
+    feito em memória (``body.read()``) para evitar problemas com
+    streams em ambientes async.
+
+    Args:
+        s3_key: Chave S3 do ficheiro de backup (ex: ``"backups/backup_20240101.zip"``).
 
     Returns:
-        Path para o ficheiro ZIP local.
+        Path: Caminho local para o ficheiro ZIP descarregado.
+
+    Raises:
+        RuntimeError: Se ocorrer um erro irrecuperável ao aceder ao S3
+            (credenciais inválidas, bucket inexistente, etc.).
     """
     import boto3
 
@@ -440,11 +583,23 @@ async def _download_backup(s3_key: str) -> Path:
 # ======================================================================
 
 def _extract_backup_zip(zip_path: Path) -> Dict[str, List[dict]]:
-    """
-    Extrai o ficheiro ZIP do backup e carrega os JSON de cada coleção.
+    """Extrai o ficheiro ZIP do backup e carrega os JSON de cada coleção.
+
+    Cada ficheiro ``.json`` dentro do ZIP é interpretado como uma coleção
+    MongoDB. O nome do ficheiro (sem extensão) é usado como nome da
+    coleção (ex: ``clients.json`` → ``"clients"``). Usa ``bson.json_util``
+    para desserializar tipos MongoDB específicos (ObjectId, datetime, etc.).
+
+    Args:
+        zip_path: Caminho local para o ficheiro ZIP do backup.
 
     Returns:
-        Dict {collection_name: [doc1, doc2, ...]}
+        Dict[str, List[dict]]: Dicionário mapeando nome da coleção
+            à lista de documentos extraídos.
+
+    Raises:
+        ValueError: Se o ZIP não contiver ficheiros JSON, se algum
+            ficheiro estiver corrompido, ou se o próprio ZIP for inválido.
     """
     from bson import json_util
 
@@ -613,11 +768,20 @@ async def _import_to_temp_collections(
 # ======================================================================
 
 async def _validate_temp_collections(dev_db, expected_stats: Dict[str, int]) -> bool:
-    """
-    Verifica que as coleções temporárias têm os documentos esperados.
+    """Verifica que as coleções temporárias contêm o número esperado de documentos.
+
+    Esta validação é executada **antes** do swap para garantir que a
+    sanitização não perdeu documentos. Se a contagem real divergir da
+    esperada, o pipeline aborta e as coleções temporárias são limpas.
+
+    Args:
+        dev_db: Instância de base de dados de Desenvolvimento.
+        expected_stats: Dicionário ``{nome_coleção: contagem_esperada}``
+            retornado por ``_import_to_temp_collections``.
 
     Returns:
-        True se OK, False se inconsistência detectada.
+        bool: ``True`` se todas as coleções estão consistentes,
+            ``False`` se alguma inconsistência for detetada.
     """
     logger.info("A validar coleções temporárias...")
 
@@ -688,9 +852,17 @@ async def _swap_collections(dev_db, collections: List[str]) -> None:
 # ======================================================================
 
 async def _cleanup_temp_collections(dev_db) -> int:
-    """
-    Remove todas as coleções _restore_temp_* residuais.
-    Retorna o número de coleções removidas.
+    """Remove todas as coleções ``_restore_temp_*`` residuais da base de dados.
+
+    Esta função é chamada em dois cenários: no final de um restauro
+    bem-sucedido (cleanup pós-swap) e no bloco ``except`` de ``run_restore``
+    (fallback para limpar temp collections se o pipeline falhar).
+
+    Args:
+        dev_db: Instância de base de dados de Desenvolvimento.
+
+    Returns:
+        int: Número de coleções temporárias removidas.
     """
     removed = 0
     all_collections = await dev_db.list_collection_names()
@@ -712,7 +884,17 @@ async def _cleanup_temp_collections(dev_db) -> int:
 # ======================================================================
 
 async def _recreate_indexes(dev_db, collections: List[str]) -> None:
-    """Recria índices importantes após o swap."""
+    """Recria índices importantes nas coleções após o swap.
+
+    Após o ``renameCollection``, os índices das coleções originais são
+    perdidos. Esta função recria os índices essenciais para performance
+    e unicidade (ex: ``users.email`` unique, ``clients.nif`` unique).
+    Erros de "índice já existe" são ignorados silenciosamente.
+
+    Args:
+        dev_db: Instância de base de dados de Desenvolvimento.
+        collections: Lista de nomes de coleções onde recriar índices.
+    """
     important_indexes = {
         "users": [("email", True), ("id", True)],
         "clients": [("email", True), ("nif", True), ("id", True)],
@@ -739,27 +921,38 @@ async def run_restore(
     dev_url: str,
     dev_db_name: str,
 ) -> dict:
-    """
-    Pipeline completo de restauro seguro: S3 Backup → Dev (com anonimização RGPD).
+    """Pipeline completo de restauro seguro: S3 Backup → Dev (com anonimização RGPD).
+
+    Executa as 7 etapas do restauro em sequência. Em caso de erro em
+    qualquer etapa anterior ao swap, as coleções temporárias são limpas
+    e a base de Dev permanece inalterada (falha segura).
 
     Fluxo:
-    1. Localizar backup mais recente no S3
-    2. Download para disco temporário
-    3. Extrair e validar JSON
-    4. Importar para coleções _temp com sanitização
-    5. Validar integridade dos dados sanitizados
-    6. Swap: coleções reais ← coleções temp
-    7. Recriar índices
-    8. Cleanup de temporários e ficheiros
+        1. Localizar backup mais recente no S3.
+        2. Download para disco temporário.
+        3. Extrair e validar JSON das coleções.
+        4. Importar para coleções ``_temp`` com sanitização RGPD.
+        5. Validar integridade dos dados sanitizados (contagens).
+        6. Swap: coleções reais ← coleções temporárias.
+        7. Recriar índices e cleanup de temporários/ficheiros.
 
-    FALHA SEGURA: A base de dados de Dev NÃO é modificada se:
-    - Nenhum backup for encontrado
-    - O backup estiver corrompido (ZIP inválido, JSON inválido)
-    - A validação de integridade falhar
-    - O swap falhar a meio
+    Args:
+        dev_url: URI de conexão ao MongoDB de Desenvolvimento.
+        dev_db_name: Nome da base de dados de Desenvolvimento.
 
     Returns:
-        dict com estatísticas do restauro
+        dict: Estatísticas do restauro incluindo:
+            - ``success`` (bool): Indica se o restauro foi concluído.
+            - ``backup_info`` (dict): Informação do backup utilizado.
+            - ``collections`` (dict): Documentos importados por coleção.
+            - ``total_documents`` (int): Total de documentos restaurados.
+            - ``errors`` (list): Lista de erros encontrados.
+            - ``warnings`` (list): Lista de avisos.
+            - ``duration_seconds`` (float): Duração total do restauro.
+
+    Raises:
+        (Não propaga exceções; todas são capturadas e registadas.
+         O campo ``success`` no resultado indica o resultado final.)
     """
     started_at = datetime.now(timezone.utc)
     tmp_dir = None
@@ -912,6 +1105,17 @@ async def run_restore(
 # ======================================================================
 
 def main():
+    """Ponto de entrada CLI para o pipeline de restauro seguro.
+
+    Parseia argumentos de linha de comando (--dev-url, --dev-db) ou
+    recorre a variáveis de ambiente (``DEV_MONGO_URL``, ``DEV_DB_NAME``).
+    Invoca ``run_restore`` de forma síncrona via ``asyncio.run`` e
+    termina com código de saída 1 se o restauro falhar.
+
+    Raises:
+        SystemExit: Com código 1 se as credenciais não forem fornecidas
+            ou se ``run_restore`` retornar ``success=False``.
+    """
     parser = argparse.ArgumentParser(
         description="Pipeline de Restauro Seguro: S3 Backup → Dev (RGPD-compliant)",
         formatter_class=argparse.RawDescriptionHelpFormatter,

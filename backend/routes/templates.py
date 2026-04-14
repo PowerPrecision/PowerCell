@@ -29,6 +29,12 @@ router = APIRouter(prefix="/templates", tags=["Templates"])
 
 
 class DocumentRequestData(BaseModel):
+    """Payload para o pedido de geração de documentos.
+
+    Attributes:
+        missing_docs: Lista de nomes de documentos em falta
+            para incluir no email de solicitação ao cliente.
+    """
     missing_docs: List[str] = []
 
 

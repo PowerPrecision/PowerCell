@@ -119,6 +119,20 @@ manager = ConnectionManager()
 
 # Tipos de eventos WebSocket
 class WSEventType:
+    """Constantes para tipos de eventos WebSocket no CRM.
+
+    Estas constantes são usadas como valores do campo ``type`` nas mensagens
+    WebSocket enviadas pelo servidor. O frontend usa estas constantes para
+    identificar que tipo de atualização recebeu e atualizar a UI em conformidade.
+
+    Categorias:
+        - Notificações (NEW_NOTIFICATION, NOTIFICATION_READ, ALL_NOTIFICATIONS_READ)
+        - Processos (PROCESS_CREATED, PROCESS_UPDATED, PROCESS_STATUS_CHANGED, etc.)
+        - Kanban Collaboration (PROCESS_MOVED, PROCESS_LOCKED, PROCESS_UNLOCKED)
+        - Documentos (DOCUMENT_EXPIRING, DOCUMENT_UPLOADED)
+        - Prazos (DEADLINE_CREATED, DEADLINE_UPDATED, DEADLINE_REMINDER)
+        - Sistema (HEARTBEAT, CONNECTION_STATUS, USER_ONLINE, USER_OFFLINE)
+    """
     # Notificações
     NEW_NOTIFICATION = "new_notification"
     NOTIFICATION_READ = "notification_read"
@@ -152,7 +166,20 @@ class WSEventType:
 
 
 def create_ws_message(event_type: str, data: dict, timestamp: Optional[str] = None) -> dict:
-    """Criar mensagem WebSocket padronizada."""
+    """Cria mensagem WebSocket padronizada para envio ao frontend.
+
+    Todas as mensagens WebSocket enviadas pelo servidor seguem esta estrutura:
+    ``{"type": "evento", "data": {...}, "timestamp": "ISO-8601"}``. O timestamp
+    UTC permite ao frontend ordenar mensagens e calcular latência.
+
+    Args:
+        event_type: Tipo de evento (usar constantes de ``WSEventType``).
+        data: Payload do evento (dicionário com dados relevantes).
+        timestamp: Timestamp ISO-8601 (default: momento atual em UTC).
+
+    Returns:
+        dict: Mensagem formatada com chaves ``type``, ``data`` e ``timestamp``.
+    """
     return {
         "type": event_type,
         "data": data,
