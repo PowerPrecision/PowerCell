@@ -2095,6 +2095,11 @@ async def webmail_list(
     """
     Listar emails no formato Webmail por pasta.
     
+    ISOLAMENTO DE DADOS (Segurança):
+    - admin/ceo/diretor: podem ver TODOS os emails (caixa geral)
+    - outros roles (consultor, intermediario, etc.): só vêem emails onde são
+      recipient (inbox) ou sender (sent). Filtragem por endereço de email.
+    
     - inbox: emails recebidos (direction=received, não arquivados)
     - sent: emails enviados (direction=sent)
     - starred: emails marcados como estrela
@@ -2102,10 +2107,40 @@ async def webmail_list(
     - drafts: emails com status=draft
     - custom: emails numa pasta personalizada (requer custom_folder param)
     """
+    from models.auth import UserRole
+    
+    user_email = (current_user.get("email") or "").lower().strip()
+    user_role = current_user.get("role", "")
+    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    
     query = {"is_archived": False}
     
     # Conditions that need $or handling
     or_conditions = []
+    
+    # === ISOLAMENTO POR UTILIZADOR ===
+    if not can_see_all and user_email:
+        if folder == "inbox":
+            # Recebidos: o to_emails deve conter o email do utilizador
+            query["to_emails"] = {"$regex": re.escape(user_email), "$options": "i"}
+        elif folder == "sent":
+            # Enviados: o from_email deve ser o email do utilizador
+            query["from_email"] = {"$regex": re.escape(user_email), "$options": "i"}
+        elif folder == "drafts":
+            # Rascunhos: criados pelo utilizador
+            query["created_by"] = current_user["id"]
+        elif folder == "starred":
+            # Estrelados: o utilizador deve ser sender ou recipient
+            or_conditions.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
+            or_conditions.append({"to_emails": {"$regex": re.escape(user_email), "$options": "i"}})
+        elif folder == "trash":
+            # Arquivados: o utilizador deve ser sender ou recipient
+            or_conditions.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
+            or_conditions.append({"to_emails": {"$regex": re.escape(user_email), "$options": "i"}})
+        elif folder == "custom":
+            # Pasta personalizada: o utilizador deve ser sender ou recipient
+            or_conditions.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
+            or_conditions.append({"to_emails": {"$regex": re.escape(user_email), "$options": "i"}})
     
     # Filtrar por conta IMAP (mostrar também emails sem campo 'account' para compatibilidade)
     if account:
@@ -2148,6 +2183,13 @@ async def webmail_list(
         base_keys = {k: v for k, v in query.items() if k != "$or"}
         if base_keys:
             and_conditions.append(base_keys)
+        # Add user-isolation $or conditions (before account $or)
+        user_isolation_or = []
+        if not can_see_all and user_email:
+            if folder in ("starred", "trash", "custom"):
+                user_isolation_or.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
+                user_isolation_or.append({"to_emails": {"$regex": re.escape(user_email), "$options": "i"}})
+                and_conditions.append({"$or": user_isolation_or})
         # Add account $or conditions
         if or_conditions:
             and_conditions.append({"$or": or_conditions})
@@ -2165,7 +2207,7 @@ async def webmail_list(
         {"_id": 0, "body": 0, "body_html": 0}
     ).sort("sent_at", -1).skip(skip).limit(limit).to_list(limit)
     
-    # Contar não lidos para a pasta inbox
+    # Contar não lidos para a pasta inbox (com isolamento de utilizador)
     unread_count = 0
     if folder == "inbox":
         unread_query = {
@@ -2174,8 +2216,15 @@ async def webmail_list(
             "is_read": False,
             "is_archived": False,
         }
+        # Aplicar isolamento ao unread_count também
+        if not can_see_all and user_email:
+            unread_query["to_emails"] = {"$regex": re.escape(user_email), "$options": "i"}
         if account:
-            unread_query["account"] = account
+            account_filter = {"$or": [{"account": account}, {"account": {"$exists": False}}]}
+            if "$and" not in unread_query:
+                unread_query = {"$and": [unread_query, account_filter]}
+            else:
+                unread_query["$and"].append(account_filter)
         unread_count = await db.emails.count_documents(unread_query)
     
     # Enriquecer emails com nome do processo/cliente
@@ -2196,6 +2245,68 @@ async def webmail_list(
         "pages": (total + limit - 1) // limit,
         "unread_count": unread_count,
         "folder": folder
+    }
+
+
+@router.get("/webmail-stats")
+async def webmail_stats(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Estatísticas de Webmail para o utilizador logado.
+    
+    Retorna contadores de emails não lidos, enviados hoje e rascunhos pendentes.
+    Respeita o isolamento de dados: consultor/intermediário só vê os seus.
+    Admin/CEO/Diretor vêem a caixa geral.
+    """
+    from models.auth import UserRole
+    
+    user_email = (current_user.get("email") or "").lower().strip()
+    user_role = current_user.get("role", "")
+    user_id = current_user.get("id", "")
+    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    
+    # Base queries
+    inbox_base = {
+        "direction": "received",
+        "status": {"$ne": "draft"},
+        "is_archived": False,
+    }
+    sent_base = {
+        "direction": "sent",
+        "status": {"$ne": "draft"},
+        "is_archived": False,
+    }
+    drafts_base = {
+        "status": "draft",
+        "is_archived": False,
+    }
+    
+    # Apply user isolation
+    if not can_see_all and user_email:
+        inbox_base["to_emails"] = {"$regex": re.escape(user_email), "$options": "i"}
+        sent_base["from_email"] = {"$regex": re.escape(user_email), "$options": "i"}
+        drafts_base["created_by"] = user_id
+    
+    # Unread count
+    unread_query = {**inbox_base, "is_read": False}
+    unread_count = await db.emails.count_documents(unread_query)
+    
+    # Sent today
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    sent_today_query = {
+        **sent_base,
+        "sent_at": {"$gte": today_start}
+    }
+    sent_today_count = await db.emails.count_documents(sent_today_query)
+    
+    # Drafts count
+    drafts_count = await db.emails.count_documents(drafts_base)
+    
+    return {
+        "unread_count": unread_count,
+        "sent_today_count": sent_today_count,
+        "drafts_count": drafts_count,
     }
 
 

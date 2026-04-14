@@ -2,14 +2,14 @@
  * ConsultorDashboard - Painel do Consultor
  * Refatorado para usar componentes partilhados do DashboardShared
  */
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { Users, Eye, Plus, AlertTriangle, Building2 } from "lucide-react";
+import { Users, Eye, Plus, AlertTriangle, Building2, Mail } from "lucide-react";
 import {
   StatCard,
   StatusBadge,
@@ -25,10 +25,14 @@ import {
   DOCUMENT_TYPES_CONSULTOR,
   formatDate
 } from "../components/dashboard/DashboardShared";
+import { getWebmailStats } from "../services/api";
 
 const ConsultorDashboard = () => {
   const navigate = useNavigate();
   
+  // Webmail stats
+  const [webmailStats, setWebmailStats] = useState({ unread_count: 0, sent_today_count: 0, drafts_count: 0 });
+
   // Hook para dados do dashboard
   const {
     processes,
@@ -43,6 +47,13 @@ const ConsultorDashboard = () => {
     setStatusFilter,
     fetchData
   } = useDashboardData();
+
+  // Fetch webmail stats
+  useEffect(() => {
+    getWebmailStats()
+      .then(res => setWebmailStats(res.data))
+      .catch(() => {});
+  }, []);
 
   // Hook para gestão de documentos
   const {
@@ -113,7 +124,7 @@ const ConsultorDashboard = () => {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
           <StatCard
             icon={Users}
             iconColor="text-blue-600"
@@ -142,6 +153,30 @@ const ConsultorDashboard = () => {
             value={processes.filter(p => p.status === "aprovado").length}
             label="Aprovados"
           />
+          {/* Email KPI Card */}
+          <Card 
+            className={`cursor-pointer hover:shadow-md transition-shadow ${webmailStats.unread_count > 0 ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200" : "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50"}`}
+            onClick={() => navigate('/webmail')}
+          >
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-4">
+                <div className={`p-3 ${webmailStats.unread_count > 0 ? "bg-amber-100 dark:bg-amber-900/30" : "bg-emerald-100 dark:bg-emerald-900/30"} rounded-lg`}>
+                  <Mail className={`h-6 w-6 ${webmailStats.unread_count > 0 ? "text-amber-600" : "text-emerald-600"}`} />
+                </div>
+                <div>
+                  <p className={`text-2xl font-bold ${webmailStats.unread_count > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                    {webmailStats.unread_count}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {webmailStats.unread_count === 1 ? "Email Não Lido" : "Emails Não Lidos"}
+                  </p>
+                  <p className="text-xs font-medium text-primary hover:underline">
+                    Abrir Webmail →
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Main Tabs */}

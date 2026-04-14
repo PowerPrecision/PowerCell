@@ -24,7 +24,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Loader2, LayoutGrid, Calendar, Users, FileText, FileX, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert, Mail, Send, Trash2, Edit3, ChevronRight, AlertCircle } from "lucide-react";
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
-import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft } from "../services/api";
+import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft, getWebmailStats } from "../services/api";
 import SmartClientSearch from "../components/SmartClientSearch";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -111,6 +111,9 @@ const StaffDashboard = () => {
   const [expandedDraft, setExpandedDraft] = useState(null);
   const [sendingDraft, setSendingDraft] = useState(null);
   
+  // Estado para estatísticas de webmail
+  const [webmailStats, setWebmailStats] = useState({ unread_count: 0, sent_today_count: 0, drafts_count: 0 });
+
   // Estado para criação de nova lead
   const [showLeadDialog, setShowLeadDialog] = useState(false);
   const [creatingLead, setCreatingLead] = useState(false);
@@ -140,16 +143,18 @@ const StaffDashboard = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [statsRes, usersRes, expiriesRes, deadlinesRes] = await Promise.all([
+      const [statsRes, usersRes, expiriesRes, deadlinesRes, webmailRes] = await Promise.all([
         getStats().catch(() => ({ data: {} })),
         getUsers().catch(() => ({ data: [] })),
         getUpcomingExpiries(60).catch(() => ({ data: [] })),
         getCalendarDeadlines().catch(() => ({ data: [] })),
+        getWebmailStats().catch(() => ({ data: { unread_count: 0, sent_today_count: 0, drafts_count: 0 } })),
       ]);
       setStats(statsRes.data);
       setUsers(usersRes.data);
       setExpiries(expiriesRes.data);
       setDeadlines(deadlinesRes.data);
+      setWebmailStats(webmailRes.data);
     } catch (error) {
       console.error("Error fetching data:", error);
       toast.error("Erro ao carregar dados");
@@ -284,8 +289,8 @@ const StaffDashboard = () => {
               <div className="h-4 w-56 bg-muted animate-pulse rounded" />
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[1,2,3,4].map(i => <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />)}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+            {[1,2,3,4,5,6,7].map(i => <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />)}
           </div>
           <div className="h-10 bg-muted animate-pulse rounded" />
           <div className="grid gap-4 md:grid-cols-2">
@@ -320,7 +325,7 @@ const StaffDashboard = () => {
         </div>
 
         {/* Quick Stats - Clickable cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
           <Card 
             className="cursor-pointer hover:shadow-md transition-shadow"
             onClick={() => navigate('/processos')}
@@ -401,6 +406,35 @@ const StaffDashboard = () => {
                     {stats.pending_tasks || 0} tarefas • {stats.pending_deadlines || 0} prazos
                   </p>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+          {/* Email KPI Card */}
+          <Card 
+            className={`cursor-pointer hover:shadow-md transition-shadow ${webmailStats.unread_count > 0 ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200" : "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50"}`}
+            onClick={() => navigate('/webmail')}
+          >
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1 mb-1">
+                  <Mail className="h-4 w-4" />
+                </div>
+                <p className={`text-3xl font-bold ${webmailStats.unread_count > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                  {webmailStats.unread_count}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {webmailStats.unread_count === 1 ? "Email Não Lido" : "Emails Não Lidos"}
+                </p>
+                {(webmailStats.sent_today_count > 0 || webmailStats.drafts_count > 0) && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {webmailStats.sent_today_count > 0 && `${webmailStats.sent_today_count} enviado${webmailStats.sent_today_count !== 1 ? "s" : ""} hoje`}
+                    {webmailStats.sent_today_count > 0 && webmailStats.drafts_count > 0 && " · "}
+                    {webmailStats.drafts_count > 0 && `${webmailStats.drafts_count} rascunho${webmailStats.drafts_count !== 1 ? "s" : ""}`}
+                  </p>
+                )}
+                <p className="text-xs font-medium text-primary mt-1.5 hover:underline">
+                  Abrir Webmail
+                </p>
               </div>
             </CardContent>
           </Card>
