@@ -184,3 +184,15 @@ class LabelUpdateRequest(BaseModel):
     """Payload para atualizar uma label."""
     name: Optional[str] = None
     color: Optional[str] = None
+
+
+class FolderCreateRequest(BaseModel):
+    """Payload para criar uma pasta."""
+    name: str
+    color: Optional[str] = "#6b7280"
+
+
+class FolderUpdateRequest(BaseModel):
+    """Payload para atualizar uma pasta."""
+    name: Optional[str] = None
+    color: Optional[str] = None

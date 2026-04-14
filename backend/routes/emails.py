@@ -29,7 +29,8 @@ from database import db
 from models.email import (
     EmailCreate, EmailUpdate, EmailResponse, EmailDirection, EmailStatus,
     EmailMarkType, EmailTemplateCreate, EmailTemplateResponse, EmailFilter, EmailSendRequest,
-    LabelCreateRequest, LabelUpdateRequest
+    LabelCreateRequest, LabelUpdateRequest,
+    FolderCreateRequest, FolderUpdateRequest
 )
 from services.auth import get_current_user
 from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails
@@ -1049,6 +1050,174 @@ async def delete_label(
     return {"success": True, "message": f"Label '{label_name}' eliminada"}
 
 
+# ==== FOLDERS CRUD (user-level custom folders) ====
+
+DEFAULT_FOLDER_COLORS = [
+    "#6b7280", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6",
+    "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1"
+]
+
+
+@router.get("/folders")
+async def list_folders(
+    current_user: dict = Depends(get_current_user)
+):
+    """Listar todas as pastas personalizadas do utilizador."""
+    user_id = current_user["id"]
+    folders = await db.email_folders.find(
+        {"user_id": user_id}, {"_id": 0}
+    ).sort("created_at", 1).to_list(100)
+
+    # Get email counts for each folder
+    folder_ids = [f["id"] for f in folders]
+    counts = {}
+    if folder_ids:
+        pipeline = [
+            {"$match": {"folder_id": {"$in": folder_ids}, "is_archived": False}},
+            {"$group": {"_id": "$folder_id", "count": {"$sum": 1}}}
+        ]
+        async for doc in db.emails.aggregate(pipeline):
+            counts[doc["_id"]] = doc["count"]
+
+    result = []
+    for f in folders:
+        f_copy = dict(f)
+        f_copy["email_count"] = counts.get(f["id"], 0)
+        result.append(f_copy)
+
+    return {"folders": result}
+
+
+@router.post("/folders")
+async def create_folder(
+    payload: FolderCreateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Criar uma nova pasta personalizada."""
+    user_id = current_user["id"]
+    name = sanitize_string(payload.name.strip(), max_length=40)
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome da pasta é obrigatório")
+
+    # Check for duplicate name
+    dup = await db.email_folders.find_one({"user_id": user_id, "name": name})
+    if dup:
+        raise HTTPException(status_code=409, detail="Já existe uma pasta com esse nome")
+
+    # Validate color or use default
+    color = payload.color.strip() if payload.color else "#6b7280"
+    if not _validate_hex_color(color):
+        color = "#6b7280"
+
+    folder_doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "color": color,
+        "user_id": user_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.email_folders.insert_one(folder_doc)
+    folder_doc.pop("_id", None)
+    folder_doc["email_count"] = 0
+
+    logger.info(f"Pasta criada: {name} ({color}) por {current_user['email']}")
+    return folder_doc
+
+
+@router.put("/folders/{folder_id}")
+async def update_folder(
+    folder_id: str,
+    payload: FolderUpdateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Atualizar nome e/ou cor de uma pasta."""
+    user_id = current_user["id"]
+    folder = await db.email_folders.find_one({"id": folder_id, "user_id": user_id})
+    if not folder:
+        raise HTTPException(status_code=404, detail="Pasta não encontrada")
+
+    update_data = {}
+    if payload.name is not None:
+        new_name = sanitize_string(payload.name.strip(), max_length=40)
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Nome da pasta é obrigatório")
+        dup = await db.email_folders.find_one({"user_id": user_id, "name": new_name, "id": {"$ne": folder_id}})
+        if dup:
+            raise HTTPException(status_code=409, detail="Já existe uma pasta com esse nome")
+        update_data["name"] = new_name
+    if payload.color is not None:
+        color = payload.color.strip()
+        if not _validate_hex_color(color):
+            color = "#6b7280"
+        update_data["color"] = color
+
+    if update_data:
+        await db.email_folders.update_one({"id": folder_id}, {"$set": update_data})
+
+    updated = await db.email_folders.find_one({"id": folder_id}, {"_id": 0})
+    logger.info(f"Pasta {folder_id} atualizada por {current_user['email']}")
+    return updated
+
+
+@router.delete("/folders/{folder_id}")
+async def delete_folder(
+    folder_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Eliminar pasta e remover referência dos emails (emails voltam à pasta de origem)."""
+    user_id = current_user["id"]
+    folder = await db.email_folders.find_one({"id": folder_id, "user_id": user_id})
+    if not folder:
+        raise HTTPException(status_code=404, detail="Pasta não encontrada")
+
+    folder_name = folder["name"]
+
+    # Remove folder_id from all emails in this folder (they go back to inbox)
+    await db.emails.update_many(
+        {"folder_id": folder_id},
+        {"$unset": {"folder_id": ""}}
+    )
+
+    # Delete folder document
+    await db.email_folders.delete_one({"id": folder_id})
+
+    logger.info(f"Pasta '{folder_name}' ({folder_id}) eliminada por {current_user['email']}")
+    return {"success": True, "message": f"Pasta '{folder_name}' eliminada"}
+
+
+@router.post("/emails/move-to-folder")
+async def move_emails_to_folder(
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Mover um ou mais emails para uma pasta personalizada."""
+    email_ids = data.get("email_ids", [])
+    folder_id = data.get("folder_id")  # None/empty = remove from folder
+
+    if not email_ids:
+        raise HTTPException(status_code=400, detail="Selecione pelo menos um email")
+
+    if folder_id:
+        # Validate folder exists
+        folder = await db.email_folders.find_one({"id": folder_id})
+        if not folder:
+            raise HTTPException(status_code=404, detail="Pasta não encontrada")
+
+    update = {"$set": {"folder_id": folder_id}} if folder_id else {"$unset": {"folder_id": ""}}
+
+    result = await db.emails.update_many(
+        {"id": {"$in": email_ids}},
+        update
+    )
+
+    return {
+        "success": True,
+        "modified_count": result.modified_count,
+        "folder_id": folder_id
+    }
+
+
 # ==== ATTACHMENT UPLOAD ====
 
 @router.post("/attachments/upload")
@@ -1747,11 +1916,13 @@ async def get_configured_accounts(
 
 @router.get("/webmail")
 async def webmail_list(
-    folder: str = Query("inbox", description="Pasta: inbox, sent, drafts, starred, trash"),
+    folder: str = Query("inbox", description="Pasta: inbox, sent, drafts, starred, trash, custom"),
     page: int = Query(1, ge=1),
     limit: int = Query(30, le=100),
     account: Optional[str] = Query(None, description="Conta IMAP: power, precision"),
     search: Optional[str] = Query(None, description="Pesquisa texto"),
+    label: Optional[str] = Query(None, description="Filtrar por label"),
+    custom_folder: Optional[str] = Query(None, description="ID de pasta personalizada"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1762,6 +1933,7 @@ async def webmail_list(
     - starred: emails marcados como estrela
     - trash: emails arquivados
     - drafts: emails com status=draft
+    - custom: emails numa pasta personalizada (requer custom_folder param)
     """
     query = {"is_archived": False}
     
@@ -1781,6 +1953,10 @@ async def webmail_list(
         query["is_archived"] = True
     elif folder == "drafts":
         query["status"] = "draft"
+    elif folder == "custom":
+        if not custom_folder:
+            raise HTTPException(status_code=400, detail="ID da pasta não especificado")
+        query["folder_id"] = custom_folder
     
     # Pesquisa textual
     if search:

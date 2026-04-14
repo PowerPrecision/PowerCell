@@ -1,6 +1,59 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: 5
+Agent: Frontend Agent
+Task: Implement Custom Folders UI in WebmailPage
+
+Work Log:
+- **Imports (line 65-71)**: Added 7 lucide-react icons: `FolderPlus, FolderOpen, Folder, FolderInput, Pencil, MoreVertical`. All existing imports preserved.
+- **Custom folders state variables (line 200-209)**: Added 9 new state variables: `customFolders`, `activeCustomFolder`, `folderDialogOpen`, `folderDialogMode`, `folderDialogData`, `folderDialogSaving`, `moveFolderOpen`, `contextMenuPosition`, `contextMenuFolder`.
+- **fetchCustomFolders (line 242-259)**: New `useCallback` fetching `GET /api/emails/folders` with auth. Returns `data.folders` array. `useEffect` on mount triggers fetch.
+- **fetchEmails modified (line 264-283)**: Added 5th parameter `customFolderId`. When set, uses `folder: "custom"` and appends `custom_folder=<id>` query param.
+- **useEffect updated (line 308-319)**: Now checks `activeCustomFolder` first — if set, calls `fetchEmails("custom", ...)` with folder ID. Added `activeCustomFolder` to dependency array.
+- **handleSearchChange updated (line 321-335)**: Passes `activeCustomFolder` through to `fetchEmails` when in custom folder view.
+- **handleRefresh updated (line 337-344)**: Same custom folder awareness as search.
+- **handleSyncEmails updated (line 393-406)**: Refresh respects active custom folder after sync.
+- **Folder CRUD handlers (line 807-918)**:
+  - `handleOpenFolderDialog(mode, folder)`: Opens create/edit dialog with appropriate defaults.
+  - `handleSaveFolder()`: POST/PUT to `/api/emails/folders`. Validates name, shows toast on success/error.
+  - `handleDeleteFolder(folder)`: DELETE to `/api/emails/folders/{id}`. Resets `activeCustomFolder` if deleted folder was active.
+  - `handleMoveToFolder(folderId)`: POST to `/api/emails/emails/move-to-folder`. Works with both selectedEmails (multi-select) and selectedEmail (single). Clears selection and refreshes.
+- **Sidebar folders updated (line 1051-1060)**: System folder buttons now clear `activeCustomFolder(null)` on click. Active state checks both `!selectedLabel && !activeCustomFolder`.
+- **Custom Folders sidebar section (line 1131-1199)**: New "Pastas" section after Marcadores, before footer. Shows FolderPlus button for creating. Lists custom folders with FolderOpen icon (colored when active), name, email_count badge, and hover-revealed MoreVertical context menu trigger.
+- **List header title updated (line 1221-1244)**: Shows custom folder name when `activeCustomFolder` is set, with X button to deselect. Falls back to label name, then system folder name.
+- **Move to Folder toolbar button (line 1017-1033)**: Visible in top bar when multi-select mode active and emails selected. Shows FolderInput icon, "Mover" label, and selected count badge.
+- **Move to Folder in reading pane (line 1601-1612)**: Tooltip-wrapped FolderInput button in email detail action toolbar (alongside Reply, Forward, Star, Link).
+- **Folder Context Menu (line 2039-2077)**: Absolutely positioned menu with fixed inset-0 backdrop for outside-click dismiss. "Renomear" opens edit dialog. "Eliminar" uses window.confirm before calling DELETE.
+- **Folder Create/Edit Dialog (line 2079-2140)**: Dialog with name Input (Enter to submit) and 10 color swatches. Create mode: "Nova Pasta" title, POST. Edit mode: "Editar Pasta" title, PUT.
+- **Move to Folder Dialog (line 2142-2179)**: Dialog listing "Caixa de Entrada" + all custom folders. Click to move. Shows email count per folder.
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/src/pages/WebmailPage.jsx` (1761 → 2186 linhas, +425)
+- Vite build OK, sem erros
+- Todas as funcionalidades existentes preservadas (labels, multi-select, composer, sync, etc.)
+- Todo o texto em português
+- APIs consumidas: GET/POST/PUT/DELETE /api/emails/folders, POST /api/emails/emails/move-to-folder, GET /api/emails/webmail?folder=custom&custom_folder=...
+
+---
+Task ID: 2
+Agent: Backend Agent
+Task: Create Custom Email Folders backend system
+
+Work Log:
+- Added FolderCreateRequest and FolderUpdateRequest Pydantic models
+- Added GET /folders, POST /folders, PUT /folders/{id}, DELETE /folders/{id} endpoints
+- Added POST /emails/move-to-folder endpoint for moving emails
+- Updated webmail_list to support custom_folder query parameter
+- All endpoints follow existing patterns with auth, sanitization, validation
+
+Stage Summary:
+- email_folders MongoDB collection used for custom folders
+- folder_id field on emails references custom folders
+- Folder deletion removes folder_id from emails (back to inbox)
+- Folder counts returned via aggregation pipeline
+
+---
 Task ID: 2-b
 Agent: Frontend Agent
 Task: Refactor WebmailPage.jsx — Labels Sidebar, Multi-Select, Attachment Cards, Drag & Drop
