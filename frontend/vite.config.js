@@ -101,7 +101,7 @@ export default defineConfig(({ mode }) => {
       'process.env.REACT_APP_BACKEND_URL': JSON.stringify(
         env.REACT_APP_BACKEND_URL ||
         process.env.REACT_APP_BACKEND_URL ||
-        'https://powercell-1.onrender.com'
+        'https://powercell.onrender.com'
       ),
     },
     
