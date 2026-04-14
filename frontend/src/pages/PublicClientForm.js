@@ -29,7 +29,7 @@
  * <PublicClientForm previewMode={false} />
  * // No modo normal, submete para /api/public/client-registration
  */
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
