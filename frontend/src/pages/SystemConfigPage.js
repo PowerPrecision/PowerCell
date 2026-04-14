@@ -1284,7 +1284,7 @@ const SystemConfigPage = () => {
               cópia <strong>mascarada de Produção</strong>.
             </p>
             <ul className="list-disc list-inside space-y-1 ml-1 text-muted-foreground">
-              <li>Emails de clientes → <code className="text-xs bg-muted px-1 rounded">user{id}@powercell.dev</code></li>
+              <li>Emails de clientes → <code className="text-xs bg-muted px-1 rounded">user&#123;id&#125;@powercell.dev</code></li>
               <li>NIFs → NIFs falsos mas válidos</li>
               <li>Telefones → Números baralhados</li>
               <li>Nomes → Apelidos ofuscados</li>
