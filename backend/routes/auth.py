@@ -677,8 +677,8 @@ async def diagnose_login(email: str):
 @router.post("/fix-passwords")
 async def fix_broken_passwords(data: dict):
     """
-    Corrige passwords com hash SHA-256 para bcrypt.
-    Como SHA-256 não é reversível, reseta a password para um valor default.
+    Reset de password para qualquer utilizador.
+    Aceita qualquer formato de hash actual (bcrypt, SHA-256, etc.).
     """
     admin_key = data.get("admin_key")
     if not admin_key or admin_key != "PowerCellFix2025":
@@ -697,17 +697,10 @@ async def fix_broken_passwords(data: dict):
     if not user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
 
-    pw = user.get("password") or user.get("hashed_password", "")
-    hash_format = _detect_hash_format(pw)
+    new_password = data.get("new_password", "PowerCell2025")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password deve ter pelo menos 6 caracteres")
 
-    if hash_format != "sha256_broken":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Password não está em formato SHA-256 (formato actual: {hash_format}). Não é necessário corrigir."
-        )
-
-    # Resetar para password default
-    new_password = "PowerCell2025"
     new_hash = hash_password(new_password)
 
     field = "password" if user.get("password") else "hashed_password"
@@ -719,11 +712,11 @@ async def fix_broken_passwords(data: dict):
         }}
     )
 
-    logger.warning(f"PASSWORD FIX: Utilizador {user.get('id')} ({clean_email}) — SHA-256 → bcrypt (password resetada)")
+    logger.warning(f"PASSWORD RESET: Utilizador {user.get('id')} ({clean_email}) — password resetada por admin")
 
     return {
         "success": True,
         "email": clean_email,
-        "message": f"Password corrigida. Password temporária: {new_password} — alterar imediatamente após login."
+        "message": f"Password actualizada com sucesso."
     }
 
