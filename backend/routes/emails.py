@@ -2104,9 +2104,13 @@ async def webmail_list(
     """
     query = {"is_archived": False}
     
-    # Filtrar por conta IMAP
+    # Conditions that need $or handling
+    or_conditions = []
+    
+    # Filtrar por conta IMAP (mostrar também emails sem campo 'account' para compatibilidade)
     if account:
-        query["account"] = account
+        or_conditions.append({"account": account})
+        or_conditions.append({"account": {"$exists": False}})
     
     if folder == "inbox":
         query["direction"] = "received"
@@ -2128,12 +2132,18 @@ async def webmail_list(
     # Pesquisa textual
     if search:
         search = sanitize_string(search, max_length=200)
-        query["$or"] = [
+        search_or = [
             {"subject": {"$regex": search, "$options": "i"}},
             {"body": {"$regex": search, "$options": "i"}},
             {"from_email": {"$regex": search, "$options": "i"}},
             {"to_emails": {"$regex": search, "$options": "i"}},
         ]
+        if or_conditions:
+            query["$and"] = [{"$or": or_conditions}, {"$or": search_or}]
+        else:
+            query["$or"] = search_or
+    elif or_conditions:
+        query["$or"] = or_conditions
     
     skip = (page - 1) * limit
     total = await db.emails.count_documents(query)
