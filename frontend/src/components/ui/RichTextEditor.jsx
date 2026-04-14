@@ -216,6 +216,7 @@ const RichTextEditor = ({
     'align',
     'link',
     'image',
+    'blockquote', 'code-block',
   ], []);
 
   // Classes do container

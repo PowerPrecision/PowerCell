@@ -62,6 +62,12 @@ import {
   Upload,
   Download,
   Trash2,
+  FolderPlus,
+  FolderOpen,
+  Folder,
+  FolderInput,
+  Pencil,
+  MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isToday, isYesterday } from "date-fns";
@@ -191,6 +197,17 @@ const WebmailPage = () => {
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Custom folders state
+  const [customFolders, setCustomFolders] = useState([]);
+  const [activeCustomFolder, setActiveCustomFolder] = useState(null);
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [folderDialogMode, setFolderDialogMode] = useState("create"); // "create" | "edit"
+  const [folderDialogData, setFolderDialogData] = useState({ name: "", color: "#6b7280" });
+  const [folderDialogSaving, setFolderDialogSaving] = useState(false);
+  const [moveFolderOpen, setMoveFolderOpen] = useState(false);
+  const [contextMenuPosition, setContextMenuPosition] = useState(null);
+  const [contextMenuFolder, setContextMenuFolder] = useState(null);
+
   // Debounce search
   const searchTimeoutRef = useRef(null);
 
@@ -220,14 +237,37 @@ const WebmailPage = () => {
   }, [fetchLabels]);
 
   // ============================================================
+  // FETCH CUSTOM FOLDERS
+  // ============================================================
+  const fetchCustomFolders = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/emails/folders`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCustomFolders(Array.isArray(data.folders) ? data.folders : []);
+      }
+    } catch {
+      // Silently fail
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchCustomFolders();
+  }, [fetchCustomFolders]);
+
+  // ============================================================
   // FETCH EMAILS
   // ============================================================
-  const fetchEmails = useCallback(async (folder, page, search, label) => {
+  const fetchEmails = useCallback(async (folder, page, search, label, customFolderId) => {
     if (!token) return;
     setLoading(true);
     try {
+      const actualFolder = customFolderId ? "custom" : (folder || activeFolder);
       const params = new URLSearchParams({
-        folder: folder || activeFolder,
+        folder: actualFolder,
         page: String(page || 1),
         limit: "30",
         account: account,
@@ -237,6 +277,9 @@ const WebmailPage = () => {
       }
       if (label) {
         params.append("label", label);
+      }
+      if (customFolderId) {
+        params.append("custom_folder", customFolderId);
       }
 
       const response = await fetch(
@@ -264,12 +307,16 @@ const WebmailPage = () => {
 
   // Carregar emails quando muda pasta, página ou label
   useEffect(() => {
-    fetchEmails(activeFolder, currentPage, "", selectedLabel);
+    if (activeCustomFolder) {
+      fetchEmails("custom", currentPage, "", null, activeCustomFolder);
+    } else {
+      fetchEmails(activeFolder, currentPage, "", selectedLabel);
+    }
     setSelectedEmail(null);
     setEmailDetail(null);
     setShowMobileReading(false);
     setSelectedEmails(new Set());
-  }, [activeFolder, currentPage, selectedLabel, fetchEmails]);
+  }, [activeFolder, currentPage, selectedLabel, activeCustomFolder, fetchEmails]);
 
   // Debounced search
   const handleSearchChange = useCallback((value) => {
@@ -279,14 +326,22 @@ const WebmailPage = () => {
     }
     searchTimeoutRef.current = setTimeout(() => {
       setCurrentPage(1);
-      fetchEmails(activeFolder, 1, value, selectedLabel);
+      if (activeCustomFolder) {
+        fetchEmails("custom", 1, value, null, activeCustomFolder);
+      } else {
+        fetchEmails(activeFolder, 1, value, selectedLabel);
+      }
     }, 400);
-  }, [activeFolder, fetchEmails, selectedLabel]);
+  }, [activeFolder, fetchEmails, selectedLabel, activeCustomFolder]);
 
   // Refresh
   const handleRefresh = useCallback(() => {
-    fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
-  }, [activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel]);
+    if (activeCustomFolder) {
+      fetchEmails("custom", currentPage, searchQuery, null, activeCustomFolder);
+    } else {
+      fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
+    }
+  }, [activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel, activeCustomFolder]);
 
   // ============================================================
   // SYNC EMAILS (IMAP → DB)
@@ -337,14 +392,18 @@ const WebmailPage = () => {
       }
       setLastSyncTime(new Date());
       // Refresh the list
-      fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
+      if (activeCustomFolder) {
+        fetchEmails("custom", currentPage, searchQuery, null, activeCustomFolder);
+      } else {
+        fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
+      }
     } catch (error) {
       console.error("Erro ao sincronizar emails:", error);
       toast.error("Erro de ligação ao servidor");
     } finally {
       setSyncing(false);
     }
-  }, [token, account, syncing, activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel]);
+  }, [token, account, syncing, activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel, activeCustomFolder]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
@@ -746,6 +805,119 @@ const WebmailPage = () => {
   }, []);
 
   // ============================================================
+  // FOLDER CRUD HANDLERS
+  // ============================================================
+  const handleOpenFolderDialog = useCallback((mode = "create", folder = null) => {
+    setFolderDialogMode(mode);
+    if (mode === "edit" && folder) {
+      setFolderDialogData({ name: folder.name, color: folder.color });
+    } else {
+      setFolderDialogData({ name: "", color: "#6b7280" });
+    }
+    setFolderDialogOpen(true);
+  }, []);
+
+  const handleSaveFolder = useCallback(async () => {
+    if (!folderDialogData.name.trim()) {
+      toast.error("Nome da pasta é obrigatório");
+      return;
+    }
+    setFolderDialogSaving(true);
+    try {
+      const url = folderDialogMode === "create"
+        ? `${API_URL}/api/emails/folders`
+        : `${API_URL}/api/emails/folders/${contextMenuFolder?.id}`;
+      const method = folderDialogMode === "create" ? "POST" : "PUT";
+      
+      const res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: folderDialogData.name.trim(),
+          color: folderDialogData.color,
+        }),
+      });
+
+      if (res.ok) {
+        toast.success(folderDialogMode === "create" ? "Pasta criada" : "Pasta atualizada");
+        setFolderDialogOpen(false);
+        fetchCustomFolders();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.detail || "Erro ao guardar pasta");
+      }
+    } catch {
+      toast.error("Erro de ligação ao servidor");
+    } finally {
+      setFolderDialogSaving(false);
+    }
+  }, [folderDialogData, folderDialogMode, contextMenuFolder, token, fetchCustomFolders]);
+
+  const handleDeleteFolder = useCallback(async (folder) => {
+    if (!folder) return;
+    try {
+      const res = await fetch(`${API_URL}/api/emails/folders/${folder.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast.success(`Pasta "${folder.name}" eliminada`);
+        if (activeCustomFolder === folder.id) {
+          setActiveCustomFolder(null);
+          setActiveFolder("inbox");
+        }
+        fetchCustomFolders();
+      } else {
+        toast.error("Erro ao eliminar pasta");
+      }
+    } catch {
+      toast.error("Erro ao eliminar pasta");
+    }
+    setContextMenuPosition(null);
+  }, [token, activeCustomFolder, fetchCustomFolders]);
+
+  const handleMoveToFolder = useCallback(async (folderId) => {
+    const emailIds = selectedEmails.size > 0
+      ? Array.from(selectedEmails)
+      : selectedEmail ? [selectedEmail.id] : [];
+    
+    if (emailIds.length === 0) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/emails/emails/move-to-folder`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email_ids: emailIds,
+          folder_id: folderId || null,
+        }),
+      });
+
+      if (res.ok) {
+        const folderName = folderId
+          ? customFolders.find(f => f.id === folderId)?.name || "Pasta"
+          : "Caixa de Entrada";
+        toast.success(`${emailIds.length} email${emailIds.length !== 1 ? "s" : ""} movido${emailIds.length !== 1 ? "s" : ""} para "${folderName}"`);
+        setMoveFolderOpen(false);
+        setSelectedEmails(new Set());
+        setMultiSelectMode(false);
+        handleRefresh();
+        fetchCustomFolders();
+      } else {
+        toast.error("Erro ao mover emails");
+      }
+    } catch {
+      toast.error("Erro ao mover emails");
+    }
+  }, [selectedEmails, selectedEmail, token, customFolders, handleRefresh, fetchCustomFolders]);
+
+  // ============================================================
   // FOLDER COUNTS (derived from email list data)
   // ============================================================
   const folderCounts = useMemo(() => {
@@ -841,6 +1013,24 @@ const WebmailPage = () => {
             </TooltipTrigger>
             <TooltipContent>Atualizar</TooltipContent>
           </Tooltip>
+
+          {/* Move to Folder (visible in multi-select mode) */}
+          {(multiSelectMode && selectedEmails.size > 0) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => setMoveFolderOpen(true)}
+            >
+              <FolderInput className="h-4 w-4" />
+              Mover
+              {selectedEmails.size > 0 && (
+                <Badge variant="secondary" className="h-5 text-[10px] px-1.5">
+                  {selectedEmails.size}
+                </Badge>
+              )}
+            </Button>
+          )}
         </div>
 
         {/* ===== THREE PANE LAYOUT ===== */}
@@ -876,7 +1066,7 @@ const WebmailPage = () => {
             <nav className="p-2 space-y-0.5">
               {FOLDERS.map((folder) => {
                 const Icon = folder.icon;
-                const isActive = activeFolder === folder.id && !selectedLabel;
+                const isActive = activeFolder === folder.id && !selectedLabel && !activeCustomFolder;
                 return (
                   <button
                     key={folder.id}
@@ -884,6 +1074,7 @@ const WebmailPage = () => {
                       setActiveFolder(folder.id);
                       setCurrentPage(1);
                       setSelectedLabel(null);
+                      setActiveCustomFolder(null);
                     }}
                     className={`
                       w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm
@@ -955,6 +1146,76 @@ const WebmailPage = () => {
               </>
             )}
 
+            {/* Pastas Personalizadas */}
+            <div className="px-2 pt-1 pb-1">
+              <div className="flex items-center justify-between px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Pastas
+                  </span>
+                </div>
+                <button
+                  onClick={() => { setContextMenuFolder(null); handleOpenFolderDialog("create"); }}
+                  className="p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
+                  title="Nova pasta"
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="space-y-0.5">
+                {customFolders.map((folder) => {
+                  const isFolderActive = activeCustomFolder === folder.id;
+                  return (
+                    <div key={folder.id} className="relative group">
+                      <button
+                        onClick={() => {
+                          setActiveCustomFolder(isFolderActive ? null : folder.id);
+                          setActiveFolder("inbox");
+                          setCurrentPage(1);
+                          setSelectedLabel(null);
+                        }}
+                        className={`
+                          w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm
+                          transition-colors text-left
+                          ${
+                            isFolderActive
+                              ? "bg-accent text-accent-foreground font-medium"
+                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                          }
+                        `}
+                      >
+                        <FolderOpen className={`h-4 w-4 shrink-0 ${isFolderActive ? "text-foreground" : ""}`}
+                          style={isFolderActive ? { color: folder.color } : {}}
+                        />
+                        <span className="flex-1 truncate">{folder.name}</span>
+                        {folder.email_count > 0 && (
+                          <Badge
+                            variant="secondary"
+                            className="h-5 min-w-[20px] flex items-center justify-center text-[10px] px-1.5"
+                          >
+                            {folder.email_count}
+                          </Badge>
+                        )}
+                        {/* Context menu trigger - only visible on hover */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setContextMenuFolder(folder);
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setContextMenuPosition({ x: rect.left, y: rect.bottom });
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent/70 transition-opacity"
+                        >
+                          <MoreVertical className="h-3 w-3" />
+                        </button>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Footer info */}
             <div className="mt-auto p-3 border-t space-y-1">
               <p className="text-[10px] text-muted-foreground">
@@ -977,10 +1238,20 @@ const WebmailPage = () => {
             <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold">
-                  {selectedLabel
+                  {activeCustomFolder
+                    ? customFolders.find((f) => f.id === activeCustomFolder)?.name || "Pasta"
+                    : selectedLabel
                     ? labels.find((l) => l.id === selectedLabel)?.name || "Marcador"
                     : FOLDERS.find((f) => f.id === activeFolder)?.label}
                 </h2>
+                {activeCustomFolder && (
+                  <button
+                    onClick={() => setActiveCustomFolder(null)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
                 {selectedLabel && (
                   <button
                     onClick={() => setSelectedLabel(null)}
@@ -1326,6 +1597,18 @@ const WebmailPage = () => {
                           ? "Já associado a um processo"
                           : "Associar a processo"}
                       </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => setMoveFolderOpen(true)}
+                          className="p-1.5 rounded-md hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
+                          title="Mover para pasta"
+                        >
+                          <FolderInput className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>Mover para pasta</TooltipContent>
                     </Tooltip>
                     {emailDetail.process_id && (
                       <Button
@@ -1747,6 +2030,148 @@ const WebmailPage = () => {
               {!linkSearchLoading && linkSearchQuery.trim().length < 2 && (
                 <p className="text-sm text-muted-foreground text-center py-4">
                   Introduza pelo menos 2 caracteres para pesquisar
+                </p>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* ===== FOLDER CONTEXT MENU ===== */}
+        {contextMenuPosition && contextMenuFolder && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setContextMenuPosition(null)}
+            />
+            <div
+              className="absolute z-50 bg-popover border rounded-md shadow-lg py-1 min-w-[140px]"
+              style={{
+                left: `${contextMenuPosition.x}px`,
+                top: `${contextMenuPosition.y}px`,
+              }}
+            >
+              <button
+                onClick={() => {
+                  setContextMenuPosition(null);
+                  handleOpenFolderDialog("edit", contextMenuFolder);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent/50 text-left"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Renomear
+              </button>
+              <button
+                onClick={() => {
+                  setContextMenuPosition(null);
+                  if (window.confirm(`Eliminar pasta "${contextMenuFolder.name}"? Os emails serão movidos para a Caixa de Entrada.`)) {
+                    handleDeleteFolder(contextMenuFolder);
+                  }
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent/50 text-left text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Eliminar
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ===== FOLDER CREATE/EDIT DIALOG ===== */}
+        <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>
+                {folderDialogMode === "create" ? "Nova Pasta" : "Editar Pasta"}
+              </DialogTitle>
+              <DialogDescription>
+                {folderDialogMode === "create"
+                  ? "Crie uma pasta para organizar os seus emails"
+                  : "Altere o nome ou cor da pasta"}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nome da pasta</label>
+                <Input
+                  placeholder="Ex: Clientes VIP, Documentação..."
+                  value={folderDialogData.name}
+                  onChange={(e) =>
+                    setFolderDialogData((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  maxLength={40}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveFolder();
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Cor</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    "#6b7280", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6",
+                    "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1",
+                  ].map((color) => (
+                    <button
+                      key={color}
+                      onClick={() =>
+                        setFolderDialogData((prev) => ({ ...prev, color }))
+                      }
+                      className={`w-7 h-7 rounded-full border-2 transition-transform ${
+                        folderDialogData.color === color
+                          ? "border-foreground scale-110"
+                          : "border-transparent hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setFolderDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveFolder} disabled={folderDialogSaving}>
+                {folderDialogSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {folderDialogMode === "create" ? "Criar Pasta" : "Guardar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ===== MOVE TO FOLDER DIALOG ===== */}
+        <Dialog open={moveFolderOpen} onOpenChange={setMoveFolderOpen}>
+          <DialogContent className="sm:max-w-[350px]">
+            <DialogHeader>
+              <DialogTitle>Mover para pasta</DialogTitle>
+              <DialogDescription>
+                Selecione a pasta de destino ou "Caixa de Entrada" para remover da pasta atual
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1 py-2 max-h-60 overflow-y-auto">
+              <button
+                onClick={() => handleMoveToFolder(null)}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm hover:bg-accent/50 text-left"
+              >
+                <Inbox className="h-4 w-4 text-muted-foreground" />
+                <span>Caixa de Entrada</span>
+              </button>
+              {customFolders.map((folder) => (
+                <button
+                  key={folder.id}
+                  onClick={() => handleMoveToFolder(folder.id)}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm hover:bg-accent/50 text-left"
+                >
+                  <FolderOpen className="h-4 w-4" style={{ color: folder.color }} />
+                  <span className="flex-1 truncate">{folder.name}</span>
+                  {folder.email_count > 0 && (
+                    <span className="text-xs text-muted-foreground">{folder.email_count}</span>
+                  )}
+                </button>
+              ))}
+              {customFolders.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Sem pastas personalizadas
                 </p>
               )}
             </div>
