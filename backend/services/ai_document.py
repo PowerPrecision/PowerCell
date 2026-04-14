@@ -4,6 +4,12 @@ AI DOCUMENT ANALYSIS SERVICE - CREDITOIMO
 ====================================================================
 Serviço de análise de documentos com IA (GPT-4o-mini).
 
+ARQUITETURA DE EXTRAÇÃO:
+- Usa OpenAI Function Calling (tools/tool_choice) para extracção estruturada
+- JSON Schemas definidos por tipo de documento garantem fiabilidade na extração
+- Fallback para response_format=json_object se tools não disponível
+- SDK oficial openai>=1.99.9 (async) — sem dependência de emergentintegrations
+
 OPTIMIZAÇÕES:
 1. Tenta extrair texto do PDF com pypdf primeiro
 2. Se conseguir texto suficiente, envia apenas texto (mais barato/rápido)
@@ -12,11 +18,20 @@ OPTIMIZAÇÕES:
 5. Processamento paralelo com asyncio.gather para bulk analysis
 6. Validação de tamanho de ficheiro antes de carregar para memória
 
+SEGURANÇA:
+- sanitize_pdf_text: remove caracteres de controlo e padrões de prompt injection
+- Limites de tamanho: MAX_PDF_TEXT_LENGTH, MAX_FILE_SIZE, MAX_IMAGE_SIZE
+- Retry com exponential backoff para rate limits (429)
+
 Tipos de documentos suportados:
 - CC (Cartão de Cidadão)
-- Recibo de Vencimento
-- IRS
-- Outros
+- Recibo de Vencimento (PT, FR, ES, UK, DE)
+- IRS / Declaração de Rendimentos
+- CPCV (Contrato Promessa Compra e Venda)
+- Simulação de Crédito Habitação
+- Mapa CRC (Central de Responsabilidades de Crédito)
+- Extrato Bancário
+- Outros (genérico)
 ====================================================================
 """
 import os
@@ -47,6 +62,18 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # Modelo a usar - gpt-4o-mini é mais barato e rápido
 AI_MODEL = "gpt-4o-mini"
+
+# Cliente OpenAI (inicialização preguiçosa/lazy)
+from openai import AsyncOpenAI
+
+_openai_client: Optional[AsyncOpenAI] = None
+
+def get_openai_client() -> AsyncOpenAI:
+    """Obter ou criar cliente OpenAI assíncrono."""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = AsyncOpenAI(api_key=EMERGENT_LLM_KEY)
+    return _openai_client
 
 
 def sanitize_email(email: str) -> str:
@@ -173,6 +200,442 @@ RETRY_MAX_WAIT = 32  # segundos
 class RateLimitError(Exception):
     """Excepção para erros de rate limit (429)."""
     pass
+
+
+def get_document_tool_definition(document_type: str) -> dict:
+    """
+    Retorna definição OpenAI tool/function calling com JSON Schema
+    para extracção estruturada de dados por tipo de documento.
+    """
+    if document_type == "cc":
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_cc_data",
+                "description": "Extrair dados de Cartão de Cidadão português (frente e verso). O NIF aparece no VERSO do cartão.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "nome_completo": {"type": "string", "description": "Nome completo da pessoa (apelidos + nomes próprios)"},
+                        "nif": {"type": "string", "description": "Número de Identificação Fiscal - EXACTAMENTE 9 dígitos, começa por 1, 2, 6 ou 9"},
+                        "numero_documento": {"type": "string", "description": "Número do documento CC"},
+                        "data_nascimento": {"type": "string", "description": "Data de nascimento (formato YYYY-MM-DD)"},
+                        "data_validade": {"type": "string", "description": "Data de validade do documento (formato YYYY-MM-DD)"},
+                        "naturalidade": {"type": "string", "description": "Local de nascimento"},
+                        "nacionalidade": {"type": "string", "description": "Nacionalidade"},
+                        "sexo": {"type": "string", "description": "M ou F"},
+                        "altura": {"type": "string", "description": "Altura em metros"},
+                        "pai": {"type": "string", "description": "Nome do pai"},
+                        "mae": {"type": "string", "description": "Nome da mãe"}
+                    },
+                    "required": ["nome_completo", "nif", "numero_documento"],
+                    "additionalProperties": True
+                }
+            }
+        }
+
+    elif document_type == "recibo_vencimento":
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_recibo_vencimento_data",
+                "description": "Extrair dados de recibos de vencimento (Portugal, França, Espanha, Reino Unido, Alemanha). Valores monetários em número decimal.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "nome_funcionario": {"type": "string", "description": "Nome do funcionário/salarié/employee"},
+                        "nif": {"type": "string", "description": "NIF/Numéro fiscal/Tax ID do funcionário (se visível)"},
+                        "empresa": {"type": "string", "description": "Nome da empresa empregadora"},
+                        "pais_origem": {"type": "string", "description": "PT/FR/ES/UK/DE (código do país do documento)"},
+                        "mes_referencia": {"type": "string", "description": "Mês de referência (formato YYYY-MM)"},
+                        "salario_bruto": {"type": "number", "description": "Salário bruto (valor decimal)"},
+                        "salario_liquido": {"type": "number", "description": "Salário líquido (valor decimal)"},
+                        "moeda": {"type": "string", "description": "Moeda (EUR/GBP/etc)"},
+                        "descontos_imposto": {"type": "number", "description": "Descontos de imposto/IRS (valor decimal)"},
+                        "descontos_ss": {"type": "number", "description": "Descontos de Segurança Social (valor decimal)"},
+                        "subsidio_alimentacao": {"type": "number", "description": "Subsídio de alimentação (valor decimal)"},
+                        "outros_abonos": {"type": "number", "description": "Outros abonos (valor decimal)"},
+                        "tipo_contrato": {"type": "string", "description": "Tipo de contrato (Efetivo/CDI/CDD/Termo/Permanent/Outro)"},
+                        "categoria_profissional": {"type": "string", "description": "Categoria profissional/função/poste"}
+                    },
+                    "required": ["nome_funcionario", "salario_bruto", "salario_liquido", "moeda"],
+                    "additionalProperties": True
+                }
+            }
+        }
+
+    elif document_type == "irs":
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_irs_data",
+                "description": "Extrair dados de declarações fiscais/IRS (Portugal, França, Espanha). Se for declaração conjunta, extrair dados de ambos os titulares.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ano_fiscal": {"type": "integer", "description": "Ano fiscal da declaração"},
+                        "pais_origem": {"type": "string", "description": "PT/FR/ES (código do país do documento)"},
+                        "nif_titular": {"type": "string", "description": "NIF/Numéro fiscal do titular 1"},
+                        "nome_titular": {"type": "string", "description": "Nome do titular 1"},
+                        "nif_titular_2": {"type": "string", "description": "NIF do titular 2/cônjuge ou null se individual"},
+                        "nome_titular_2": {"type": "string", "description": "Nome do titular 2/cônjuge ou null se individual"},
+                        "estado_civil_fiscal": {"type": "string", "description": "Estado civil fiscal (Solteiro/Casado/União de facto/Célibataire/Marié)"},
+                        "morada_fiscal": {"type": "string", "description": "Morada/adresse fiscal"},
+                        "rendimento_bruto_anual": {"type": "number", "description": "Rendimento bruto anual (valor decimal)"},
+                        "rendimento_liquido_anual": {"type": "number", "description": "Rendimento líquido anual (valor decimal)"},
+                        "imposto_pago": {"type": "number", "description": "Imposto pago (valor decimal)"},
+                        "reembolso_ou_pagamento": {"type": "number", "description": "Valor a receber ou a pagar (valor decimal, positivo=reembolso)"},
+                        "moeda": {"type": "string", "description": "Moeda (EUR/GBP/etc)"},
+                        "numero_dependentes": {"type": "integer", "description": "Número de dependentes"},
+                        "tem_imoveis": {"type": "boolean", "description": "Se possui imóveis"},
+                        "tem_creditos_habitacao": {"type": "boolean", "description": "Se possui créditos habitação"}
+                    },
+                    "required": ["ano_fiscal", "nif_titular", "nome_titular", "rendimento_bruto_anual", "moeda"],
+                    "additionalProperties": True
+                }
+            }
+        }
+
+    elif document_type == "cpcv":
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_cpcv_data",
+                "description": "Extrair dados de Contrato Promessa Compra e Venda (CPCV) português. Pode haver múltiplos compradores.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "compradores": {
+                            "type": "array",
+                            "description": "Lista de compradores/proponentes (pode ter 1 ou mais)",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "nome_completo": {"type": "string", "description": "Nome completo do comprador/proponente"},
+                                    "nif": {"type": "string", "description": "NIF do comprador (9 dígitos)"},
+                                    "cc": {"type": "string", "description": "Número do Cartão de Cidadão"},
+                                    "estado_civil": {"type": "string", "description": "Estado civil (Solteiro/Casado/Divorciado/Viúvo/União de Facto)"},
+                                    "regime_bens": {"type": "string", "description": "Regime de bens (Comunhão de adquiridos/Separação de bens/etc)"},
+                                    "profissao": {"type": "string", "description": "Profissão"},
+                                    "morada": {"type": "string", "description": "Morada completa"},
+                                    "codigo_postal": {"type": "string", "description": "Código postal"},
+                                    "localidade": {"type": "string", "description": "Localidade/Cidade"},
+                                    "email": {"type": "string", "description": "Email"},
+                                    "telefone": {"type": "string", "description": "Telefone"}
+                                },
+                                "required": ["nome_completo"],
+                                "additionalProperties": True
+                            }
+                        },
+                        "vendedor": {
+                            "type": "object",
+                            "description": "Dados do vendedor/promitente vendedor",
+                            "properties": {
+                                "nome": {"type": "string", "description": "Nome completo do vendedor"},
+                                "nif": {"type": "string", "description": "NIF do vendedor"},
+                                "cc": {"type": "string", "description": "Número CC do vendedor"},
+                                "estado_civil": {"type": "string", "description": "Estado civil do vendedor"},
+                                "morada": {"type": "string", "description": "Morada do vendedor"},
+                                "tipo": {"type": "string", "description": "Tipo (Particular/Empresa/Herança)"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "imovel": {
+                            "type": "object",
+                            "description": "Dados completos do imóvel",
+                            "properties": {
+                                "descricao": {"type": "string", "description": "Descrição do imóvel (apartamento, moradia, etc)"},
+                                "morada_completa": {"type": "string", "description": "Morada completa do imóvel"},
+                                "codigo_postal": {"type": "string", "description": "Código postal"},
+                                "localidade": {"type": "string", "description": "Localidade/Cidade"},
+                                "freguesia": {"type": "string", "description": "Freguesia"},
+                                "concelho": {"type": "string", "description": "Concelho"},
+                                "distrito": {"type": "string", "description": "Distrito"},
+                                "tipologia": {"type": "string", "description": "T0/T1/T2/T3/T4/T5/Moradia"},
+                                "area_bruta": {"type": "number", "description": "Área bruta em m2"},
+                                "area_util": {"type": "number", "description": "Área útil em m2"},
+                                "fracao": {"type": "string", "description": "Fração (ex: A, B, 1º Dto)"},
+                                "artigo_matricial": {"type": "string", "description": "Artigo matricial/Número da matriz"},
+                                "descricao_predial": {"type": "string", "description": "Descrição predial na Conservatória"},
+                                "conservatoria": {"type": "string", "description": "Nome da Conservatória do Registo Predial"},
+                                "numero_predial": {"type": "string", "description": "Número de descrição predial"},
+                                "licenca_utilizacao": {"type": "string", "description": "Número da licença de utilização"},
+                                "ano_construcao": {"type": "integer", "description": "Ano de construção"},
+                                "certificado_energetico": {"type": "string", "description": "Classe energética (A, B, C, D, E, F)"},
+                                "estacionamento": {"type": "string", "description": "Detalhes do lugar de garagem"},
+                                "arrecadacao": {"type": "string", "description": "Detalhes da arrecadação"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "valores": {
+                            "type": "object",
+                            "description": "Valores financeiros do negócio",
+                            "properties": {
+                                "preco_total": {"type": "number", "description": "Preço total de compra"},
+                                "sinal": {"type": "number", "description": "Valor do sinal"},
+                                "data_sinal": {"type": "string", "description": "Data do pagamento do sinal (YYYY-MM-DD)"},
+                                "reforco_sinal": {"type": "number", "description": "Valor do reforço do sinal"},
+                                "data_reforco": {"type": "string", "description": "Data do reforço (YYYY-MM-DD)"},
+                                "valor_escritura": {"type": "number", "description": "Valor da escritura"},
+                                "valor_financiamento": {"type": "number", "description": "Valor do financiamento"},
+                                "comissao_mediacao": {"type": "number", "description": "Valor da comissão de mediação"},
+                                "percentagem_comissao": {"type": "number", "description": "Percentagem da comissão"},
+                                "quem_paga_comissao": {"type": "string", "description": "Quem paga a comissão (Comprador/Vendedor/Partilhada)"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "datas": {
+                            "type": "object",
+                            "description": "Datas importantes do contrato",
+                            "properties": {
+                                "data_cpcv": {"type": "string", "description": "Data do contrato CPCV (YYYY-MM-DD)"},
+                                "data_escritura_prevista": {"type": "string", "description": "Data prevista para escritura (YYYY-MM-DD)"},
+                                "prazo_escritura_dias": {"type": "integer", "description": "Prazo em dias para a escritura"},
+                                "data_entrega_chaves": {"type": "string", "description": "Data prevista entrega de chaves (YYYY-MM-DD)"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "condicoes": {
+                            "type": "object",
+                            "description": "Condições do contrato",
+                            "properties": {
+                                "condicao_suspensiva": {"type": "string", "description": "Condição suspensiva (ex: aprovação crédito)"},
+                                "prazo_condicao": {"type": "string", "description": "Prazo da condição suspensiva"},
+                                "clausula_penalizacao": {"type": "string", "description": "Condições de penalização por incumprimento"},
+                                "observacoes": {"type": "string", "description": "Outras condições importantes"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "mediador": {
+                            "type": "object",
+                            "description": "Dados do mediador/imobiliária",
+                            "properties": {
+                                "nome_empresa": {"type": "string", "description": "Nome da imobiliária/mediador"},
+                                "nif_empresa": {"type": "string", "description": "NIF da empresa"},
+                                "licenca_ami": {"type": "string", "description": "Número da licença AMI"},
+                                "consultor": {"type": "string", "description": "Nome do consultor imobiliário"}
+                            },
+                            "additionalProperties": True
+                        }
+                    },
+                    "required": ["compradores"],
+                    "additionalProperties": True
+                }
+            }
+        }
+
+    elif document_type == "simulacao_credito":
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_simulacao_credito_data",
+                "description": "Extrair dados de simulações de crédito habitação portuguesas. Pode haver múltiplos proponentes.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "proponentes": {
+                            "type": "array",
+                            "description": "Lista de proponentes (pode ter 1 ou mais)",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "nome": {"type": "string", "description": "Nome do proponente"},
+                                    "nif": {"type": "string", "description": "NIF do proponente"},
+                                    "data_nascimento": {"type": "string", "description": "Data de nascimento (YYYY-MM-DD)"},
+                                    "rendimento_mensal": {"type": "number", "description": "Rendimento mensal (valor decimal)"},
+                                    "entidade_patronal": {"type": "string", "description": "Empresa onde trabalha"}
+                                },
+                                "required": ["nome"],
+                                "additionalProperties": True
+                            }
+                        },
+                        "credito": {
+                            "type": "object",
+                            "description": "Dados do crédito",
+                            "properties": {
+                                "montante_financiamento": {"type": "number", "description": "Montante do financiamento"},
+                                "prazo_anos": {"type": "integer", "description": "Prazo em anos"},
+                                "taxa_juro": {"type": "number", "description": "Taxa de juro (percentagem)"},
+                                "spread": {"type": "number", "description": "Spread (percentagem)"},
+                                "prestacao_mensal": {"type": "number", "description": "Prestação mensal"},
+                                "taeg": {"type": "number", "description": "TAEG (percentagem)"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "imovel": {
+                            "type": "object",
+                            "description": "Dados do imóvel",
+                            "properties": {
+                                "valor_aquisicao": {"type": "number", "description": "Valor de aquisição do imóvel"},
+                                "localizacao": {"type": "string", "description": "Localização do imóvel"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "banco": {"type": "string", "description": "Nome do banco"}
+                    },
+                    "required": ["proponentes", "credito"],
+                    "additionalProperties": True
+                }
+            }
+        }
+
+    elif document_type == "mapa_crc":
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_mapa_crc_data",
+                "description": "Extrair dados de Mapas da Central de Responsabilidades de Crédito (CRC) do Banco de Portugal.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "titular": {
+                            "type": "object",
+                            "description": "Dados do titular",
+                            "properties": {
+                                "nome": {"type": "string", "description": "Nome completo do titular"},
+                                "nif": {"type": "string", "description": "NIF do titular"}
+                            },
+                            "required": ["nome", "nif"],
+                            "additionalProperties": True
+                        },
+                        "data_referencia": {"type": "string", "description": "Data de referência do mapa (YYYY-MM-DD)"},
+                        "resumo": {
+                            "type": "object",
+                            "description": "Resumo de responsabilidades",
+                            "properties": {
+                                "total_divida": {"type": "number", "description": "Total em dívida"},
+                                "total_em_incumprimento": {"type": "number", "description": "Total em incumprimento"},
+                                "total_potencial": {"type": "number", "description": "Total potencial"},
+                                "prestacao_mensal_total": {"type": "number", "description": "Soma das prestações mensais"},
+                                "numero_instituicoes": {"type": "integer", "description": "Número de instituições"},
+                                "numero_produtos": {"type": "integer", "description": "Número de produtos/créditos"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "creditos": {
+                            "type": "array",
+                            "description": "Lista de créditos",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "instituicao": {"type": "string", "description": "Nome do banco/instituição financeira"},
+                                    "tipo_produto": {"type": "string", "description": "Tipo de produto (Cartão de crédito/Crédito pessoal/Crédito habitação/Crédito automóvel/Outro)"},
+                                    "valor_em_divida": {"type": "number", "description": "Valor em dívida"},
+                                    "valor_potencial": {"type": "number", "description": "Valor potencial"},
+                                    "prestacao_mensal": {"type": "number", "description": "Prestação mensal"},
+                                    "data_inicio": {"type": "string", "description": "Data de início (YYYY-MM-DD)"},
+                                    "data_fim": {"type": "string", "description": "Data de fim (YYYY-MM-DD)"},
+                                    "em_incumprimento": {"type": "boolean", "description": "Se está em incumprimento"},
+                                    "numero_devedores": {"type": "integer", "description": "Número de devedores"}
+                                },
+                                "required": ["instituicao", "tipo_produto"],
+                                "additionalProperties": True
+                            }
+                        }
+                    },
+                    "required": ["titular", "data_referencia"],
+                    "additionalProperties": True
+                }
+            }
+        }
+
+    elif document_type == "extrato_bancario":
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_extrato_bancario_data",
+                "description": "Extrair dados de extratos bancários. Incluir saldos e movimentos regulares (salários, rendas, prestações).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "titular": {"type": "string", "description": "Nome do titular da conta"},
+                        "nif": {"type": "string", "description": "NIF se disponível"},
+                        "banco": {"type": "string", "description": "Nome do banco"},
+                        "numero_conta": {"type": "string", "description": "Número da conta (IBAN se disponível)"},
+                        "data_extrato": {"type": "string", "description": "Data do extrato (YYYY-MM-DD)"},
+                        "periodo": {
+                            "type": "object",
+                            "description": "Período do extrato",
+                            "properties": {
+                                "inicio": {"type": "string", "description": "Data de início (YYYY-MM-DD)"},
+                                "fim": {"type": "string", "description": "Data de fim (YYYY-MM-DD)"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "saldos": {
+                            "type": "object",
+                            "description": "Saldos da conta",
+                            "properties": {
+                                "inicial": {"type": "number", "description": "Saldo inicial"},
+                                "final": {"type": "number", "description": "Saldo final"},
+                                "disponivel": {"type": "number", "description": "Saldo disponível"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "totais": {
+                            "type": "object",
+                            "description": "Totais do período",
+                            "properties": {
+                                "entradas": {"type": "number", "description": "Total de entradas/depósitos"},
+                                "saidas": {"type": "number", "description": "Total de saídas/debitos"}
+                            },
+                            "additionalProperties": True
+                        },
+                        "movimentos_relevantes": {
+                            "type": "array",
+                            "description": "Movimentos relevantes (salários, rendas, prestações, etc)",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "data": {"type": "string", "description": "Data do movimento (YYYY-MM-DD)"},
+                                    "descricao": {"type": "string", "description": "Descrição do movimento"},
+                                    "valor": {"type": "number", "description": "Valor do movimento"},
+                                    "tipo": {"type": "string", "description": "Tipo (credito/debito)"}
+                                },
+                                "required": ["data", "descricao", "valor", "tipo"],
+                                "additionalProperties": True
+                            }
+                        }
+                    },
+                    "required": ["titular", "banco", "data_extrato"],
+                    "additionalProperties": True
+                }
+            }
+        }
+
+    else:
+        # Tipo genérico / outro
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_documento_data",
+                "description": "Extrair todos os dados relevantes de um documento genérico. Se existirem múltiplas pessoas, incluí-las no array pessoas.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tipo_documento": {"type": "string", "description": "Tipo de documento identificado"},
+                        "pessoas": {
+                            "type": "array",
+                            "description": "Lista de pessoas mencionadas no documento",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "nome": {"type": "string", "description": "Nome completo"},
+                                    "nif": {"type": "string", "description": "NIF"},
+                                    "papel": {"type": "string", "description": "Papel da pessoa (titular, cônjuge, etc)"}
+                                },
+                                "additionalProperties": True
+                            }
+                        },
+                        "datas": {"type": "string", "description": "Datas relevantes encontradas"},
+                        "valores": {"type": "string", "description": "Valores monetários encontrados"},
+                        "entidade": {"type": "string", "description": "Entidade/Empresa relacionada"},
+                        "observacoes": {"type": "string", "description": "Observações gerais"}
+                    },
+                    "additionalProperties": True
+                }
+            }
+        }
 
 
 def sanitize_pdf_text(text: str, max_length: int = MAX_PDF_TEXT_LENGTH) -> str:
@@ -503,78 +966,56 @@ def resize_image_base64(base64_content: str, mime_type: str, max_size: int = MAX
     retry=retry_if_exception_type(RateLimitError),
     before_sleep=before_sleep_log(logger, logging.WARNING)
 )
-async def call_openai_api(payload: dict, timeout: float = 60.0) -> dict:
+async def call_openai_api(
+    messages: list,
+    tool_definition: dict = None,
+    timeout: float = 60.0
+) -> dict:
     """
-    Chamar API do OpenAI através da biblioteca de integração.
+    Chamar API OpenAI usando SDK oficial com suporte a Function Calling.
     
     Usa exponential backoff: 2s, 4s, 8s, 16s, 32s
     Máximo 5 tentativas antes de desistir.
     
     Args:
-        payload: Payload JSON para enviar (model, messages, etc.)
-        timeout: Timeout em segundos (não usado directamente pela lib)
+        messages: Lista de mensagens [{role, content}, ...]
+        tool_definition: Definição OpenAI tool para function calling
+        timeout: Timeout em segundos
     
     Returns:
-        Resposta no formato compatível com OpenAI API
+        Dicionário com dados extraídos da chamada de ferramenta
     
     Raises:
-        RateLimitError: Se receber erro de rate limit
+        RateLimitError: Em caso de rate limit (429)
         Exception: Outros erros
     """
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
-        messages = payload.get("messages", [])
-        model = payload.get("model", "gpt-4o-mini")
-        
-        # Extrair system message e user message
-        system_message = "Você é um assistente de extracção de dados de documentos."
-        user_text = ""
-        
-        for msg in messages:
-            if msg.get("role") == "system":
-                system_message = msg.get("content", system_message)
-            elif msg.get("role") == "user":
-                content = msg.get("content", "")
-                if isinstance(content, str):
-                    user_text = content
-                elif isinstance(content, list):
-                    # Para mensagens com imagem (visão)
-                    for item in content:
-                        if item.get("type") == "text":
-                            user_text = item.get("text", "")
-                            break
-        
-        # Criar sessão única para esta análise
-        import uuid
-        session_id = f"doc-analysis-{uuid.uuid4().hex[:8]}"
-        
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message=system_message
-        ).with_model("openai", model)
-        
-        # Enviar mensagem COM TIMEOUT
-        user_message = UserMessage(text=user_text)
-        try:
-            response = await asyncio.wait_for(
-                chat.send_message(user_message),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout ({timeout}s) ao chamar OpenAI API")
-            raise Exception(f"Timeout na chamada à API ({timeout}s)")
-        
-        # Formatar resposta no formato esperado
-        return {
-            "choices": [{
-                "message": {
-                    "content": response
-                }
-            }]
+    client = get_openai_client()
+    
+    kwargs = {
+        "model": AI_MODEL,
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": 4096,
+    }
+    
+    if tool_definition:
+        kwargs["tools"] = [tool_definition]
+        kwargs["tool_choice"] = {
+            "type": "function",
+            "function": {"name": tool_definition["function"]["name"]}
         }
-        
+    else:
+        # Fallback: usar response_format para modo JSON
+        kwargs["response_format"] = {"type": "json_object"}
+    
+    try:
+        response = await asyncio.wait_for(
+            client.chat.completions.create(**kwargs),
+            timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout ({timeout}s) ao chamar OpenAI API")
+        raise Exception(f"Timeout na chamada à API ({timeout}s)")
     except Exception as e:
         error_msg = str(e).lower()
         if "rate" in error_msg or "429" in error_msg or "limit" in error_msg:
@@ -582,52 +1023,70 @@ async def call_openai_api(payload: dict, timeout: float = 60.0) -> dict:
             raise RateLimitError(f"Rate limit: {e}")
         logger.error(f"Erro ao chamar OpenAI API: {e}")
         raise
+    
+    # Extrair dados da chamada de ferramenta ou do conteúdo
+    choice = response.choices[0]
+    message = choice.message
+    
+    if message.tool_calls and len(message.tool_calls) > 0:
+        # Caminho de function calling - saída estruturada
+        tool_call = message.tool_calls[0]
+        try:
+            data = json.loads(tool_call.function.arguments)
+            logger.info(f"[Function Calling] Tool '{tool_call.function.name}' chamado com sucesso")
+            return {"data": data, "method": "function_calling"}
+        except json.JSONDecodeError as e:
+            logger.error(f"Falha ao fazer parse dos argumentos da tool call: {e}")
+            return {"data": {}, "method": "function_calling", "error": str(e)}
+    elif message.content:
+        # Fallback: JSON no conteúdo
+        content = message.content.strip()
+        return {"data": json.loads(content), "method": "json_content"}
+    else:
+        logger.error("Sem tool calls e sem conteúdo na resposta")
+        return {"data": {}, "method": "none", "error": "Resposta vazia"}
 
 
 async def analyze_with_text(text: str, document_type: str) -> Dict[str, Any]:
     """
     Analisar documento usando apenas texto (sem visão).
-    Mais rápido e barato que usar modelo de visão.
-    
-    Inclui retry automático para erros 429 (rate limit).
-    
-    Args:
-        text: Texto extraído do documento
-        document_type: Tipo de documento
-    
-    Returns:
-        Dados extraídos
+    Usa OpenAI Function Calling para extracção estruturada.
     """
-    system_prompt, user_prompt = get_extraction_prompts(document_type)
+    system_prompt, _ = get_extraction_prompts(document_type)
+    tool_definition = get_document_tool_definition(document_type)
     
     try:
         messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
-                "content": f"{user_prompt}\n\n--- TEXTO DO DOCUMENTO ---\n{text}"
+                "content": f"Analisa o seguinte texto de um documento e extrai todos os dados possíveis.\n\n--- TEXTO DO DOCUMENTO ---\n{text}"
             }
         ]
         
-        payload = {
-            "model": AI_MODEL,
-            "messages": messages,
-            "max_tokens": 2000,
-            "temperature": 0.1
-        }
+        result = await call_openai_api(
+            messages=messages,
+            tool_definition=tool_definition,
+            timeout=60.0
+        )
         
-        result = await call_openai_api(payload, timeout=60.0)
+        extracted_data = result.get("data", {})
         
-        ai_response = result["choices"][0]["message"]["content"]
-        extracted_data = parse_ai_response(ai_response, document_type)
+        # Depuração para CC
+        if document_type == 'cc':
+            nif = extracted_data.get('nif')
+            nome = extracted_data.get('nome_completo')
+            logger.info(f"[DEBUG CC] Function Calling extraiu: NIF='{nif}', Nome='{nome}'")
+            logger.info(f"[DEBUG CC] Dados completos: {json.dumps(extracted_data, ensure_ascii=False, indent=2)}")
         
         return {
-            "success": True,
+            "success": bool(extracted_data),
             "document_type": document_type,
             "extracted_data": extracted_data,
             "analysis_method": "text",
             "model": AI_MODEL,
-            "raw_response": ai_response
+            "extraction_mode": result.get("method", "desconhecido"),
+            "raw_response": json.dumps(extracted_data, ensure_ascii=False)
         }
         
     except RateLimitError as e:
@@ -650,86 +1109,59 @@ async def analyze_with_text(text: str, document_type: str) -> Dict[str, Any]:
 async def analyze_with_vision(base64_content: str, mime_type: str, document_type: str) -> Dict[str, Any]:
     """
     Analisar documento usando modelo de visão.
-    Usado quando extracção de texto não é possível.
-    
-    Inclui retry automático para erros 429 (rate limit).
-    
-    Args:
-        base64_content: Imagem em base64
-        mime_type: Tipo MIME
-        document_type: Tipo de documento
-    
-    Returns:
-        Dados extraídos
+    Usa OpenAI Function Calling para extracção estruturada.
     """
-    system_prompt, user_prompt = get_extraction_prompts(document_type)
+    system_prompt, _ = get_extraction_prompts(document_type)
+    tool_definition = get_document_tool_definition(document_type)
     
-    # Para documentos de identificação (CC), NÃO redimensionar para preservar qualidade
-    # Para outros documentos, redimensionar para economizar tokens
+    # Lógica de redimensionamento de imagem - MANTER EXACTAMENTE COM ESTÁ
     if document_type in ['cc', 'cpcv']:
-        # Manter resolução original para documentos de ID
         resized_base64 = base64_content
         new_mime_type = mime_type
         logger.info(f"Análise com visão: tipo={document_type}, mantendo resolução original")
     else:
-        # Redimensionar imagem antes de enviar
         resized_base64, new_mime_type = resize_image_base64(base64_content, mime_type)
     
-    # Documentos de identificação (CC) precisam de alta resolução para ler números pequenos
-    # Outros documentos podem usar baixa resolução para economizar tokens
     image_detail = "high" if document_type in ['cc', 'cpcv'] else "low"
     logger.info(f"Análise com visão: tipo={document_type}, detail={image_detail}")
     
     try:
-        # Usar biblioteca de integração com suporte a imagem
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-        import uuid
-        
-        # Criar sessão única para esta análise
-        session_id = f"doc-vision-{uuid.uuid4().hex[:8]}"
-        
-        # Inicializar chat com system message
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message=system_prompt
-        ).with_model("openai", AI_MODEL)
-        
-        # Criar conteúdo de imagem em base64
-        image_content = ImageContent(
-            image_base64=resized_base64
-        )
-        
-        # Criar mensagem com texto e imagem
-        user_message = UserMessage(
-            text=user_prompt,
-            file_contents=[image_content]
-        )
-        
-        # Enviar mensagem e obter resposta COM TIMEOUT (120 segundos)
-        # Evita bloqueio infinito se a API não responder
-        try:
-            ai_response = await asyncio.wait_for(
-                chat.send_message(user_message),
-                timeout=120.0  # 2 minutos máximo por documento
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout ao analisar documento com visão (tipo={document_type})")
-            return {
-                "success": False,
-                "error": "Timeout na análise do documento. O serviço demorou muito a responder.",
-                "extracted_data": {}
+        # Construir conteúdo multimodal da mensagem
+        user_content = [
+            {
+                "type": "text",
+                "text": f"Analisa este documento ({document_type}) e extrai todos os dados possíveis."
+            },
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{new_mime_type};base64,{resized_base64}",
+                    "detail": image_detail
+                }
             }
+        ]
         
-        extracted_data = parse_ai_response(ai_response, document_type)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ]
+        
+        result = await call_openai_api(
+            messages=messages,
+            tool_definition=tool_definition,
+            timeout=120.0
+        )
+        
+        extracted_data = result.get("data", {})
         
         return {
-            "success": True,
+            "success": bool(extracted_data),
             "document_type": document_type,
             "extracted_data": extracted_data,
             "analysis_method": "vision",
             "model": AI_MODEL,
-            "raw_response": ai_response
+            "extraction_mode": result.get("method", "desconhecido"),
+            "raw_response": json.dumps(extracted_data, ensure_ascii=False)
         }
         
     except RateLimitError as e:
@@ -865,29 +1297,7 @@ Sê MUITO preciso com números - lê cada dígito cuidadosamente.
 O NIF português para pessoas singulares começa por 1, 2, 6 ou 9 (NUNCA por 5 que é para empresas).
 Se algum campo não for legível ou não existir, usa null."""
         
-        user_prompt = """Analisa este Cartão de Cidadão português e extrai os seguintes dados em formato JSON.
-
-ATENÇÃO AO NIF:
-- O NIF tem EXACTAMENTE 9 dígitos
-- Aparece no VERSO do cartão, na linha "Nº DE IDENTIFICAÇÃO FISCAL" ou "NIF"
-- Lê cada dígito cuidadosamente, especialmente o primeiro dígito
-- NIFs válidos para pessoas: começam por 1, 2, 6 ou 9
-
-{
-    "nome_completo": "Nome completo da pessoa (apelidos + nomes próprios)",
-    "nif": "Número de Identificação Fiscal - EXACTAMENTE 9 dígitos, ex: 268494622",
-    "numero_documento": "Número do documento CC",
-    "data_nascimento": "Data de nascimento (formato YYYY-MM-DD)",
-    "data_validade": "Data de validade do documento (formato YYYY-MM-DD)",
-    "naturalidade": "Local de nascimento",
-    "nacionalidade": "Nacionalidade",
-    "sexo": "M ou F",
-    "altura": "Altura em metros",
-    "pai": "Nome do pai",
-    "mae": "Nome da mãe"
-}
-
-Retorna APENAS o JSON, sem texto adicional."""
+        user_prompt = f"Analisa este Cartão de Cidadão português e extrai todos os dados possíveis."
 
     elif document_type == "recibo_vencimento":
         system_prompt = """És um assistente especializado em extrair dados de recibos de vencimento.
@@ -904,26 +1314,7 @@ Valores monetários devem ser números decimais (na moeda original).
 IMPORTANTE: Identifica o país de origem do documento pelo idioma e formato.
 Se algum campo não for legível ou não existir, usa null."""
         
-        user_prompt = """Analisa este recibo de vencimento (pode ser de Portugal, França, ou outro país) e extrai os seguintes dados em formato JSON:
-
-{
-    "nome_funcionario": "Nome do funcionário/salarié/employee",
-    "nif": "NIF/Numéro fiscal/Tax ID do funcionário (se visível)",
-    "empresa": "Nome da empresa empregadora",
-    "pais_origem": "PT/FR/ES/UK/DE (código do país do documento)",
-    "mes_referencia": "Mês de referência (formato YYYY-MM)",
-    "salario_bruto": 0.00,
-    "salario_liquido": 0.00,
-    "moeda": "EUR/GBP",
-    "descontos_imposto": 0.00,
-    "descontos_ss": 0.00,
-    "subsidio_alimentacao": 0.00,
-    "outros_abonos": 0.00,
-    "tipo_contrato": "Efetivo/CDI/CDD/Termo/Permanent/Outro",
-    "categoria_profissional": "Categoria/função/poste"
-}
-
-Retorna APENAS o JSON, sem texto adicional."""
+        user_prompt = f"Analisa este recibo de vencimento e extrai todos os dados possíveis."
 
     elif document_type == "irs":
         system_prompt = """És um assistente especializado em extrair dados de declarações fiscais de rendimentos.
@@ -939,28 +1330,7 @@ Valores monetários devem ser números decimais.
 IMPORTANTE: Identifica o país de origem pelo formato e idioma.
 Se for uma declaração conjunta (casados/unidos de facto), extrai dados de AMBOS os titulares."""
         
-        user_prompt = """Analisa esta declaração de rendimentos/IRS (pode ser de Portugal, França, ou outro país) e extrai os seguintes dados em formato JSON:
-
-{
-    "ano_fiscal": 2024,
-    "pais_origem": "PT/FR/ES (código do país do documento)",
-    "nif_titular": "NIF/Numéro fiscal do titular 1",
-    "nome_titular": "Nome do titular 1",
-    "nif_titular_2": "NIF do titular 2/cônjuge ou null se individual",
-    "nome_titular_2": "Nome do titular 2/cônjuge ou null se individual",
-    "estado_civil_fiscal": "Solteiro/Casado/União de facto/Célibataire/Marié",
-    "morada_fiscal": "Morada/adresse fiscal",
-    "rendimento_bruto_anual": 0.00,
-    "rendimento_liquido_anual": 0.00,
-    "imposto_pago": 0.00,
-    "reembolso_ou_pagamento": 0.00,
-    "moeda": "EUR",
-    "numero_dependentes": 0,
-    "tem_imoveis": true,
-    "tem_creditos_habitacao": true
-}
-
-Retorna APENAS o JSON, sem texto adicional."""
+        user_prompt = f"Analisa esta declaração de rendimentos/IRS e extrai todos os dados possíveis."
 
     elif document_type == "cpcv":
         system_prompt = """És um assistente especializado em extrair dados de Contratos Promessa de Compra e Venda (CPCV) portugueses.
@@ -974,89 +1344,7 @@ IMPORTANTE:
 - Extrai todas as datas importantes
 - Valores monetários devem ser números decimais."""
         
-        user_prompt = """Analisa este CPCV (Contrato Promessa Compra e Venda) e extrai os seguintes dados em formato JSON:
-
-{
-    "compradores": [
-        {
-            "nome_completo": "Nome completo do comprador/proponente 1",
-            "nif": "NIF do comprador 1 (9 dígitos)",
-            "cc": "Número do Cartão de Cidadão",
-            "estado_civil": "Solteiro/Casado/Divorciado/Viúvo/União de Facto",
-            "regime_bens": "Comunhão de adquiridos/Separação de bens/etc",
-            "profissao": "Profissão",
-            "morada": "Morada completa",
-            "codigo_postal": "Código postal",
-            "localidade": "Localidade/Cidade",
-            "email": "Email",
-            "telefone": "Telefone"
-        }
-    ],
-    "vendedor": {
-        "nome": "Nome completo do vendedor/promitente vendedor",
-        "nif": "NIF do vendedor",
-        "cc": "Número CC do vendedor",
-        "estado_civil": "Estado civil do vendedor",
-        "morada": "Morada do vendedor",
-        "tipo": "Particular/Empresa/Herança"
-    },
-    "imovel": {
-        "descricao": "Descrição do imóvel (apartamento, moradia, etc)",
-        "morada_completa": "Morada completa do imóvel",
-        "codigo_postal": "Código postal",
-        "localidade": "Localidade/Cidade",
-        "freguesia": "Freguesia",
-        "concelho": "Concelho",
-        "distrito": "Distrito",
-        "tipologia": "T0/T1/T2/T3/T4/T5/Moradia",
-        "area_bruta": "Área bruta em m2",
-        "area_util": "Área útil em m2",
-        "fracao": "Fração (ex: A, B, 1º Dto)",
-        "artigo_matricial": "Artigo matricial/Número da matriz",
-        "descricao_predial": "Descrição predial na Conservatória",
-        "conservatoria": "Nome da Conservatória do Registo Predial",
-        "numero_predial": "Número de descrição predial",
-        "licenca_utilizacao": "Número da licença de utilização",
-        "ano_construcao": "Ano de construção",
-        "certificado_energetico": "Classe energética (A, B, C, D, E, F)",
-        "estacionamento": "Sim/Não - detalhes do lugar de garagem",
-        "arrecadacao": "Sim/Não - detalhes da arrecadação"
-    },
-    "valores": {
-        "preco_total": 0.00,
-        "sinal": 0.00,
-        "data_sinal": "Data do pagamento do sinal (YYYY-MM-DD)",
-        "reforco_sinal": 0.00,
-        "data_reforco": "Data do reforço (YYYY-MM-DD)",
-        "valor_escritura": 0.00,
-        "valor_financiamento": 0.00,
-        "comissao_mediacao": 0.00,
-        "percentagem_comissao": 0.00,
-        "quem_paga_comissao": "Comprador/Vendedor/Partilhada"
-    },
-    "datas": {
-        "data_cpcv": "Data do contrato CPCV (YYYY-MM-DD)",
-        "data_escritura_prevista": "Data prevista para escritura (YYYY-MM-DD)",
-        "prazo_escritura_dias": "Prazo em dias para a escritura",
-        "data_entrega_chaves": "Data prevista entrega de chaves (YYYY-MM-DD)"
-    },
-    "condicoes": {
-        "condicao_suspensiva": "Descrever condição suspensiva se existir (ex: aprovação crédito)",
-        "prazo_condicao": "Prazo da condição suspensiva",
-        "clausula_penalizacao": "Valor/condições de penalização por incumprimento",
-        "observacoes": "Outras condições importantes"
-    },
-    "mediador": {
-        "nome_empresa": "Nome da imobiliária/mediador",
-        "nif_empresa": "NIF da empresa",
-        "licenca_ami": "Número da licença AMI",
-        "consultor": "Nome do consultor imobiliário"
-    }
-}
-
-Se houver apenas 1 comprador, o array "compradores" deve ter apenas 1 elemento.
-Extrai o máximo de informação possível do documento.
-Retorna APENAS o JSON, sem texto adicional."""
+        user_prompt = f"Analisa este CPCV (Contrato Promessa Compra e Venda) e extrai todos os dados possíveis."
 
     elif document_type == "simulacao_credito":
         system_prompt = """És um assistente especializado em extrair dados de simulações de crédito habitação portuguesas.
@@ -1066,42 +1354,7 @@ IMPORTANTE:
 - Identifica Proponente 1, Proponente 2, Cônjuge, etc.
 - Valores monetários devem ser números decimais."""
         
-        user_prompt = """Analisa esta simulação de crédito habitação e extrai os seguintes dados em formato JSON:
-
-{
-    "proponentes": [
-        {
-            "nome": "Nome do proponente 1",
-            "nif": "NIF",
-            "data_nascimento": "Data nascimento (YYYY-MM-DD)",
-            "rendimento_mensal": 0.00,
-            "entidade_patronal": "Empresa onde trabalha"
-        },
-        {
-            "nome": "Nome do proponente 2 (cônjuge) ou null se individual",
-            "nif": "NIF ou null",
-            "data_nascimento": "Data nascimento ou null",
-            "rendimento_mensal": 0.00,
-            "entidade_patronal": "Empresa"
-        }
-    ],
-    "credito": {
-        "montante_financiamento": 0.00,
-        "prazo_anos": 0,
-        "taxa_juro": 0.00,
-        "spread": 0.00,
-        "prestacao_mensal": 0.00,
-        "taeg": 0.00
-    },
-    "imovel": {
-        "valor_aquisicao": 0.00,
-        "localizacao": "Localização do imóvel"
-    },
-    "banco": "Nome do banco"
-}
-
-Se houver apenas 1 proponente, o array deve ter apenas 1 elemento.
-Retorna APENAS o JSON, sem texto adicional."""
+        user_prompt = f"Analisa esta simulação de crédito habitação e extrai todos os dados possíveis."
 
     elif document_type == "mapa_crc":
         system_prompt = """És um assistente especializado em extrair dados de Mapas da Central de Responsabilidades de Crédito (CRC) do Banco de Portugal.
@@ -1112,94 +1365,32 @@ IMPORTANTE:
 - Datas no formato YYYY-MM-DD
 - Inclui o nome da instituição financeira de cada crédito"""
         
-        user_prompt = """Analisa este Mapa CRC (Central de Responsabilidades de Crédito) e extrai os seguintes dados em formato JSON:
-
-{
-    "titular": {
-        "nome": "Nome completo do titular",
-        "nif": "NIF do titular"
-    },
-    "data_referencia": "Data de referência do mapa (YYYY-MM-DD)",
-    "resumo": {
-        "total_divida": 0.00,
-        "total_em_incumprimento": 0.00,
-        "total_potencial": 0.00,
-        "prestacao_mensal_total": 0.00,
-        "numero_instituicoes": 0,
-        "numero_produtos": 0
-    },
-    "creditos": [
-        {
-            "instituicao": "Nome do banco/instituição financeira",
-            "tipo_produto": "Cartão de crédito/Crédito pessoal/Crédito habitação/Crédito automóvel/Outro",
-            "valor_em_divida": 0.00,
-            "valor_potencial": 0.00,
-            "prestacao_mensal": 0.00,
-            "data_inicio": "YYYY-MM-DD ou null",
-            "data_fim": "YYYY-MM-DD ou null",
-            "em_incumprimento": false,
-            "numero_devedores": 1
-        }
-    ]
-}
-
-Extrai TODOS os créditos presentes no documento.
-Calcula a soma das prestações mensais para "prestacao_mensal_total".
-Retorna APENAS o JSON, sem texto adicional."""
+        user_prompt = f"Analisa este Mapa CRC (Central de Responsabilidades de Crédito) e extrai todos os dados possíveis."
 
     elif document_type == "extrato_bancario":
         system_prompt = """És um assistente especializado em extrair dados de extratos bancários.
 Extrai o saldo e movimentos principais. Valores monetários devem ser números decimais."""
         
-        user_prompt = """Analisa este extrato bancário e extrai os seguintes dados em formato JSON:
-
-{
-    "titular": "Nome do titular da conta",
-    "nif": "NIF se disponível",
-    "banco": "Nome do banco",
-    "numero_conta": "Número da conta (IBAN se disponível)",
-    "data_extrato": "Data do extrato (YYYY-MM-DD)",
-    "periodo": {
-        "inicio": "YYYY-MM-DD",
-        "fim": "YYYY-MM-DD"
-    },
-    "saldos": {
-        "inicial": 0.00,
-        "final": 0.00,
-        "disponivel": 0.00
-    },
-    "totais": {
-        "entradas": 0.00,
-        "saidas": 0.00
-    },
-    "movimentos_relevantes": [
-        {
-            "data": "YYYY-MM-DD",
-            "descricao": "Descrição do movimento",
-            "valor": 0.00,
-            "tipo": "credito/debito"
-        }
-    ]
-}
-
-Foca nos movimentos regulares como salários, rendas, prestações de crédito.
-Retorna APENAS o JSON, sem texto adicional."""
+        user_prompt = f"Analisa este extrato bancário e extrai todos os dados possíveis."
 
     else:
         system_prompt = """És um assistente especializado em extrair dados de documentos.
 Extrai todos os dados relevantes que encontrares no documento.
 IMPORTANTE: Se o documento mencionar múltiplas pessoas (compradores, proponentes, cônjuges), extrai dados de TODAS."""
         
-        user_prompt = """Analisa este documento e extrai todos os dados relevantes em formato JSON estruturado.
-Inclui nomes, datas, valores, números de identificação, e qualquer outra informação importante.
-Se existirem múltiplas pessoas mencionadas (compradores, proponentes, cônjuges), cria um array "pessoas" com os dados de cada uma.
-Retorna APENAS o JSON, sem texto adicional."""
+        user_prompt = f"Analisa este documento do tipo '{document_type}' e extrai todos os dados possíveis. Se existirem múltiplas pessoas mencionadas (compradores, proponentes, cônjuges), inclui os dados de cada uma."
 
     return system_prompt, user_prompt
 
 
 def parse_ai_response(response: str, document_type: str) -> Dict[str, Any]:
-    """Fazer parse da resposta da IA e extrair dados JSON."""
+    """
+    Fazer parse da resposta da IA e extrair dados JSON.
+    
+    NOTA: Esta função está DEPRECIADA. A extracção estruturada é agora feita via
+    OpenAI Function Calling em call_openai_api(). Mantida apenas como utilitário
+    de fallback para casos onde function calling não está disponível.
+    """
     
     try:
         response = response.strip()
