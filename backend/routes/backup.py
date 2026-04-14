@@ -14,6 +14,7 @@ Endpoints:
 ====================================================================
 """
 import logging
+import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -329,3 +330,127 @@ async def get_backup_status(
         "success": True,
         "backup": backup
     }
+
+
+@router.post("/restore-from-s3")
+async def restore_from_s3(
+    data: dict,
+    current_user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """
+    Restaura a base de dados de Produção a partir do backup mais recente no S3.
+    ATENÇÃO: Este endpoint sobrescreve TODOS os dados da BD actual.
+    """
+    from config import MONGO_URL, DB_NAME
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from services.backup import get_s3_client
+    from bson import json_util
+    import tempfile
+    import zipfile
+    import shutil
+    import boto3
+    import io
+
+    # Validação de segurança
+    confirm = data.get("confirm")
+    if confirm != "RESTAURAR_PRODUCAO":
+        raise HTTPException(
+            status_code=400,
+            detail='Para confirmar, envie {"confirm": "RESTAURAR_PRODUCAO"} no body. Esta operação sobrescreve TODOS os dados da BD.'
+        )
+
+    backup_key = data.get("backup_key")  # S3 key específico (opcional)
+    collections_to_restore = data.get("collections")  # Lista de colecções (opcional, default = todas)
+
+    logger.warning(f"[RESTORE] Restore de Produção iniciado por {current_user.get('email')}")
+
+    s3_client = get_s3_client()
+    if not s3_client:
+        raise HTTPException(status_code=500, detail="S3 não configurado — credenciais AWS em falta")
+
+    tmp_dir = tempfile.mkdtemp()
+    stats = {"collections": {}, "total_documents": 0, "errors": [], "warnings": []}
+
+    try:
+        # 1. Encontrar backup no S3
+        if backup_key:
+            s3_keys = [backup_key]
+        else:
+            # Listar backups e encontrar o mais recente
+            response = s3_client.list_objects_v2(
+                Bucket=os.environ.get("AWS_BUCKET_NAME", ""),
+                Prefix="backups/",
+            )
+            s3_keys = sorted(
+                [obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(".zip")],
+                reverse=True
+            )
+            if not s3_keys:
+                raise HTTPException(status_code=404, detail="Nenhum backup encontrado no S3")
+
+        selected_key = s3_keys[0]
+        logger.info(f"[RESTORE] A usar backup: {selected_key}")
+
+        # 2. Download do ZIP
+        zip_buffer = io.BytesIO()
+        s3_client.download_fileobj(os.environ.get("AWS_BUCKET_NAME", ""), selected_key, zip_buffer)
+        zip_buffer.seek(0)
+
+        # 3. Extrair e importar colecções
+        client = AsyncIOMotorClient(MONGO_URL)
+        database = client[DB_NAME]
+
+        with zipfile.ZipFile(zip_buffer, 'r') as zf:
+            json_files = [f for f in zf.namelist() if f.endswith(".json")]
+
+            for json_file in json_files:
+                col_name = json_file.replace(".json", "").split("/")[-1]
+
+                # Se collections_to_restore especificado, filtrar
+                if collections_to_restore and col_name not in collections_to_restore:
+                    continue
+
+                try:
+                    content = zf.read(json_file)
+                    docs = json_util.loads(content)
+
+                    if not isinstance(docs, list) or not docs:
+                        stats["warnings"].append(f"Colecção {col_name}: sem documentos válidos")
+                        continue
+
+                    # Limpar colecção actual e inserir dados do backup
+                    await database[col_name].delete_many({})
+                    if docs:
+                        result = await database[col_name].insert_many(docs)
+                        stats["collections"][col_name] = len(docs)
+                        stats["total_documents"] += len(docs)
+
+                    logger.info(f"[RESTORE] {col_name}: {len(docs)} documentos restaurados")
+
+                except Exception as e:
+                    stats["errors"].append(f"{col_name}: {str(e)}")
+                    logger.error(f"[RESTORE] Erro em {col_name}: {e}")
+
+        client.close()
+
+        # Limpeza
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        logger.info(f"[RESTORE] Concluído: {stats['total_documents']} documentos em {len(stats['collections'])} colecções")
+
+        return {
+            "success": len(stats["errors"]) == 0,
+            "backup_key": selected_key,
+            "collections": stats["collections"],
+            "total_documents": stats["total_documents"],
+            "errors": stats["errors"],
+            "warnings": stats["warnings"],
+            "restored_at": datetime.now(timezone.utc).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[RESTORE] Erro fatal: {e}")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"Erro no restore: {str(e)}")
