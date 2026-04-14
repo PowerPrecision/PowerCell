@@ -183,6 +183,14 @@ PowerCell/
 - **Metadados de rastreabilidade**: Cada documento recebe `_sanitized_at`, `_sanitized_source` e flags de anonimização
 - **Disponível via API** e **CLI standalone** com suporte a `PROD_MONGO_URL`, `PROD_DB_NAME`, `DEV_MONGO_URL`, `DEV_DB_NAME`
 
+### Webmail (Email IMAP)
+- **Sincronização automática**: Worker sincroniza emails via IMAP a cada 15 minutos
+- **Sincronização manual**: Botão "Sincronizar" no WebmailPage para trigger imediato
+- **Múltiplas caixas de email**: Suporte a Precision Crédito e Power Real Estate (IMAP separado)
+- **Envio de emails B2B**: Envio de documentação para bancos com editor de texto rico
+- **Rascunhos automáticos IA**: Geração automática de emails quando faltam documentos
+- **Upload e anexação**: Anexação automática de documentos aos emails
+
 ### Documentos
 - **Explorador S3**: Vista lista/grelha, preview lateral, renomear, mover
 - **Organização automática IA**: Categorização por tipo (Financeiros, Identificação, etc.)
@@ -372,13 +380,17 @@ O histórico de processos NÃO é guardado em arrays embebidos no documento prin
 | `EMAIL_FROM_NAME` | Nome do remetente | `Power Real Estate...` |
 | `OPENAI_API_KEY` | Chave API OpenAI (legado) | — |
 | `EMERGENT_LLM_KEY` | Chave API LLM (GPT-4o/4o-mini) | — |
+| `EMERGENT_BASE_URL` | URL base LLM (emergent) | `https://api.emergent.ai/v1` |
 | `GEMINI_API_KEY` | Chave API Gemini | — |
 | `ONEDRIVE_TENANT_ID` | Tenant ID do OneDrive | — |
 | `ONEDRIVE_CLIENT_ID` | Client ID do OneDrive | — |
 | `ONEDRIVE_CLIENT_SECRET` | Client Secret do OneDrive | — |
+| `VAPID_PRIVATE_KEY` | Chave privada VAPID (Push) | — |
+| `VAPID_PUBLIC_KEY` | Chave pública VAPID (Push) | — |
 | `TRELLO_API_KEY` | API Key do Trello | — |
 | `TRELLO_TOKEN` | Token do Trello | — |
 | `TRELLO_BOARD_ID` | Board ID do Trello | — |
+| `SCRAPERAPI_API_KEY` | API Key do ScraperAPI (Idealista) | — |
 
 #### Backend — Sincronização Prod ↔ Dev (pipelines)
 | Variável | Descrição |
@@ -397,11 +409,123 @@ O histórico de processos NÃO é guardado em arrays embebidos no documento prin
 | `VITE_DSN_SENTRY_FRONTEND` | DSN do Sentry (frontend, preferido) |
 | `VITE_SENTRY_DSN` | DSN do Sentry (frontend, legado) |
 
+## Instalação e Configuração Local
+
+### Pré-requisitos
+
+- **Python 3.11+** com pip
+- **Node.js 18+** (recomendado 24) com npm/yarn
+- **MongoDB Atlas** (ou instância local) — connection string SRV
+- **Conta AWS** (para S3) — opcional mas recomendado
+- **Conta OpenAI** (para análise de documentos) — opcional
+
+### Backend
+
+```bash
+# 1. Clonar o repositório
+git clone https://github.com/powercell/powercell-crm.git
+cd powercell-crm
+
+# 2. Instalar dependências Python
+cd backend
+pip install -r requirements.txt
+
+# 3. Configurar variáveis de ambiente
+cp ../.env.example .env
+# Editar .env e preencher MONGO_URL, DB_NAME, JWT_SECRET, CORS_ORIGINS
+
+# 4. Executar seeds (dados de teste)
+python seed.py
+
+# 5. Iniciar o servidor
+python server.py
+# O servidor arranca em http://localhost:8000
+```
+
+### Frontend
+
+```bash
+# 1. Instalar dependências
+cd frontend
+npm install
+
+# 2. Configurar variáveis de ambiente
+# Criar .env na pasta frontend/ com:
+#   REACT_APP_BACKEND_URL=http://localhost:8000
+#   REACT_APP_ENVIRONMENT=development
+
+# 3. Iniciar em modo desenvolvimento
+npm start
+# O frontend arranca em http://localhost:3000
+```
+
+### Worker (Background Tasks)
+
+```bash
+cd backend
+python worker.py
+# O worker lê da mesma BD e Redis, processando tarefas em fila
+```
+
+### Docker (Produção)
+
+```bash
+# Backend
+cd backend
+docker build -t powercell-backend .
+docker run -p 8000:8000 --env-file .env powercell-backend
+
+# Frontend (Vercel faz deploy automático)
+# Basta fazer push para a branch main
+```
+
 ## Credenciais de Teste
 
 - **Admin**: admin@sistema.pt / admin
 - **CEO**: pedroborges@powerealestate.pt / power2026
 - **Consultor**: tiagoborges@powerealestate.pt / power2026
+
+## Fluxo de Desenvolvimento
+
+### Branches
+
+| Branch | Propósito | Deploy |
+|--------|-----------|--------|
+| `main` | Produção | Render (backend) + Vercel (frontend) |
+| `dev` | Desenvolvimento | Render (preview) + Vercel (preview) |
+
+### Commits
+
+- Mensagens de commit em **português (pt-PT)**
+- Formato: `tipo: descrição curta`
+- Tipos: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+- Exemplo: `feat: adicionar sincronização de webmail`
+
+### CI/CD Pipeline
+
+```
+Push para branch → GitHub Actions
+├── Frontend: ESLint + Vite build → Vercel deploy
+├── Backend: Flake8 + Pytest → Render deploy
+└── Testes E2E: Playwright (front-end)
+```
+
+### Testes
+
+```bash
+# Backend — Unit + Integration
+cd backend
+pytest tests/ -v
+
+# Backend — com cobertura
+pytest tests/ --cov=. --cov-report=html
+
+# Frontend — lint
+npm run lint
+
+# Frontend — build de produção
+npm run build
+```
 
 ## Deploy
 

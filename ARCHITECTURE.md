@@ -644,3 +644,142 @@ sequenceDiagram
 - **OpenAI PII Opt-out**: Configuração de opt-out de treino de dados na conta OpenAI
 - **Prompt Injection Protection**: Mitigação de prompt injection em análise de PDFs
 - **SPA Rewrite Security**: Vercel rewrites excluem `/assets/` para evitar MIME type attacks
+
+---
+
+## Arquitetura de Webmail e Email
+
+```mermaid
+sequenceDiagram
+    actor User as Consultor
+    participant WP as WebmailPage
+    participant API as FastAPI
+    participant Worker as ARQ Worker
+    participant IMAP as IMAP Servers
+    participant DB as MongoDB
+    participant WS as WebSocket
+
+    %% Sync automático (Worker)
+    loop A cada 15 minutos
+        Worker->>IMAP: FETCH emails (Precision + Power)
+        IMAP-->>Worker: Lista de mensagens
+        Worker->>DB: Upsert emails (dedup por message_id)
+        Worker->>WS: broadcast(email_sync_completed)
+        WS-->>User: Notificação de novos emails
+    end
+
+    %% Sync manual (botão)
+    User->>WP: Clicar "Sincronizar"
+    WP->>API: POST /api/emails/webmail/sync
+    API->>IMAP: FETCH todos os emails de todas as pastas
+    IMAP-->>API: Lista de mensagens
+    API->>DB: Upsert (dedup)
+    API-->>WP: {new: N, duplicates: D, errors: E}
+
+    %% Envio B2B
+    User->>WP: Compor email para banco
+    WP->>API: POST /api/emails/send-to-bank
+    API->>DB: Guardar email (direção: outbound)
+    API->>S3: Anexar documentos selecionados
+    API->>SMTP: Enviar via SendGrid/Resend/SMTP
+    API-->>WP: Email enviado
+```
+
+**Contas de email suportadas:**
+
+| Conta | Variáveis de Configuração | Servidor IMAP |
+|-------|--------------------------|---------------|
+| Precision Crédito | `PRECISION_EMAIL`, `PRECISION_PASSWORD`, `PRECISION_IMAP_SERVER/PORT` | `mail.precisioncredito.pt:993` |
+| Power Real Estate | `POWER_EMAIL`, `POWER_PASSWORD`, `POWER_IMAP_SERVER/PORT` | `webmail2.hcpro.pt:993` |
+
+---
+
+## Arquitetura de Push Notifications
+
+```mermaid
+flowchart LR
+    subgraph Frontend
+        SW["Service Worker<br/>(sw-push.js)"]
+        Reg["Navigator.pushManager<br/>subscribe()"]
+    end
+
+    subgraph Backend
+        Sub["POST /api/push/subscribe"]
+        Send["Push Service<br/>(push_notifications.py)"]
+    end
+
+    subgraph Browser
+        PushAPI["Web Push API<br/>(VAPID)"]
+    end
+
+    Reg -->|VAPID Public Key| Sub
+    Sub -->|Guardar subscription| DB[(MongoDB<br/>push_subscriptions)]
+    Send -->|VAPID Private Key| PushAPI
+    PushAPI -->|Notificação| SW
+```
+
+**Configuração VAPID:**
+- `VAPID_PRIVATE_KEY` — Chave privada para assinar notificações (backend)
+- `VAPID_PUBLIC_KEY` — Chave pública para subscrição (frontend via `REACT_APP_VAPID_PUBLIC_KEY`)
+- `VAPID_MAILTO` — Contacto admin para VAPID (`mailto:admin@creditoimo.pt`)
+
+---
+
+## Arquitetura de Rate Limiting
+
+O sistema utiliza rate limiting em duas camadas:
+
+### Backend (slowapi)
+
+```mermaid
+flowchart TD
+    Request["Request HTTP"] --> GlobalRL["Rate Limit Global<br/>(200/min por defeito)"]
+    GlobalRL -->|Permitido| TypeRL["Rate Limit por Tipo"]
+    TypeRL --> AuthRL["auth: 10/min"]
+    TypeRL --> ReadRL["read: 120/min"]
+    TypeRL --> WriteRL["write: 60/min"]
+    TypeRL --> UploadRL["upload: 20/min"]
+    TypeRL --> ExportRL["export: 10/min"]
+    TypeRL --> AIRL["ai: 20/min"]
+    TypeRL -->|Excedido| Error429["429 Too Many Requests"]
+```
+
+**Variáveis de ambiente:**
+
+| Variável | Predefinição | Descrição |
+|----------|-------------|-----------|
+| `RATE_LIMIT_AUTH` | `10/minute` | Login e registo |
+| `RATE_LIMIT_READ` | `120/minute` | GET requests |
+| `RATE_LIMIT_WRITE` | `60/minute` | POST/PUT/PATCH |
+| `RATE_LIMIT_UPLOAD` | `20/minute` | Uploads de ficheiros |
+| `RATE_LIMIT_EXPORT` | `10/minute` | Exportações (CSV, ZIP) |
+| `RATE_LIMIT_AI` | `20/minute` | Chamadas à API de IA |
+| `RATE_LIMIT_DEFAULT` | `200/minute` | Qualquer outro endpoint |
+
+### Frontend (429 Retry)
+
+- **API Interceptor**: 3 retries com exponential backoff (2s → 4s → 8s + jitter ±500ms)
+- Respeita header `Retry-After` quando presente
+- Suprime toast de erro durante retries para evitar spam
+- **Notifications Polling**: Backoff em 429 (30s → 60s → 120s → 5min), reset após 3 sucessos
+
+---
+
+## Arquitetura de Scraping (Idealista)
+
+```mermaid
+flowchart TD
+    Admin["Admin Dashboard"] -->|"Importar Imóvel"| API["POST /api/scraper/scrape"]
+    API --> ScraperSvc["PropertyScraper"]
+    ScraperSvc -->|"Tentativa 1"| Direct["HTTP Request direta"]
+    Direct -->|Bloqueado| ScraperAPI["ScraperAPI<br/>(premium+render)"]
+    ScraperSvc -->|"Tentativa 2"| ScraperAPI
+    ScraperAPI -->|Sucesso| Parse["Parse HTML"]
+    Parse -->|"Extração"| Gemini["Gemini Flash<br/>(AI extraction)"]
+    Gemini -->|"Dados estruturados"| DB[(MongoDB<br/>properties)]
+```
+
+**Configuração:**
+- `SCRAPERAPI_API_KEY` — API key do ScraperAPI (para sites protegidos)
+- `GEMINI_API_KEY` — Gemini Flash para extração de dados de páginas
+- Fallback: HTTP direto → ScraperAPI basic → ScraperAPI premium → ScraperAPI premium+render
