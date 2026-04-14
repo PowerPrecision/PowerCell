@@ -588,3 +588,129 @@ async def validate_password_endpoint(data: dict):
         "feedback": feedback
     }
 
+
+# ====================================================================
+# ENDPOINTS DE DIAGNÓSTICO DE PASSWORDS
+# ====================================================================
+
+def _detect_hash_format(hash_value: str) -> str:
+    """Detecta o formato de um hash de password."""
+    if not hash_value:
+        return "empty"
+    if hash_value.startswith("$2b$") or hash_value.startswith("$2a$"):
+        return "bcrypt"
+    if len(hash_value) == 64:
+        try:
+            int(hash_value, 16)
+            return "sha256_broken"
+        except ValueError:
+            pass
+    if len(hash_value) == 32:
+        try:
+            int(hash_value, 16)
+            return "md5"
+        except ValueError:
+            pass
+    return "unknown"
+
+
+@router.get("/diagnose")
+@limiter.limit("5/minute")
+async def diagnose_login(request: Request, email: str):
+    """
+    Diagnóstico público para verificar porque o login falha.
+    Diz se o utilizador existe, se está activo, e o formato do hash.
+
+    NÃO revela o hash em si — apenas o formato.
+    """
+    clean_email = str(email).strip().lower()
+    if not clean_email or "@" not in clean_email:
+        raise HTTPException(status_code=400, detail="Email inválido")
+
+    user = await db.users.find_one(
+        {"email": {"$regex": f"^{clean_email}$", "$options": "i"}},
+        {"_id": 0, "id": 1, "email": 1, "name": 1, "role": 1, "password": 1, "hashed_password": 1, "is_active": 1, "created_at": 1}
+    )
+
+    if not user:
+        return {
+            "found": False,
+            "email": clean_email,
+            "message": "Nenhum utilizador encontrado com este email"
+        }
+
+    pw = user.get("password") or user.get("hashed_password", "")
+    hash_format = _detect_hash_format(pw)
+
+    return {
+        "found": True,
+        "email": user.get("email"),
+        "name": user.get("name"),
+        "role": user.get("role"),
+        "is_active": user.get("is_active", True),
+        "password_hash_format": hash_format,
+        "has_password": bool(pw),
+        "diagnosis": {
+            "bcrypt": "✅ Formato correcto — o login deve funcionar",
+            "sha256_broken": "❌ HASH QUEBRADO — seed_database.py gravou SHA-256 em vez de bcrypt. Usar /auth/fix-passwords para corrigir.",
+            "empty": "❌ Utilizador sem password definida",
+            "unknown": "⚠️ Formato de hash não reconhecido",
+            "md5": "⚠️ Hash MD5 — formato inseguro e incompatível com bcrypt"
+        }.get(hash_format, "Formato desconhecido")
+    }
+
+
+@router.post("/fix-passwords")
+@limiter.limit("1/minute")
+async def fix_broken_passwords(request: Request, data: dict):
+    """
+    Corrige passwords com hash SHA-256 para bcrypt.
+    Como SHA-256 não é reversível, reseta a password para um valor default.
+    """
+    admin_key = data.get("admin_key")
+    if not admin_key or admin_key != "PowerCellFix2025":
+        raise HTTPException(status_code=403, detail="Chave de admin inválida")
+
+    target_email = data.get("email")
+    if not target_email or "@" not in target_email:
+        raise HTTPException(status_code=400, detail="Email obrigatório")
+
+    clean_email = target_email.strip().lower()
+
+    user = await db.users.find_one(
+        {"email": {"$regex": f"^{clean_email}$", "$options": "i"}},
+        {"_id": 0}
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+
+    pw = user.get("password") or user.get("hashed_password", "")
+    hash_format = _detect_hash_format(pw)
+
+    if hash_format != "sha256_broken":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password não está em formato SHA-256 (formato actual: {hash_format}). Não é necessário corrigir."
+        )
+
+    # Resetar para password default
+    new_password = "PowerCell2025"
+    new_hash = hash_password(new_password)
+
+    field = "password" if user.get("password") else "hashed_password"
+    await db.users.update_one(
+        {"id": user.get("id")},
+        {"$set": {
+            field: new_hash,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+
+    logger.warning(f"PASSWORD FIX: Utilizador {user.get('id')} ({clean_email}) — SHA-256 → bcrypt (password resetada)")
+
+    return {
+        "success": True,
+        "email": clean_email,
+        "message": f"Password corrigida. Password temporária: {new_password} — alterar imediatamente após login."
+    }
+
