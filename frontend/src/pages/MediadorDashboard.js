@@ -87,24 +87,24 @@ const MediadorDashboard = () => {
   // Função para renderizar cada linha da tabela
   const renderRow = (process) => (
     <tr key={process.id} className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
-      <td className="p-4 align-middle font-medium">{process.client_name}</td>
-      <td className="p-4 align-middle">{process.client_email}</td>
-      <td className="p-4 align-middle">
+      <td className="p-2 sm:p-3 lg:p-4 align-middle font-medium">{process.client_name}</td>
+      <td className="p-2 sm:p-3 lg:p-4 align-middle">{process.client_email}</td>
+      <td className="p-2 sm:p-3 lg:p-4 align-middle">
         {process.financial_data?.monthly_income 
           ? `€${process.financial_data.monthly_income.toLocaleString()}` 
           : "-"}
       </td>
-      <td className="p-4 align-middle">
+      <td className="p-2 sm:p-3 lg:p-4 align-middle">
         {process.financial_data?.valor_financiado || "-"}
       </td>
-      <td className="p-4 align-middle">
+      <td className="p-2 sm:p-3 lg:p-4 align-middle">
         <StatusBadge status={process.status} workflowStatuses={workflowStatuses} />
       </td>
-      <td className="p-4 align-middle text-right">
-        <Button variant="ghost" size="icon" onClick={() => navigate(`/process/${process.id}`)}>
+      <td className="p-2 sm:p-3 lg:p-4 align-middle text-right">
+        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => navigate(`/process/${process.id}`)}>
           <Eye className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" onClick={() => openAddExpiryDialog(process.id)}>
+        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => openAddExpiryDialog(process.id)}>
           <Plus className="h-4 w-4" />
         </Button>
       </td>
@@ -120,7 +120,7 @@ const MediadorDashboard = () => {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             icon={CreditCard}
             iconColor="text-emerald-600"
@@ -153,7 +153,7 @@ const MediadorDashboard = () => {
 
         {/* Main Tabs */}
         <Tabs defaultValue="clients">
-          <TabsList>
+          <TabsList className="flex-wrap">
             <TabsTrigger value="clients" className="gap-2">
               <CreditCard className="h-4 w-4" />
               Meus Clientes

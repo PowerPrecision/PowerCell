@@ -82,22 +82,22 @@ const ConsultorDashboard = () => {
   // Função para renderizar cada linha da tabela
   const renderRow = (process) => (
     <tr key={process.id} className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
-      <td className="p-4 align-middle font-medium">{process.client_name}</td>
-      <td className="p-4 align-middle">{process.client_email}</td>
-      <td className="p-4 align-middle">
+      <td className="p-2 sm:p-3 lg:p-4 align-middle font-medium">{process.client_name}</td>
+      <td className="p-2 sm:p-3 lg:p-4 align-middle">{process.client_email}</td>
+      <td className="p-2 sm:p-3 lg:p-4 align-middle">
         <Badge variant="outline">{TYPE_LABELS[process.process_type] || process.process_type}</Badge>
       </td>
-      <td className="p-4 align-middle">
+      <td className="p-2 sm:p-3 lg:p-4 align-middle">
         <StatusBadge status={process.status} workflowStatuses={workflowStatuses} />
       </td>
-      <td className="p-4 align-middle text-sm text-muted-foreground">
+      <td className="p-2 sm:p-3 lg:p-4 align-middle text-sm text-muted-foreground">
         {formatDate(process.created_at)}
       </td>
-      <td className="p-4 align-middle text-right">
-        <Button variant="ghost" size="icon" onClick={() => navigate(`/process/${process.id}`)}>
+      <td className="p-2 sm:p-3 lg:p-4 align-middle text-right">
+        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => navigate(`/process/${process.id}`)}>
           <Eye className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" onClick={() => openAddExpiryDialog(process.id)}>
+        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => openAddExpiryDialog(process.id)}>
           <Plus className="h-4 w-4" />
         </Button>
       </td>
@@ -113,7 +113,7 @@ const ConsultorDashboard = () => {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             icon={Users}
             iconColor="text-blue-600"
@@ -146,7 +146,7 @@ const ConsultorDashboard = () => {
 
         {/* Main Tabs */}
         <Tabs defaultValue="clients">
-          <TabsList>
+          <TabsList className="flex-wrap">
             <TabsTrigger value="clients" className="gap-2">
               <Users className="h-4 w-4" />
               Meus Clientes

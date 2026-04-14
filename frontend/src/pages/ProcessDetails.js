@@ -1519,7 +1519,7 @@ const ProcessDetails = () => {
                             <Phone className="h-4 w-4 text-blue-500" />
                             Contactos
                           </h4>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Email</Label>
                               <Input
@@ -1552,7 +1552,7 @@ const ProcessDetails = () => {
                             <CreditCard className="h-4 w-4 text-amber-500" />
                             Identificação
                           </h4>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1 md:col-span-2">
                               <Label className="text-xs text-muted-foreground">Nome Completo</Label>
                               <Input
@@ -1712,7 +1712,7 @@ const ProcessDetails = () => {
                             <Users className="h-4 w-4 text-orange-500" />
                             Filiação
                           </h4>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Nome do Pai</Label>
                               <Input
@@ -1765,7 +1765,7 @@ const ProcessDetails = () => {
                                 Cônjuge/Co-Titular
                               </Badge>
                             </h4>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               {/* Nome */}
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Nome</Label>
@@ -1930,7 +1930,7 @@ const ProcessDetails = () => {
                                       </Badge>
                                     )}
                                   </div>
-                                  <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                                     {buyer.nome && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">Nome:</span>
@@ -1972,7 +1972,7 @@ const ProcessDetails = () => {
                                       </Badge>
                                     )}
                                   </div>
-                                  <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                                     {applicant.nome && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">Nome:</span>
@@ -2028,7 +2028,7 @@ const ProcessDetails = () => {
                             <Briefcase className="h-4 w-4 text-green-500" />
                             Rendimentos
                           </h4>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Rendimento Mensal (€)</Label>
                               <Input
@@ -2080,7 +2080,7 @@ const ProcessDetails = () => {
                             <CreditCard className="h-4 w-4 text-blue-500" />
                             Situação Financeira
                           </h4>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Contrato Efetivo?</Label>
                               <Select
@@ -2167,7 +2167,7 @@ const ProcessDetails = () => {
                           <p className="text-xs text-muted-foreground mb-3">
                             Preencha as credenciais de acesso aos portais oficiais para facilitar a gestão do processo.
                           </p>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {/* Portal das Finanças */}
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Portal Finanças - Utilizador</Label>
@@ -2193,7 +2193,7 @@ const ProcessDetails = () => {
                                 <button
                                   type="button"
                                   onClick={() => setShowPortalSenha(!showPortalSenha)}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
                                   tabIndex={-1}
                                 >
                                   {showPortalSenha ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -2225,7 +2225,7 @@ const ProcessDetails = () => {
                                 <button
                                   type="button"
                                   onClick={() => setShowSegSocialSenha(!showSegSocialSenha)}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
                                   tabIndex={-1}
                                 >
                                   {showSegSocialSenha ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -2248,7 +2248,7 @@ const ProcessDetails = () => {
                             <p className="text-xs text-muted-foreground mb-3">
                               Credenciais de acesso aos portais oficiais do segundo proponente/titular.
                             </p>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               {/* Portal das Finanças */}
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Finanças - Utilizador</Label>
@@ -2360,7 +2360,7 @@ const ProcessDetails = () => {
                             <User className="h-4 w-4 text-purple-500" />
                             Situação Profissional
                           </h4>
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Tipo de Emprego</Label>
                               <Select
@@ -2879,7 +2879,7 @@ const ProcessDetails = () => {
                                 <p className="text-[10px] text-muted-foreground">{format(parseISO(activity.created_at), "dd/MM HH:mm", { locale: pt })}</p>
                               </div>
                               {(activity.user_id === user.id || user.role === "admin") && (
-                                <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => handleDeleteComment(activity.id)}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleDeleteComment(activity.id)}>
                                   <Trash2 className="h-3 w-3 text-destructive" />
                                 </Button>
                               )}
@@ -2963,7 +2963,7 @@ const ProcessDetails = () => {
                               <Plus className="h-4 w-4" />
                             </Button>
                           </DialogTrigger>
-                          <DialogContent aria-describedby="deadline-dialog-description">
+                          <DialogContent aria-describedby="deadline-dialog-description" className="sm:max-w-md w-[calc(100vw-2rem)]">
                             <DialogHeader>
                               <DialogTitle>Novo Prazo</DialogTitle>
                               <DialogDescription id="deadline-dialog-description">
@@ -3064,7 +3064,7 @@ const ProcessDetails = () => {
                                 </div>
                               </div>
                               {canManageDeadlines && (
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleDeleteDeadline(deadline.id)}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDeleteDeadline(deadline.id)}>
                                   <Trash2 className="h-3 w-3 text-destructive" />
                                 </Button>
                               )}
@@ -3290,7 +3290,7 @@ const ProcessDetails = () => {
 
       {/* Dialog de Revisão de Conflitos IA */}
       <Dialog open={showAIReviewDialog} onOpenChange={setShowAIReviewDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-yellow-500" />
@@ -3308,7 +3308,7 @@ const ProcessDetails = () => {
                   {conflict.field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                 </div>
                 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div 
                     className="border rounded p-3 cursor-pointer hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950"
                     onClick={() => resolveAIConflict(conflict.field, conflict.existing_value)}

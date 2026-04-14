@@ -764,7 +764,7 @@ const StaffDashboard = () => {
                             {isExpanded && (
                               <div className="p-4 border-t space-y-3">
                                 {/* Email details */}
-                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                                   <div>
                                     <span className="text-muted-foreground">Para:</span>{" "}
                                     <span className="font-medium">{draft.to_emails?.[0] || "N/A"}</span>
@@ -874,7 +874,7 @@ const StaffDashboard = () => {
           if (!open) { setSelectedClient(null); setNewLead({ client_name: "", client_email: "", client_phone: "", process_type: "credito_habitacao" }); }
           setShowLeadDialog(open);
         }}>
-          <DialogContent className="sm:max-w-[500px]" aria-describedby="create-lead-description">
+          <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)]" aria-describedby="create-lead-description">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5" />
