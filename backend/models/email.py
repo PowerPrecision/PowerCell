@@ -23,6 +23,7 @@ class EmailStatus(str, Enum):
     FAILED = "failed"
     PENDING = "pending"
     DRAFT = "draft"
+    SYNCED = "synced"
 
 
 class EmailMarkType(str, Enum):
