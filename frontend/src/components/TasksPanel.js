@@ -82,10 +82,10 @@ const TasksPanel = ({
       
       let tasksRes;
       if (processId) {
-        tasksRes = await getProcessTasks(processId);
+        tasksRes = await getProcessTasks(processId, showCompleted);
       } else if (showOnlyMyTasks && !showCreatedByMe) {
         // Buscar apenas tarefas atribuídas ao utilizador actual
-        tasksRes = await getMyTasks();
+        tasksRes = await getMyTasks(showCompleted);
       } else {
         // Buscar tarefas com filtros
         const params = { include_completed: showCompleted };
