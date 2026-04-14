@@ -432,3 +432,41 @@ Work Log:
 Stage Summary:
 - Backend broadcasts granular move events with user info
 - Frontend can send lock/unlock events via WebSocket
+
+---
+Task ID: 1
+Agent: Frontend Agent
+Task: Replace textarea with react-quill WYSIWYG for email template
+
+Work Log:
+- Added 'react-quill-new/dist/quill.snow.css' import at top of DocumentRecipientsManager.js
+- Replaced plain Textarea with ReactQuill snow theme component
+- Configured toolbar with formatting buttons (headers, bold, italic, lists, align, link, clean)
+- Added matching formats array for proper rendering
+
+Stage Summary:
+- Email template editor in System Config > Destinatários now uses visual WYSIWYG
+- HTML is generated and stored in state as before
+
+---
+Task ID: 2
+Agent: General Agent
+Task: Add "Pré-visualizar RGPD" button with preview modal to SystemConfigPage.js
+
+Work Log:
+- **Dialog import (line 27)**: Added `import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog"`. Deduplicated a previously existing duplicate import.
+- **State variable (line 1125)**: Added `const [showRgpdPreview, setShowRgpdPreview] = useState(false)` inside RGPDTab component.
+- **Preview button (line 1343-1349)**: Added "👁️ Pré-visualizar RGPD" button with `variant="outline"` between "Restaurar Padrão" and "Guardar Template" buttons in the action bar.
+- **Preview Dialog (line 1370-1399)**: Added Dialog component before `</CardContent>` with:
+  - `sm:max-w-[700px] max-h-[85vh] overflow-y-auto` for responsive scrollable modal
+  - `prose prose-sm` classes for nice typography on preview content
+  - `dangerouslySetInnerHTML` with `.replace()` chains for all template variables (`{{NOME_CLIENTE}}`, `{{NOME_EMPRESA}}`, `{{CONTRIBUINTE}}`, `{{MORADA}}`, `{{CODIGO_POSTAL}}`, `{{TIPO_DOCUMENTO}}`, `{{NUMERO_DOCUMENTO}}`, `{{VALIDADE_DOCUMENTO}}`, `{{DATA_ASSINATURA}}`)
+  - Realistic sample values (João Silva, Power Real Estate, 123456789, etc.)
+  - Dynamic date via `new Date().toLocaleDateString("pt-PT")`
+  - "Fechar" button in DialogFooter
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/src/pages/SystemConfigPage.js`
+- Duplicate Dialog import cleaned up
+- Preview modal fully functional with template variable substitution
+- No changes to SmartRichEditor or existing functionality
