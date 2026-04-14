@@ -1506,7 +1506,7 @@ async def download_email_attachment(
 @router.post("/{email_id}/mark")
 async def mark_email(
     email_id: str,
-    mark_type: EmailMarkType = Body(..., embed=True),
+    data: dict = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1519,7 +1519,18 @@ async def mark_email(
     - starred: Marcar com estrela
     - archived: Arquivar
     - spam: Marcar como spam
+    
+    Aceita tanto {"type": "read"} como {"mark_type": "read"}
     """
+    mark_type_str = data.get("type") or data.get("mark_type")
+    if not mark_type_str:
+        raise HTTPException(status_code=422, detail="Campo 'type' obrigatório")
+    
+    try:
+        mark_type = EmailMarkType(mark_type_str)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Tipo de marcação inválido: {mark_type_str}")
+    
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
