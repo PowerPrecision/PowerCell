@@ -12,7 +12,7 @@ from models.auth import (
     UserRole, UserRegister, UserLogin, UserResponse, TokenResponse
 )
 from services.auth import (
-    hash_password, verify_password, create_token, get_current_user,
+    hash_password, verify_password, needs_rehash, create_token, get_current_user,
     validate_password_strength
 )
 from utils.input_sanitization import (
@@ -354,6 +354,21 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
         if not verify_password(data.password, password_field):
             logger.warning(f"Login falhou: password incorrecta para user={user['id']}")
             raise HTTPException(status_code=401, detail="Credenciais inválidas")
+
+        # Re-hash automático: se a password está em formato legacy (SHA-256),
+        # re-hashar para bcrypt de forma transparente após login bem-sucedido
+        if needs_rehash(password_field):
+            try:
+                new_hash = hash_password(data.password)
+                pw_field_name = "password" if user.get("password") else "hashed_password"
+                await db.users.update_one(
+                    {"id": user["id"]},
+                    {"$set": {pw_field_name: new_hash}}
+                )
+                logger.info(f"Auto-rehash: user={user['id']} password migrada para bcrypt")
+            except Exception as e:
+                logger.error(f"Auto-rehash falhou para user={user['id']}: {e}")
+                # Não bloquear o login — o utilizador consegue entrar de qualquer forma
         
         if not user.get("is_active", True):
             logger.warning(f"Login falhou: conta desactivada user={user['id']}")
