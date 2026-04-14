@@ -2447,9 +2447,15 @@ _sync_result_cache = {"result": None, "timestamp": None}
 
 
 class SyncDatabaseRequest(BaseModel):
-    """Modelo para a requisição de sincronização de BD."""
-    prod_url: Optional[str] = None
-    prod_db_name: Optional[str] = None
+    """
+    Modelo para a requisição de restauro de BD a partir de backup.
+
+    Nota: prod_url e prod_db_name já não são necessários pois a fonte
+    é o backup automático no S3 (não a BD de Produção diretamente).
+    Mantidos para compatibilidade backward (são ignorados).
+    """
+    prod_url: Optional[str] = None   # Ignorado (legado — mantido para compatibilidade)
+    prod_db_name: Optional[str] = None  # Ignorado (legado)
     dev_url: Optional[str] = None
     dev_db_name: Optional[str] = None
 
@@ -2475,18 +2481,22 @@ async def sync_database(
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """
-    Sincroniza dados de Produção para Desenvolvimento com anonimização RGPD.
+    Restaura a base de dados de Desenvolvimento a partir do backup de Produção (S3).
+
+    Arquitetura (sem carga no servidor de Produção):
+        S3 Backup (ZIP) → Download → Extract JSON → Coleções _temp → Sanitize RGPD
+        → Validar integridade → Swap para coleções reais → Cleanup
 
     SEGURANÇA:
-    - Só funciona se ENVIRONMENT != "production"
-    - Só pode ser executado por superadmin (role = admin)
+    - Só funciona se ENVIRONMENT != "production" (403 em produção)
+    - Só pode ser executado por admin (role = admin)
     - Executa em background (BackgroundTasks) para evitar timeouts
-    - Todos os dados pessoais são anonimizados (email, NIF, telefone, nome)
+    - FALHA SEGURA: Dev DB NÃO é modificada se o backup estiver corrompido
 
-    Correções aplicadas durante a transferência:
-    - clients: email → user{id}@powercell.dev, NIF → falso válido, phone → baralhado, apelido → ofuscado
+    Anonimização RGPD aplicada:
+    - clients: email → dev_client_{id}@powercell.dev, NIF → falso válido, phone → baralhado
     - processes: remove links S3/AWS, limpa campos financeiros ultra-sensíveis
-    - properties: remove links S3/AWS, limpa dados financeiros, arredonda coordenadas
+    - properties: remove links S3, limpa dados financeiros, arredonda coordenadas
     - users: mantém emails e passwords reais para login, anonimiza dados pessoais
     """
     global _sync_in_progress, _sync_result_cache
@@ -2494,38 +2504,31 @@ async def sync_database(
     # ─── SEGURANÇA 1: Bloquear em produção ───
     environment = os.environ.get("ENVIRONMENT", "development").lower()
     if environment in ("production", "prod"):
-        logger.warning(f"Tentativa de sync em PRODUÇÃO bloqueada por utilizador {user.get('email')}")
+        logger.warning(f"Tentativa de restore em PRODUÇÃO bloqueada por utilizador {user.get('email')}")
         raise HTTPException(
             status_code=403,
             detail="Este endpoint NÃO pode ser executado em produção. Ação bloqueada por segurança."
         )
 
-    # ─── SEGURANÇA 2: Apenas superadmin ───
+    # ─── SEGURANÇA 2: Apenas admin ───
     if user.get("role") != UserRole.ADMIN:
-        logger.warning(f"Tentativa de sync por não-admin bloqueada: {user.get('email')}")
+        logger.warning(f"Tentativa de restore por não-admin bloqueada: {user.get('email')}")
         raise HTTPException(
             status_code=403,
-            detail="Apenas o administrador (superadmin) pode executar esta operação."
+            detail="Apenas o administrador pode executar esta operação."
         )
 
     # ─── PREVENIR CONCORRÊNCIA ───
     if _sync_in_progress:
         raise HTTPException(
             status_code=409,
-            detail="Já existe uma sincronização em curso. Aguarde a conclusão."
+            detail="Já existe um restauro em curso. Aguarde a conclusão."
         )
 
-    # ─── RESOLVER URIs ───
-    prod_url = request.prod_url or os.getenv("PROD_MONGO_URL") or os.getenv("MONGO_URL")
-    prod_db_name = request.prod_db_name or os.getenv("PROD_DB_NAME") or os.getenv("DB_NAME")
+    # ─── RESOLVER URI DEV ───
     dev_url = request.dev_url or os.getenv("DEV_MONGO_URL")
     dev_db_name = request.dev_db_name or os.getenv("DEV_DB_NAME")
 
-    if not prod_url or not prod_db_name:
-        raise HTTPException(
-            status_code=400,
-            detail="URL e nome da BD de Produção são obrigatórios. Defina PROD_MONGO_URL/PROD_DB_NAME ou envie no body."
-        )
     if not dev_url or not dev_db_name:
         raise HTTPException(
             status_code=400,
@@ -2534,48 +2537,52 @@ async def sync_database(
 
     # ─── REGISTAR AUDIT LOG ───
     await _audit_log(
-        "prod_to_dev_sync_started",
+        "restore_dev_from_backup",
         "database",
-        "sync",
+        "restore",
         user,
         {
-            "prod_db": prod_db_name,
+            "mode": "backup_restore",
             "dev_db": dev_db_name,
             "environment": environment,
             "anonymization": True,
+            "source": "s3_backup",
         }
     )
 
     # ─── EXECUTAR EM BACKGROUND ───
-    async def _execute_sync():
+    async def _execute_restore():
         global _sync_in_progress, _sync_result_cache
         _sync_in_progress = True
         try:
-            from scripts.sync_prod_to_dev import run_sync
-            result = await run_sync(prod_url, prod_db_name, dev_url, dev_db_name)
+            from scripts.restore_dev_from_backup import run_restore
+            result = await run_restore(dev_url, dev_db_name)
             _sync_result_cache = {"result": result, "timestamp": datetime.now(timezone.utc).isoformat()}
         except Exception as e:
-            logger.error(f"Erro crítico no sync Prod→Dev: {e}", exc_info=True)
+            logger.error(f"Erro crítico no restore Dev from backup: {e}", exc_info=True)
             _sync_result_cache = {
                 "result": {
                     "success": False,
                     "error": str(e),
                     "total_documents": 0,
+                    "mode": "backup_restore",
                 },
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         finally:
             _sync_in_progress = False
 
-    background_tasks.add_task(_execute_sync)
+    background_tasks.add_task(_execute_restore)
 
     return {
         "success": True,
-        "message": "Sincronização iniciada em background. Use GET /admin/sync-database/status para acompanhar o progresso.",
+        "message": "Restauro a partir de backup iniciado em background. Use GET /admin/sync-database/status para acompanhar.",
         "details": {
-            "prod_db": prod_db_name,
+            "mode": "backup_restore",
+            "source": "s3_latest_backup",
             "dev_db": dev_db_name,
             "anonymization": True,
+            "fail_safe": True,
             "environment": environment,
             "started_by": user.get("email"),
             "started_at": datetime.now(timezone.utc).isoformat(),
