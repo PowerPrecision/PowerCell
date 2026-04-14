@@ -866,11 +866,17 @@ async def send_documentation_email(
         warnings.append(f"⚠️ {len(failed_attachments)} documento(s) não puderam ser anexados: {', '.join(failed_attachments)}")
     
     # ==== ENVIAR EMAIL COM ANEXOS ====
+    # Gerar versão plain-text a partir do HTML (strip tags) como fallback
+    import re
+    plain_text_body = re.sub(r'<[^>]+>', '', email_body).strip()
+    plain_text_body = re.sub(r'\n{3,}', '\n\n', plain_text_body)
+    
     result = await send_email(
         account_name="power",
         to_emails=to_emails,
         subject=subject,
-        body=email_body,
+        body=plain_text_body,
+        body_html=email_body,
         cc_emails=cc_emails if cc_emails else None,
         bcc_emails=validated_bcc,
         process_id=process_id,
