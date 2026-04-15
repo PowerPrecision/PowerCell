@@ -157,12 +157,13 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const getNavItems = () => {
-    // Admin vai para /admin, CEO e outros staff vão para /processos
-    const dashboardHref = effectiveRole?.toLowerCase() === "admin" ? "/admin" : "/processos";
+    // Admin vai para /admin, outros staff vão para /processos
+    const isAdmin = effectiveRole?.toLowerCase() === "admin";
+    const dashboardHref = isAdmin ? "/admin" : "/processos";
     
     const baseItems = [
       {
-        label: "Dashboard",
+        label: isAdmin ? "Dashboard" : "Processos",
         icon: LayoutDashboard,
         href: dashboardHref,
       },
@@ -223,7 +224,7 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/registos-clientes",
               },
               {
-                label: "Processos",
+                label: "Lista de Clientes",
                 icon: User,
                 href: "/clientes",
               },
@@ -329,7 +330,7 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/registos-clientes",
               },
               {
-                label: "Processos",
+                label: "Lista de Clientes",
                 icon: User,
                 href: "/clientes",
               },
@@ -519,10 +520,15 @@ const DashboardLayout = ({ children, title }) => {
       
       const negocioItems = [];
       
-      // Adicionar "Os Meus Processos" para consultores e intermediários (incluindo intermediário de crédito)
+      // Adicionar "Os Meus Processos" e "Os Meus Clientes" para consultores e intermediários
       if (["consultor", "intermediario", "mediador", "consultor_intermediario"].includes(userRole)) {
         negocioItems.push({
           label: "Os Meus Processos",
+          icon: FileText,
+          href: "/processos",
+        });
+        negocioItems.push({
+          label: "Os Meus Clientes",
           icon: Users,
           href: "/meus-clientes",
         });

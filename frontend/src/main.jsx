@@ -8,7 +8,6 @@ import App from "./App";
 if (import.meta.env.DEV) {
   import("@axe-core/react").then((axe) => {
     axe.default(React, ReactDOM, 3000);
-    console.log("axe-core a11y testing enabled (dev only)");
   }).catch(() => {});
 }
 
@@ -37,9 +36,6 @@ if (SENTRY_DSN) {
     // Send default PII (personal info)
     sendDefaultPii: import.meta.env.VITE_SENTRY_SEND_DEFAULT_PII === 'true',
   });
-  console.log('✅ Sentry initialized for frontend');
-} else {
-  console.log('⚠️ Sentry DSN not configured - error tracking disabled');
 }
 
 // ====================================================================

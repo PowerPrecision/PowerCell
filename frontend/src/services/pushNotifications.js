@@ -40,7 +40,6 @@ class PushNotificationService {
       const registration = await navigator.serviceWorker.register('/sw-push.js', {
         scope: '/'
       });
-      console.log('Service Worker registado:', registration);
       this.swRegistration = registration;
       return registration;
     } catch (error) {
@@ -59,7 +58,6 @@ class PushNotificationService {
 
     try {
       const permission = await Notification.requestPermission();
-      console.log('Permissão de notificações:', permission);
       return { success: permission === 'granted', permission };
     } catch (error) {
       console.error('Erro ao pedir permissão:', error);
@@ -104,7 +102,6 @@ class PushNotificationService {
         };
 
         subscription = await this.swRegistration.pushManager.subscribe(options);
-        console.log('Nova subscrição criada:', subscription);
       }
 
       // Enviar subscrição para o backend
@@ -127,9 +124,7 @@ class PushNotificationService {
             })
           });
           
-          if (response.ok) {
-            console.log('Subscrição registada no backend');
-          } else {
+          if (!response.ok) {
             console.warn('Erro ao registar subscrição no backend:', response.status);
           }
         } catch (backendError) {
@@ -180,7 +175,6 @@ class PushNotificationService {
         }
         
         await subscription.unsubscribe();
-        console.log('Subscrição cancelada');
       }
       return { success: true };
     } catch (error) {

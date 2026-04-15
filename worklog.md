@@ -2,6 +2,126 @@
 
 ---
 Task ID: 5
+Agent: General-purpose Agent
+Task: Audit ProcessDetails.js for missing field display and add missing fields
+
+Work Log:
+- **Audit methodology**: Read backend model (`backend/models/process.py`), cross-referenced with `ProcessDetails.js` tabs (Personal, Financial, Real Estate, Credit), `ProcessSummaryCard.js`, and `ProcessDetailsModal.jsx`
+- **Personal tab audit (lines 1551-1755)**: Found missing fields: `menor_35_anos` (boolean, in PersonalData model line 121), `compra_tipo` (string, in PersonalData model line 120)
+- **Financial tab audit (lines 2057-2453)**: Found missing fields: `rendimento_bruto` (in validFields but no UI input), `rendimento_co_titular` (used in DSTICalculator line 1370 but no UI), `nr_dependentes`/`number_of_dependents`, `creditos_existentes`, `prestacao_creditos_mensal`
+- **Real Estate tab**: All real_estate_data fields displayed ✅
+- **Credit tab**: All credit_data fields displayed ✅ (requested_amount, loan_term_years, interest_rate, monthly_payment, bank_name, bank_approval_date, bank_approval_notes)
+- **ProcessSummaryCard.js**: Shows summary (client, contact, property, financing, team, days) — appropriate for a summary card ✅
+- **ProcessDetailsModal.jsx**: Quick-view modal shows client info, property info, status, assignments, notes, dates — appropriate for modal ✅
+- **cleanFinancialDataForSubmit validFields**: Added 7 new fields: `nr_dependentes`, `number_of_dependents`, `rendimento_co_titular`, `creditos_existentes`, `prestacao_creditos_mensal`, `rendimento_agregado`, `rendimento_bruto` (already present, confirmed)
+- **Personal tab changes**:
+  - Added `Tipo de Compra` Select (line 1650) in Identificação section — options: Primeira Habitação, Segunda Habitação, Investimento, Refinanciamento
+  - Added `Menor de 35 anos` checkbox (line 1723) in Identificação section — boolean for state support eligibility, with helper text "Apoio ao estado (jovem até 35 anos)"
+- **Financial tab changes**:
+  - Added `Rendimento Bruto (€)` input (line 2080) in Rendimentos card — reads from `financialData.rendimento_bruto || financialData.salario_bruto`
+  - Added `Rendimento Co-Titular (€)` input (line 2120) in Rendimentos card — placeholder "Rendimento do 2º titular"
+  - Added `Nº de Dependentes` input (line 2131) in Rendimentos card — number type, min=0, reads from `nr_dependentes || number_of_dependents`
+  - Added `Créditos Existentes (€)` input (line 2197) in Situação Financeira card — placeholder "Valor total em dívida"
+  - Added `Prestação Créditos Mensal (€)` input (line 2208) in Situação Financeira card — placeholder "Total prestações mensais"
+- All new fields follow existing patterns: grid layout, `h-9` class, `canEditFinancial`/`canEditPersonal` disabled state, type="number" with parseFloat
+- Vite build: ✅ OK (10.83s, 2811 modules)
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/src/pages/ProcessDetails.js` (3413 → 3505 linhas, +92)
+- 5 campos adicionados ao Personal tab (menor_35_anos, compra_tipo + reordenação)
+- 5 campos adicionados ao Financial tab (rendimento_bruto, rendimento_co_titular, nr_dependentes, creditos_existentes, prestacao_creditos_mensal)
+- 7 campos adicionados ao validFields do cleanFinancialDataForSubmit para permitir persistência
+- Real Estate tab e Credit tab completos — sem campos em falta
+- ProcessSummaryCard e ProcessDetailsModal auditados — cobertura adequada para o nível de detalhe pretendido
+- Todo o texto em português
+
+---
+Task ID: 2
+Agent: Backend Agent
+Task: Add default sorting by workflow phase then client name in list endpoints
+
+Work Log:
+- **GET /processes (line 746-772)**: Replaced MongoDB `.sort("client_name", 1).skip().limit()` with Python-side compound sorting. Fetches all matching processes (up to 5000), decrypts, then sorts by `(status_order, client_name.lower())`. Pagination applied after sorting. Removed separate `count_documents` call (uses `len()` post-sort).
+- **GET /processes/kanban (line 1125-1127)**: Added per-column sorting — each status group in `processes_by_status` is now sorted alphabetically by `client_name` before enrichment and kanban assembly.
+- **GET /processes/my-clients (line 1229-1271)**: Fixed pagination bug — previously applied `skip/limit` at MongoDB level before Python sort (producing inconsistent cross-page ordering). Now fetches up to 5000, sorts via `get_sort_key` (phase_order + client_name), then paginates. Kept existing `get_sort_key` function with updated docstring.
+- **GET /clients/me (line 118-161)**: Replaced `.sort("client_name", 1).skip().limit()` with Python-side compound sorting. Fetches workflow statuses first for order map, fetches all matching processes (up to 5000), sorts by `(status_order, client_name.lower())`, then applies `skip/limit` for pagination.
+- **GET /clients (line 800-807)**: Replaced simple `clients.sort(key=lambda c: (c.get("nome") or "").lower())` with compound sort: primary key = `status_order` of the client's `fase_principal` (first active process status), secondary key = `nome.lower()`. Uses existing `workflow_statuses` already fetched earlier in the endpoint.
+
+Stage Summary:
+- 2 ficheiros alterados: `backend/routes/processes.py`, `backend/routes/clients.py`
+- 5 endpoints updated with compound sorting (workflow phase order → client name)
+- All endpoints use Python-side sorting after fetch (consistent pattern)
+- Kanban: sorted alphabetically within each column
+- Pagination fixed in my-clients (was applying skip/limit before sort)
+- py_compile syntax check: OK for both files
+
+---
+Task ID: 1
+Agent: fix-menu-routing
+Task: Fix menu routing and labels in sidebar and mobile nav
+
+Work Log:
+- **DashboardLayout.js — baseItems label (line 166)**: Added `isAdmin` flag. Non-admin staff now see "Processos" label (href: /processos) instead of misleading "Dashboard". Admin keeps "Dashboard" → /admin.
+- **DashboardLayout.js — CEO menu (line 227)**: Changed label "Processos" → "Lista de Clientes" (href remains /clientes — semantically correct).
+- **DashboardLayout.js — Admin menu (line 333)**: Changed label "Processos" → "Lista de Clientes" (href remains /clientes — semantically correct).
+- **DashboardLayout.js — Consultor/Mediador/Intermediário (lines 523-535)**: "Os Meus Processos" now correctly routes to /processos (was /meus-clientes) with FileText icon. Added new "Os Meus Clientes" item → /meus-clientes with Users icon.
+- **MobileBottomNav.jsx — first nav item (line 35)**: Changed label from "Kanban" to "Quadro Geral" to match sidebar naming.
+- **MobileBottomNav.jsx — getDashboardPath (line 20)**: Non-admin path changed from /processos to /kanban (matching sidebar "Quadro Geral" → /kanban). Admin stays /admin.
+- Vite build verified: ✓ built in 11.34s, no errors.
+
+Stage Summary:
+- 2 ficheiros alterados: `DashboardLayout.js`, `MobileBottomNav.jsx`
+- Sidebar labels now match their actual routes for all roles
+- Mobile nav first item renamed to "Quadro Geral" and routes to /kanban for non-admin
+- All changes are label/route fixes only — no structural or functional changes
+Task ID: 3
+Agent: General-purpose Agent
+Task: Reorganize client form field order in ProcessDetails.js
+
+Work Log:
+- Read worklog.md for project context
+- Read `frontend/src/pages/ProcessDetails.js` lines 1540-1720 to identify the personal data form grid structure
+- Identified current field order in the "Identificação" card (lines 1555-1703):
+  1. Nome Completo → 2. NIF → 3. Nº Documento (CC) → 4. Data de Nascimento → 5. Validade CC → 6. Sexo → 7. Naturalidade → 8. Nacionalidade → 9. Estado Civil → 10. Altura
+- Used single Edit to rearrange all 8 form field blocks (lines 1596-1703) from:
+  - Old: CC → Data Nascimento → Validade CC → Sexo → Naturalidade → Nacionalidade → Estado Civil → Altura
+  - New: CC → Validade CC → Data Nascimento → Estado Civil → Sexo → Naturalidade → Nacionalidade → Altura
+- No code logic changed — only block order within the JSX grid rearranged
+- Verified new order via grep on Label text: lines 1596, 1612, 1629, 1645, 1662, 1676, 1685, 1694
+- Vite build: OK (11.48s, no errors)
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/src/pages/ProcessDetails.js` (0 linhas adicionadas/removidas, blocos reordenados)
+- "Data de Nascimento" moved right after "Validade CC" (CC block now: CC number + validity + birth date)
+- "Estado Civil" moved right after "Data de Nascimento"
+- Remaining fields (Sexo, Naturalidade, Nacionalidade, Altura) preserved in original relative order
+- Vite build passes
+
+---
+Task ID: 4
+Agent: General Agent
+Task: Remove all console.log, console.info, and console.table statements from frontend
+
+Work Log:
+- Grepped entire `frontend/src/` for `console.log|console.info|console.table` — found 30 occurrences across 9 files
+- **main.jsx**: Removed 3 `console.log` (axe-core dev message, Sentry init success, Sentry DSN warning). Cleaned up resulting empty `else {}` block.
+- **pushNotifications.js**: Removed 5 `console.log` (SW registered, permission result, subscription created, backend registered, unsubscribed). Converted empty `if (response.ok) {} else` to `if (!response.ok)`.
+- **api.js**: Removed 1 `console.log` (impersonate token expiry message).
+- **TrelloIntegration.js**: Removed 9 `console.log` (4 debug block before save, URL/Body, response status/ok, error text, response data). All were debug statements leaking request details.
+- **BulkDocumentUpload.js**: Removed 2 `console.log` (session created, session finished).
+- **useWebSocket.js**: Removed 10 `console.log` (token expired refresh, token renewed, token updated, reconnecting, connected, connecting URL, connection established, connection closed, token expired 4001, reconnecting with delay). Preserved `console.error` and `console.warn` for error handling. Cleaned empty switch case.
+- **ProcessDetails.js**: Removed 1 `console.log` (AI extracted data dump with `extractedData, fieldConfidence, conflicts, documentsProcessed`).
+- **NotificationsDropdown.js**: Removed 1 `console.log` (audio not available) — replaced with code comment.
+- **TasksContext.js**: Removed 1 `console.log` (circuit breaker reset message).
+
+Stage Summary:
+- 9 ficheiros alterados, 31 `console.log` removidos
+- 0 `console.info` ou `console.table` encontrados
+- `console.error` e `console.warn` preservados em todos os ficheiros
+- 1 ocorrência restante em `useWebSocket.js:43` — trata-se de exemplo em JSDoc comment, não statement executável
+
+---
+Task ID: 5
 Agent: Frontend Agent
 Task: Implement Custom Folders UI in WebmailPage
 
@@ -578,3 +698,27 @@ Stage Summary:
 - Commit `d0bc7bd`: fix(frontend): corrigir erro de build esbuild — ternary sem else branch em template literal multiline
 - Build verified: `npx vite build` completes successfully
 - No other files affected by this esbuild limitation
+
+---
+Task ID: 6
+Agent: General-purpose Agent
+Task: Add email/phone sync to clients collection when process is updated
+
+Work Log:
+- Read worklog.md for project context
+- Read `backend/routes/processes.py` lines 1680-1880 — identified `update_process` function at line 1694
+- Confirmed `sanitize_email` and `sanitize_phone` imported at line 90 from `utils.input_sanitization`
+- Confirmed `process.get("client_id")` used at line 1763 (exists in scope)
+- Read `backend/routes/search.py` — confirmed search queries MongoDB directly with **no caching layer**, so no cache invalidation needed
+- Added client sync logic (lines 1843-1857) after `await db.processes.update_one()` and before cache invalidation:
+  - Checks if `data.client_email` or `data.client_phone` was provided in the update payload
+  - If `client_id` exists on the process, updates `contacto.email` and/or `contacto.telefone` in the `clients` collection
+  - Uses `sanitize_email()` / `sanitize_phone()` on raw request values (before encryption)
+  - Logs sync action for audit trail
+- Verified syntax with `py_compile`: OK
+
+Stage Summary:
+- 1 ficheiro alterado: `backend/routes/processes.py` (+15 lines)
+- Email/phone changes in ProcessDetails now propagate to `clients.contacto.email` / `clients.contacto.telefone`
+- Global search (which queries both collections) will return up-to-date contact info
+- No search cache invalidation needed (search queries MongoDB directly)

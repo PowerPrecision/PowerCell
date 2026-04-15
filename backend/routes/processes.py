@@ -743,22 +743,30 @@ async def get_processes(
         else:
             query = search_condition
 
-    # Contar total de documentos (count_documents é mais eficiente que len(list))
-    total = await db.processes.count_documents(query)
-    
     # Calcular offset
     skip = (page - 1) * size
     
-    # BUSCAR COM PROJEÇÃO OTIMIZADA
+    # Buscar ordem das fases do workflow para ordenação composta
+    statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    status_order = {s["name"]: idx for idx, s in enumerate(statuses)}
+    
+    # BUSCAR COM PROJEÇÃO OTIMIZADA (até 5000 para ordenação Python-side)
     # Apenas campos necessários para a tabela de listagem
     processes = await db.processes.find(
         query, 
         PROCESS_LIST_PROJECTION
-    ).sort("client_name", 1).skip(skip).limit(size).to_list(size)
+    ).to_list(5000)
     
     # Desencriptar apenas campos sensíveis necessários (client_phone, client_nif)
     # NOTA: personal_data e financial_data NÃO são projetados, então não precisam de desencriptação
     processes = decrypt_processes_list(processes, fields_to_decrypt=["client_phone", "client_nif"])
+    
+    # Ordenação composta: 1ª por fase do workflow (ordem definida), 2ª por nome do cliente
+    processes.sort(key=lambda p: (status_order.get(p.get("status"), 999), (p.get("client_name") or "").lower()))
+    
+    # Total e paginação (após ordenação)
+    total = len(processes)
+    processes = processes[skip:skip + size]
     
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
@@ -1114,6 +1122,10 @@ async def get_kanban_board(
         db.processes.count_documents(inactive_count_query),
     )
     
+    # Ordenar processos dentro de cada coluna por nome do cliente
+    for status_key in processes_by_status:
+        processes_by_status[status_key].sort(key=lambda p: (p.get("client_name") or "").lower())
+    
     kanban = []
     for status in statuses:
         status_processes = processes_by_status.get(status["name"], [])
@@ -1214,17 +1226,14 @@ async def get_my_clients(
     else:
         query = {}
     
-    # Contar total
-    total = await db.processes.count_documents(query)
-    
     # Calcular offset
     skip = (page - 1) * size
     
-    # Buscar processos COM PROJEÇÃO OTIMIZADA
+    # Buscar processos COM PROJEÇÃO OTIMIZADA (até 5000 para ordenação Python-side)
     processes = await db.processes.find(
         query,
         PROCESS_MY_CLIENTS_PROJECTION
-    ).sort("client_name", 1).skip(skip).limit(size).to_list(size)
+    ).to_list(5000)
     
     # Desencriptar APENAS campos sensíveis projetados
     processes = decrypt_processes_list(
@@ -1238,7 +1247,7 @@ async def get_my_clients(
     
     # Ordenar processos por fase (order do status) e depois por nome
     def get_sort_key(p):
-        """Gera chave de ordenação para processos no kanban.
+        """Gera chave de ordenação para processos.
 
         Ordena primeiro pela ordem da fase no workflow (phase_order),
         depois por nome do cliente em ordem alfabética. Isto garante
@@ -1256,6 +1265,10 @@ async def get_my_clients(
         return (phase_order, client_name)
     
     processes = sorted(processes, key=get_sort_key)
+    
+    # Total e paginação (após ordenação)
+    total = len(processes)
+    processes = processes[skip:skip + size]
     
     # Obter tarefas pendentes por processo (apenas IDs necessários)
     process_ids = [p["id"] for p in processes]
@@ -1839,6 +1852,22 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    
+    # === SYNC CLIENT DATA: Email/Phone changes must propagate to clients collection ===
+    client_id = process.get("client_id")
+    if client_id and (data.client_email is not None or data.client_phone is not None):
+        client_update = {}
+        if data.client_email is not None:
+            client_update["contacto.email"] = sanitize_email(data.client_email)
+        if data.client_phone is not None:
+            client_update["contacto.telefone"] = sanitize_phone(data.client_phone)
+        
+        if client_update:
+            await db.clients.update_one(
+                {"id": client_id},
+                {"$set": client_update}
+            )
+            logger.info(f"Sincronizados dados de contacto para cliente {client_id}: {list(client_update.keys())}")
     
     # === CACHE INVALIDATION: Actualização de processo pode alterar KPIs ===
     # Invalidar apenas se houve mudança de status (afeta contadores)

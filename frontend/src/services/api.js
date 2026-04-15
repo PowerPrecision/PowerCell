@@ -129,8 +129,6 @@ api.interceptors.response.use(
       if (originalToken) {
         // Estamos em modo impersonate e o token expirou ou stop-impersonate falhou
         // Tentar voltar à conta original automaticamente
-        console.log("[API] Token de impersonate expirou ou stop-impersonate falhou, restaurando sessão original...");
-        
         // Restaurar token original
         localStorage.setItem("token", originalToken);
         localStorage.removeItem("originalToken");

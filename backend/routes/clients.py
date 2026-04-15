@@ -115,22 +115,29 @@ async def get_my_assigned_clients(
         }
         query = {"$and": [query, search_filter]}
     
-    # Buscar processos
+    # Buscar ordem das fases do workflow para ordenação composta
+    workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    status_order = {s["name"]: idx for idx, s in enumerate(workflow_statuses)}
+    status_map = {s["name"]: s for s in workflow_statuses}
+    
+    # Buscar processos (até 5000 para ordenação Python-side)
     processes = await db.processes.find(
         query,
         {"_id": 0, "id": 1, "process_number": 1, "client_name": 1,
          "client_email": 1, "client_phone": 1, "status": 1,
          "assigned_consultor_id": 1, "assigned_mediador_id": 1,
          "created_at": 1, "updated_at": 1}
-    ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
+    ).to_list(5000)
     
     # Desencriptar dados sensíveis
     from services.process_service import decrypt_processes_list
     processes = decrypt_processes_list(processes)
     
-    # Buscar status labels
-    workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-    status_map = {s["name"]: s for s in workflow_statuses}
+    # Ordenação composta: 1ª por fase do workflow, 2ª por nome do cliente
+    processes.sort(key=lambda p: (status_order.get(p.get("status"), 999), (p.get("client_name") or "").lower()))
+    
+    # Aplicar paginação (após ordenação)
+    processes = processes[skip:skip + limit]
     
     clients_list = []
     for p in processes:
@@ -792,8 +799,12 @@ async def list_clients(
         
         clients = list(clients_map.values())
         
-        # M5 - Ordenar por nome alfabeticamente (padrão)
-        clients.sort(key=lambda c: (c.get("nome") or "").lower())
+        # Ordenação composta: 1ª por fase do workflow (da fase principal), 2ª por nome
+        status_order = {s["name"]: idx for idx, s in enumerate(workflow_statuses)}
+        clients.sort(key=lambda c: (
+            status_order.get(c.get("fase_principal", {}).get("status"), 999),
+            (c.get("nome") or "").lower()
+        ))
         
         # Filtrar por ter processo activo
         if has_active_process is not None:

@@ -463,8 +463,6 @@ const ProcessDetails = () => {
 
   // Handler para dados extraídos pela IA dos documentos
   const handleAIDataExtractedFromDocs = async ({ extractedData, fieldConfidence, conflicts, documentsProcessed, suggestions }) => {
-    console.log("Dados extraídos pela IA:", { extractedData, fieldConfidence, conflicts, documentsProcessed });
-    
     // Guardar dados, confiança e conflitos
     setAiExtractedData(extractedData);
     setAiFieldConfidence(fieldConfidence || {});
@@ -755,6 +753,11 @@ const ProcessDetails = () => {
       'rendimento_mensal', 'rendimento_bruto', 'salario_liquido', 'salario_bruto',
       'empresa', 'tipo_contrato', 'categoria_profissional', 'subsidiario_alimentacao',
       'data_referencia',
+      // Créditos existentes e co-titular
+      'nr_dependentes', 'number_of_dependents', 'rendimento_co_titular',
+      'creditos_existentes', 'prestacao_creditos_mensal',
+      // Rendimento agregado
+      'rendimento_agregado',
     ];
     
     const cleaned = {};
@@ -1611,6 +1614,23 @@ const ProcessDetails = () => {
                             </div>
                             <div className="space-y-1">
                               <div className="flex items-center justify-between">
+                                <Label className="text-xs text-muted-foreground">Validade CC</Label>
+                                {getConfidenceIndicator("cc_validity") && (
+                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("cc_validity").badge}`}>
+                                    IA {getConfidenceIndicator("cc_validity").label}
+                                  </Badge>
+                                )}
+                              </div>
+                              <Input
+                                type="date"
+                                value={formatDateForInput(personalData.data_validade_cc)}
+                                onChange={(e) => setPersonalData({ ...personalData, data_validade_cc: e.target.value })}
+                                disabled={!canEditPersonal}
+                                className={`h-9 ${getConfidenceIndicator("cc_validity")?.borderClass || ''}`}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
                                 <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
                                 {getConfidenceIndicator("birth_date") && (
                                   <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("birth_date").badge}`}>
@@ -1627,21 +1647,37 @@ const ProcessDetails = () => {
                               />
                             </div>
                             <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <Label className="text-xs text-muted-foreground">Validade CC</Label>
-                                {getConfidenceIndicator("cc_validity") && (
-                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("cc_validity").badge}`}>
-                                    IA {getConfidenceIndicator("cc_validity").label}
-                                  </Badge>
-                                )}
-                              </div>
-                              <Input
-                                type="date"
-                                value={formatDateForInput(personalData.data_validade_cc)}
-                                onChange={(e) => setPersonalData({ ...personalData, data_validade_cc: e.target.value })}
+                              <Label className="text-xs text-muted-foreground">Tipo de Compra</Label>
+                              <Select
+                                value={personalData.compra_tipo || ""}
+                                onValueChange={(value) => setPersonalData({ ...personalData, compra_tipo: value })}
                                 disabled={!canEditPersonal}
-                                className={`h-9 ${getConfidenceIndicator("cc_validity")?.borderClass || ''}`}
-                              />
+                              >
+                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="primeira_habitacao">Primeira Habitação</SelectItem>
+                                  <SelectItem value="segunda_habitacao">Segunda Habitação</SelectItem>
+                                  <SelectItem value="investimento">Investimento</SelectItem>
+                                  <SelectItem value="refinanciamento">Refinanciamento</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Estado Civil</Label>
+                              <Select
+                                value={personalData.estado_civil || personalData.marital_status || ""}
+                                onValueChange={(value) => setPersonalData({ ...personalData, estado_civil: value })}
+                                disabled={!canEditPersonal}
+                              >
+                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="solteiro">Solteiro(a)</SelectItem>
+                                  <SelectItem value="casado">Casado(a)</SelectItem>
+                                  <SelectItem value="divorciado">Divorciado(a)</SelectItem>
+                                  <SelectItem value="viuvo">Viúvo(a)</SelectItem>
+                                  <SelectItem value="uniao_facto">União de Facto</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </div>
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Sexo</Label>
@@ -1676,23 +1712,6 @@ const ProcessDetails = () => {
                               />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Estado Civil</Label>
-                              <Select
-                                value={personalData.estado_civil || personalData.marital_status || ""}
-                                onValueChange={(value) => setPersonalData({ ...personalData, estado_civil: value })}
-                                disabled={!canEditPersonal}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="solteiro">Solteiro(a)</SelectItem>
-                                  <SelectItem value="casado">Casado(a)</SelectItem>
-                                  <SelectItem value="divorciado">Divorciado(a)</SelectItem>
-                                  <SelectItem value="viuvo">Viúvo(a)</SelectItem>
-                                  <SelectItem value="uniao_facto">União de Facto</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Altura (m)</Label>
                               <Input
                                 value={personalData.altura || ""}
@@ -1700,6 +1719,24 @@ const ProcessDetails = () => {
                                 disabled={!canEditPersonal}
                                 className="h-9"
                               />
+                            </div>
+                            <div className="space-y-1 flex items-end pb-2">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id="menor_35_anos"
+                                  checked={personalData.menor_35_anos || false}
+                                  onChange={(e) => setPersonalData({ ...personalData, menor_35_anos: e.target.checked })}
+                                  disabled={!canEditPersonal}
+                                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <Label htmlFor="menor_35_anos" className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                                  Menor de 35 anos
+                                </Label>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground">
+                                Apoio ao estado (jovem até 35 anos)
+                              </p>
                             </div>
                           </div>
                         </CardContent>
@@ -2040,6 +2077,16 @@ const ProcessDetails = () => {
                               />
                             </div>
                             <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Rendimento Bruto (€)</Label>
+                              <Input
+                                type="number"
+                                value={financialData.rendimento_bruto || financialData.salario_bruto || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, rendimento_bruto: parseFloat(e.target.value) || null })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                              />
+                            </div>
+                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Capital Próprio (€)</Label>
                               <Input
                                 type="number"
@@ -2067,6 +2114,29 @@ const ProcessDetails = () => {
                                 onChange={(e) => setFinancialData({ ...financialData, renda_habitacao_atual: parseFloat(e.target.value) || null })}
                                 disabled={!canEditFinancial}
                                 className="h-9"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Rendimento Co-Titular (€)</Label>
+                              <Input
+                                type="number"
+                                value={financialData.rendimento_co_titular || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, rendimento_co_titular: parseFloat(e.target.value) || null })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                                placeholder="Rendimento do 2º titular"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Nº de Dependentes</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={financialData.nr_dependentes || financialData.number_of_dependents || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, nr_dependentes: parseInt(e.target.value) || null })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                                placeholder="0"
                               />
                             </div>
                           </div>
@@ -2122,6 +2192,28 @@ const ProcessDetails = () => {
                                   <SelectItem value="nao">Não</SelectItem>
                                 </SelectContent>
                               </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Créditos Existentes (€)</Label>
+                              <Input
+                                type="number"
+                                value={financialData.creditos_existentes || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, creditos_existentes: parseFloat(e.target.value) || null })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                                placeholder="Valor total em dívida"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Prestação Créditos Mensal (€)</Label>
+                              <Input
+                                type="number"
+                                value={financialData.prestacao_creditos_mensal || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, prestacao_creditos_mensal: parseFloat(e.target.value) || null })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                                placeholder="Total prestações mensais"
+                              />
                             </div>
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Acesso Portais Oficiais?</Label>
