@@ -165,6 +165,14 @@ class BackgroundJobService:
                 "progress.message": f"Erro: {error}"
             }}
         )
+
+    async def complete_job(self, job_id: str, result: Dict[str, Any]):
+        """Convenience alias for set_result — marks job as COMPLETED with a result dict."""
+        await self.set_result(job_id, result)
+
+    async def fail_job(self, job_id: str, error: str):
+        """Convenience alias for set_error — marks job as FAILED with an error message."""
+        await self.set_error(job_id, error)
     
     async def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
