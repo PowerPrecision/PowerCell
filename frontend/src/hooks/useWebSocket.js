@@ -240,7 +240,6 @@ class WebSocketManager {
         return false;
       }
 
-      console.log('WebSocket: Token expirado, a tentar refresh...');
       const response = await fetch(`${API_URL}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -259,7 +258,6 @@ class WebSocketManager {
       localStorage.setItem('refreshToken', data.refresh_token);
       this.token = data.access_token;
 
-      console.log('WebSocket: Token renovado com sucesso, a reconectar...');
 
       // Reset reconnect state and reconnect with new token
       this._reconnectAttempts = 0;
@@ -284,11 +282,8 @@ class WebSocketManager {
     const oldToken = this.token;
     this.token = newToken;
 
-    console.log('WebSocket: Token atualizado');
-
     // If currently connected, reconnect with new token
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      console.log('WebSocket: Reconectando com novo token...');
       this.ws.onclose = null; // Prevent auto-reconnect with old token
       this.ws.close(1000, 'Token atualizado');
       this.ws = null;
@@ -316,9 +311,6 @@ class WebSocketManager {
       // System-level logging (minimal)
       switch (type) {
         case WSEventType.CONNECTION_STATUS:
-          if (payload.status === 'connected') {
-            console.log('WebSocket: Conectado com sucesso', payload);
-          }
           break;
         case WSEventType.HEARTBEAT:
           break;
@@ -358,13 +350,11 @@ class WebSocketManager {
     if (!url) return;
 
     this._isConnecting = true;
-    console.log('WebSocket: Conectando a', url.replace(/token=.*/, 'token=***'));
 
     try {
       this.ws = new WebSocket(url);
 
       this.ws.onopen = () => {
-        console.log('WebSocket: Conexão estabelecida');
         this._isConnecting = false;
         this._reconnectAttempts = 0;
         this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
@@ -383,7 +373,6 @@ class WebSocketManager {
       this.ws.onmessage = (event) => this._handleMessage(event);
 
       this.ws.onclose = (event) => {
-        console.log('WebSocket: Conexão fechada', event.code, event.reason);
         this._isConnecting = false;
         this.isConnected = false;
         this._stopHeartbeat();
@@ -391,7 +380,6 @@ class WebSocketManager {
 
         // Handle token expiration (4001) - try to refresh and reconnect
         if (event.code === WS_CLOSE_TOKEN_EXPIRED && this._subscriberCount > 0) {
-          console.log('WebSocket: Token expirado (4001), a tentar refresh...');
           this._refreshAndReconnect();
           return;
         }
@@ -408,7 +396,6 @@ class WebSocketManager {
           const delay = this._reconnectInterval;
           this._reconnectAttempts++;
           this._reconnectInterval = Math.min(this._reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
-          console.log(`WebSocket: Reconectando em ${delay / 1000}s... (tentativa ${this._reconnectAttempts})`);
           this._reconnectTimeout = setTimeout(() => this.connect(this.token), delay);
         }
       };

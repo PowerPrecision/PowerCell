@@ -128,7 +128,7 @@ const NotificationsDropdown = () => {
         osc2.stop(audioContext.currentTime + 0.15);
       }, 150);
     } catch (e) {
-      console.log("Audio not available");
+      // Audio not available
     }
   }, [soundEnabled]);
 

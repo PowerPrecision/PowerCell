@@ -145,7 +145,6 @@ export const TasksProvider = ({ children }) => {
 
     // Agendar retomada automática do polling
     circuitBreakerTimeoutRef.current = setTimeout(() => {
-      console.log("[TasksContext] Circuit breaker resetado, retomando polling...");
       circuitBreakerActiveRef.current = false;
       consecutiveFailuresRef.current = 0;
       // Retomar polling será feito pelo useEffect

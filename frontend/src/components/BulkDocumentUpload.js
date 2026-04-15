@@ -360,7 +360,6 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
       if (sessionResponse.ok) {
         const sessionData = await sessionResponse.json();
         backendSessionId = sessionData.session_id;
-        console.log("Sessão agregada criada:", backendSessionId);
       }
     } catch (error) {
       console.warn("Não foi possível criar sessão agregada:", error);
@@ -511,7 +510,6 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
         
         if (finishResponse.ok) {
           const finishData = await finishResponse.json();
-          console.log("Sessão agregada finalizada:", finishData);
           
           // Mostrar resumo detalhado
           if (finishData.summary?.clients) {
