@@ -152,7 +152,7 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{process.client_name}</p>
                       <p className="text-xs text-muted-foreground truncate">
-                        {process.process_type} • {process.status}
+                        {typeof process.process_type === 'string' ? process.process_type.replace(/_/g, ' ') : String(process.process_type || '')} • {typeof process.status === 'string' ? process.status.replace(/_/g, ' ') : String(process.status || '')}
                       </p>
                     </div>
                     <ArrowRight className="h-4 w-4 text-muted-foreground" />
@@ -214,7 +214,7 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{task.title}</p>
                       <p className="text-xs text-muted-foreground truncate">
-                        {task.status}
+                        {typeof task.status === 'string' ? task.status.replace(/_/g, ' ') : String(task.status || '')}
                       </p>
                     </div>
                     <ArrowRight className="h-4 w-4 text-muted-foreground" />

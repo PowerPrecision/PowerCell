@@ -96,7 +96,7 @@ const ConsultorDashboard = () => {
       <td className="p-2 sm:p-3 lg:p-4 align-middle font-medium">{process.client_name}</td>
       <td className="p-2 sm:p-3 lg:p-4 align-middle">{process.client_email}</td>
       <td className="p-2 sm:p-3 lg:p-4 align-middle">
-        <Badge variant="outline">{TYPE_LABELS[process.process_type] || process.process_type}</Badge>
+        <Badge variant="outline">{TYPE_LABELS[process.process_type] || (typeof process.process_type === 'string' ? process.process_type : '')}</Badge>
       </td>
       <td className="p-2 sm:p-3 lg:p-4 align-middle">
         <StatusBadge status={process.status} workflowStatuses={workflowStatuses} />
