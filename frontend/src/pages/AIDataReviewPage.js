@@ -536,7 +536,7 @@ const AIDataReviewPage = () => {
                             </TableCell>
                             <TableCell>
                               <Badge variant={process.status === "concluido" ? "secondary" : "outline"}>
-                                {process.status}
+                                {typeof process.status === 'string' ? process.status : String(process.status || '')}
                               </Badge>
                             </TableCell>
                             <TableCell>
