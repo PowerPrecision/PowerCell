@@ -46,11 +46,19 @@ const DialogContent = React.forwardRef(({
      child.type === DialogHeader)
   )
 
-  // Check if children contain a DialogDescription
+  // Check if children contain a DialogDescription (including nested in DialogHeader)
   const hasDescription = React.Children.toArray(children).some(
-    child => React.isValidElement(child) && 
-    (child.type === DialogDescription || 
-     child.type?.displayName === DialogDescription.displayName)
+    child => {
+      if (!React.isValidElement(child)) return false;
+      if (child.type === DialogDescription || child.type?.displayName === DialogDescription.displayName) return true;
+      // Also look inside DialogHeader
+      if (child.type === DialogHeader || child.type?.displayName === DialogHeader.displayName) {
+        return React.Children.toArray(child.props.children).some(
+          gc => React.isValidElement(gc) && (gc.type === DialogDescription || gc.type?.displayName === DialogDescription.displayName)
+        );
+      }
+      return false;
+    }
   )
 
   return (
@@ -58,22 +66,22 @@ const DialogContent = React.forwardRef(({
       <DialogOverlay />
       <DialogPrimitive.Content
         ref={ref}
-        aria-describedby={hasDescription || description ? undefined : undefined}
         className={cn(
           "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-4 sm:p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
           className
         )}
-        {...props}>
+        {...props}
+        aria-describedby={undefined}>
         {/* Render hidden title for accessibility if no visible title exists */}
         {!hasTitle && (
           <VisuallyHidden.Root>
             <DialogPrimitive.Title>{title || "Dialog"}</DialogPrimitive.Title>
           </VisuallyHidden.Root>
         )}
-        {/* Render provided description as hidden if specified */}
-        {description && !hasDescription && (
+        {/* Always render a hidden DialogPrimitive.Description so Radix finds it and suppresses the warning */}
+        {!hasDescription && (
           <VisuallyHidden.Root>
-            <DialogPrimitive.Description>{description}</DialogPrimitive.Description>
+            <DialogPrimitive.Description>{description || ""}</DialogPrimitive.Description>
           </VisuallyHidden.Root>
         )}
         {children}
