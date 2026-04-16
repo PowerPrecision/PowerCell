@@ -694,6 +694,38 @@ async def create_ttl_indexes(db) -> dict:
             f"{len(results['errors'])} erros"
         )
     
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'oauth_states' (Google OAuth)
+    # ====================================================================
+    oauth_indexes = [
+        # Índice único no state — CSRF protection lookup
+        {"keys": [("state", 1)], "name": "idx_oauth_state", "unique": True},
+        
+        # TTL no created_at — limpar states velhos automaticamente (10 min)
+        {
+            "keys": [("created_at", 1)],
+            "name": "idx_oauth_state_ttl",
+            "expireAfterSeconds": 600,
+        },
+    ]
+    
+    for idx in oauth_indexes:
+        try:
+            await db.oauth_states.create_index(
+                idx["keys"],
+                name=idx["name"],
+                unique=idx.get("unique", False),
+                background=True,
+                expireAfterSeconds=idx.get("expireAfterSeconds"),
+            )
+            results["created"].append(f"oauth_states.{idx['name']}")
+            logger.info(f"Índice criado: oauth_states.{idx['name']}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["skipped"].append(f"oauth_states.{idx['name']}")
+            else:
+                results["errors"].append(f"oauth_states.{idx['name']}: {str(e)}")
+    
     return results
 
 
