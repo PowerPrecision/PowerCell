@@ -1,4 +1,5 @@
 import os
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from pathlib import Path
@@ -30,7 +31,7 @@ def get_motor_client():
     """Retorna o cliente Motor (criado on-demand)."""
     global _client
     if _client is None:
-        _client = AsyncIOMotorClient(mongo_url)
+        _client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
     return _client
 
 
