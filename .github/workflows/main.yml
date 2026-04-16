@@ -43,13 +43,13 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
           persist-credentials: false
       
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -82,7 +82,7 @@ jobs:
           ls -la dist/
       
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: success()
         with:
           name: frontend-build
@@ -105,7 +105,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -121,6 +121,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest-timeout
       
       - name: Lint with flake8
         run: |
@@ -146,7 +147,7 @@ jobs:
   backend-full:
     name: Backend CI — Full
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: backend-fast
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -168,7 +169,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -184,10 +185,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest-timeout
       
       - name: Run ALL tests with coverage
         run: |
-          pytest --tb=short -v \
+          pytest --tb=short -v --timeout=30 \
             --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=0 \
             --ignore=tests/e2e \
             --ignore-glob="tests/test_iteration*.py" \
@@ -221,7 +223,7 @@ jobs:
           S3_BUCKET: "test-bucket"
       
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: backend-coverage
@@ -229,6 +231,7 @@ jobs:
             backend/coverage.xml
             backend/.coverage
           retention-days: 7
+          if-no-files-found: ignore
 
   # ==================================================================
   # JOB 4: NOTIFY (opcional)
