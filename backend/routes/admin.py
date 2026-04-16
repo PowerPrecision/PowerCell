@@ -69,6 +69,7 @@ from pydantic import BaseModel
 from database import db
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
+from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import hash_password, require_roles
 from utils.input_sanitization import (
     log_sanitization_rejection
@@ -2927,5 +2928,260 @@ async def sync_database(
             "started_by": user.get("email"),
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
+    }
+
+
+# ============== USER EMAIL CONFIG MANAGEMENT (ADMIN) ==============
+
+@router.get("/users/{user_id}/email-config")
+async def admin_get_user_email_config(
+    user_id: str,
+    admin: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """Obter configuração de email de um utilizador alvo (Admin/CEO).
+
+    SEGURANÇA: Nunca devolve a password real — apenas has_password: true.
+    O admin pode VER que uma password existe, mas nunca a lê em plain-text.
+
+    Args:
+        user_id: ID do utilizador alvo.
+        admin: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        dict: Configuração de email (sem password).
+
+    Raises:
+        HTTPException(404): Se utilizador não encontrado.
+    """
+    target = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "password": 0, "email_config": 1, "name": 1, "email": 1}
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+
+    config = target.get("email_config")
+    if not config:
+        return {
+            "is_configured": False,
+            "email_address": None,
+            "imap_server": None,
+            "imap_port": None,
+            "smtp_server": None,
+            "smtp_port": None,
+            "has_password": False,
+            "target_user": {
+                "id": user_id,
+                "name": target.get("name"),
+                "email": target.get("email"),
+            },
+        }
+
+    return {
+        "is_configured": config.get("is_configured", False),
+        "email_address": config.get("email_address"),
+        "imap_server": config.get("imap_server"),
+        "imap_port": config.get("imap_port", 993),
+        "smtp_server": config.get("smtp_server"),
+        "smtp_port": config.get("smtp_port", 465),
+        "has_password": bool(config.get("encrypted_password")),
+        "target_user": {
+            "id": user_id,
+            "name": target.get("name"),
+            "email": target.get("email"),
+        },
+    }
+
+
+@router.post("/users/{user_id}/email-config")
+async def admin_set_user_email_config(
+    user_id: str,
+    config: "EmailConfigCreate",
+    admin: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """Definir configuração de email IMAP/SMTP de um utilizador alvo (Admin/CEO).
+
+    SEGURANÇA: A password fornecida pelo admin é encriptada com Fernet
+    (via services/encryption.py) ANTES de ser guardada na base de dados.
+    O admin nunca visualiza a password existente — apenas pode definir uma nova.
+
+    Se a password for omitida/vazia e o utilizador já tem uma configuração,
+    a password existente é mantida.
+
+    Args:
+        user_id: ID do utilizador alvo.
+        config: Dados de configuração (EmailConfigCreate).
+        admin: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        dict: success, message.
+
+    Raises:
+        HTTPException(404): Se utilizador não encontrado.
+        HTTPException(500): Se erro ao guardar.
+    """
+    from models.email_config import EmailConfigCreate
+    from services.encryption import encryption_service
+
+    target = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "name": 1, "email_config": 1}
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+
+    # Se não foi fornecida password, manter a existente (se houver)
+    encrypted_password = ""
+    existing_config = target.get("email_config", {})
+    if config.password:
+        encrypted_password = encryption_service.encrypt(config.password)
+    elif existing_config.get("encrypted_password"):
+        encrypted_password = existing_config["encrypted_password"]
+
+    email_config = {
+        "email_address": config.email_address.strip().lower(),
+        "imap_server": config.imap_server.strip(),
+        "imap_port": config.imap_port,
+        "smtp_server": config.smtp_server.strip(),
+        "smtp_port": config.smtp_port,
+        "encrypted_password": encrypted_password,
+        "is_configured": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"email_config": email_config}}
+    )
+
+    if result.modified_count == 0:
+        raise HTTPException(status_code=500, detail="Erro ao guardar configuração")
+
+    # Audit log
+    await _audit_log(
+        "user_email_config_set",
+        "user",
+        user_id,
+        admin,
+        {
+            "email_address": config.email_address.strip().lower(),
+            "imap_server": config.imap_server.strip(),
+            "smtp_server": config.smtp_server.strip(),
+        }
+    )
+
+    return {
+        "success": True,
+        "message": f"Configuração de email guardada para {target.get('name', user_id)}",
+        "is_configured": True,
+    }
+
+
+@router.post("/users/{user_id}/email-config/test")
+async def admin_test_user_email_config(
+    user_id: str,
+    admin: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """Testar ligação IMAP/SMTP de um utilizador alvo (Admin/CEO).
+
+    Usa as credenciais encriptadas guardadas do utilizador alvo.
+    O admin não precisa de fornecer password — o teste usa as credenciais
+    guardadas na base de dados.
+
+    Args:
+        user_id: ID do utilizador alvo.
+        admin: Utilizador admin/CEO autenticado (injetado).
+
+    Returns:
+        dict: success, imap_connected, smtp_connected, error.
+
+    Raises:
+        HTTPException(404): Se utilizador não encontrado.
+        HTTPException(400): Se configuração de email não existe.
+    """
+    import imaplib
+    import smtplib
+    import ssl
+    import certifi
+    from services.encryption import encryption_service
+
+    target = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "email_config": 1, "name": 1}
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+
+    config = target.get("email_config")
+    if not config or not config.get("encrypted_password"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Configuração de email não encontrada para {target.get('name', user_id)}"
+        )
+
+    # Desencriptar a password
+    password = encryption_service.decrypt(config.get("encrypted_password", ""))
+
+    # Verificar se a desencriptação falhou (password ainda está encriptada)
+    if password.startswith("ENC:"):
+        raise HTTPException(
+            status_code=400,
+            detail="Erro ao desencriptar a password. A chave de encriptação pode ter mudado. Guarda a password novamente."
+        )
+
+    if not password:
+        raise HTTPException(status_code=400, detail="Password desencriptada está vazia. Guarda a password novamente.")
+
+    # SSL context com certifi para certificados atualizados (Render)
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+
+    # Test IMAP
+    imap_ok = False
+    smtp_ok = False
+    error = None
+
+    try:
+        imap_port = config.get("imap_port", 993)
+        if not imap_port:
+            imap_port = 993
+        mail = imaplib.IMAP4_SSL(
+            config["imap_server"],
+            int(imap_port),
+            ssl_context=ssl_context
+        )
+        mail.login(config["email_address"], password)
+        mail.logout()
+        imap_ok = True
+    except Exception as e:
+        error = f"IMAP: {str(e)}"
+
+    # Test SMTP
+    try:
+        smtp_port = config.get("smtp_port", 465)
+        if not smtp_port:
+            smtp_port = 465
+        with smtplib.SMTP_SSL(
+            config["smtp_server"],
+            int(smtp_port),
+            context=ssl_context,
+            timeout=15
+        ) as server:
+            server.login(config["email_address"], password)
+        smtp_ok = True
+    except Exception as e:
+        if error:
+            error += f" | SMTP: {str(e)}"
+        else:
+            error = f"SMTP: {str(e)}"
+
+    return {
+        "success": imap_ok and smtp_ok,
+        "imap_connected": imap_ok,
+        "smtp_connected": smtp_ok,
+        "error": error,
+        "target_user": {
+            "id": user_id,
+            "name": target.get("name"),
+        },
     }
 

@@ -18,11 +18,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { 
-  Users, Search, UserPlus, Edit, Trash2, Loader2, UserX, UserCheck, Eye, EyeOff, RefreshCw, Copy
+  Users, Search, UserPlus, Edit, Trash2, Loader2, UserX, UserCheck, Eye, EyeOff, RefreshCw, Copy, Mail
 } from "lucide-react";
 import { toast } from "sonner";
 import { getUsers, createUser, updateUser, deleteUser } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
+import EmailConfigForm from "../components/EmailConfigForm";
 
 const roleLabels = {
   cliente: "Cliente",
@@ -70,6 +71,7 @@ const UsersManagementPage = () => {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState("");
+  const [emailConfigDialog, setEmailConfigDialog] = useState({ open: false, user: null });
 
   useEffect(() => {
     fetchUsers();
@@ -498,6 +500,11 @@ const UsersManagementPage = () => {
                         <Button variant="ghost" size="icon" onClick={() => handleToggleUserStatus(u.id, u.is_active)}>
                           {u.is_active ? <UserX className="h-4 w-4 text-orange-600" /> : <UserCheck className="h-4 w-4 text-green-600" />}
                         </Button>
+                        {(currentUser?.role === "admin" || currentUser?.role === "ceo") && u.role !== "parceiro" && (
+                              <Button variant="ghost" size="icon" onClick={() => setEmailConfigDialog({ open: true, user: u })} title="Configurar Email">
+                                <Mail className="h-4 w-4" />
+                              </Button>
+                            )}
                         {currentUser?.role !== "indexacao"  && (
                           <>
                             <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}>
@@ -577,6 +584,11 @@ const UsersManagementPage = () => {
                               <UserCheck className="h-4 w-4 text-green-600" />
                             )}
                           </Button>
+                          {(currentUser?.role === "admin" || currentUser?.role === "ceo") && user.role !== "parceiro" && (
+                            <Button variant="ghost" size="icon" onClick={() => setEmailConfigDialog({ open: true, user })} title="Configurar Email" className="text-teal-600 hover:text-teal-800 hover:bg-teal-50">
+                              <Mail className="h-4 w-4" />
+                            </Button>
+                          )}
                           {currentUser?.role !== "indexacao"  && (
                           <>
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(user)}>
@@ -702,6 +714,35 @@ const UsersManagementPage = () => {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      {/* Email Config Dialog (Admin) */}
+      <Dialog open={emailConfigDialog.open} onOpenChange={(open) => setEmailConfigDialog({ open, user: emailConfigDialog.user })}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" />
+              Configurar Webmail — {emailConfigDialog.user?.name}
+            </DialogTitle>
+            <DialogDescription>
+              {emailConfigDialog.user?.role !== "parceiro"
+                ? "Configure as credenciais IMAP/SMTP para este utilizador. A password será encriptada."
+                : "Parceiros não podem ter configuração de email."}
+            </DialogDescription>
+          </DialogHeader>
+          {emailConfigDialog.user?.role !== "parceiro" ? (
+            <EmailConfigForm
+              mode="admin"
+              userId={emailConfigDialog.user?.id}
+              targetUserName={emailConfigDialog.user?.name}
+              onSuccess={() => {
+                setEmailConfigDialog({ open: false, user: null });
+              }}
+              onCancel={() => setEmailConfigDialog({ open: false, user: null })}
+            />
+          ) : (
+            <p className="text-muted-foreground py-4">Parceiros não têm acesso ao webmail.</p>
+          )}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

@@ -84,14 +84,27 @@ async def save_my_email_config(
     """
     Guardar configuração de email do utilizador.
     A password é encriptada ANTES de ser guardada.
+    Se a password não for fornecida, mantém a existente (se houver).
     """
     from services.encryption import encryption_service
 
     user_id = current_user["id"]
-    
-    # Encriptar a password
-    encrypted_password = encryption_service.encrypt(config.password) if config.password else ""
-    
+
+    # Buscar config existente para preservar password se não fornecida
+    existing_user = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "email_config": 1}
+    )
+    existing_config = (existing_user or {}).get("email_config", {})
+
+    # Encriptar a password (ou manter a existente)
+    if config.password:
+        encrypted_password = encryption_service.encrypt(config.password)
+    elif existing_config.get("encrypted_password"):
+        encrypted_password = existing_config["encrypted_password"]
+    else:
+        encrypted_password = ""
+
     email_config = {
         "email_address": config.email_address.strip().lower(),
         "imap_server": config.imap_server.strip(),
@@ -102,15 +115,15 @@ async def save_my_email_config(
         "is_configured": True,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    
+
     result = await db.users.update_one(
         {"id": user_id},
         {"$set": {"email_config": email_config}}
     )
-    
+
     if result.modified_count == 0:
         raise HTTPException(status_code=500, detail="Erro ao guardar configuração")
-    
+
     return {
         "success": True,
         "message": "Configuração guardada com sucesso",
@@ -126,6 +139,10 @@ async def test_my_email_config(
     Testar ligação IMAP/SMTP do utilizador.
     Usa as credenciais encriptadas guardadas.
     """
+    import imaplib
+    import smtplib
+    import ssl
+    import certifi
     from services.encryption import encryption_service
     
     user_id = current_user["id"]
@@ -141,10 +158,23 @@ async def test_my_email_config(
     encrypted_password = config.get("encrypted_password", "")
     
     if not encrypted_password:
-        raise HTTPException(status_code=400, detail="Password não configurada")
+        raise HTTPException(status_code=400, detail="Password não configurada. Guarda a configuração com password primeiro.")
     
-    # Desencriptar a password apenas aqui (no motor de sincronização)
+    # Desencriptar a password
     password = encryption_service.decrypt(encrypted_password)
+    
+    # Verificar se a desencriptação falhou (password ainda está encriptada)
+    if password.startswith("ENC:"):
+        raise HTTPException(
+            status_code=400,
+            detail="Erro ao desencriptar a password. A chave de encriptação pode ter mudado. Guarda a password novamente."
+        )
+    
+    if not password:
+        raise HTTPException(status_code=400, detail="Password desencriptada está vazia. Guarda a password novamente.")
+    
+    # SSL context com certifi para certificados atualizados (Render)
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
     
     # Test IMAP
     imap_ok = False
@@ -152,13 +182,13 @@ async def test_my_email_config(
     error = None
     
     try:
-        import imaplib
-        import ssl
-        context = ssl.create_default_context()
+        imap_port = config.get("imap_port", 993)
+        if not imap_port:
+            imap_port = 993
         mail = imaplib.IMAP4_SSL(
             config["imap_server"],
-            int(config.get("imap_port", 993)),
-            ssl_context=context
+            int(imap_port),
+            ssl_context=ssl_context
         )
         mail.login(config["email_address"], password)
         mail.logout()
@@ -168,14 +198,14 @@ async def test_my_email_config(
     
     # Test SMTP
     try:
-        import smtplib
-        import ssl
-        context = ssl.create_default_context()
+        smtp_port = config.get("smtp_port", 465)
+        if not smtp_port:
+            smtp_port = 465
         with smtplib.SMTP_SSL(
             config["smtp_server"],
-            int(config.get("smtp_port", 465)),
-            context=context,
-            timeout=10
+            int(smtp_port),
+            context=ssl_context,
+            timeout=15
         ) as server:
             server.login(config["email_address"], password)
         smtp_ok = True
@@ -185,10 +215,8 @@ async def test_my_email_config(
         else:
             error = f"SMTP: {str(e)}"
     
-    success = imap_ok and smtp_ok
-    
     return {
-        "success": success,
+        "success": imap_ok and smtp_ok,
         "imap_connected": imap_ok,
         "smtp_connected": smtp_ok,
         "error": error,
