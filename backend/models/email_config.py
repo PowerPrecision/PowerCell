@@ -6,9 +6,13 @@ from typing import Optional
 
 
 class EmailConfigCreate(BaseModel):
-    """Payload para configurar email do utilizador (POST)."""
+    """Payload para configurar email do utilizador (POST).
+
+    O campo password é opcional para permitir atualizar servidores
+    sem ter de reenviar a password (a existente é mantida).
+    """
     email_address: str
-    password: str  # Recebe em plain-text, será encriptada no endpoint
+    password: Optional[str] = None  # Recebe em plain-text, será encriptada no endpoint
     imap_server: str
     imap_port: int = 993
     smtp_server: str

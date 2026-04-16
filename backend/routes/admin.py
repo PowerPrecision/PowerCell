@@ -3099,6 +3099,10 @@ async def admin_test_user_email_config(
         HTTPException(404): Se utilizador não encontrado.
         HTTPException(400): Se configuração de email não existe.
     """
+    import imaplib
+    import smtplib
+    import ssl
+    import certifi
     from services.encryption import encryption_service
 
     target = await db.users.find_one(
@@ -3118,19 +3122,32 @@ async def admin_test_user_email_config(
     # Desencriptar a password
     password = encryption_service.decrypt(config.get("encrypted_password", ""))
 
+    # Verificar se a desencriptação falhou (password ainda está encriptada)
+    if password.startswith("ENC:"):
+        raise HTTPException(
+            status_code=400,
+            detail="Erro ao desencriptar a password. A chave de encriptação pode ter mudado. Guarda a password novamente."
+        )
+
+    if not password:
+        raise HTTPException(status_code=400, detail="Password desencriptada está vazia. Guarda a password novamente.")
+
+    # SSL context com certifi para certificados atualizados (Render)
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+
     # Test IMAP
     imap_ok = False
     smtp_ok = False
     error = None
 
     try:
-        import imaplib
-        import ssl
-        context = ssl.create_default_context()
+        imap_port = config.get("imap_port", 993)
+        if not imap_port:
+            imap_port = 993
         mail = imaplib.IMAP4_SSL(
             config["imap_server"],
-            int(config.get("imap_port", 993)),
-            ssl_context=context
+            int(imap_port),
+            ssl_context=ssl_context
         )
         mail.login(config["email_address"], password)
         mail.logout()
@@ -3140,14 +3157,14 @@ async def admin_test_user_email_config(
 
     # Test SMTP
     try:
-        import smtplib
-        import ssl
-        context = ssl.create_default_context()
+        smtp_port = config.get("smtp_port", 465)
+        if not smtp_port:
+            smtp_port = 465
         with smtplib.SMTP_SSL(
             config["smtp_server"],
-            int(config.get("smtp_port", 465)),
-            context=context,
-            timeout=10
+            int(smtp_port),
+            context=ssl_context,
+            timeout=15
         ) as server:
             server.login(config["email_address"], password)
         smtp_ok = True

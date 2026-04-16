@@ -66,14 +66,14 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     try {
       const response = await api.get(getConfigUrl());
       const config = response.data;
-      if (config && config.imap_server) {
+      if (config && (config.is_configured || config.imap_server)) {
         setEmailConfig({
           email_address: config.email_address || "",
           imap_server: config.imap_server || "",
           imap_port: config.imap_port || 993,
           smtp_server: config.smtp_server || "",
           smtp_port: config.smtp_port || 465,
-          password: "",
+          password: "",  // Never populate password from server
         });
         setWebmailConfigured(true);
       }
@@ -85,44 +85,40 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   };
 
   const handleTest = async () => {
-    // For admin mode: save first if password is provided, then test with stored creds
-    // For self mode: need to save first since test endpoint uses stored creds
+    // Always save current form values first, then test.
+    // The test endpoint uses stored credentials, so the form must be saved first
+    // to ensure we test the values the user sees (not stale DB values).
     if (!emailConfig.email_address) {
       toast.error("Preencha o endereço de email para testar");
+      return;
+    }
+
+    if (!webmailConfigured && !emailConfig.password) {
+      toast.error("Preencha a password do email para a configuração inicial");
       return;
     }
 
     setTesting(true);
     setTestResult(null);
     try {
-      if (isSelf && emailConfig.password) {
-        // Self mode: save first (password required to test)
-        await api.post(saveConfigUrl(), {
-          email_address: emailConfig.email_address,
-          password: emailConfig.password,
-          imap_server: emailConfig.imap_server,
-          imap_port: emailConfig.imap_port,
-          smtp_server: emailConfig.smtp_server,
-          smtp_port: emailConfig.smtp_port,
-        });
-      } else if (!isSelf && emailConfig.password) {
-        // Admin mode: save first if password changed
-        await api.post(saveConfigUrl(), {
-          email_address: emailConfig.email_address,
-          password: emailConfig.password,
-          imap_server: emailConfig.imap_server,
-          imap_port: emailConfig.imap_port,
-          smtp_server: emailConfig.smtp_server,
-          smtp_port: emailConfig.smtp_port,
-        });
-      }
+      // Always save form values before testing
+      await api.post(saveConfigUrl(), {
+        email_address: emailConfig.email_address,
+        password: emailConfig.password || undefined,  // omit if empty → backend preserves existing
+        imap_server: emailConfig.imap_server,
+        imap_port: emailConfig.imap_port,
+        smtp_server: emailConfig.smtp_server,
+        smtp_port: emailConfig.smtp_port,
+      });
 
+      // Now test with the just-saved stored credentials
       const response = await api.post(testConfigUrl());
       const result = response.data;
       setTestResult(result);
 
       if (result.success) {
         toast.success("Ligação IMAP/SMTP bem-sucedida");
+        setWebmailConfigured(true);
       } else {
         toast.error(`Erro na ligação: ${result.error || "Desconhecido"}`);
       }
