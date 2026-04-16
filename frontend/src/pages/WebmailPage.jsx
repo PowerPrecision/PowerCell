@@ -249,8 +249,8 @@ const WebmailPage = () => {
         const data = await res.json();
         setCustomFolders(Array.isArray(data.folders) ? data.folders : []);
       }
-    } catch {
-      // Silently fail
+    } catch (error) {
+      console.error("Erro ao carregar pastas personalizadas:", error);
     }
   }, [token]);
 
@@ -289,8 +289,14 @@ const WebmailPage = () => {
         }
       );
 
-      if (!response.ok) throw new Error("Erro ao carregar emails");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Erro ${response.status} ao carregar emails`);
+      }
       const data = await response.json();
+
+      // Debug — remover após confirmar que a listagem funciona
+      console.error("[Webmail Debug] folder=%s, account=%s, response:", actualFolder, account, data);
 
       setEmails(data.emails || []);
       setTotalEmails(data.total || 0);
