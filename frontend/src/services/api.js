@@ -370,6 +370,11 @@ export const createUser = (data) => api.post("/admin/users", data);
 export const updateUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteUser = (id) => api.delete(`/admin/users/${id}`);
 
+// User Email Config (Admin)
+export const getUserEmailConfig = (userId) => api.get(`/admin/users/${userId}/email-config`);
+export const setUserEmailConfig = (userId, data) => api.post(`/admin/users/${userId}/email-config`, data);
+export const testUserEmailConfig = (userId) => api.post(`/admin/users/${userId}/email-config/test`);
+
 // Stats
 export const getStats = () => api.get("/stats");
 
