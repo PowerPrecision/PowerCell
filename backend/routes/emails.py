@@ -2113,94 +2113,96 @@ async def webmail_list(
     user_role = current_user.get("role", "")
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     
-    query = {"is_archived": False}
-    
-    # Conditions that need $or handling
-    or_conditions = []
+    # === CONSTRUIR QUERY USANDO $and PARA EVITAR CONFLITOS ENTRE $or ===
+    # Cada condição independente entra como um elemento separado do $and.
+    # Isso evita que múltiplos $or se sobreponham.
+    and_conditions = []
     
     # === ISOLAMENTO POR UTILIZADOR ===
     if not can_see_all and user_email:
         if folder == "inbox":
             # Recebidos: o to_emails deve conter o email do utilizador
-            query["to_emails"] = {"$regex": re.escape(user_email), "$options": "i"}
+            # to_emails pode ser array ou string — MongoDB $regex funciona em ambos
+            and_conditions.append({
+                "$or": [
+                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                    {"to_emails": {"$exists": False}},  # emails legados sem to_emails
+                ]
+            })
         elif folder == "sent":
             # Enviados: o from_email deve ser o email do utilizador
-            query["from_email"] = {"$regex": re.escape(user_email), "$options": "i"}
+            and_conditions.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
         elif folder == "drafts":
             # Rascunhos: criados pelo utilizador
-            query["created_by"] = current_user["id"]
-        elif folder == "starred":
-            # Estrelados: o utilizador deve ser sender ou recipient
-            or_conditions.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
-            or_conditions.append({"to_emails": {"$regex": re.escape(user_email), "$options": "i"}})
-        elif folder == "trash":
-            # Arquivados: o utilizador deve ser sender ou recipient
-            or_conditions.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
-            or_conditions.append({"to_emails": {"$regex": re.escape(user_email), "$options": "i"}})
-        elif folder == "custom":
-            # Pasta personalizada: o utilizador deve ser sender ou recipient
-            or_conditions.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
-            or_conditions.append({"to_emails": {"$regex": re.escape(user_email), "$options": "i"}})
+            and_conditions.append({"created_by": current_user["id"]})
+        elif folder in ("starred", "trash", "custom"):
+            # O utilizador deve ser sender ou recipient
+            and_conditions.append({
+                "$or": [
+                    {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                ]
+            })
     
-    # Filtrar por conta IMAP (mostrar também emails sem campo 'account' para compatibilidade)
-    if account:
-        or_conditions.append({"account": account})
-        or_conditions.append({"account": {"$exists": False}})
-    
+    # === FILTRO DE PASTA ===
     if folder == "inbox":
-        query["direction"] = "received"
-        query["status"] = {"$ne": "draft"}
+        and_conditions.append({"direction": "received"})
+        and_conditions.append({"status": {"$ne": "draft"}})
+        and_conditions.append({"is_archived": False})
     elif folder == "sent":
-        query["direction"] = "sent"
-        query["status"] = {"$ne": "draft"}
+        and_conditions.append({"direction": "sent"})
+        and_conditions.append({"status": {"$ne": "draft"}})
+        and_conditions.append({"is_archived": False})
     elif folder == "starred":
-        query["is_starred"] = True
+        and_conditions.append({"is_starred": True})
     elif folder == "trash":
-        query["is_archived"] = True
+        and_conditions.append({"is_archived": True})
     elif folder == "drafts":
-        query["status"] = "draft"
+        and_conditions.append({"status": "draft"})
     elif folder == "custom":
         if not custom_folder:
             raise HTTPException(status_code=400, detail="ID da pasta não especificado")
-        query["folder_id"] = custom_folder
+        and_conditions.append({"folder_id": custom_folder})
     
-    # Filtro por label
+    # === FILTRO POR CONTA IMAP ===
+    if account:
+        and_conditions.append({
+            "$or": [
+                {"account": account},
+                {"account": {"$exists": False}},
+            ]
+        })
+    
+    # === FILTRO POR LABEL ===
     if label:
-        query["labels"] = label
+        and_conditions.append({"labels": label})
     
-    # Pesquisa textual
+    # === PESQUISA TEXTUAL ===
     if search:
         search = sanitize_string(search, max_length=200)
-        search_or = [
-            {"subject": {"$regex": search, "$options": "i"}},
-            {"body": {"$regex": search, "$options": "i"}},
-            {"from_email": {"$regex": search, "$options": "i"}},
-            {"to_emails": {"$regex": search, "$options": "i"}},
-        ]
-        # Build $and: base conditions + $or conditions + search $or + label
-        and_conditions = []
-        # Add all base (non-$or) conditions
-        base_keys = {k: v for k, v in query.items() if k != "$or"}
-        if base_keys:
-            and_conditions.append(base_keys)
-        # Add user-isolation $or conditions (before account $or)
-        user_isolation_or = []
-        if not can_see_all and user_email:
-            if folder in ("starred", "trash", "custom"):
-                user_isolation_or.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
-                user_isolation_or.append({"to_emails": {"$regex": re.escape(user_email), "$options": "i"}})
-                and_conditions.append({"$or": user_isolation_or})
-        # Add account $or conditions
-        if or_conditions:
-            and_conditions.append({"$or": or_conditions})
-        # Add search $or
-        and_conditions.append({"$or": search_or})
+        and_conditions.append({
+            "$or": [
+                {"subject": {"$regex": search, "$options": "i"}},
+                {"body": {"$regex": search, "$options": "i"}},
+                {"from_email": {"$regex": search, "$options": "i"}},
+                {"to_emails": {"$regex": search, "$options": "i"}},
+            ]
+        })
+    
+    # Montar query final
+    if len(and_conditions) == 1:
+        query = and_conditions[0]
+    elif and_conditions:
         query = {"$and": and_conditions}
-    elif or_conditions:
-        query["$or"] = or_conditions
+    else:
+        query = {}
     
     skip = (page - 1) * limit
     total = await db.emails.count_documents(query)
+    
+    # Debug logging — remover após confirmar que a listagem funciona
+    logger.info(f"[Webmail List] folder={folder}, user={user_email}, role={user_role}, can_see_all={can_see_all}, account={account}")
+    logger.info(f"[Webmail List] query={query}, total={total}")
     
     emails = await db.emails.find(
         query,
@@ -2210,22 +2212,28 @@ async def webmail_list(
     # Contar não lidos para a pasta inbox (com isolamento de utilizador)
     unread_count = 0
     if folder == "inbox":
-        unread_query = {
-            "direction": "received",
-            "status": {"$ne": "draft"},
-            "is_read": False,
-            "is_archived": False,
-        }
+        unread_and = [
+            {"direction": "received"},
+            {"status": {"$ne": "draft"}},
+            {"is_read": False},
+            {"is_archived": False},
+        ]
         # Aplicar isolamento ao unread_count também
         if not can_see_all and user_email:
-            unread_query["to_emails"] = {"$regex": re.escape(user_email), "$options": "i"}
+            unread_and.append({
+                "$or": [
+                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                    {"to_emails": {"$exists": False}},
+                ]
+            })
         if account:
-            account_filter = {"$or": [{"account": account}, {"account": {"$exists": False}}]}
-            if "$and" not in unread_query:
-                unread_query = {"$and": [unread_query, account_filter]}
-            else:
-                unread_query["$and"].append(account_filter)
-        unread_count = await db.emails.count_documents(unread_query)
+            unread_and.append({
+                "$or": [
+                    {"account": account},
+                    {"account": {"$exists": False}},
+                ]
+            })
+        unread_count = await db.emails.count_documents({"$and": unread_and})
     
     # Enriquecer emails com nome do processo/cliente
     enriched = []
