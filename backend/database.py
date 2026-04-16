@@ -15,6 +15,19 @@ _client = None
 _db = None
 
 
+def _is_local_connection(url: str) -> bool:
+    """Verifica se a URL aponta para um MongoDB local (sem TLS).
+
+    Conexões locais (localhost, 127.0.0.1, Docker host) não usam TLS.
+    Conexões cloud (MongoDB Atlas, Render, etc.) usam TLS via certifi.
+
+    Isto previne o erro "SSL handshake received but server is started
+    without SSL support" quando se corre testes contra MongoDB local.
+    """
+    local_prefixes = ("mongodb://localhost", "mongodb://127.0.0.1", "mongodb://host.docker.internal")
+    return any(url.startswith(p) for p in local_prefixes)
+
+
 def reset_db_connection():
     """Reset da ligação (útil para testes)."""
     global _client, _db
@@ -28,10 +41,17 @@ def reset_db_connection():
 
 
 def get_motor_client():
-    """Retorna o cliente Motor (criado on-demand)."""
+    """Retorna o cliente Motor (criado on-demand).
+
+    TLS (certifi) é usado APENAS para conexões cloud.
+    MongoDB local em CI/desenvolvimento não tem SSL → sem certifi.
+    """
     global _client
     if _client is None:
-        _client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
+        if _is_local_connection(mongo_url):
+            _client = AsyncIOMotorClient(mongo_url)
+        else:
+            _client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
     return _client
 
 
