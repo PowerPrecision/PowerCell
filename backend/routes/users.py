@@ -171,7 +171,7 @@ async def test_my_email_config(
     Se tem Google OAuth → testa Gmail API.
     Se tem password IMAP/SMTP → testa IMAP/SMTP.
     """
-    from services.email_v2 import test_connection_smart
+    from services.gmail_oauth import test_connection_smart
 
     user_id = current_user["id"]
     user = await db.users.find_one(
