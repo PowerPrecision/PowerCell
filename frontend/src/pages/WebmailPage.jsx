@@ -295,8 +295,7 @@ const WebmailPage = () => {
       }
       const data = await response.json();
 
-      // Debug — remover após confirmar que a listagem funciona
-      console.error("[Webmail Debug] folder=%s, account=%s, response:", actualFolder, account, data);
+      console.debug("[Webmail] folder=%s, account=%s, total=%d", actualFolder, account, data?.total || 0);
 
       setEmails(data.emails || []);
       setTotalEmails(data.total || 0);

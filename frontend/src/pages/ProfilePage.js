@@ -55,6 +55,9 @@ import {
   Clock,
   MapPin,
   ArrowLeft,
+  Mail,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
 
 // ====================================================================
@@ -86,6 +89,122 @@ const ProfilePage = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(null);
+
+  // Estados para configuração de webmail
+  const [emailConfig, setEmailConfig] = useState({
+    email_address: "",
+    imap_server: "",
+    imap_port: 993,
+    smtp_server: "",
+    smtp_port: 465,
+    password: "",
+  });
+  const [webmailConfigured, setWebmailConfigured] = useState(false);
+  const [loadingEmailConfig, setLoadingEmailConfig] = useState(false);
+  const [savingEmailConfig, setSavingEmailConfig] = useState(false);
+  const [testingEmailConfig, setTestingEmailConfig] = useState(false);
+  const [showWebmailPassword, setShowWebmailPassword] = useState(false);
+
+  // Carregar configuração de webmail
+  const loadEmailConfig = async () => {
+    setLoadingEmailConfig(true);
+    try {
+      const response = await api.get("/users/me/email-config");
+      const config = response.data;
+      if (config && config.imap_server) {
+        setEmailConfig({
+          email_address: config.email_address || "",
+          imap_server: config.imap_server || "",
+          imap_port: config.imap_port || 993,
+          smtp_server: config.smtp_server || "",
+          smtp_port: config.smtp_port || 465,
+          password: "",
+        });
+        setWebmailConfigured(true);
+      }
+    } catch (error) {
+      // 404 ou erro — não está configurado
+      setWebmailConfigured(false);
+    } finally {
+      setLoadingEmailConfig(false);
+    }
+  };
+
+  useEffect(() => {
+    loadEmailConfig();
+  }, []);
+
+  // Testar ligação IMAP/SMTP
+  const handleTestEmailConfig = async () => {
+    if (!emailConfig.email_address || !emailConfig.password) {
+      toast({
+        variant: "destructive",
+        title: "Campos obrigatórios",
+        description: "Preencha o endereço de email e a password para testar a ligação.",
+      });
+      return;
+    }
+    setTestingEmailConfig(true);
+    try {
+      await api.post("/users/me/email-config/test", {
+        email_address: emailConfig.email_address,
+        password: emailConfig.password,
+        imap_server: emailConfig.imap_server,
+        imap_port: emailConfig.imap_port,
+        smtp_server: emailConfig.smtp_server,
+        smtp_port: emailConfig.smtp_port,
+      });
+      toast({
+        title: "Ligação bem-sucedida",
+        description: "A ligação IMAP/SMTP foi estabelecida com sucesso.",
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro na ligação",
+        description: error.response?.data?.detail || "Não foi possível estabelecer a ligação IMAP/SMTP.",
+      });
+    } finally {
+      setTestingEmailConfig(false);
+    }
+  };
+
+  // Guardar configuração de webmail
+  const handleSaveEmailConfig = async () => {
+    if (!emailConfig.email_address || !emailConfig.password) {
+      toast({
+        variant: "destructive",
+        title: "Campos obrigatórios",
+        description: "Preencha o endereço de email e a password para guardar.",
+      });
+      return;
+    }
+    setSavingEmailConfig(true);
+    try {
+      await api.post("/users/me/email-config", {
+        email_address: emailConfig.email_address,
+        password: emailConfig.password,
+        imap_server: emailConfig.imap_server,
+        imap_port: emailConfig.imap_port,
+        smtp_server: emailConfig.smtp_server,
+        smtp_port: emailConfig.smtp_port,
+      });
+      toast({
+        title: "Configuração guardada",
+        description: "A configuração de webmail foi guardada com sucesso.",
+      });
+      setEmailConfig((prev) => ({ ...prev, password: "" }));
+      loadEmailConfig();
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao guardar",
+        description: error.response?.data?.detail || "Não foi possível guardar a configuração de webmail.",
+      });
+    } finally {
+      setSavingEmailConfig(false);
+    }
+  };
 
   // Estados para sessões
   const [sessions, setSessions] = useState([]);
@@ -672,6 +791,157 @@ const ProfilePage = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Configuração de Webmail */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Mail className="h-5 w-5" />
+                  Configuração de Webmail
+                </CardTitle>
+                <CardDescription>
+                  Configure o seu email para integração IMAP/SMTP
+                </CardDescription>
+              </div>
+              {loadingEmailConfig ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+              ) : webmailConfigured ? (
+                <Badge className="bg-green-600 hover:bg-green-700 text-white">
+                  Configurado
+                </Badge>
+              ) : (
+                <Badge variant="secondary">
+                  Não configurado
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="wm_email">Endereço de Email</Label>
+                <Input
+                  id="wm_email"
+                  type="email"
+                  value={emailConfig.email_address}
+                  onChange={(e) =>
+                    setEmailConfig({ ...emailConfig, email_address: e.target.value })
+                  }
+                  placeholder="seu@email.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="wm_password">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="wm_password"
+                    type={showWebmailPassword ? "text" : "password"}
+                    value={emailConfig.password}
+                    onChange={(e) =>
+                      setEmailConfig({ ...emailConfig, password: e.target.value })
+                    }
+                    placeholder={webmailConfigured ? "Introduza a nova password" : "Password do email"}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full"
+                    onClick={() => setShowWebmailPassword(!showWebmailPassword)}
+                  >
+                    {showWebmailPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                {webmailConfigured && (
+                  <p className="text-xs text-muted-foreground">
+                    Deixe em branco para manter a password atual
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="wm_imap_server">Servidor IMAP</Label>
+                <Input
+                  id="wm_imap_server"
+                  type="text"
+                  value={emailConfig.imap_server}
+                  onChange={(e) =>
+                    setEmailConfig({ ...emailConfig, imap_server: e.target.value })
+                  }
+                  placeholder="imap.exemplo.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="wm_imap_port">Porta IMAP</Label>
+                <Input
+                  id="wm_imap_port"
+                  type="number"
+                  value={emailConfig.imap_port}
+                  onChange={(e) =>
+                    setEmailConfig({ ...emailConfig, imap_port: parseInt(e.target.value) || 993 })
+                  }
+                  placeholder="993"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="wm_smtp_server">Servidor SMTP</Label>
+                <Input
+                  id="wm_smtp_server"
+                  type="text"
+                  value={emailConfig.smtp_server}
+                  onChange={(e) =>
+                    setEmailConfig({ ...emailConfig, smtp_server: e.target.value })
+                  }
+                  placeholder="smtp.exemplo.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="wm_smtp_port">Porta SMTP</Label>
+                <Input
+                  id="wm_smtp_port"
+                  type="number"
+                  value={emailConfig.smtp_port}
+                  onChange={(e) =>
+                    setEmailConfig({ ...emailConfig, smtp_port: parseInt(e.target.value) || 465 })
+                  }
+                  placeholder="465"
+                />
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={handleTestEmailConfig}
+                disabled={testingEmailConfig}
+                className="gap-2"
+              >
+                {testingEmailConfig ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                {testingEmailConfig ? "A testar..." : "Testar Ligação"}
+              </Button>
+              <Button
+                onClick={handleSaveEmailConfig}
+                disabled={savingEmailConfig}
+                className="gap-2"
+              >
+                {savingEmailConfig ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                {savingEmailConfig ? "A guardar..." : "Guardar Configuração"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Dialog Confirmar Revogação de Sessão */}
         <AlertDialog
