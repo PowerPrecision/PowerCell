@@ -2223,15 +2223,24 @@ async def webmail_list(
     skip = (page - 1) * limit
     total = await db.emails.count_documents(query)
     
-    # Debug logging — remover após confirmar que a listagem funciona
-    logger.info(f"[Webmail List] folder={folder}, user={user_email}, role={user_role}, can_see_all={can_see_all}, account={account}, account_email={account_email}")
-    logger.info(f"[Webmail List] query={query}, total={total}")
+    logger.info(f"[Webmail List] folder={folder}, account={account}, user={user_email}, total={total}")
     
     emails = await db.emails.find(
         query,
         {"_id": 0, "body": 0, "body_html": 0}
     ).sort("sent_at", -1).skip(skip).limit(limit).to_list(limit)
-    
+
+    # Serialize _id to string and ensure id is always a string for frontend keying
+    emails_serialized = []
+    for email in emails:
+        email = dict(email)
+        if "_id" in email and email["_id"]:
+            email["_id"] = str(email["_id"])
+        if "id" in email and email["id"]:
+            email["id"] = str(email["id"])
+        emails_serialized.append(email)
+    emails = emails_serialized
+
     # Contar não lidos para a pasta inbox (com isolamento de utilizador)
     unread_count = 0
     if folder == "inbox":
@@ -2262,6 +2271,7 @@ async def webmail_list(
     enriched = []
     for email in emails:
         e = await enrich_email(email)
+        e["id"] = str(e.get("id", ""))
         # Preview: primeira linha do body (buscar sem os campos excluídos acima)
         body_preview = email.get("body", "")[:120]
         if len(body_preview) == 120:
@@ -2416,6 +2426,62 @@ async def webmail_sync(
         "message": "Sincronização iniciada em background",
         "job_id": job_id,
         "status": "started"
+    }
+
+
+@router.post("/webmail/sync-user")
+async def webmail_sync_user(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Sincronizar emails usando as credenciais pessoais do utilizador logado.
+    Requer que o utilizador tenha configurado o seu email em Configurações > Perfil.
+    """
+    from services.background_jobs import BackgroundJobService, JobType
+    
+    user_id = current_user["id"]
+    
+    # Verificar se o utilizador tem configuração
+    user = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "email_config": 1}
+    )
+    
+    if not user or not user.get("email_config", {}).get("is_configured"):
+        return {
+            "success": False,
+            "error": "Configuração de email não encontrada. Vá ao seu Perfil > Configuração de Webmail para configurar."
+        }
+    
+    # Criar job em background
+    job_service = BackgroundJobService()
+    job_id = await job_service.create_job(
+        job_type=JobType.EMAIL_SYNC,
+        user_id=user_id,
+        user_email=current_user.get("email", ""),
+        metadata={"sync_type": "user_personal"}
+    )
+    
+    async def run_user_sync():
+        try:
+            from services.email_service import sync_user_emails
+            await job_service.update_progress(job_id, 0, 1, "A sincronizar emails pessoais...")
+            result = await sync_user_emails(user_id)
+            if result.get("success") == False:
+                await job_service.fail_job(job_id, result.get("error", "Erro na sincronização"))
+            else:
+                synced = result.get("total_synced", 0)
+                await job_service.complete_job(job_id, {"synced": synced, "details": result})
+        except Exception as e:
+            logger.error(f"Erro na sincronização user emails: {e}", exc_info=True)
+            await job_service.fail_job(job_id, str(e))
+    
+    asyncio.create_task(run_user_sync())
+    
+    return {
+        "success": True,
+        "message": "Sincronização pessoal iniciada em background",
+        "job_id": job_id,
     }
 
 

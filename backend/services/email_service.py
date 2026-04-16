@@ -1118,7 +1118,33 @@ async def send_email(
         if accounts:
             account = accounts[0]
         else:
-            return {"success": False, "error": "Nenhuma conta de email configurada"}
+            # If no global account matches, try user's personal email config
+            if created_by:
+                from services.encryption import encryption_service
+                user = await db.users.find_one(
+                    {"id": created_by},
+                    {"_id": 0, "email_config": 1}
+                )
+                if user and user.get("email_config", {}).get("is_configured"):
+                    cfg = user["email_config"]
+                    encrypted_password = cfg.get("encrypted_password", "")
+                    if encrypted_password:
+                        try:
+                            password = encryption_service.decrypt(encrypted_password)
+                            account = EmailAccount(
+                                name="personal",
+                                imap_server=cfg.get("smtp_server", ""),
+                                imap_port=int(cfg.get("smtp_port", 465)),
+                                smtp_server=cfg.get("smtp_server", ""),
+                                smtp_port=int(cfg.get("smtp_port", 465)),
+                                email=cfg.get("email_address", ""),
+                                password=password,
+                            )
+                            logger.info(f"[Send Email] Usando conta pessoal do utilizador {created_by}: {cfg.get('email_address', '')}")
+                        except Exception as e:
+                            logger.warning(f"[Send Email] Erro ao desencriptar password pessoal: {e}")
+            if not account:
+                return {"success": False, "error": "Nenhuma conta de email configurada"}
     
     try:
         has_attachments = attachments and len(attachments) > 0
@@ -1483,8 +1509,8 @@ async def sync_webmail_emails(
                         "process_id": None,
                         "direction": em.get("direction", "received"),
                         "from_email": em.get("from_email", ""),
-                        "to_emails": em.get("to_emails", []),
-                        "cc_emails": em.get("cc_emails", []),
+                        "to_emails": [str(e) for e in (em.get("to_emails") or []) if e],
+                        "cc_emails": [str(e) for e in (em.get("cc_emails") or []) if e],
                         "bcc_emails": [],
                         "subject": em.get("subject", ""),
                         "body": em.get("body", ""),
@@ -1532,4 +1558,202 @@ async def sync_webmail_emails(
         "total_duplicates": total_duplicates,
         "total_errors": total_errors,
         "accounts": results,
+    }
+
+
+async def sync_user_emails(user_id: str, days: int = 7, max_emails: int = 100) -> Dict[str, Any]:
+    """
+    Sincronizar emails para um utilizador específico usando a sua configuração pessoal.
+    
+    Args:
+        user_id: ID do utilizador
+        days: Dias para sincronizar
+        max_emails: Máximo de emails por pasta
+    
+    Returns:
+        Dict com resultado da sincronização
+    """
+    from services.encryption import encryption_service
+    
+    user = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "email_config": 1}
+    )
+    
+    if not user or not user.get("email_config"):
+        return {"success": False, "error": "Utilizador sem configuração de email"}
+    
+    config = user["email_config"]
+    if not config.get("is_configured"):
+        return {"success": False, "error": "Configuração de email não ativa"}
+    
+    encrypted_password = config.get("encrypted_password", "")
+    if not encrypted_password:
+        return {"success": False, "error": "Password não configurada"}
+    
+    # Desencriptar password apenas no motor de sincronização
+    password = encryption_service.decrypt(encrypted_password)
+    
+    # Criar EmailAccount temporária com as credenciais do utilizador
+    account = EmailAccount(
+        name=f"user_{user_id[:8]}",
+        imap_server=config.get("imap_server", ""),
+        imap_port=int(config.get("imap_port", 993)),
+        smtp_server=config.get("smtp_server", ""),
+        smtp_port=int(config.get("smtp_port", 465)),
+        email=config.get("email_address", ""),
+        password=password,
+    )
+    
+    total_synced = 0
+    total_duplicates = 0
+    total_errors = 0
+    
+    try:
+        loop = asyncio.get_event_loop()
+        
+        # Buscar da INBOX
+        inbox_emails = await loop.run_in_executor(
+            _email_executor,
+            lambda: _fetch_all_from_folder_sync(account, "INBOX", days, max_emails)
+        )
+        
+        # Buscar da pasta de Enviados
+        sent_emails = []
+        for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados"]:
+            try:
+                emails = await loop.run_in_executor(
+                    _email_executor,
+                    lambda f=sent_folder: _fetch_all_from_folder_sync(account, f, days, max_emails)
+                )
+                if emails:
+                    sent_emails = emails
+                    break
+            except Exception:
+                continue
+        
+        all_emails = inbox_emails + sent_emails
+        
+        for em in all_emails:
+            try:
+                msg_id = em.get("message_id", "")
+                if not msg_id:
+                    continue
+                
+                # Verificar se já existe (por message_id + user_id para isolamento)
+                existing = await db.emails.find_one({
+                    "message_id": msg_id,
+                    "synced_for_user": user_id,
+                })
+                
+                if existing:
+                    total_duplicates += 1
+                    continue
+                
+                # Parsear data
+                sent_at = em.get("date")
+                try:
+                    if sent_at:
+                        sent_at = datetime.fromisoformat(sent_at.replace("Z", "+00:00")).isoformat()
+                    else:
+                        sent_at = datetime.now(timezone.utc).isoformat()
+                except Exception:
+                    sent_at = datetime.now(timezone.utc).isoformat()
+                
+                email_doc = {
+                    "id": str(uuid.uuid4()),
+                    "process_id": None,
+                    "direction": em.get("direction", "received"),
+                    "from_email": em.get("from_email", ""),
+                    "to_emails": [str(e) for e in (em.get("to_emails") or []) if e],
+                    "cc_emails": [str(e) for e in (em.get("cc_emails") or []) if e],
+                    "bcc_emails": [],
+                    "subject": em.get("subject", ""),
+                    "body": em.get("body", ""),
+                    "body_html": em.get("body_html", ""),
+                    "attachments": em.get("attachments", []),
+                    "status": "synced",
+                    "sent_at": sent_at,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_by": user_id,
+                    "notes": f"User webmail sync - {config.get('email_address', '')}",
+                    "synced": True,
+                    "account": config.get("email_address", ""),
+                    "synced_for_user": user_id,
+                    "message_id": msg_id,
+                    "is_read": em.get("direction") == "sent",
+                    "is_starred": False,
+                    "is_archived": False,
+                    "source": "user_webmail_sync",
+                }
+                
+                await db.emails.insert_one(email_doc)
+                total_synced += 1
+                
+            except Exception as e:
+                logger.warning(f"[User Email Sync] Erro ao guardar email: {e}")
+                total_errors += 1
+        
+        logger.info(f"[User Email Sync] User {user_id}: {total_synced} novos, {total_duplicates} duplicados")
+        
+    except Exception as e:
+        logger.error(f"[User Email Sync] Erro: {e}")
+        total_errors += 1
+    
+    return {
+        "success": total_errors == 0 or total_synced > 0,
+        "total_synced": total_synced,
+        "total_duplicates": total_duplicates,
+        "total_errors": total_errors,
+        "user_id": user_id,
+    }
+
+
+async def sync_all_user_emails(days: int = 7) -> Dict[str, Any]:
+    """
+    Sincronizar emails para TODOS os utilizadores com configuração ativa.
+    Usa asyncio.gather para execução concorrente.
+    
+    Returns:
+        Dict com resumo global da sincronização
+    """
+    # Query: utilizadores com email_config.is_configured == True
+    users_with_config = await db.users.find(
+        {"email_config.is_configured": True},
+        {"_id": 0, "id": 1}
+    ).to_list(200)
+    
+    if not users_with_config:
+        return {"success": True, "message": "Nenhum utilizador com email configurado", "users_synced": 0}
+    
+    # Criar tasks para cada utilizador
+    tasks = [
+        sync_user_emails(user["id"], days=days)
+        for user in users_with_config
+    ]
+    
+    # Executar concorrentemente
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    total_synced = 0
+    total_errors = 0
+    user_results = {}
+    
+    for i, result in enumerate(results):
+        user_id = users_with_config[i]["id"]
+        if isinstance(result, Exception):
+            logger.error(f"[All User Sync] User {user_id}: {result}")
+            user_results[user_id] = {"error": str(result)}
+            total_errors += 1
+        else:
+            user_results[user_id] = result
+            total_synced += result.get("total_synced", 0)
+            total_errors += result.get("total_errors", 0)
+    
+    return {
+        "success": total_errors == 0,
+        "users_synced": len(users_with_config),
+        "total_synced": total_synced,
+        "total_errors": total_errors,
+        "users": user_results,
     }
