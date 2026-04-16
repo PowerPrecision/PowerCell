@@ -2985,6 +2985,13 @@ async def admin_get_user_email_config(
         "smtp_server": config.get("smtp_server"),
         "smtp_port": config.get("smtp_port", 465),
         "has_password": bool(config.get("encrypted_password")),
+        "has_google_oauth": bool(config.get("google_refresh_token")),
+        "auth_method": (
+            "google_oauth" if config.get("google_refresh_token")
+            else "imap_smtp" if config.get("encrypted_password")
+            else "none"
+        ),
+        "google_email": config.get("google_email"),
         "target_user": {
             "id": user_id,
             "name": target.get("name"),
@@ -3049,6 +3056,18 @@ async def admin_set_user_email_config(
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    # Preservar campos Google OAuth existentes (não os apagar ao guardar IMAP)
+    if existing_config.get("google_refresh_token"):
+        email_config["google_refresh_token"] = existing_config["google_refresh_token"]
+    if existing_config.get("google_access_token"):
+        email_config["google_access_token"] = existing_config["google_access_token"]
+    if existing_config.get("google_email"):
+        email_config["google_email"] = existing_config["google_email"]
+    if existing_config.get("auth_method"):
+        email_config["auth_method"] = existing_config["auth_method"]
+    if existing_config.get("oauth_connected_at"):
+        email_config["oauth_connected_at"] = existing_config["oauth_connected_at"]
+
     result = await db.users.update_one(
         {"id": user_id},
         {"$set": {"email_config": email_config}}
@@ -3082,28 +3101,23 @@ async def admin_test_user_email_config(
     user_id: str,
     admin: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    """Testar ligação IMAP/SMTP de um utilizador alvo (Admin/CEO).
+    """Testar ligação de email de um utilizador alvo (Admin/CEO) — Smart.
 
-    Usa as credenciais encriptadas guardadas do utilizador alvo.
-    O admin não precisa de fornecer password — o teste usa as credenciais
-    guardadas na base de dados.
+    Se o utilizador tem Google OAuth → testa Gmail API.
+    Se tem password IMAP/SMTP → testa IMAP/SMTP.
 
     Args:
         user_id: ID do utilizador alvo.
         admin: Utilizador admin/CEO autenticado (injetado).
 
     Returns:
-        dict: success, imap_connected, smtp_connected, error.
+        dict: success, auth_method, gmail_api_connected/imap_connected/smtp_connected, error.
 
     Raises:
         HTTPException(404): Se utilizador não encontrado.
         HTTPException(400): Se configuração de email não existe.
     """
-    import imaplib
-    import smtplib
-    import ssl
-    import certifi
-    from services.encryption import encryption_service
+    from services.email_v2 import test_connection_smart
 
     target = await db.users.find_one(
         {"id": user_id},
@@ -3113,75 +3127,16 @@ async def admin_test_user_email_config(
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
 
     config = target.get("email_config")
-    if not config or not config.get("encrypted_password"):
+    if not config:
         raise HTTPException(
             status_code=400,
             detail=f"Configuração de email não encontrada para {target.get('name', user_id)}"
         )
 
-    # Desencriptar a password
-    password = encryption_service.decrypt(config.get("encrypted_password", ""))
-
-    # Verificar se a desencriptação falhou (password ainda está encriptada)
-    if password.startswith("ENC:"):
-        raise HTTPException(
-            status_code=400,
-            detail="Erro ao desencriptar a password. A chave de encriptação pode ter mudado. Guarda a password novamente."
-        )
-
-    if not password:
-        raise HTTPException(status_code=400, detail="Password desencriptada está vazia. Guarda a password novamente.")
-
-    # SSL context com certifi para certificados atualizados (Render)
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-
-    # Test IMAP
-    imap_ok = False
-    smtp_ok = False
-    error = None
-
-    try:
-        imap_port = config.get("imap_port", 993)
-        if not imap_port:
-            imap_port = 993
-        mail = imaplib.IMAP4_SSL(
-            config["imap_server"],
-            int(imap_port),
-            ssl_context=ssl_context
-        )
-        mail.login(config["email_address"], password)
-        mail.logout()
-        imap_ok = True
-    except Exception as e:
-        error = f"IMAP: {str(e)}"
-
-    # Test SMTP
-    try:
-        smtp_port = config.get("smtp_port", 465)
-        if not smtp_port:
-            smtp_port = 465
-        with smtplib.SMTP_SSL(
-            config["smtp_server"],
-            int(smtp_port),
-            context=ssl_context,
-            timeout=15
-        ) as server:
-            server.login(config["email_address"], password)
-        smtp_ok = True
-    except Exception as e:
-        if error:
-            error += f" | SMTP: {str(e)}"
-        else:
-            error = f"SMTP: {str(e)}"
-
-    return {
-        "success": imap_ok and smtp_ok,
-        "imap_connected": imap_ok,
-        "smtp_connected": smtp_ok,
-        "error": error,
-        "target_user": {
-            "id": user_id,
-            "name": target.get("name"),
-        },
+    result = await test_connection_smart(config, user_id)
+    result["target_user"] = {
+        "id": user_id,
+        "name": target.get("name"),
     }
+    return result
 

@@ -393,3 +393,49 @@ if GEMINI_API_KEY:
 if EMERGENT_LLM_KEY:
     print("✅ LLM API Key configurada (OpenAI)", file=sys.stderr)
 
+
+# ====================================================================
+# GOOGLE OAUTH 2.0 CONFIG (Gmail API)
+# ====================================================================
+# Opcional — se definido, permite autenticação OAuth para Gmail
+# em vez de passwords IMAP/SMTP (mais seguro, sem "Less Secure Apps").
+#
+# Como configurar:
+# 1. Aceder a https://console.cloud.google.com/apis/credentials
+# 2. Criar um projeto (ou seleccionar existente)
+# 3. Criar "OAuth 2.0 Client ID" (tipo "Web application")
+# 4. Adicionar a redirect URI autorizada:
+#    https://<SEU_BACKEND>/api/auth/google/callback
+# 5. Copiar Client ID e Client Secret para as variáveis abaixo
+#
+# Scopes solicitados:
+#   - https://mail.google.com/ (leitura + envio + gestão completa)
+#   - https://www.googleapis.com/auth/gmail.compose (envio)
+#   - https://www.googleapis.com/auth/gmail.readonly (leitura)
+# ====================================================================
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_REDIRECT_URI = os.environ.get(
+    'GOOGLE_REDIRECT_URI',
+    os.environ.get('GOOGLE_OAUTH_REDIRECT_URI', '')
+)
+
+# Scopes do Gmail — acesso completo para leitura e envio
+GOOGLE_GMAIL_SCOPES = [
+    'https://mail.google.com/',
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.compose',
+    'https://www.googleapis.com/auth/gmail.modify',
+]
+
+# Validação: se Client ID está definido, Client Secret também deve estar
+if GOOGLE_CLIENT_ID and not GOOGLE_CLIENT_SECRET:
+    print("⚠️  GOOGLE_CLIENT_ID definido mas GOOGLE_CLIENT_SECRET em falta!", file=sys.stderr)
+elif GOOGLE_CLIENT_SECRET and not GOOGLE_CLIENT_ID:
+    print("⚠️  GOOGLE_CLIENT_SECRET definido mas GOOGLE_CLIENT_ID em falta!", file=sys.stderr)
+elif GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    print(f"✅ Google OAuth 2.0 configurado (Client ID: {GOOGLE_CLIENT_ID[:8]}...)", file=sys.stderr)
+    if not GOOGLE_REDIRECT_URI:
+        print("⚠️  GOOGLE_REDIRECT_URI não definido — o callback usará a URL do request", file=sys.stderr)
+
+
