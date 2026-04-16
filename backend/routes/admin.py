@@ -3117,7 +3117,7 @@ async def admin_test_user_email_config(
         HTTPException(404): Se utilizador não encontrado.
         HTTPException(400): Se configuração de email não existe.
     """
-    from services.email_v2 import test_connection_smart
+    from services.gmail_oauth import test_connection_smart
 
     target = await db.users.find_one(
         {"id": user_id},
