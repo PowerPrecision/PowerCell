@@ -2113,36 +2113,59 @@ async def webmail_list(
     user_role = current_user.get("role", "")
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     
+    # === OBTER EMAIL DA CONTA IMAP SELECIONADA ===
+    # Quando o user seleciona uma conta (ex: "power"), obtém o email dessa conta
+    # para incluir no filtro — permite ver emails da caixa partilhada.
+    account_email = None
+    if account:
+        try:
+            accounts = await get_email_accounts_async()
+            for acc in accounts:
+                if acc.name == account:
+                    account_email = (acc.email or "").lower().strip()
+                    break
+        except Exception:
+            pass
+    
     # === CONSTRUIR QUERY USANDO $and PARA EVITAR CONFLITOS ENTRE $or ===
     # Cada condição independente entra como um elemento separado do $and.
     # Isso evita que múltiplos $or se sobreponham.
     and_conditions = []
     
     # === ISOLAMENTO POR UTILIZADOR ===
+    # Para pastas partilhadas (inbox), incluímos também o email da conta IMAP
+    # para que staff possa ver emails recebidos na caixa de entrada partilhada.
     if not can_see_all and user_email:
         if folder == "inbox":
-            # Recebidos: o to_emails deve conter o email do utilizador
-            # to_emails pode ser array ou string — MongoDB $regex funciona em ambos
-            and_conditions.append({
-                "$or": [
-                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
-                    {"to_emails": {"$exists": False}},  # emails legados sem to_emails
-                ]
-            })
+            inbox_or = [
+                {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                {"to_emails": {"$exists": False}},  # emails legados sem to_emails
+            ]
+            # Se há conta selecionada, incluir também o email da conta partilhada
+            if account_email and account_email != user_email:
+                inbox_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
+            and_conditions.append({"$or": inbox_or})
         elif folder == "sent":
-            # Enviados: o from_email deve ser o email do utilizador
-            and_conditions.append({"from_email": {"$regex": re.escape(user_email), "$options": "i"}})
+            # Enviados: o from_email deve ser do utilizador OU da conta partilhada
+            sent_or = [
+                {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+            ]
+            if account_email and account_email != user_email:
+                sent_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
+            and_conditions.append({"$or": sent_or})
         elif folder == "drafts":
             # Rascunhos: criados pelo utilizador
             and_conditions.append({"created_by": current_user["id"]})
         elif folder in ("starred", "trash", "custom"):
             # O utilizador deve ser sender ou recipient
-            and_conditions.append({
-                "$or": [
-                    {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
-                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
-                ]
-            })
+            shared_or = [
+                {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+                {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+            ]
+            if account_email and account_email != user_email:
+                shared_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
+                shared_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
+            and_conditions.append({"$or": shared_or})
     
     # === FILTRO DE PASTA ===
     if folder == "inbox":
@@ -2201,7 +2224,7 @@ async def webmail_list(
     total = await db.emails.count_documents(query)
     
     # Debug logging — remover após confirmar que a listagem funciona
-    logger.info(f"[Webmail List] folder={folder}, user={user_email}, role={user_role}, can_see_all={can_see_all}, account={account}")
+    logger.info(f"[Webmail List] folder={folder}, user={user_email}, role={user_role}, can_see_all={can_see_all}, account={account}, account_email={account_email}")
     logger.info(f"[Webmail List] query={query}, total={total}")
     
     emails = await db.emails.find(
