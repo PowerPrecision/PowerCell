@@ -309,6 +309,27 @@ def require_roles(allowed_roles: List[str]):
     return role_checker
 
 
+def require_admin():
+    """Dependency do FastAPI que restringe acesso a administradores e CEO.
+
+    Um utilizador é considerado "admin" se o seu role for ``UserRole.ADMIN``
+    ou ``UserRole.CEO``. Isto é usado para endpoints sensíveis (ex: gestão
+    de configs de email por empresa, configurações do sistema) que só devem
+    ser acessíveis por administradores ou CEO.
+
+    Retorna uma dependency function para uso com ``Depends()`` — o FastAPI
+    injeta automaticamente o resultado de ``get_current_user`` como argumento
+    da função interna.
+
+    Returns:
+        Callable: Função async que retorna o utilizador autenticado.
+
+    Raises:
+        HTTPException: 403 se o utilizador autenticado não tiver role de admin ou CEO.
+    """
+    return require_roles([UserRole.ADMIN, UserRole.CEO])
+
+
 def require_staff():
     """Dependency do FastAPI que restringe acesso a membros da equipa (staff).
 
