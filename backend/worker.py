@@ -220,11 +220,13 @@ async def scheduler_loop():
             # ISOLAMENTO DE DADOS: Em vez de descarregar emails da conta global "geral",
             # itera APENAS pelos utilizadores com email_config.is_configured == True
             # e sincroniza as suas caixas pessoais de email.
+            # INCLUÍDO: Sincronização de caixas partilhadas via Gmail API (ex: indexacao)
             if now - last_runs["webmail"] > 900:
                 logger.info("Agendando sincronização de webmail por utilizador...")
                 try:
                     from services.email_service import sync_user_emails
-                    # Buscar todos os utilizadores com email pessoal configurado
+
+                    # 1. Sync de utilizadores pessoais (IMAP)
                     configured_users = await db.users.find(
                         {"email_config.is_configured": True},
                         {"id": 1}
@@ -241,9 +243,34 @@ async def scheduler_loop():
                                     logger.info(f"Webmail sync user {user_id}: {synced} novos emails")
                             except Exception as user_err:
                                 logger.warning(f"Erro ao sincronizar webmail do user {user_id}: {user_err}")
-                        logger.info(f"Sincronização webmail concluída ({len(configured_users)} utilizadores)")
+                        logger.info(f"Sincronização webmail pessoal concluída ({len(configured_users)} utilizadores)")
                     else:
                         logger.debug("Nenhum utilizador com email pessoal configurado")
+
+                    # 2. Sync de caixas partilhadas via Gmail API (ex: indexacao)
+                    from services.gmail_api_service import gmail_api_sync_to_db
+                    shared_configs = await db.shared_role_email_configs.find(
+                        {
+                            "is_configured": True,
+                            "google_refresh_token": {"$ne": "", "$exists": True},
+                        },
+                        {"role": 1, "email_address": 1},
+                    ).to_list(10)
+                    if shared_configs:
+                        for shared_cfg in shared_configs:
+                            role = shared_cfg.get("role")
+                            try:
+                                result = await gmail_api_sync_to_db(role=role, days=3, max_emails=100)
+                                if result.get("success"):
+                                    synced = result.get("total_synced", 0)
+                                    if synced > 0:
+                                        logger.info(f"Gmail API sync role '{role}': {synced} novos emails")
+                                else:
+                                    logger.warning(f"Gmail API sync role '{role}' falhou: {result.get('error')}")
+                            except Exception as shared_err:
+                                logger.warning(f"Erro ao sincronizar Gmail API do role '{role}': {shared_err}")
+                        logger.info(f"Sincronização Gmail API concluída ({len(shared_configs)} roles)")
+
                 except Exception as e:
                     logger.error(f"Erro na sincronização de webmail: {e}")
                 last_runs["webmail"] = now
