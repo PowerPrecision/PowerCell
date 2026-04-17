@@ -81,6 +81,7 @@ import {
   Info,
   RotateCcw,
   Plus,
+  ShieldCheck,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -442,6 +443,7 @@ const CompanyEmailConfigSection = () => {
     imap_port: 993,
     smtp_server: "",
     smtp_port: 465,
+    require_ssl: true,
   });
   const [deletingCompany, setDeletingCompany] = useState(null);
 
@@ -489,6 +491,7 @@ const CompanyEmailConfigSection = () => {
       imap_port: config.imap_port || 993,
       smtp_server: config.smtp_server || "",
       smtp_port: config.smtp_port || 465,
+      require_ssl: config.require_ssl !== false,
     });
   };
 
@@ -503,6 +506,7 @@ const CompanyEmailConfigSection = () => {
       imap_port: 993,
       smtp_server: "",
       smtp_port: 465,
+      require_ssl: true,
     });
     setShowCreateDialog(true);
   };
@@ -689,6 +693,19 @@ const CompanyEmailConfigSection = () => {
                   placeholder="465"
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="ce_require_ssl">Requer SSL/TLS</Label>
+                <div className="flex items-center gap-3 h-9">
+                  <Switch
+                    id="ce_require_ssl"
+                    checked={formData.require_ssl}
+                    onCheckedChange={(v) => setFormData({ ...formData, require_ssl: v })}
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {formData.require_ssl ? "Ativado" : "Desativado"}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -725,12 +742,15 @@ const CompanyEmailConfigSection = () => {
                         <p>{cfg.smtp_server}:{cfg.smtp_port}</p>
                       </div>
                       <div>
-                        <span className="text-xs uppercase tracking-wider">Criado</span>
-                        <p>{cfg.created_at ? new Date(cfg.created_at).toLocaleDateString("pt-PT") : "—"}</p>
+                        <span className="text-xs uppercase tracking-wider">SSL/TLS</span>
+                        <p className="flex items-center gap-1">
+                          <ShieldCheck className={`h-3 w-3 ${cfg.require_ssl !== false ? "text-green-500" : "text-muted-foreground"}`} />
+                          {cfg.require_ssl !== false ? "Ativado" : "Desativado"}
+                        </p>
                       </div>
                       <div>
-                        <span className="text-xs uppercase tracking-wider">Atualizado</span>
-                        <p>{cfg.updated_at ? new Date(cfg.updated_at).toLocaleDateString("pt-PT") : "—"}</p>
+                        <span className="text-xs uppercase tracking-wider">Utilizadores</span>
+                        <p>{cfg.total_users}</p>
                       </div>
                     </div>
                   </div>
