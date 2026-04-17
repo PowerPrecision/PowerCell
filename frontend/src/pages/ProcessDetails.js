@@ -3472,6 +3472,7 @@ const ProcessDetails = () => {
                         <Badge className="mt-2">{currentStatusInfo.label}</Badge>
                       </div>
                     ) : (
+                      <>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Valor do Empréstimo (€)</Label>
@@ -3598,6 +3599,7 @@ const ProcessDetails = () => {
                           )}
                         </CardContent>
                       </Card>
+                      </>
                     )}
                   </TabsContent>
 
