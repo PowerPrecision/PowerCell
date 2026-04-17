@@ -10,13 +10,16 @@ ARMAZENAMENTO: Coleção `shared_role_email_configs` no MongoDB.
 
 ENDPOINTS:
 - GET    /api/admin/shared-email              → Listar todas as configs
+- GET    /api/admin/shared-email/google/callback      → Callback OAuth
 - GET    /api/admin/shared-email/{role}       → Obter config de um role
 - PUT    /api/admin/shared-email/{role}       → Criar/atualizar config (IMAP)
 - DELETE /api/admin/shared-email/{role}       → Remover config
 - GET    /api/admin/shared-email/{role}/google/login  → Iniciar OAuth
-- GET    /api/admin/shared-email/google/callback      → Callback OAuth
 - POST   /api/admin/shared-email/{role}/sync         → Sync manual via Gmail API
 - DELETE /api/admin/shared-email/{role}/google       → Desconectar OAuth
+
+NOTA: /google/callback DEVE ficar antes de /{role} para evitar que
+FastAPI faça match de "google" ao path parameter {role}.
 
 O fluxo OAuth é idêntico ao fluxo por utilizador, mas guarda os
 tokens na coleção `shared_role_email_configs` em vez do perfil
@@ -26,6 +29,7 @@ individual do utilizador.
 
 import logging
 import secrets
+import traceback
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -116,6 +120,191 @@ async def list_shared_email_configs(
 
     return SharedEmailConfigListResponse(configs=response_list, total=len(response_list))
 
+
+# ====================================================================
+# GOOGLE OAUTH CALLBACK — ANTES de /{role} para evitar conflito de rotas
+# ====================================================================
+
+@router.get("/google/callback")
+async def shared_email_google_callback(
+    request: Request,
+    code: str,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    """
+    Callback OAuth para email partilhado por role.
+
+    Quando o state contém `shared_role`, os tokens são guardados na
+    coleção `shared_role_email_configs` em vez do perfil do utilizador.
+    """
+    if error:
+        logger.warning(f"[Shared Email OAuth] Autorização negada: {error}")
+        return HTMLResponse(
+            content=f"""
+            <html><head><title>Autenticação Google Cancelada</title></head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                <h2 style="color: #e74c3c;">Autenticação Cancelada</h2>
+                <p>Acesso ao Gmail cancelado: {error_description or error}</p>
+                <script>
+                    if (window.opener) {{
+                        window.opener.postMessage({{ type: 'shared_google_oauth_error', error: '{error}' }}, '*');
+                    }}
+                </script>
+            </body></html>
+            """,
+            status_code=400,
+        )
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Código de autorização não fornecido")
+
+    try:
+        google_cfg = _get_google_config()
+    except HTTPException:
+        raise
+
+    try:
+        from google_auth_oauthlib.flow import Flow
+        from googleapiclient.discovery import build
+
+        # Verificar state
+        shared_role = None
+        redirect_uri = google_cfg["redirect_uri"]
+        email_address = None
+        admin_user_id = None
+
+        if state:
+            stored_state = await db.oauth_states.find_one({"state": state})
+            if stored_state:
+                shared_role = stored_state.get("shared_role")
+                admin_user_id = stored_state.get("user_id")
+                redirect_uri = stored_state.get("redirect_uri") or google_cfg["redirect_uri"]
+                email_address = stored_state.get("email_address")
+                await db.oauth_states.delete_one({"_id": stored_state["_id"]})
+
+        if not shared_role:
+            logger.warning("[Shared Email OAuth] Callback sem shared_role no state — ignorar")
+            return HTMLResponse(
+                content="<html><body><p>Erro: Estado de autenticação inválido.</p></body></html>",
+                status_code=400,
+            )
+
+        if not redirect_uri:
+            redirect_uri = _build_redirect_uri(request, "")
+
+        # Trocar code por tokens
+        flow = Flow.from_client_config(
+            client_config={
+                "web": {
+                    "client_id": google_cfg["client_id"],
+                    "client_secret": google_cfg["client_secret"],
+                    "auth_uri": "https://accounts.google.com/o/oauth2/v2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [redirect_uri],
+                }
+            },
+            scopes=google_cfg["scopes"],
+            redirect_uri=redirect_uri,
+        )
+
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+
+        refresh_token = credentials.refresh_token
+
+        if not refresh_token:
+            logger.warning("[Shared Email OAuth] Refresh token NÃO recebido!")
+
+        # Verificar email do Google
+        google_email = None
+        try:
+            service = build("gmail", "v1", credentials=credentials)
+            profile = service.users().getProfile(userId="me").execute()
+            google_email = profile.get("emailAddress")
+        except Exception as e:
+            logger.warning(f"[Shared Email OAuth] Não foi possível verificar email: {e}")
+
+        # Encriptar tokens
+        encrypted_refresh = encryption_service.encrypt(refresh_token) if refresh_token else ""
+
+        # Guardar na config partilhada do role
+        now = datetime.now(timezone.utc).isoformat()
+
+        existing = await db.shared_role_email_configs.find_one({"role": shared_role}, {"_id": 0})
+
+        update_data = {
+            "role": shared_role,
+            "email_address": email_address or google_email or (existing or {}).get("email_address", ""),
+            "google_refresh_token": encrypted_refresh,
+            "google_email": google_email or "",
+            "auth_method": "google_oauth" if refresh_token else "google_oauth_temp",
+            "is_configured": True,
+            "oauth_connected_at": now,
+            "updated_at": now,
+        }
+
+        await db.shared_role_email_configs.update_one(
+            {"role": shared_role},
+            {"$set": update_data},
+            upsert=True,
+        )
+
+        # Audit log
+        await db.audit_logs.insert_one({
+            "action": "shared_google_oauth_connected",
+            "user_id": admin_user_id,
+            "details": {
+                "role": shared_role,
+                "email": google_email,
+                "has_refresh_token": bool(refresh_token),
+            },
+            "created_at": now,
+        })
+
+        logger.info(
+            f"[Shared Email OAuth] Tokens guardados para role '{shared_role}' "
+            f"(email={google_email}, has_refresh={bool(refresh_token)})"
+        )
+
+        has_refresh_text = "sim" if refresh_token else "NÃO"
+        return HTMLResponse(
+            content=f"""
+            <html><head><title>Google OAuth - Conectado</title></head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                <h2 style="color: #27ae60;">Gmail Conectado com Sucesso!</h2>
+                <p>Email Partilhado: <strong>{google_email or email_address or 'N/A'}</strong></p>
+                <p>Departamento (role): <strong>{shared_role}</strong></p>
+                <p>Refresh Token: <strong>{has_refresh_text}</strong></p>
+                <p>Pode fechar esta janela.</p>
+                <script>
+                    if (window.opener) {{
+                        window.opener.postMessage({{
+                            type: 'shared_google_oauth_success',
+                            role: '{shared_role}',
+                            email: '{google_email or email_address or ""}',
+                            has_refresh_token: {str(bool(refresh_token)).lower()}
+                        }}, '*');
+                    }}
+                </script>
+            </body></html>
+            """,
+            status_code=200,
+        )
+
+    except HTTPException:
+        raise
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Bibliotecas Google OAuth não instaladas.")
+    except Exception as e:
+        logger.error(f"[Shared Email OAuth] Erro no callback: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Erro ao processar callback: {e}")
+
+
+# ====================================================================
+# ENDPOINTS POR ROLE (depois de /google/callback para evitar conflito)
+# ====================================================================
 
 @router.get("/{role}", response_model=SharedEmailConfigResponse)
 async def get_shared_email_config(
@@ -261,9 +450,9 @@ async def shared_email_google_login(
     if role not in ALLOWED_ROLES:
         raise HTTPException(status_code=400, detail=f"Role '{role}' não permitido. Roles: {ALLOWED_ROLES}")
 
-    google_cfg = _get_google_config()
-
     try:
+        google_cfg = _get_google_config()
+
         from google_auth_oauthlib.flow import Flow
 
         redirect_uri = _build_redirect_uri(request, google_cfg["redirect_uri"])
@@ -320,188 +509,15 @@ async def shared_email_google_login(
 
     except HTTPException:
         raise
-    except ImportError:
+    except ImportError as e:
+        logger.error(f"[Shared Email OAuth] Biblioteca não instalada: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=503,
             detail="Bibliotecas Google OAuth não instaladas. pip install google-auth-oauthlib",
         )
     except Exception as e:
-        logger.error(f"[Shared Email OAuth] Erro ao gerar URL: {e}")
+        logger.error(f"[Shared Email OAuth] Erro ao gerar URL: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Erro ao gerar URL de autorização: {e}")
-
-
-@router.get("/google/callback")
-async def shared_email_google_callback(
-    request: Request,
-    code: str,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    error_description: Optional[str] = None,
-):
-    """
-    Callback OAuth para email partilhado por role.
-
-    Quando o state contém `shared_role`, os tokens são guardados na
-    coleção `shared_role_email_configs` em vez do perfil do utilizador.
-    """
-    if error:
-        logger.warning(f"[Shared Email OAuth] Autorização negada: {error}")
-        return HTMLResponse(
-            content=f"""
-            <html><head><title>Autenticação Google Cancelada</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-                <h2 style="color: #e74c3c;">Autenticação Cancelada</h2>
-                <p>Acesso ao Gmail cancelado: {error_description or error}</p>
-                <script>
-                    if (window.opener) {{
-                        window.opener.postMessage({{ type: 'shared_google_oauth_error', error: '{error}' }}, '*');
-                    }}
-                </script>
-            </body></html>
-            """,
-            status_code=400,
-        )
-
-    if not code:
-        raise HTTPException(status_code=400, detail="Código de autorização não fornecido")
-
-    google_cfg = _get_google_config()
-
-    try:
-        from google_auth_oauthlib.flow import Flow
-        from googleapiclient.discovery import build
-
-        # Verificar state
-        shared_role = None
-        redirect_uri = google_cfg["redirect_uri"]
-        email_address = None
-        admin_user_id = None
-
-        if state:
-            stored_state = await db.oauth_states.find_one({"state": state})
-            if stored_state:
-                shared_role = stored_state.get("shared_role")
-                admin_user_id = stored_state.get("user_id")
-                redirect_uri = stored_state.get("redirect_uri") or google_cfg["redirect_uri"]
-                email_address = stored_state.get("email_address")
-                await db.oauth_states.delete_one({"_id": stored_state["_id"]})
-
-        if not shared_role:
-            logger.warning("[Shared Email OAuth] Callback sem shared_role no state — ignorar")
-            return HTMLResponse(
-                content="<html><body><p>Erro: Estado de autenticação inválido.</p></body></html>",
-                status_code=400,
-            )
-
-        if not redirect_uri:
-            redirect_uri = _build_redirect_uri(request, "")
-
-        # Trocar code por tokens
-        flow = Flow.from_client_config(
-            client_config={
-                "web": {
-                    "client_id": google_cfg["client_id"],
-                    "client_secret": google_cfg["client_secret"],
-                    "auth_uri": "https://accounts.google.com/o/oauth2/v2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [redirect_uri],
-                }
-            },
-            scopes=google_cfg["scopes"],
-            redirect_uri=redirect_uri,
-        )
-
-        flow.fetch_token(code=code)
-        credentials = flow.credentials
-
-        refresh_token = credentials.refresh_token
-
-        if not refresh_token:
-            logger.warning("[Shared Email OAuth] Refresh token NÃO recebido!")
-
-        # Verificar email do Google
-        google_email = None
-        try:
-            service = build("gmail", "v1", credentials=credentials)
-            profile = service.users().getProfile(userId="me").execute()
-            google_email = profile.get("emailAddress")
-        except Exception as e:
-            logger.warning(f"[Shared Email OAuth] Não foi possível verificar email: {e}")
-
-        # Encriptar tokens
-        encrypted_refresh = encryption_service.encrypt(refresh_token) if refresh_token else ""
-
-        # Guardar na config partilhada do role
-        now = datetime.now(timezone.utc).isoformat()
-
-        existing = await db.shared_role_email_configs.find_one({"role": shared_role}, {"_id": 0})
-
-        update_data = {
-            "role": shared_role,
-            "email_address": email_address or google_email or (existing or {}).get("email_address", ""),
-            "google_refresh_token": encrypted_refresh,
-            "google_email": google_email or "",
-            "auth_method": "google_oauth" if refresh_token else "google_oauth_temp",
-            "is_configured": True,
-            "oauth_connected_at": now,
-            "updated_at": now,
-        }
-
-        await db.shared_role_email_configs.update_one(
-            {"role": shared_role},
-            {"$set": update_data},
-            upsert=True,
-        )
-
-        # Audit log
-        await db.audit_logs.insert_one({
-            "action": "shared_google_oauth_connected",
-            "user_id": admin_user_id,
-            "details": {
-                "role": shared_role,
-                "email": google_email,
-                "has_refresh_token": bool(refresh_token),
-            },
-            "created_at": now,
-        })
-
-        logger.info(
-            f"[Shared Email OAuth] Tokens guardados para role '{shared_role}' "
-            f"(email={google_email}, has_refresh={bool(refresh_token)})"
-        )
-
-        has_refresh_text = "sim" if refresh_token else "NÃO"
-        return HTMLResponse(
-            content=f"""
-            <html><head><title>Google OAuth - Conectado</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-                <h2 style="color: #27ae60;">Gmail Conectado com Sucesso!</h2>
-                <p>Email Partilhado: <strong>{google_email or email_address or 'N/A'}</strong></p>
-                <p>Departamento (role): <strong>{shared_role}</strong></p>
-                <p>Refresh Token: <strong>{has_refresh_text}</strong></p>
-                <p>Pode fechar esta janela.</p>
-                <script>
-                    if (window.opener) {{
-                        window.opener.postMessage({{
-                            type: 'shared_google_oauth_success',
-                            role: '{shared_role}',
-                            email: '{google_email or email_address or ""}',
-                            has_refresh_token: {str(bool(refresh_token)).lower()}
-                        }}, '*');
-                    }}
-                </script>
-            </body></html>
-            """,
-            status_code=200,
-        )
-
-    except HTTPException:
-        raise
-    except ImportError:
-        raise HTTPException(status_code=503, detail="Bibliotecas Google OAuth não instaladas.")
-    except Exception as e:
-        logger.error(f"[Shared Email OAuth] Erro no callback: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro ao processar callback: {e}")
 
 
 @router.delete("/{role}/google")
