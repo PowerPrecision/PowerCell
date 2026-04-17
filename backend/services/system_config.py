@@ -108,7 +108,8 @@ async def save_system_config(config: SystemConfig) -> bool:
     
     try:
         config.updated_at = datetime.now(timezone.utc).isoformat()
-        config_dict = config.model_dump()
+        # mode='json' para garantir Enums são serializados como strings
+        config_dict = config.model_dump(mode='json')
         config_dict["_id"] = "main"
         
         await db.system_config.replace_one(
@@ -117,9 +118,9 @@ async def save_system_config(config: SystemConfig) -> bool:
             upsert=True
         )
         
-        # Invalidar cache
-        _config_cache = config
-        _config_cache_time = datetime.now(timezone.utc)
+        # Invalidar cache para forçar reload na próxima leitura
+        _config_cache = None
+        _config_cache_time = None
         
         logger.info("Configurações do sistema guardadas")
         return True
