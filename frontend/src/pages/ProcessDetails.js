@@ -2053,7 +2053,7 @@ const ProcessDetails = () => {
                             </div>
                             <div className="space-y-1">
                               <div className="flex items-center justify-between">
-                                <Label className="text-xs text-muted-foreground">Validade CC</Label>
+                                <Label className="text-xs text-muted-foreground">Validade CC <span className="text-red-500">*</span></Label>
                                 {getConfidenceIndicator("cc_validity") && (
                                   <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("cc_validity").badge}`}>
                                     IA {getConfidenceIndicator("cc_validity").label}

@@ -1088,17 +1088,17 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="data_validade_cc">
-            Data Validade CC
-            <span className="text-xs text-muted-foreground ml-1">(opcional)</span>
-          </Label>
+          <RequiredLabel htmlFor="data_validade_cc">Data Validade CC</RequiredLabel>
           <Input
             id="data_validade_cc"
             type="date"
             value={formData.data_validade_cc}
             onChange={(e) => updateField("data_validade_cc", e.target.value)}
+            required
             data-testid="client-data-validade-cc"
+            className={cn(fieldErrors.data_validade_cc && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
+          {fieldErrors.data_validade_cc && <FieldError>{fieldErrors.data_validade_cc}</FieldError>}
           <FieldHint>Data de validade do Cartão de Cidadão.</FieldHint>
         </div>
         
@@ -2223,6 +2223,10 @@ const PublicClientForm = ({ previewMode = false }) => {
         if (!formData.documento_id) {
           errors.push("Nº do documento é obrigatório");
           newFieldErrors.documento_id = "Nº do documento é obrigatório";
+        }
+        if (!formData.data_validade_cc) {
+          errors.push("Data de validade do CC é obrigatória");
+          newFieldErrors.data_validade_cc = "Data de validade do CC é obrigatória";
         }
         if (!formData.naturalidade) {
           errors.push("Naturalidade é obrigatória");
