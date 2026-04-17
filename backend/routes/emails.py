@@ -808,7 +808,14 @@ async def send_documentation_email(
     
     # Validar destinatários contra contas ativas e simulações
     financial_data = process.get("financial_data", {}) or {}
-    bancos_creditos = financial_data.get("bancos_creditos", []) or []
+    _bancos_raw = financial_data.get("bancos_creditos", []) or []
+    # bancos_creditos pode ser [{banco, valor}] (novo) ou ["CGD"] (legacy)
+    bancos_creditos = []
+    for item in _bancos_raw:
+        if isinstance(item, dict):
+            bancos_creditos.append(item.get("banco", ""))
+        else:
+            bancos_creditos.append(item)
     bancos_simulacoes = financial_data.get("bancos_simulacoes", []) or []
     
     def normalize_bank_name(name):

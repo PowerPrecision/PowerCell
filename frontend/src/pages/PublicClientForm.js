@@ -835,7 +835,12 @@ const PublicClientForm = ({ previewMode = false }) => {
           efetivo: formData.efetivo,
           fiador: formData.fiador,
           monthly_income: formData.salario_liquido ? parseFloat(formData.salario_liquido) : null,
-          bancos_creditos: formData.bancos_creditos,
+          bancos_creditos: formData.bancos_creditos && formData.bancos_creditos.length > 0
+            ? formData.bancos_creditos.map(item => ({
+                banco: typeof item === 'object' ? item.banco : item,
+                valor: typeof item === 'object' && item.valor ? parseFloat(item.valor) : null,
+              }))
+            : null,
           bancos_simulacoes: formData.bancos_simulacoes,
           tempo_restante_credito: formData.tempo_restante_credito || null,
           capital_proprio: formData.capital_proprio ? parseFloat(formData.capital_proprio) : null,
@@ -934,11 +939,24 @@ const PublicClientForm = ({ previewMode = false }) => {
   };
 
   const toggleBanco = (banco) => {
+    setFormData(prev => {
+      const current = prev.bancos_creditos || [];
+      const exists = current.some(item => typeof item === 'object' ? item.banco === banco : item === banco);
+      if (exists) {
+        return { ...prev, bancos_creditos: current.filter(item => typeof item === 'object' ? item.banco !== banco : item !== banco) };
+      }
+      return { ...prev, bancos_creditos: [...current, { banco, valor: "" }] };
+    });
+  };
+
+  const updateBancoValor = (banco, valor) => {
     setFormData(prev => ({
       ...prev,
-      bancos_creditos: (prev.bancos_creditos || []).includes(banco)
-        ? prev.bancos_creditos.filter(b => b !== banco)
-        : [...(prev.bancos_creditos || []), banco]
+      bancos_creditos: (prev.bancos_creditos || []).map(item => {
+        if (typeof item === 'object' && item.banco === banco) return { ...item, valor };
+        if (item === banco) return { banco, valor };
+        return item;
+      })
     }));
   };
 
@@ -1821,7 +1839,8 @@ const PublicClientForm = ({ previewMode = false }) => {
               Nenhuma
             </button>
             {BANCOS.map((banco) => {
-              const selected = (formData.bancos_creditos || []).includes(banco);
+              const item = (formData.bancos_creditos || []).find(i => typeof i === 'object' ? i.banco === banco : i === banco);
+              const selected = !!item;
               const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
               return (
                 <button
@@ -1841,6 +1860,39 @@ const PublicClientForm = ({ previewMode = false }) => {
               );
             })}
           </div>
+          {/* Valor por banco — aparece apenas para bancos selecionados */}
+          {(formData.bancos_creditos || []).length > 0 && (
+            <div className="space-y-2 mt-2">
+              {(formData.bancos_creditos || []).map((item) => {
+                const banco = typeof item === 'object' ? item.banco : item;
+                const valor = typeof item === 'object' ? (item.valor || '') : '';
+                const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+                return (
+                  <div key={banco} className="flex items-center gap-3">
+                    <span
+                      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium min-w-[100px] justify-center"
+                      style={{ backgroundColor: colors.bg, color: colors.text }}
+                    >
+                      {banco}
+                    </span>
+                    <div className="flex-1 relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">€</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Valor do crédito (ex: 150000)"
+                        value={valor}
+                        onChange={(e) => updateBancoValor(banco, e.target.value)}
+                        className="pl-7 h-9"
+                        data-testid={`banco-valor-${banco.toLowerCase().replace(/\s+/g, '-')}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <FieldHint>Inclui crédito habitação, automóvel, pessoal, ou cartões de crédito com saldo em dívida.</FieldHint>
         </div>
 
