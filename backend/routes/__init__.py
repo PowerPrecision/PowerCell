@@ -11,3 +11,4 @@ from .ai import router as ai_router
 from .documents import router as documents_router
 from .annotations import router as annotations_router
 from .finance import router as finance_router
+from .announcements import router as announcements_router

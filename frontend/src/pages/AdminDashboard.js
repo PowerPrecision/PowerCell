@@ -60,6 +60,7 @@ import {
 } from "../components/admin";
 import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import TasksPanel from "../components/TasksPanel";
+import TeamFeed from "../components/TeamFeed";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -373,61 +374,8 @@ const AdminDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Activity Feed */}
-          <Card className="border-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Clock className="h-5 w-5 text-amber-500" />
-                Atividade Recente
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Últimas atualizações do sistema
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[260px]">
-                {recentActivities.length > 0 ? (
-                  <div className="space-y-3">
-                    {recentActivities.map((activity, idx) => (
-                      <div key={activity.id || idx} className="flex gap-3 pb-3 border-b border-border/50 last:border-0">
-                        <div className="flex-shrink-0 mt-0.5">
-                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-                            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
-                          </div>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm">
-                            <span className="font-medium">{activity.user_name || "Utilizador"}</span>
-                            {" "}{activity.action || activity.description || "Atualizou o processo"}
-                          </p>
-                          {(activity.process_id || activity.created_at) && (
-                            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                              {activity.created_at && format(parseISO(activity.created_at), "dd MMM HH:mm", { locale: pt })}
-                              {activity.process_id && (
-                                <>
-                                  <ChevronRight className="h-3 w-3" />
-                                  <button
-                                    className="text-blue-600 hover:underline"
-                                    onClick={() => navigate(`/processo/${activity.process_id}`)}
-                                  >
-                                    Ver processo
-                                  </button>
-                                </>
-                              )}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm py-8">
-                    Sem atividade recente
-                  </div>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </Card>
+          {/* Team Feed (Mural da Equipa) */}
+          <TeamFeed />
         </div>
 
         {/* Stale Processes Alert */}

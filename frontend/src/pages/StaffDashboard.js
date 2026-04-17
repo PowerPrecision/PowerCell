@@ -21,11 +21,12 @@ import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
-import { Loader2, LayoutGrid, Calendar, Users, FileText, FileX, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert, Mail, Send, Trash2, Edit3, ChevronRight, AlertCircle } from "lucide-react";
+import { Loader2, LayoutGrid, Calendar, Users, FileText, FileX, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert, Mail, Send, Trash2, Edit3, ChevronRight, AlertCircle, Rss } from "lucide-react";
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
 import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft, getWebmailStats } from "../services/api";
 import SmartClientSearch from "../components/SmartClientSearch";
+import TeamMural from "../components/TeamMural";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -522,6 +523,11 @@ const StaffDashboard = () => {
                 </Badge>
               </TabsTrigger>
             )}
+            <TabsTrigger value="mural" className="gap-2">
+              <Rss className="h-4 w-4" />
+              <span className="hidden sm:inline">Mural</span>
+              <span className="sm:hidden">Mural</span>
+            </TabsTrigger>
             {canManageUsers && (
               <TabsTrigger value="users" className="gap-2">
                 <Users className="h-4 w-4" />
@@ -530,6 +536,11 @@ const StaffDashboard = () => {
               </TabsTrigger>
             )}
           </TabsList>
+
+          {/* Mural da Equipa Tab */}
+          <TabsContent value="mural" className="mt-6">
+            <TeamMural />
+          </TabsContent>
 
           {/* Kanban Tab */}
           <TabsContent value="kanban" className="mt-6">

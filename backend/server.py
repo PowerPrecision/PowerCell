@@ -94,6 +94,8 @@ from routes.portal import router as portal_router
 from routes.google_auth import router as google_auth_router
 from routes.shared_email import router as shared_email_router
 from routes.companies import router as companies_router
+from routes.ai_analysis import router as ai_analysis_router
+from routes.announcements import router as announcements_router
 
 # Configuração Sentry
 if SENTRY_DSN:
@@ -462,6 +464,8 @@ app.include_router(portal_router, prefix="/api")
 app.include_router(google_auth_router, prefix="/api")
 app.include_router(shared_email_router, prefix="/api")
 app.include_router(companies_router, prefix="/api")
+app.include_router(ai_analysis_router, prefix="/api")
+app.include_router(announcements_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():

@@ -761,5 +761,13 @@ export const directS3Upload = async (options) => {
   }
 };
 
+// ===== MURAL DA EQUIPA (Announcements) =====
+export const getAnnouncements = (limit = 50) => api.get("/announcements", { params: { limit } });
+export const createAnnouncement = (data) => api.post("/announcements", data);
+export const deleteAnnouncement = (id) => api.delete(`/announcements/${id}`);
+export const toggleAnnouncementLike = (id) => api.post(`/announcements/${id}/like`);
+export const markAnnouncementRead = (id) => api.post(`/announcements/${id}/read`);
+export const getAnnouncementReaders = (id) => api.get(`/announcements/readers/${id}`);
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
