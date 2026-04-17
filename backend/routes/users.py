@@ -18,6 +18,9 @@ from services.auth import require_staff, get_current_user
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
+# Roles que usam exclusivamente config partilhada do departamento
+FORCED_SHARED_ROLES = {"indexacao", "suporte"}
+
 
 @router.get("", response_model=List[UserResponse])
 async def get_users(role: str = None, user: dict = Depends(require_staff())):
@@ -47,51 +50,61 @@ async def get_my_email_config(current_user: dict = Depends(get_current_user)):
     """
     Obter configuração de email do utilizador logado.
     NUNCA devolve a password real nem o refresh_token — apenas flags booleanas.
-    Inclui has_google_oauth para indicar se a conta está ligada via Google OAuth.
+
+    HERANÇA (Caminho da Configuração):
+      1. User Config (email_config embedded no user)
+      2. Company Config (company_email_configs — servidores padrão)
+      3. System Config (system_config.email — globals)
+
+    BLOQUEIO:
+      - Utilizadores com role 'indexacao' usam SEMPRE o SharedRoleEmailConfig
+        do departamento. Qualquer config individual é ignorada.
     """
+    from services.email_config_resolver import resolve_email_config
+
     user_id = current_user["id"]
-    user = await db.users.find_one(
-        {"id": user_id},
-        {"_id": 0, "email_config": 1}
-    )
-    if not user or not user.get("email_config"):
+    user_role = current_user.get("role", "")
+
+    # Para roles forçados, retornar info do shared role config
+    if user_role in FORCED_SHARED_ROLES:
+        resolved = await resolve_email_config(user_id)
         return {
-            "is_configured": False,
-            "email_address": None,
-            "imap_server": None,
-            "imap_port": None,
-            "smtp_server": None,
-            "smtp_port": None,
-            "has_password": False,
-            "has_google_oauth": False,
-            "auth_method": "none",
-            "google_email": None,
+            "config_source": resolved.get("config_source", "none"),
+            "is_configured": resolved.get("has_password") or resolved.get("has_google_oauth"),
+            "email_address": resolved.get("email_address"),
+            "imap_server": resolved.get("imap_server"),
+            "imap_port": resolved.get("imap_port", 993),
+            "smtp_server": resolved.get("smtp_server"),
+            "smtp_port": resolved.get("smtp_port", 465),
+            "has_password": resolved.get("has_password", False),
+            "has_google_oauth": resolved.get("has_google_oauth", False),
+            "auth_method": resolved.get("auth_method", "none"),
+            "google_email": resolved.get("google_email"),
+            "oauth_connected_at": resolved.get("oauth_connected_at"),
+            "shared_role": user_role,
+            "managed_centralized": True,
+            "company_name": resolved.get("company_name"),
+            "display_name": resolved.get("display_name"),
         }
-    
-    config = user["email_config"]
-    has_oauth = bool(config.get("google_refresh_token"))
-    has_password = bool(config.get("encrypted_password"))
-    
-    # Determinar auth_method
-    if has_oauth:
-        auth_method = "google_oauth"
-    elif has_password:
-        auth_method = "imap_smtp"
-    else:
-        auth_method = "none"
-    
+
+    # Usar o resolver para seguir o caminho de herança
+    resolved = await resolve_email_config(user_id)
+    source = resolved.get("config_source", "none")
+
     return {
-        "is_configured": config.get("is_configured", False) or has_oauth or has_password,
-        "email_address": config.get("email_address"),
-        "imap_server": config.get("imap_server"),
-        "imap_port": config.get("imap_port", 993),
-        "smtp_server": config.get("smtp_server"),
-        "smtp_port": config.get("smtp_port", 465),
-        "has_password": has_password,
-        "has_google_oauth": has_oauth,
-        "auth_method": auth_method,
-        "google_email": config.get("google_email"),
-        "oauth_connected_at": config.get("oauth_connected_at"),
+        "config_source": source,
+        "is_configured": resolved.get("has_password") or resolved.get("has_google_oauth"),
+        "email_address": resolved.get("email_address"),
+        "imap_server": resolved.get("imap_server"),
+        "imap_port": resolved.get("imap_port", 993),
+        "smtp_server": resolved.get("smtp_server"),
+        "smtp_port": resolved.get("smtp_port", 465),
+        "has_password": resolved.get("has_password", False),
+        "has_google_oauth": resolved.get("has_google_oauth", False),
+        "auth_method": resolved.get("auth_method", "none"),
+        "google_email": resolved.get("google_email"),
+        "oauth_connected_at": resolved.get("oauth_connected_at"),
+        "company_name": resolved.get("company_name"),
     }
 
 
@@ -104,10 +117,27 @@ async def save_my_email_config(
     Guardar configuração de email do utilizador.
     A password é encriptada ANTES de ser guardada.
     Se a password não for fornecida, mantém a existente (se houver).
+
+    BLOQUEIO:
+      - Utilizadores com role 'indexacao' não podem guardar config individual.
+        A config é gerida centralmente pelo administrador.
     """
     from services.encryption import encryption_service
 
     user_id = current_user["id"]
+    user_role = current_user.get("role", "")
+
+    # ==================================================================
+    # BLOQUEIO: Roles com config gerida centralmente
+    # ==================================================================
+    if user_role in FORCED_SHARED_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"O seu acesso ao email é gerido centralmente pelo departamento. "
+                f"Contacte o Administrador para alterações na configuração de email."
+            ),
+        )
 
     # Buscar config existente para preservar password se não fornecida
     existing_user = await db.users.find_one(
@@ -170,10 +200,36 @@ async def test_my_email_config(
     Testar ligação de email do utilizador (Smart).
     Se tem Google OAuth → testa Gmail API.
     Se tem password IMAP/SMTP → testa IMAP/SMTP.
+
+    Para roles 'indexacao', testa a config partilhada do departamento.
     """
     from services.gmail_oauth import test_connection_smart
+    from services.email_config_resolver import resolve_email_config_for_sync
 
     user_id = current_user["id"]
+    user_role = current_user.get("role", "")
+
+    # Para roles com config partilhada, usar a config resolvida
+    if user_role in FORCED_SHARED_ROLES:
+        resolved = await resolve_email_config_for_sync(user_id)
+        if not resolved:
+            raise HTTPException(
+                status_code=400,
+                detail="Configuração de email do departamento não disponível. Contacte o Administrador."
+            )
+        # Construir config no formato esperado por test_connection_smart
+        test_config = {
+            "email_address": resolved.get("email_address"),
+            "imap_server": resolved.get("imap_server"),
+            "imap_port": resolved.get("imap_port", 993),
+            "smtp_server": resolved.get("smtp_server"),
+            "smtp_port": resolved.get("smtp_port", 465),
+            "encrypted_password": resolved.get("encrypted_password", ""),
+            "google_refresh_token": resolved.get("google_refresh_token"),
+        }
+        return await test_connection_smart(test_config, user_id)
+
+    # Para utilizadores normais, usar config individual
     user = await db.users.find_one(
         {"id": user_id},
         {"_id": 0, "email_config": 1}

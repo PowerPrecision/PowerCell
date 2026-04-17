@@ -59,6 +59,8 @@ import {
   Mail,
   RefreshCw,
   Loader2,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 
 // ====================================================================
@@ -97,6 +99,10 @@ const ProfilePage = () => {
   const [sessionToRevoke, setSessionToRevoke] = useState(null);
   const [revokingSession, setRevokingSession] = useState(false);
 
+  // Estados para config de email (herança)
+  const [emailConfigInfo, setEmailConfigInfo] = useState(null);
+  const [loadingEmailConfig, setLoadingEmailConfig] = useState(false);
+
   // Carregar dados do utilizador
   useEffect(() => {
     if (user) {
@@ -124,6 +130,23 @@ const ProfilePage = () => {
 
   useEffect(() => {
     loadSessions();
+  }, []);
+
+  // Carregar info de config de email (para mostrar herança)
+  const loadEmailConfigInfo = async () => {
+    setLoadingEmailConfig(true);
+    try {
+      const response = await api.get("/users/me/email-config");
+      setEmailConfigInfo(response.data);
+    } catch (error) {
+      setEmailConfigInfo(null);
+    } finally {
+      setLoadingEmailConfig(false);
+    }
+  };
+
+  useEffect(() => {
+    loadEmailConfigInfo();
   }, []);
 
   // Guardar alterações do perfil
@@ -678,20 +701,91 @@ const ProfilePage = () => {
         </Dialog>
 
         {/* Configuração de Webmail */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Mail className="h-5 w-5" />
-              Configuração de Webmail
-            </CardTitle>
-            <CardDescription>
-              Configure o seu email para integração IMAP/SMTP
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <EmailConfigForm mode="self" />
-          </CardContent>
-        </Card>
+        {user?.role === "indexacao" ? (
+          /* ── BLOQUEIO: Indexação — config gerida centralmente ── */
+          <Card className="border-amber-200 bg-amber-50/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-amber-800">
+                <AlertTriangle className="h-5 w-5" />
+                Configuração de Webmail
+              </CardTitle>
+              <CardDescription className="text-amber-700">
+                Acesso gerido centralmente pelo departamento
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-start gap-3 p-4 border border-amber-200 rounded-lg bg-amber-50">
+                <Shield className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+                <div className="space-y-2">
+                  <p className="text-amber-800 font-medium">
+                    O seu acesso ao email é gerido centralmente pelo departamento.
+                  </p>
+                  <p className="text-sm text-amber-700">
+                    Contacte o Administrador para alterações na configuração de email.
+                    As definições de IMAP/SMTP são aplicadas uniformemente a todos os membros do departamento.
+                  </p>
+                  {emailConfigInfo?.display_name && (
+                    <p className="text-sm text-amber-700">
+                      Caixa partilhada: <strong>{emailConfigInfo.display_name}</strong>
+                      {emailConfigInfo.email_address && (
+                        <> ({emailConfigInfo.email_address})</>
+                      )}
+                    </p>
+                  )}
+                  {emailConfigInfo?.is_configured ? (
+                    <Badge className="bg-green-600 hover:bg-green-700 text-white">
+                      Configuração ativa
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">Pendente de configuração</Badge>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          /* ── NORMAL: Config individual com info de herança ── */
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5" />
+                Configuração de Webmail
+              </CardTitle>
+              <CardDescription>
+                Configure o seu email para integração IMAP/SMTP
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Indicador de herança de config */}
+              {emailConfigInfo?.config_source && emailConfigInfo.config_source !== "user" && emailConfigInfo.config_source !== "none" && (
+                <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+                  <Info className="h-4 w-4 shrink-0" />
+                  <span>
+                    {emailConfigInfo.config_source === "company" && (
+                      <>
+                        Servidores IMAP/SMTP herdados da empresa
+                        {emailConfigInfo.company_name && (
+                          <> <strong>{emailConfigInfo.company_name}</strong></>
+                        )}
+                        . Apenas o email e a password são individuais.
+                      </>
+                    )}
+                    {emailConfigInfo.config_source === "system" && (
+                      <>Servidores IMAP/SMTP herdados da configuração global do sistema.</>
+                    )}
+                  </span>
+                </div>
+              )}
+              {emailConfigInfo?.config_source === "user" && (
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
+                  <Mail className="h-4 w-4 shrink-0" />
+                  <span>A utilizar configuração individual. Os servidores foram definidos manualmente.</span>
+                </div>
+              )}
+              <EmailConfigForm mode="self" />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Dialog Confirmar Revogação de Sessão */}
         <AlertDialog

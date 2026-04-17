@@ -60,7 +60,7 @@ def _get_google_oauth_config() -> Dict[str, str]:
     }
 
 
-def _build_credentials(refresh_token: str) -> "google.oauth2.credentials.Credentials":
+def _build_credentials(refresh_token: str) -> Any:
     """
     Constrói credenciais OAuth2 a partir de um refresh_token.
 
