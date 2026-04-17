@@ -562,6 +562,30 @@ async def create_indexes(db) -> dict:
                 results["errors"].append(f"history.{idx['name']}: {str(e)}")
                 logger.error(f"Erro ao criar índice history.{idx['name']}: {e}")
     
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'announcements'
+    # ====================================================================
+    announcement_indexes = [
+        {"keys": [("created_at", -1)], "name": "idx_announcements_created_desc"},
+        {"keys": [("author_id", 1)], "name": "idx_announcements_author"},
+    ]
+    
+    for idx in announcement_indexes:
+        try:
+            await db.announcements.create_index(
+                idx["keys"],
+                name=idx["name"],
+                background=True
+            )
+            results["created"].append(f"announcements.{idx['name']}")
+            logger.info(f"Índice criado: announcements.{idx['name']}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["skipped"].append(f"announcements.{idx['name']}")
+            else:
+                results["errors"].append(f"announcements.{idx['name']}: {str(e)}")
+                logger.error(f"Erro ao criar índice announcements.{idx['name']}: {e}")
+    
     # Resumo
     logger.info(
         f"Criação de índices concluída: "

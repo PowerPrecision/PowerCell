@@ -761,5 +761,9 @@ export const directS3Upload = async (options) => {
   }
 };
 
+// Announcements (Mural da Equipa)
+export const getAnnouncements = () => api.get("/announcements");
+export const createAnnouncement = (content) => api.post("/announcements", { content });
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
