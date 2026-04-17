@@ -2903,8 +2903,8 @@ const ProcessDetails = () => {
                         </Card>
                       )}
 
-                      {/* Contas Abertas nos Bancos */}
-                      {financialData?.tem_creditos_activos?.length > 0 && (
+                      {/* Contas Abertas nos Bancos — read-only (só se não pode editar) */}
+                      {!canEditFinancial && financialData?.tem_creditos_activos?.length > 0 && (
                         <Card className="border-l-4 border-l-amber-500">
                           <CardContent className="pt-4">
                             <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
