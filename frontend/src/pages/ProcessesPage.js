@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { 
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
-  User, Users, Archive
+  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
@@ -49,6 +49,38 @@ const ProcessesPage = () => {
     searchParams.get("view_mode") === "all"
   );
   
+  // Sort state
+  const [sortField, setSortField] = useState(searchParams.get("sort") || "created_at");
+  const [sortOrder, setSortOrder] = useState(searchParams.get("order") || "desc");
+  const [sortedProcesses, setSortedProcesses] = useState([]);
+
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      const newOrder = sortOrder === "asc" ? "desc" : "asc";
+      setSortOrder(newOrder);
+      setSearchParams(prev => {
+        prev.set("sort", field);
+        prev.set("order", newOrder);
+        return prev;
+      }, { replace: true });
+    } else {
+      setSortField(field);
+      setSortOrder("asc");
+      setSearchParams(prev => {
+        prev.set("sort", field);
+        prev.set("order", "asc");
+        return prev;
+      }, { replace: true });
+    }
+  };
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />;
+    return sortOrder === "asc" 
+      ? <ArrowUp className="h-3 w-3 ml-1" />
+      : <ArrowDown className="h-3 w-3 ml-1" />;
+  };
+
   // Sync filters with URL
   const searchTerm = searchParams.get("search") || "";
   const setSearchTerm = (value) => {
@@ -115,6 +147,46 @@ const ProcessesPage = () => {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  // Client-side sort when processes or sort params change
+  useEffect(() => {
+    const sorted = [...processes].sort((a, b) => {
+      let aVal, bVal;
+
+      if (sortField === "client_name") {
+        aVal = (a.client_name || "").toLowerCase();
+        bVal = (b.client_name || "").toLowerCase();
+      } else if (sortField === "contacto") {
+        aVal = (a.client_email || a.client_phone || "").toLowerCase();
+        bVal = (b.client_email || b.client_phone || "").toLowerCase();
+      } else if (sortField === "property_location") {
+        aVal = (a.property_location || "").toLowerCase();
+        bVal = (b.property_location || "").toLowerCase();
+      } else if (sortField === "property_value") {
+        aVal = a.property_value || 0;
+        bVal = b.property_value || 0;
+      } else if (sortField === "status") {
+        aVal = (a.status || "").toLowerCase();
+        bVal = (b.status || "").toLowerCase();
+      } else if (sortField === "priority") {
+        const prio = { high: 3, medium: 2, low: 1 };
+        aVal = prio[a.priority] || 0;
+        bVal = prio[b.priority] || 0;
+      } else if (sortField === "created_at" || sortField === "updated_at") {
+        aVal = new Date(a[sortField] || 0).getTime();
+        bVal = new Date(b[sortField] || 0).getTime();
+      } else {
+        aVal = a[sortField];
+        bVal = b[sortField];
+        if (typeof aVal === "string") { aVal = aVal.toLowerCase(); bVal = (bVal || "").toLowerCase(); }
+      }
+
+      if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
+      return 0;
+    });
+    setSortedProcesses(sorted);
+  }, [processes, sortField, sortOrder]);
 
   // Re-fetch when search term changes (driven by URL param sync above)
   useEffect(() => {
@@ -294,25 +366,37 @@ const ProcessesPage = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Contacto</TableHead>
-                    <TableHead>Localização</TableHead>
-                    <TableHead>Valor</TableHead>
+                    <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("client_name")}>
+                      <span className="flex items-center">Cliente <SortIcon field="client_name" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("contacto")}>
+                      <span className="flex items-center">Contacto <SortIcon field="contacto" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("property_location")}>
+                      <span className="flex items-center">Localização <SortIcon field="property_location" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("property_value")}>
+                      <span className="flex items-center">Valor <SortIcon field="property_value" /></span>
+                    </TableHead>
                     <TableHead>Equipa</TableHead>
-                    <TableHead>Prioridade</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("priority")}>
+                      <span className="flex items-center">Prioridade <SortIcon field="priority" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("status")}>
+                      <span className="flex items-center">Status <SortIcon field="status" /></span>
+                    </TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {processes.length === 0 ? (
+                  {sortedProcesses.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         {searchTerm ? `Nenhum processo encontrado com "${searchTerm}"` : "Nenhum processo encontrado"}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    processes.map((process) => {
+                    sortedProcesses.map((process) => {
                       const priorityBadge = getPriorityBadge(process.priority);
                       
                       // Construir lista de equipa

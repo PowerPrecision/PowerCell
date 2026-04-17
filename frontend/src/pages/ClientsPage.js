@@ -211,8 +211,23 @@ export default function ClientsPage() {
     
     // Ordenar
     result.sort((a, b) => {
-      let aVal = a[sortField];
-      let bVal = b[sortField];
+      let aVal, bVal;
+
+      if (sortField === "contacto") {
+        aVal = (a.contacto?.email || a.contacto?.telefone || "").toLowerCase();
+        bVal = (b.contacto?.email || b.contacto?.telefone || "").toLowerCase();
+      } else if (sortField === "nif") {
+        aVal = a.dados_pessoais?.nif || "";
+        bVal = b.dados_pessoais?.nif || "";
+        aVal = aVal.toLowerCase();
+        bVal = bVal.toLowerCase();
+      } else if (sortField === "fase") {
+        aVal = (a.fase_principal?.status_label || "").toLowerCase();
+        bVal = (b.fase_principal?.status_label || "").toLowerCase();
+      } else {
+        aVal = a[sortField];
+        bVal = b[sortField];
+      }
       
       // Handle dates
       if (sortField === "created_at" || sortField === "updated_at") {
@@ -641,7 +656,7 @@ export default function ClientsPage() {
                   <TableHeader className="sticky top-0 z-10 bg-card">
                     <TableRow className="bg-muted/50">
                       <TableHead 
-                        className="cursor-pointer hover:bg-muted" 
+                        className="cursor-pointer hover:bg-muted select-none" 
                         onClick={() => toggleSort("nome")}
                       >
                         <span className="flex items-center">
@@ -649,9 +664,33 @@ export default function ClientsPage() {
                           <SortIcon field="nome" />
                         </span>
                       </TableHead>
-                      <TableHead>Contacto</TableHead>
-                      <TableHead>NIF</TableHead>
-                      <TableHead>Fase</TableHead>
+                      <TableHead 
+                        className="cursor-pointer hover:bg-muted select-none" 
+                        onClick={() => toggleSort("contacto")}
+                      >
+                        <span className="flex items-center">
+                          Contacto
+                          <SortIcon field="contacto" />
+                        </span>
+                      </TableHead>
+                      <TableHead 
+                        className="cursor-pointer hover:bg-muted select-none" 
+                        onClick={() => toggleSort("nif")}
+                      >
+                        <span className="flex items-center">
+                          NIF
+                          <SortIcon field="nif" />
+                        </span>
+                      </TableHead>
+                      <TableHead 
+                        className="cursor-pointer hover:bg-muted select-none" 
+                        onClick={() => toggleSort("fase")}
+                      >
+                        <span className="flex items-center">
+                          Fase
+                          <SortIcon field="fase" />
+                        </span>
+                      </TableHead>
                       <TableHead className="text-right">Acções</TableHead>
                     </TableRow>
                   </TableHeader>
