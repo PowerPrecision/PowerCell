@@ -1721,7 +1721,8 @@ const SystemConfigPage = () => {
                               : "text-muted-foreground hover:bg-muted hover:text-foreground"
                           }`}
                         >
-                          <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />\n                          <span className="truncate">{fields[key]?.title?.split(" ")[0] || key}</span>
+                          <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+                          <span className="truncate">{fields[key]?.title?.split(" ")[0] || key}</span>
                           {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                         </button>
                       );
@@ -1736,7 +1737,8 @@ const SystemConfigPage = () => {
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       }`}
                     >
-                      <FileSignature className={`h-4 w-4 shrink-0 ${activeTab === "rgpd" ? "text-primary" : ""}`} />\n                      <span className="truncate">RGPD</span>
+                      <FileSignature className={`h-4 w-4 shrink-0 ${activeTab === "rgpd" ? "text-primary" : ""}`} />
+                      <span className="truncate">RGPD</span>
                       {activeTab === "rgpd" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                     </button>
                     <button
@@ -1748,7 +1750,8 @@ const SystemConfigPage = () => {
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       }`}
                     >
-                      <Wrench className={`h-4 w-4 shrink-0 ${activeTab === "maintenance" ? "text-primary" : ""}`} />\n                      <span className="truncate">Manutenção</span>
+                      <Wrench className={`h-4 w-4 shrink-0 ${activeTab === "maintenance" ? "text-primary" : ""}`} />
+                      <span className="truncate">Manutenção</span>
                       {activeTab === "maintenance" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                     </button>
                   </nav>
