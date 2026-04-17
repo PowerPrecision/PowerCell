@@ -1236,7 +1236,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="titular2_email">Email</Label>
+            <RequiredLabel htmlFor="titular2_email">Email</RequiredLabel>
             <Input
               id="titular2_email"
               type="email"
@@ -1250,7 +1250,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="titular2_phone">Telemóvel</Label>
+            <RequiredLabel htmlFor="titular2_phone">Telemóvel</RequiredLabel>
             <Input
               id="titular2_phone"
               type="tel"
@@ -1264,7 +1264,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="titular2_nif">NIF</Label>
+            <RequiredLabel htmlFor="titular2_nif">NIF</RequiredLabel>
             <Input
               id="titular2_nif"
               type="text"
@@ -2256,18 +2256,34 @@ const PublicClientForm = ({ previewMode = false }) => {
             errors.push("Nome do 2º titular é obrigatório");
             newFieldErrors.titular2_name = "Nome do 2º titular é obrigatório";
           }
-          if (formData.titular2_nif) {
+          if (!formData.titular2_nif) {
+            errors.push("NIF do 2º titular é obrigatório");
+            newFieldErrors.titular2_nif = "NIF do 2º titular é obrigatório";
+          } else {
             const nif2Check = validateNIF(formData.titular2_nif);
             if (!nif2Check.valid) {
               errors.push(`2º Titular: ${nif2Check.message}`);
               newFieldErrors.titular2_nif = nif2Check.message;
             }
           }
-          if (formData.titular2_email) {
+          if (!formData.titular2_email) {
+            errors.push("Email do 2º titular é obrigatório");
+            newFieldErrors.titular2_email = "Email do 2º titular é obrigatório";
+          } else {
             const email2Check = validateEmail(formData.titular2_email);
             if (!email2Check.valid) {
               errors.push(`2º Titular: ${email2Check.message}`);
               newFieldErrors.titular2_email = email2Check.message;
+            }
+          }
+          if (!formData.titular2_phone) {
+            errors.push("Telemóvel do 2º titular é obrigatório");
+            newFieldErrors.titular2_phone = "Telemóvel do 2º titular é obrigatório";
+          } else {
+            const phone2Check = validatePhone(formData.titular2_phone);
+            if (!phone2Check.valid) {
+              errors.push(`2º Titular: ${phone2Check.message}`);
+              newFieldErrors.titular2_phone = phone2Check.message;
             }
           }
         }
