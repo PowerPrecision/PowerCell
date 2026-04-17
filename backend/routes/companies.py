@@ -65,6 +65,37 @@ async def list_company_configs():
     return CompanyEmailConfigListResponse(configs=result, total=len(result))
 
 
+@router.get("/available-companies")
+async def get_available_companies():
+    """
+    Lista empresas registadas no sistema (do campo 'company' dos users)
+    com indicação de quais já têm config de email.
+    """
+    pipeline = [
+        {"$match": {"company": {"$exists": True, "$ne": "", "$ne": None}}},
+        {"$group": {"_id": "$company", "total": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+    ]
+    company_users = await db.users.aggregate(pipeline).to_list(100)
+
+    # Buscar configs existentes
+    existing_configs = await db.company_email_configs.find(
+        {}, {"_id": 0, "company_name": 1}
+    ).to_list(100)
+    configured_companies = {c["company_name"] for c in existing_configs}
+
+    result = []
+    for item in company_users:
+        name = item["_id"]
+        result.append({
+            "company_name": name,
+            "total_users": item["total"],
+            "has_email_config": name in configured_companies,
+        })
+
+    return {"companies": result, "total": len(result)}
+
+
 @router.get("/{company_name}")
 async def get_company_config(company_name: str):
     """Obtém a config de email de uma empresa específica."""
@@ -209,34 +240,3 @@ async def delete_company_config(company_name: str):
         "message": f"Configuração removida para '{company_name}'",
         "affected_users": total_users,
     }
-
-
-@router.get("/available-companies")
-async def get_available_companies():
-    """
-    Lista empresas registadas no sistema (do campo 'company' dos users)
-    com indicação de quais já têm config de email.
-    """
-    pipeline = [
-        {"$match": {"company": {"$exists": True, "$ne": "", "$ne": None}}},
-        {"$group": {"_id": "$company", "total": {"$sum": 1}}},
-        {"$sort": {"total": -1}},
-    ]
-    company_users = await db.users.aggregate(pipeline).to_list(100)
-
-    # Buscar configs existentes
-    existing_configs = await db.company_email_configs.find(
-        {}, {"_id": 0, "company_name": 1}
-    ).to_list(100)
-    configured_companies = {c["company_name"] for c in existing_configs}
-
-    result = []
-    for item in company_users:
-        name = item["_id"]
-        result.append({
-            "company_name": name,
-            "total_users": item["total"],
-            "has_email_config": name in configured_companies,
-        })
-
-    return {"companies": result, "total": len(result)}
