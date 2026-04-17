@@ -789,32 +789,27 @@ const ProcessDetails = () => {
         updateData.client_phone = String(process.client_phone || '');
       }
 
-      if (user.role === "cliente" || user.role === "admin") {
+      // Todos os roles com permissão de edição enviam dados pessoais
+      // Indexação é a única exceção (só envia dados financeiros)
+      if (user.role !== "indexacao") {
         updateData.personal_data = cleanedPersonalData;
         updateData.financial_data = cleanedFinancialData;
-        updateData.titular2_data = titular2Data;  // Incluir dados do 2º titular
+        updateData.titular2_data = titular2Data;
+      } else {
+        updateData.financial_data = cleanedFinancialData;
       }
 
+      // Consultor e admin podem editar dados do imóvel
       if (user.role === "consultor" || user.role === "admin") {
-        updateData.personal_data = cleanedPersonalData;
-        updateData.financial_data = cleanedFinancialData;
         updateData.real_estate_data = realEstateData;
-        updateData.titular2_data = titular2Data;  // Incluir dados do 2º titular
       }
 
+      // Mediador pode editar dados de crédito em fases avançadas
       if (user.role === "mediador" || user.role === "admin") {
-        updateData.personal_data = cleanedPersonalData;
-        updateData.financial_data = cleanedFinancialData;
-        updateData.titular2_data = titular2Data;  // Incluir dados do 2º titular
         const allowedStatuses = workflowStatuses.filter(s => s.order >= 3).map(s => s.name);
         if (allowedStatuses.includes(process.status) || process.status === "ch_aprovado" || process.status === "fase_bancaria") {
           updateData.credit_data = creditData;
         }
-      }
-
-      // Indexação só envia dados financeiros
-      if (user.role === "indexacao") {
-        updateData.financial_data = cleanedFinancialData;
       }
 
       if (user.role !== "cliente" && statusToSave !== process.status) {
