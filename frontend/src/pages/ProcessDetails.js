@@ -2903,32 +2903,14 @@ const ProcessDetails = () => {
                         </Card>
                       )}
 
-                      {/* Contas Abertas nos Bancos — read-only (só se não pode editar) */}
-                      {!canEditFinancial && financialData?.tem_creditos_activos?.length > 0 && (
-                        <Card className="border-l-4 border-l-amber-500">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <CreditCard className="h-4 w-4 text-amber-500" />
-                              Contas de Crédito Abertas
-                            </h4>
-                            <div className="flex flex-wrap gap-2">
-                              {financialData.tem_creditos_activos.map((banco, idx) => (
-                                <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
-                              ))}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )}
-
-                      {/* Editável: Bancos com contas de crédito abertas */}
-                      {canEditFinancial && (
-                        <Card className="border-l-4 border-l-amber-300 bg-amber-50/30">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <CreditCard className="h-4 w-4 text-amber-500" />
-                              Gerir Contas de Crédito
-                              <Badge variant="outline" className="text-xs bg-amber-50 text-amber-600 border-amber-200">Edição</Badge>
-                            </h4>
+                      {/* Contas de Crédito Abertas */}
+                      <Card className="border-l-4 border-l-amber-500">
+                        <CardContent className="pt-4">
+                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                            <CreditCard className="h-4 w-4 text-amber-500" />
+                            Contas de Crédito Abertas
+                          </h4>
+                          {canEditFinancial ? (
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
@@ -2946,7 +2928,7 @@ const ProcessDetails = () => {
                                 const selected = (financialData.tem_creditos_activos || []).includes(banco);
                                 return (
                                   <button
-                                    key={`edit-contas-${banco}`}
+                                    key={`contas-${banco}`}
                                     type="button"
                                     onClick={() => {
                                       const current = financialData.tem_creditos_activos || [];
@@ -2965,9 +2947,19 @@ const ProcessDetails = () => {
                                 );
                               })}
                             </div>
-                          </CardContent>
-                        </Card>
-                      )}
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {(financialData?.tem_creditos_activos || []).length > 0 ? (
+                                financialData.tem_creditos_activos.map((banco, idx) => (
+                                  <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
+                                ))
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Nenhuma conta registada</span>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
                       
                       {/* Simulações de Crédito */}
                       {financialData?.bancos_simulacoes?.length > 0 && (
