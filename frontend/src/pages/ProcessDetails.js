@@ -1235,9 +1235,7 @@ const ProcessDetails = () => {
   const canEditRealEstate = hasEditProcess && 
     (userActions.length > 0 ? true : ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canEditCredit = hasEditProcess && 
-    (userActions.length > 0 ? true : ["mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole)) &&
-    (workflowStatuses.filter(s => s.order >= 3).map(s => s.name).includes(process?.status) || 
-     process?.status === "ch_aprovado" || process?.status === "fase_bancaria");
+    (userActions.length > 0 ? true : ["mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canChangeStatus = hasEditProcess && 
     (userActions.length > 0 ? true : ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canManageDeadlines = hasEditProcess && 
@@ -1694,10 +1692,10 @@ const ProcessDetails = () => {
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Nome do Vendedor</Label>
                 <Input
-                  value={process?.vendedor?.name || ""}
+                  value={process?.vendedor?.nome || process?.vendedor?.name || ""}
                   onChange={(e) => setProcess(prev => ({
                     ...prev,
-                    vendedor: { ...(prev.vendedor || {}), name: e.target.value }
+                    vendedor: { ...(prev.vendedor || {}), nome: e.target.value, name: e.target.value }
                   }))}
                   disabled={!canEditPersonal}
                   className="h-9"
@@ -1707,10 +1705,10 @@ const ProcessDetails = () => {
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Contacto do Vendedor</Label>
                 <Input
-                  value={process?.vendedor?.contacto || ""}
+                  value={process?.vendedor?.contacto || process?.vendedor?.telefone || ""}
                   onChange={(e) => setProcess(prev => ({
                     ...prev,
-                    vendedor: { ...(prev.vendedor || {}), contacto: e.target.value }
+                    vendedor: { ...(prev.vendedor || {}), contacto: e.target.value, telefone: e.target.value }
                   }))}
                   disabled={!canEditPersonal}
                   className="h-9"
@@ -2549,6 +2547,16 @@ const ProcessDetails = () => {
                               />
                             </div>
                             <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Rendimento Anual (€)</Label>
+                              <Input
+                                type="number"
+                                value={financialData.rendimento_anual || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, rendimento_anual: parseFloat(e.target.value) || null })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                              />
+                            </div>
+                            <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Capital Próprio (€)</Label>
                               <Input
                                 type="number"
@@ -2918,7 +2926,7 @@ const ProcessDetails = () => {
                           <CardContent className="pt-4">
                             <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
                               <CreditCard className="h-4 w-4 text-amber-500" />
-                              Contas de Crédito Abertas
+                              Gerir Contas de Crédito
                               <Badge variant="outline" className="text-xs bg-amber-50 text-amber-600 border-amber-200">Edição</Badge>
                             </h4>
                             <div className="flex flex-wrap gap-2">
@@ -3459,16 +3467,23 @@ const ProcessDetails = () => {
                               </div>
                             </div>
                             {/* Características como badges */}
-                            {realEstateData?.caracteristicas?.length > 0 && (
-                              <div className="mt-3 space-y-1">
-                                <Label className="text-xs text-muted-foreground">Características Pretendidas</Label>
-                                <div className="flex flex-wrap gap-2">
-                                  {realEstateData.caracteristicas.map((c, idx) => (
-                                    <Badge key={idx} variant="secondary">{c}</Badge>
-                                  ))}
+                            {(() => {
+                              const chars = Array.isArray(realEstateData?.caracteristicas)
+                                ? realEstateData.caracteristicas
+                                : typeof realEstateData?.caracteristicas === 'string' && realEstateData.caracteristicas.trim()
+                                  ? realEstateData.caracteristicas.split(',').map(s => s.trim()).filter(Boolean)
+                                  : [];
+                              return chars.length > 0 ? (
+                                <div className="mt-3 space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Características Pretendidas</Label>
+                                  <div className="flex flex-wrap gap-2">
+                                    {chars.map((c, idx) => (
+                                      <Badge key={idx} variant="secondary">{c}</Badge>
+                                    ))}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
+                              ) : null;
+                            })()}
                             <div className="mt-3 space-y-1">
                               <Label className="text-xs text-muted-foreground">Outras Informações</Label>
                               <Textarea
@@ -3648,13 +3663,6 @@ const ProcessDetails = () => {
 
                   {/* Credit Tab */}
                   <TabsContent value="credit" className="space-y-4 mt-4">
-                    {!canEditCredit && !creditData?.requested_amount ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <CreditCard className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p>Dados de crédito só podem ser preenchidos na fase bancária ou após aprovação</p>
-                        <Badge className="mt-2">{currentStatusInfo.label}</Badge>
-                      </div>
-                    ) : (
                       <>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
@@ -3783,7 +3791,6 @@ const ProcessDetails = () => {
                         </CardContent>
                       </Card>
                       </>
-                    )}
                   </TabsContent>
 
                   {/* Documents Tab - Destaque para fácil acesso */}
