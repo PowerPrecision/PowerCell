@@ -217,12 +217,33 @@ async def scheduler_loop():
                 last_runs["matching"] = now
 
             # Sincronização Webmail (a cada 15 minutos)
+            # ISOLAMENTO DE DADOS: Em vez de descarregar emails da conta global "geral",
+            # itera APENAS pelos utilizadores com email_config.is_configured == True
+            # e sincroniza as suas caixas pessoais de email.
             if now - last_runs["webmail"] > 900:
-                logger.info("Agendando sincronização de webmail...")
+                logger.info("Agendando sincronização de webmail por utilizador...")
                 try:
-                    from services.email_service import sync_webmail_emails
-                    await sync_webmail_emails(days=7, max_emails=100)
-                    logger.info("Sincronização de webmail concluída")
+                    from services.email_service import sync_user_emails
+                    # Buscar todos os utilizadores com email pessoal configurado
+                    configured_users = await db.users.find(
+                        {"email_config.is_configured": True},
+                        {"id": 1}
+                    ).to_list(50)
+                    if configured_users:
+                        for user_doc in configured_users:
+                            user_id = user_doc.get("id")
+                            if not user_id:
+                                continue
+                            try:
+                                result = await sync_user_emails(user_id, days=3, max_emails=50)
+                                synced = result.get("total_synced", 0)
+                                if synced > 0:
+                                    logger.info(f"Webmail sync user {user_id}: {synced} novos emails")
+                            except Exception as user_err:
+                                logger.warning(f"Erro ao sincronizar webmail do user {user_id}: {user_err}")
+                        logger.info(f"Sincronização webmail concluída ({len(configured_users)} utilizadores)")
+                    else:
+                        logger.debug("Nenhum utilizador com email pessoal configurado")
                 except Exception as e:
                     logger.error(f"Erro na sincronização de webmail: {e}")
                 last_runs["webmail"] = now

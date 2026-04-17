@@ -1113,6 +1113,33 @@ async def send_email(
     accounts = get_email_accounts()
     account = next((a for a in accounts if a.name == account_name), None)
     
+    # Se a conta pedida é "personal", ir diretamente para a config do utilizador
+    # sem nunca cair nas contas globais (isolamento de remetente)
+    if account_name == "personal" and created_by:
+        from services.encryption import encryption_service
+        user = await db.users.find_one(
+            {"id": created_by},
+            {"_id": 0, "email_config": 1}
+        )
+        if user and user.get("email_config", {}).get("is_configured"):
+            cfg = user["email_config"]
+            encrypted_password = cfg.get("encrypted_password", "")
+            if encrypted_password:
+                try:
+                    password = encryption_service.decrypt(encrypted_password)
+                    account = EmailAccount(
+                        name="personal",
+                        imap_server=cfg.get("smtp_server", ""),
+                        imap_port=int(cfg.get("smtp_port", 465)),
+                        smtp_server=cfg.get("smtp_server", ""),
+                        smtp_port=int(cfg.get("smtp_port", 465)),
+                        email=cfg.get("email_address", ""),
+                        password=password,
+                    )
+                    logger.info(f"[Send Email] Conta pessoal do utilizador {created_by}: {cfg.get('email_address', '')}")
+                except Exception as e:
+                    logger.warning(f"[Send Email] Erro ao desencriptar password pessoal: {e}")
+    
     if not account:
         # Usar primeira conta disponível
         if accounts:

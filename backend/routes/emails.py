@@ -2133,31 +2133,42 @@ async def webmail_list(
     and_conditions = []
     
     # === ISOLAMENTO POR UTILIZADOR ===
-    # Para pastas partilhadas (inbox), incluímos também o email da conta IMAP
-    # para que staff possa ver emails recebidos na caixa de entrada partilhada.
+    # Regras estritas de isolamento para utilizadores não-admin:
+    # 1. Emails devem pertencer ao utilizador (created_by OU synced_for_user)
+    # 2. O endereço do utilizador deve aparecer no FROM/TO
+    # 3. Emails legados sem user_id (antigo sync global "geral") são BLOQUEADOS
+    # NOTA: admin/ceo/diretor podem ver TUDO (can_see_all = True)
     if not can_see_all and user_email:
+        user_id = current_user["id"]
+
+        # Filtro de pertença: o email deve ter sido criado por este utilizador
+        # OU sincronizado para a sua conta pessoal
+        ownership_filter = {
+            "$or": [
+                {"created_by": user_id},
+                {"synced_for_user": user_id},
+            ]
+        }
+
         if folder == "inbox":
             inbox_or = [
                 {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
-                {"to_emails": {"$exists": False}},  # emails legados sem to_emails
             ]
             # Se há conta selecionada, incluir também o email da conta partilhada
             if account_email and account_email != user_email:
                 inbox_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
-            and_conditions.append({"$or": inbox_or})
+            and_conditions.append({"$and": [ownership_filter, {"$or": inbox_or}]})
         elif folder == "sent":
-            # Enviados: o from_email deve ser do utilizador OU da conta partilhada
             sent_or = [
                 {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
             ]
             if account_email and account_email != user_email:
                 sent_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
-            and_conditions.append({"$or": sent_or})
+            and_conditions.append({"$and": [ownership_filter, {"$or": sent_or}]})
         elif folder == "drafts":
             # Rascunhos: criados pelo utilizador
-            and_conditions.append({"created_by": current_user["id"]})
+            and_conditions.append({"created_by": user_id})
         elif folder in ("starred", "trash", "custom"):
-            # O utilizador deve ser sender ou recipient
             shared_or = [
                 {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
                 {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
@@ -2165,7 +2176,7 @@ async def webmail_list(
             if account_email and account_email != user_email:
                 shared_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
                 shared_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
-            and_conditions.append({"$or": shared_or})
+            and_conditions.append({"$and": [ownership_filter, {"$or": shared_or}]})
     
     # === FILTRO DE PASTA ===
     if folder == "inbox":
@@ -2252,10 +2263,16 @@ async def webmail_list(
         ]
         # Aplicar isolamento ao unread_count também
         if not can_see_all and user_email:
+            user_id_unread = current_user["id"]
             unread_and.append({
-                "$or": [
-                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
-                    {"to_emails": {"$exists": False}},
+                "$and": [
+                    {"$or": [
+                        {"created_by": user_id_unread},
+                        {"synced_for_user": user_id_unread},
+                    ]},
+                    {"$or": [
+                        {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                    ]},
                 ]
             })
         if account:
@@ -2360,13 +2377,25 @@ async def webmail_sync(
     """
     Sincronizar emails do IMAP para o Webmail (background).
     
-    Faz pull de TODOS os emails recentes das pastas INBOX e Enviados,
-    sem filtro de processo. Deduplica por Message-ID + conta.
+    ISOLAMENTO DE DADOS:
+    - admin/ceo/diretor: podem sincronizar contas globais (power, precision)
+    - outros roles: BLOQUEADOS — devem usar POST /webmail/sync-user
+      para sincronizar a sua caixa pessoal.
     
-    Executa em background — o progresso pode ser acompanhado na página
-    de Tarefas em Background.
+    Esta rota faz pull de TODOS os emails recentes das pastas INBOX e Enviados
+    das contas GLOBAIS configuradas. Para isolamento, utilizadores comuns
+    devem usar o endpoint /webmail/sync-user.
     """
+    from models.auth import UserRole
     from services.background_jobs import BackgroundJobService, JobType
+    
+    # Bloquear sync global para utilizadores não-admin
+    user_role = current_user.get("role", "")
+    if user_role not in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
+        raise HTTPException(
+            status_code=403,
+            detail="Sincronização global apenas disponível para administradores. Use /webmail/sync-user para sincronizar o seu email pessoal."
+        )
     
     # Verificar contas configuradas primeiro
     accounts = await get_email_accounts_async()
@@ -2745,7 +2774,38 @@ async def send_email_endpoint(
     account: str = Query("power", description="Conta de email"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Enviar email através de uma das contas configuradas."""
+    """
+    Enviar email através de uma das contas configuradas.
+    
+    ISOLAMENTO DE REMETENTE:
+    - admin/ceo/diretor: podem usar contas globais (power, precision) OU pessoal
+    - outros roles (consultor, intermediario, etc.): obrigatoriamente usam
+      a conta pessoal configurada no seu perfil (email_config).
+      Se não tiver email configurado, o envio é bloqueado.
+    """
+    from models.auth import UserRole
+    
+    user_role = current_user.get("role", "")
+    can_use_global_accounts = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    
+    # Para utilizadores não-admin, forçar uso da conta pessoal
+    if not can_use_global_accounts:
+        user_id = current_user["id"]
+        user = await db.users.find_one(
+            {"id": user_id},
+            {"_id": 0, "email_config": 1}
+        )
+        
+        if not user or not user.get("email_config", {}).get("is_configured"):
+            raise HTTPException(
+                status_code=403,
+                detail="Configuração de email pessoal não encontrada. Vá ao seu Perfil > Configuração de Webmail para configurar o seu email antes de enviar."
+            )
+        
+        # Forçar account = "personal" para utilizadores não-admin
+        account = "personal"
+        logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): forçado a conta pessoal")
+    
     # Sanitize inputs before sending and DB insert
     to_emails = [e for e in (sanitize_email(e) for e in payload.to_emails) if e]
     cc_emails = None
