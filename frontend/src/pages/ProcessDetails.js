@@ -2861,74 +2861,134 @@ const ProcessDetails = () => {
                       )}
 
                       {/* Créditos/Bancos */}
-                      {financialData?.bancos_creditos?.length > 0 && (
-                        <Card className="border-l-4 border-l-red-500">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <AlertCircle className="h-4 w-4 text-red-500" />
-                              Créditos Ativos
-                            </h4>
-                            {/* Total dos créditos */}
-                            {(() => {
-                              const total = financialData.bancos_creditos.reduce((sum, item) => {
-                                if (typeof item === 'object' && item.valor) return sum + item.valor;
-                                return sum;
-                              }, 0);
-                              if (total > 0) {
-                                return (
-                                  <p className="text-xs text-muted-foreground mb-2">
-                                    Total: <span className="font-semibold text-foreground">{total.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</span>
-                                  </p>
-                                );
-                              }
-                              return null;
-                            })()}
+                      <Card className="border-l-4 border-l-red-500">
+                        <CardContent className="pt-4">
+                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4 text-red-500" />
+                            Créditos Ativos
+                          </h4>
+                          {canEditFinancial ? (
                             <div className="space-y-2">
-                              {financialData.bancos_creditos.map((item, idx) => {
+                              {/* Total dos créditos */}
+                              {(() => {
+                                const total = (financialData.bancos_creditos || []).reduce((sum, item) => {
+                                  if (typeof item === 'object' && item.valor) return sum + item.valor;
+                                  return sum;
+                                }, 0);
+                                if (total > 0) {
+                                  return (
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      Total: <span className="font-semibold text-foreground">{total.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</span>
+                                    </p>
+                                  );
+                                }
+                                return null;
+                              })()}
+                              {(financialData.bancos_creditos || []).map((item, idx) => {
                                 const banco = typeof item === 'object' ? item.banco : item;
                                 const valor = typeof item === 'object' ? item.valor : null;
                                 return (
                                   <div key={idx} className="flex items-center gap-2">
-                                    <Badge className={getBankColor(banco)}>{banco}</Badge>
-                                    {valor != null && valor > 0 && (
-                                      <span className="text-xs font-medium text-muted-foreground">
-                                        {valor.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}
-                                      </span>
-                                    )}
+                                    <select
+                                      value={banco || ''}
+                                      onChange={(e) => {
+                                        const updated = [...(financialData.bancos_creditos || [])];
+                                        updated[idx] = { ...updated[idx], banco: e.target.value };
+                                        setFinancialData({ ...financialData, bancos_creditos: updated });
+                                      }}
+                                      className="text-xs border rounded px-2 py-1 bg-background"
+                                    >
+                                      <option value="">Banco...</option>
+                                      {BANK_LIST.map((b) => (
+                                        <option key={b} value={b}>{b}</option>
+                                      ))}
+                                    </select>
+                                    <input
+                                      type="number"
+                                      placeholder="Valor"
+                                      value={valor || ''}
+                                      onChange={(e) => {
+                                        const updated = [...(financialData.bancos_creditos || [])];
+                                        updated[idx] = { ...updated[idx], valor: parseFloat(e.target.value) || 0 };
+                                        setFinancialData({ ...financialData, bancos_creditos: updated });
+                                      }}
+                                      className="text-xs border rounded px-2 py-1 w-28 bg-background"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = (financialData.bancos_creditos || []).filter((_, i) => i !== idx);
+                                        setFinancialData({ ...financialData, bancos_creditos: updated });
+                                      }}
+                                      className="p-1 hover:bg-red-100 rounded text-red-500 transition-colors"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
                                   </div>
                                 );
                               })}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...(financialData.bancos_creditos || []), { banco: '', valor: 0 }];
+                                  setFinancialData({ ...financialData, bancos_creditos: updated });
+                                }}
+                                className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium mt-1"
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                                Adicionar crédito
+                              </button>
                             </div>
-                          </CardContent>
-                        </Card>
-                      )}
-
-                      {/* Contas Abertas nos Bancos — read-only (só se não pode editar) */}
-                      {!canEditFinancial && financialData?.tem_creditos_activos?.length > 0 && (
-                        <Card className="border-l-4 border-l-amber-500">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <CreditCard className="h-4 w-4 text-amber-500" />
-                              Contas de Crédito Abertas
-                            </h4>
-                            <div className="flex flex-wrap gap-2">
-                              {financialData.tem_creditos_activos.map((banco, idx) => (
-                                <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
-                              ))}
+                          ) : (
+                            <div>
+                              {/* Total dos créditos */}
+                              {(() => {
+                                const total = (financialData.bancos_creditos || []).reduce((sum, item) => {
+                                  if (typeof item === 'object' && item.valor) return sum + item.valor;
+                                  return sum;
+                                }, 0);
+                                if (total > 0) {
+                                  return (
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      Total: <span className="font-semibold text-foreground">{total.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</span>
+                                    </p>
+                                  );
+                                }
+                                return null;
+                              })()}
+                              <div className="space-y-2">
+                                {(financialData.bancos_creditos || []).length > 0 ? (
+                                  financialData.bancos_creditos.map((item, idx) => {
+                                    const banco = typeof item === 'object' ? item.banco : item;
+                                    const valor = typeof item === 'object' ? item.valor : null;
+                                    return (
+                                      <div key={idx} className="flex items-center gap-2">
+                                        <Badge className={getBankColor(banco)}>{banco}</Badge>
+                                        {valor != null && valor > 0 && (
+                                          <span className="text-xs font-medium text-muted-foreground">
+                                            {valor.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">Nenhum crédito registado</span>
+                                )}
+                              </div>
                             </div>
-                          </CardContent>
-                        </Card>
-                      )}
+                          )}
+                        </CardContent>
+                      </Card>
 
-                      {/* Editável: Bancos com contas de crédito abertas */}
-                      {canEditFinancial && (
-                        <Card className="border-l-4 border-l-amber-300 bg-amber-50/30">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <CreditCard className="h-4 w-4 text-amber-500" />
-                              Gerir Contas de Crédito
-                              <Badge variant="outline" className="text-xs bg-amber-50 text-amber-600 border-amber-200">Edição</Badge>
-                            </h4>
+                      {/* Contas de Crédito Abertas */}
+                      <Card className="border-l-4 border-l-amber-500">
+                        <CardContent className="pt-4">
+                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                            <CreditCard className="h-4 w-4 text-amber-500" />
+                            Contas de Crédito Abertas
+                          </h4>
+                          {canEditFinancial ? (
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
@@ -2946,7 +3006,7 @@ const ProcessDetails = () => {
                                 const selected = (financialData.tem_creditos_activos || []).includes(banco);
                                 return (
                                   <button
-                                    key={`edit-contas-${banco}`}
+                                    key={`contas-${banco}`}
                                     type="button"
                                     onClick={() => {
                                       const current = financialData.tem_creditos_activos || [];
@@ -2965,26 +3025,65 @@ const ProcessDetails = () => {
                                 );
                               })}
                             </div>
-                          </CardContent>
-                        </Card>
-                      )}
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {(financialData?.tem_creditos_activos || []).length > 0 ? (
+                                financialData.tem_creditos_activos.map((banco, idx) => (
+                                  <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
+                                ))
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Nenhuma conta registada</span>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
                       
                       {/* Simulações de Crédito */}
-                      {financialData?.bancos_simulacoes?.length > 0 && (
-                        <Card className="border-l-4 border-l-blue-500">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <CreditCard className="h-4 w-4 text-blue-500" />
-                              Simulações de Crédito Efetuadas
-                            </h4>
+                      <Card className="border-l-4 border-l-blue-500">
+                        <CardContent className="pt-4">
+                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                            <CreditCard className="h-4 w-4 text-blue-500" />
+                            Simulações de Crédito Efetuadas
+                          </h4>
+                          {canEditFinancial ? (
                             <div className="flex flex-wrap gap-2">
-                              {financialData.bancos_simulacoes.map((banco, idx) => (
-                                <Badge key={idx} variant="outline" className="border-blue-300 text-blue-700">{banco}</Badge>
-                              ))}
+                              {BANK_LIST.map((banco) => {
+                                const selected = (financialData.bancos_simulacoes || []).includes(banco);
+                                return (
+                                  <button
+                                    key={`sim-${banco}`}
+                                    type="button"
+                                    onClick={() => {
+                                      const current = financialData.bancos_simulacoes || [];
+                                      setFinancialData({
+                                        ...financialData,
+                                        bancos_simulacoes: current.includes(banco)
+                                          ? current.filter(b => b !== banco)
+                                          : [...current, banco]
+                                      });
+                                    }}
+                                    className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-blue-400 scale-105' : 'opacity-50 hover:opacity-80'} ${getBankColor(banco)}`}
+                                  >
+                                    {selected && <span className="mr-1">✓</span>}
+                                    {banco}
+                                  </button>
+                                );
+                              })}
                             </div>
-                          </CardContent>
-                        </Card>
-                      )}
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {(financialData.bancos_simulacoes || []).length > 0 ? (
+                                financialData.bancos_simulacoes.map((banco, idx) => (
+                                  <Badge key={idx} variant="outline" className="border-blue-300 text-blue-700">{banco}</Badge>
+                                ))
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Nenhuma simulação registada</span>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
                       
                       {/* Tempo Restante do Crédito (Refinanciamento) */}
                       {financialData?.tempo_restante_credito && (
