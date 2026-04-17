@@ -469,29 +469,44 @@ const ProcessDetails = () => {
     setAiConflicts(conflicts || []);
     
     // Pré-preencher campos nos formulários
+    // UNIFICAÇÃO: A IA pode usar nomes variados — mapeamos sempre para o campo canónico do modelo DB
     if (extractedData) {
       // Dados pessoais
       const newPersonalData = { ...personalData };
       if (extractedData.nif) newPersonalData.nif = extractedData.nif;
       if (extractedData.documento_id || extractedData.cc_number) newPersonalData.documento_id = extractedData.documento_id || extractedData.cc_number;
       if (extractedData.data_nascimento || extractedData.birth_date) newPersonalData.data_nascimento = extractedData.data_nascimento || extractedData.birth_date;
-      if (extractedData.cc_validity) newPersonalData.cc_validity = extractedData.cc_validity;
+      if (extractedData.cc_validity || extractedData.data_validade_cc) newPersonalData.data_validade_cc = extractedData.cc_validity || extractedData.data_validade_cc;
       if (extractedData.naturalidade) newPersonalData.naturalidade = extractedData.naturalidade;
       if (extractedData.nacionalidade || extractedData.nationality) newPersonalData.nacionalidade = extractedData.nacionalidade || extractedData.nationality;
       if (extractedData.estado_civil) newPersonalData.estado_civil = extractedData.estado_civil;
       if (extractedData.sexo || extractedData.gender) newPersonalData.sexo = extractedData.sexo || extractedData.gender;
-      if (extractedData.morada || extractedData.address) newPersonalData.morada = extractedData.morada || extractedData.address;
-      if (extractedData.morada_fiscal || extractedData.fiscal_address) newPersonalData.morada_fiscal = extractedData.morada_fiscal || extractedData.fiscal_address;
+      if (extractedData.profissao || extractedData.profession) newPersonalData.profissao = extractedData.profissao || extractedData.profession;
+      // UNIFICADO: morada → morada_fiscal (campo canónico do modelo)
+      const addr = extractedData.morada_fiscal || extractedData.fiscal_address || extractedData.morada || extractedData.address || "";
+      if (addr) newPersonalData.morada_fiscal = addr;
+      if (extractedData.codigo_postal || extractedData.postal_code) newPersonalData.codigo_postal = extractedData.codigo_postal || extractedData.postal_code;
+      // UNIFICADO: email/phone da IA → sincronizar com campos de topo do processo
+      if (extractedData.email) newPersonalData.email = extractedData.email;
+      if (extractedData.phone || extractedData.telefone) newPersonalData.phone = extractedData.phone || extractedData.telefone;
       setPersonalData(newPersonalData);
       
       // Dados financeiros
       const newFinancialData = { ...financialData };
-      if (extractedData.rendimento_mensal || extractedData.salario_liquido) newFinancialData.rendimento_mensal = extractedData.rendimento_mensal || extractedData.salario_liquido;
-      if (extractedData.rendimento_bruto || extractedData.salario_bruto) newFinancialData.rendimento_bruto = extractedData.rendimento_bruto || extractedData.salario_bruto;
-      if (extractedData.empresa) newFinancialData.empresa = extractedData.empresa;
-      if (extractedData.tipo_contrato) newFinancialData.tipo_contrato = extractedData.tipo_contrato;
+      // UNIFICADO: rendimento_mensal/salario_liquido → monthly_income (campo canónico do modelo)
+      const liq = extractedData.monthly_income || extractedData.rendimento_mensal || extractedData.salario_liquido;
+      if (liq) newFinancialData.monthly_income = liq;
+      // UNIFICADO: rendimento_bruto/salario_bruto → rendimento_bruto (campo canónico)
+      const brut = extractedData.rendimento_bruto || extractedData.salario_bruto;
+      if (brut) newFinancialData.rendimento_bruto = brut;
+      // UNIFICADO: empresa → employer_name (campo canónico)
+      if (extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal) newFinancialData.employer_name = extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal;
+      // UNIFICADO: tipo_contrato → employment_type (campo canónico)
+      if (extractedData.employment_type || extractedData.tipo_contrato) newFinancialData.tipo_contrato = extractedData.employment_type || extractedData.tipo_contrato;
       if (extractedData.categoria_profissional) newFinancialData.categoria_profissional = extractedData.categoria_profissional;
       if (extractedData.subsidiario_alimentacao) newFinancialData.subsidiario_alimentacao = extractedData.subsidiario_alimentacao;
+      if (extractedData.data_referencia || extractedData.reference_date) newFinancialData.data_referencia = extractedData.data_referencia || extractedData.reference_date;
+      if (extractedData.employer_nif || extractedData.nif_entidade) newFinancialData.employer_nif = extractedData.employer_nif || extractedData.nif_entidade;
       setFinancialData(newFinancialData);
       
       // Dados do imóvel
@@ -628,6 +643,32 @@ const ProcessDetails = () => {
       setFinancialData(processData.financial_data || {});
       setRealEstateData(processData.real_estate_data || {});
       setCreditData(processData.credit_data || {});
+      
+      // UNIFICAÇÃO backward-compat: se personal_data tem morada/address mas não morada_fiscal, migrar
+      const pd = processData.personal_data || {};
+      if ((pd.morada || pd.address) && !pd.morada_fiscal) {
+        setPersonalData(prev => ({ ...prev, morada_fiscal: prev.morada || prev.address || "" }));
+      }
+      // UNIFICAÇÃO backward-compat: se financial_data tem rendimento_mensal mas não monthly_income, migrar
+      const fd = processData.financial_data || {};
+      if ((fd.rendimento_mensal || fd.salario_liquido) && !fd.monthly_income) {
+        setFinancialData(prev => ({ ...prev, monthly_income: prev.rendimento_mensal || prev.salario_liquido }));
+      }
+      // UNIFICAÇÃO backward-compat: se financial_data tem empresa mas não employer_name, migrar
+      if ((fd.empresa || fd.entidade_patronal) && !fd.employer_name) {
+        setFinancialData(prev => ({ ...prev, employer_name: prev.empresa || prev.entidade_patronal }));
+      }
+      // UNIFICAÇÃO backward-compat: se financial_data tem tipo_contrato mas não employment_type, migrar
+      if (fd.tipo_contrato && !fd.employment_type) {
+        setFinancialData(prev => ({ ...prev, employment_type: prev.tipo_contrato }));
+      }
+      // UNIFICAÇÃO: se personal_data tem email/phone, sincronizar com campos de topo
+      if (pd.email && !processData.client_email) {
+        setProcess(prev => ({ ...prev, client_email: pd.email }));
+      }
+      if ((pd.phone || pd.telefone) && !processData.client_phone) {
+        setProcess(prev => ({ ...prev, client_phone: prev.phone || prev.telefone }));
+      }
       
       // TAREFA 2: Carregar estado de conflitos e confirmação de dados
       setAiSuggestions(processData.ai_suggestions || []);
@@ -854,6 +895,13 @@ const ProcessDetails = () => {
 
       if (user.role !== "cliente" && statusToSave !== process.status) {
         updateData.status = statusToSave;
+      }
+
+      // Campos de topo do processo (vendedor, mediador, monitored_emails)
+      if (process.vendedor) updateData.vendedor = process.vendedor;
+      if (process.mediador) updateData.mediador = process.mediador;
+      if (process.monitored_emails && process.monitored_emails.length > 0) {
+        updateData.monitored_emails = process.monitored_emails;
       }
 
       await updateProcess(id, updateData);
@@ -1476,6 +1524,100 @@ const ProcessDetails = () => {
           mediadorName={process.mediador_name || process.assigned_mediador_name}
         />
 
+        {/* Dados Adicionais do Processo */}
+        <Card>
+          <CardContent className="pt-4">
+            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" />
+              Dados do Processo
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* NIF do Cliente */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">NIF do Cliente</Label>
+                <Input
+                  value={process?.client_nif || personalData?.nif || ""}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 9);
+                    setPersonalData(prev => ({ ...prev, nif: val }));
+                  }}
+                  disabled={!canEditPersonal}
+                  className="h-9"
+                  placeholder="9 dígitos"
+                />
+              </div>
+              {/* Email Adicional Monitorizado */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Emails Adicionais Monitorizados</Label>
+                <Input
+                  value={(process?.monitored_emails || []).join(", ")}
+                  onChange={(e) => {
+                    const emails = e.target.value.split(",").map(s => s.trim()).filter(Boolean);
+                    setProcess(prev => ({ ...prev, monitored_emails: emails }));
+                  }}
+                  disabled={!canEditPersonal}
+                  className="h-9"
+                  placeholder="email1@exemplo.com, email2@exemplo.com"
+                />
+              </div>
+              {/* Vendedor */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Nome do Vendedor</Label>
+                <Input
+                  value={process?.vendedor?.name || ""}
+                  onChange={(e) => setProcess(prev => ({
+                    ...prev,
+                    vendedor: { ...(prev.vendedor || {}), name: e.target.value }
+                  }))}
+                  disabled={!canEditPersonal}
+                  className="h-9"
+                  placeholder="Nome de quem vende"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Contacto do Vendedor</Label>
+                <Input
+                  value={process?.vendedor?.contacto || ""}
+                  onChange={(e) => setProcess(prev => ({
+                    ...prev,
+                    vendedor: { ...(prev.vendedor || {}), contacto: e.target.value }
+                  }))}
+                  disabled={!canEditPersonal}
+                  className="h-9"
+                  placeholder="+351 000 000 000"
+                />
+              </div>
+              {/* Mediador Imobiliário */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Mediador Imobiliário</Label>
+                <Input
+                  value={process?.mediador?.name || ""}
+                  onChange={(e) => setProcess(prev => ({
+                    ...prev,
+                    mediador: { ...(prev.mediador || {}), name: e.target.value }
+                  }))}
+                  disabled={!canEditPersonal}
+                  className="h-9"
+                  placeholder="Nome da imobiliária/mediador"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">AMI do Mediador</Label>
+                <Input
+                  value={process?.mediador?.ami || ""}
+                  onChange={(e) => setProcess(prev => ({
+                    ...prev,
+                    mediador: { ...(prev.mediador || {}), ami: e.target.value }
+                  }))}
+                  disabled={!canEditPersonal}
+                  className="h-9"
+                  placeholder="Número AMI"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Timeline do Processo */}
         <ProcessTimeline 
           processId={id}
@@ -1755,6 +1897,16 @@ const ProcessDetails = () => {
                                 className="h-9"
                               />
                             </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Profissão</Label>
+                              <Input
+                                value={personalData.profissao || ""}
+                                onChange={(e) => setPersonalData({ ...personalData, profissao: e.target.value })}
+                                disabled={!canEditPersonal}
+                                className="h-9"
+                                placeholder="Profissão do titular"
+                              />
+                            </div>
                             <div className="space-y-1 flex items-end pb-2">
                               <div className="flex items-center gap-2">
                                 <input
@@ -1814,14 +1966,27 @@ const ProcessDetails = () => {
                             <MapPin className="h-4 w-4 text-teal-500" />
                             Morada
                           </h4>
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
-                            <Input
-                              value={personalData.morada_fiscal || personalData.address || ""}
-                              onChange={(e) => setPersonalData({ ...personalData, morada_fiscal: e.target.value })}
-                              disabled={!canEditPersonal}
-                              className="h-9"
-                            />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-1 sm:col-span-2">
+                              <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
+                              <Input
+                                value={personalData.morada_fiscal || personalData.address || ""}
+                                onChange={(e) => setPersonalData({ ...personalData, morada_fiscal: e.target.value })}
+                                disabled={!canEditPersonal}
+                                className="h-9"
+                                placeholder="Rua, número, andar"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Código Postal</Label>
+                              <Input
+                                value={personalData.codigo_postal || ""}
+                                onChange={(e) => setPersonalData({ ...personalData, codigo_postal: e.target.value })}
+                                disabled={!canEditPersonal}
+                                className="h-9"
+                                placeholder="0000-000"
+                              />
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
@@ -2534,6 +2699,50 @@ const ProcessDetails = () => {
                               <Input
                                 value={financialData.employer_name || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, employer_name: e.target.value })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">NIF da Entidade Empregadora</Label>
+                              <Input
+                                value={financialData.employer_nif || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/\D/g, '').slice(0, 9);
+                                  setFinancialData({ ...financialData, employer_nif: val });
+                                }}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                                placeholder="NIF da empresa"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Categoria Profissional</Label>
+                              <Input
+                                value={financialData.categoria_profissional || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, categoria_profissional: e.target.value })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                                placeholder="Ex: Técnico superior, Operário..."
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Subsídio Alimentação (€)</Label>
+                              <Input
+                                type="number"
+                                value={financialData.subsidiario_alimentacao || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, subsidiario_alimentacao: parseFloat(e.target.value) || null })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                                placeholder="0.00"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Data de Referência (Recibo)</Label>
+                              <Input
+                                type="month"
+                                value={financialData.data_referencia || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, data_referencia: e.target.value })}
                                 disabled={!canEditFinancial}
                                 className="h-9"
                               />
