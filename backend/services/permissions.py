@@ -37,6 +37,7 @@ AVAILABLE_PAGES = [
     "permissions",       # Perfis e Permissões
     "form_manager",      # Gestão do Formulário
     "my_clients",        # Os Meus Clientes
+    "webmail",           # Webmail / Email
 ]
 
 # Ações disponíveis no sistema
@@ -149,7 +150,8 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
             "processes",     # Os Meus Processos
             "clients",       # Lista de Clientes
             "documents",
-            "notifications"
+            "notifications",
+            "webmail"        # Email
         ],
         "actions": [
             "download_docs", "assign_clients", "manage_tasks", "use_chat",

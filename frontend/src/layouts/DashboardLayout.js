@@ -497,6 +497,15 @@ const DashboardLayout = ({ children, title }) => {
           });
         }
 
+        // "Email" (Webmail)
+        if (userPages.includes("webmail")) {
+          indexacaoMain.push({
+            label: "Email",
+            icon: Mail,
+            href: "/webmail",
+          });
+        }
+
         return {
           main: indexacaoMain,
           groups: [],
