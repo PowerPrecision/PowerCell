@@ -70,7 +70,7 @@ from database import db
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from models.email_config import EmailConfigCreate, EmailConfigResponse
-from services.auth import hash_password, require_roles
+from services.auth import hash_password, require_roles, get_current_user
 from utils.input_sanitization import (
     log_sanitization_rejection
 )
@@ -1097,7 +1097,7 @@ async def impersonate_user(user_id: str, user: dict = Depends(require_roles([Use
 
 
 @router.post("/stop-impersonate")
-async def stop_impersonate(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO]))):
+async def stop_impersonate(user: dict = Depends(get_current_user)):
     """
     Termina a sessão de personificação e restaura a conta original do admin.
 
