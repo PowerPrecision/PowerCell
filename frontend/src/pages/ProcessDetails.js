@@ -130,6 +130,7 @@ import {
   FileSignature,
   AlertTriangle,
   CheckCircle,
+  Pencil,
   Database,
   Calculator,
   TrendingUp,
@@ -274,6 +275,7 @@ const ProcessDetails = () => {
   const [personalData, setPersonalData] = useState({});
   const [titular2Data, setTitular2Data] = useState({});  // Estado para 2º titular
   const [financialData, setFinancialData] = useState({});
+  const [editingCreditField, setEditingCreditField] = useState(null); // 'creditos' | 'contas' | 'simulacoes' | null
   const [showPortalSenha, setShowPortalSenha] = useState(false);
   const [showSegSocialSenha, setShowSegSocialSenha] = useState(false);
   const [realEstateData, setRealEstateData] = useState({});
@@ -2863,27 +2865,34 @@ const ProcessDetails = () => {
                       {/* Créditos/Bancos */}
                       <Card className="border-l-4 border-l-red-500">
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <AlertCircle className="h-4 w-4 text-red-500" />
-                            Créditos Ativos
-                          </h4>
-                          {canEditFinancial ? (
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-semibold text-sm flex items-center gap-2">
+                              <AlertCircle className="h-4 w-4 text-red-500" />
+                              Créditos Ativos
+                            </h4>
+                            {canEditFinancial && editingCreditField !== 'creditos' && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingCreditField('creditos')}
+                                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                              >
+                                <Pencil className="h-3 w-3" />
+                                Editar
+                              </button>
+                            )}
+                            {canEditFinancial && editingCreditField === 'creditos' && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingCreditField(null)}
+                                className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 transition-colors"
+                              >
+                                <CheckCircle className="h-3 w-3" />
+                                Concluído
+                              </button>
+                            )}
+                          </div>
+                          {editingCreditField === 'creditos' && canEditFinancial ? (
                             <div className="space-y-2">
-                              {/* Total dos créditos */}
-                              {(() => {
-                                const total = (financialData.bancos_creditos || []).reduce((sum, item) => {
-                                  if (typeof item === 'object' && item.valor) return sum + item.valor;
-                                  return sum;
-                                }, 0);
-                                if (total > 0) {
-                                  return (
-                                    <p className="text-xs text-muted-foreground mb-2">
-                                      Total: <span className="font-semibold text-foreground">{total.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</span>
-                                    </p>
-                                  );
-                                }
-                                return null;
-                              })()}
                               {(financialData.bancos_creditos || []).map((item, idx) => {
                                 const banco = typeof item === 'object' ? item.banco : item;
                                 const valor = typeof item === 'object' ? item.valor : null;
@@ -2941,7 +2950,6 @@ const ProcessDetails = () => {
                             </div>
                           ) : (
                             <div>
-                              {/* Total dos créditos */}
                               {(() => {
                                 const total = (financialData.bancos_creditos || []).reduce((sum, item) => {
                                   if (typeof item === 'object' && item.valor) return sum + item.valor;
@@ -2984,11 +2992,33 @@ const ProcessDetails = () => {
                       {/* Contas de Crédito Abertas */}
                       <Card className="border-l-4 border-l-amber-500">
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <CreditCard className="h-4 w-4 text-amber-500" />
-                            Contas de Crédito Abertas
-                          </h4>
-                          {canEditFinancial ? (
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-semibold text-sm flex items-center gap-2">
+                              <CreditCard className="h-4 w-4 text-amber-500" />
+                              Contas de Crédito Abertas
+                            </h4>
+                            {canEditFinancial && editingCreditField !== 'contas' && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingCreditField('contas')}
+                                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                              >
+                                <Pencil className="h-3 w-3" />
+                                Editar
+                              </button>
+                            )}
+                            {canEditFinancial && editingCreditField === 'contas' && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingCreditField(null)}
+                                className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 transition-colors"
+                              >
+                                <CheckCircle className="h-3 w-3" />
+                                Concluído
+                              </button>
+                            )}
+                          </div>
+                          {editingCreditField === 'contas' && canEditFinancial ? (
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
@@ -3042,11 +3072,33 @@ const ProcessDetails = () => {
                       {/* Simulações de Crédito */}
                       <Card className="border-l-4 border-l-blue-500">
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <CreditCard className="h-4 w-4 text-blue-500" />
-                            Simulações de Crédito Efetuadas
-                          </h4>
-                          {canEditFinancial ? (
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-semibold text-sm flex items-center gap-2">
+                              <CreditCard className="h-4 w-4 text-blue-500" />
+                              Simulações de Crédito Efetuadas
+                            </h4>
+                            {canEditFinancial && editingCreditField !== 'simulacoes' && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingCreditField('simulacoes')}
+                                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                              >
+                                <Pencil className="h-3 w-3" />
+                                Editar
+                              </button>
+                            )}
+                            {canEditFinancial && editingCreditField === 'simulacoes' && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingCreditField(null)}
+                                className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 transition-colors"
+                              >
+                                <CheckCircle className="h-3 w-3" />
+                                Concluído
+                              </button>
+                            )}
+                          </div>
+                          {editingCreditField === 'simulacoes' && canEditFinancial ? (
                             <div className="flex flex-wrap gap-2">
                               {BANK_LIST.map((banco) => {
                                 const selected = (financialData.bancos_simulacoes || []).includes(banco);
