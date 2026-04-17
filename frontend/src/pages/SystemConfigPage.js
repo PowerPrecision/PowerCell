@@ -38,7 +38,7 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
 import { Textarea } from "../components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+// Tabs removed — replaced with vertical master-detail layout
 import DocumentRecipientsManager from "../components/DocumentRecipientsManager";
 import RichTextEditor from "../components/ui/RichTextEditor";
 import SmartRichEditor from "../components/ui/SmartRichEditor";
@@ -1697,53 +1697,162 @@ const SystemConfigPage = () => {
           </Button>
         </div>
 
-        {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4 sm:grid-cols-6 lg:grid-cols-9">
-            {sections.map((key) => {
-              const Icon = SECTION_ICONS[key] || Settings;
-              return (
-                <TabsTrigger key={key} value={key} className="gap-2">
-                  <Icon className="h-4 w-4" />
-                  <span className="hidden sm:inline">{fields[key]?.title?.split(" ")[0]}</span>
-                </TabsTrigger>
-              );
-            })}
-            <TabsTrigger value="rgpd" className="gap-2">
-              <FileSignature className="h-4 w-4" />
-              <span className="hidden sm:inline">RGPD</span>
-            </TabsTrigger>
-            <TabsTrigger value="maintenance" className="gap-2">
-              <Wrench className="h-4 w-4" />
-              <span className="hidden sm:inline">Manutenção</span>
-            </TabsTrigger>
-          </TabsList>
+        {/* Vertical Master-Detail Layout */}
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* ─── Left: Sidebar Navigation (Desktop) / Dropdown+Chips (Mobile) ─── */}
+          <aside className="w-full lg:w-64 xl:w-72 shrink-0">
+            {/* Desktop: Vertical sidebar */}
+            <div className="hidden lg:block sticky top-20">
+              <Card className="py-2">
+                <CardContent className="p-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2 mb-2">Categorias</p>
+                  <nav className="space-y-1">
+                    {sections.map((key) => {
+                      const Icon = SECTION_ICONS[key] || Settings;
+                      const isActive = activeTab === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setActiveTab(key)}
+                          className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                            isActive
+                              ? "bg-primary/10 text-primary font-medium"
+                              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                          }`}
+                        >
+                          <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+                          <span className="truncate">{fields[key]?.title?.split(" ")[0] || key}</span>
+                          {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                        </button>
+                      );
+                    })}
+                    <div className="my-1.5 border-t border-border" />
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("rgpd")}
+                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                        activeTab === "rgpd"
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <FileSignature className={`h-4 w-4 shrink-0 ${activeTab === "rgpd" ? "text-primary" : ""}`} />
+                      <span className="truncate">RGPD</span>
+                      {activeTab === "rgpd" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("maintenance")}
+                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                        activeTab === "maintenance"
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <Wrench className={`h-4 w-4 shrink-0 ${activeTab === "maintenance" ? "text-primary" : ""}`} />
+                      <span className="truncate">Manutenção</span>
+                      {activeTab === "maintenance" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                    </button>
+                  </nav>
+                </CardContent>
+              </Card>
+              <p className="text-xs text-muted-foreground/60 px-1 mt-2">Cada categoria guarda as suas definições independentemente.</p>
+            </div>
 
-          {sections.map((key) => (
-            <TabsContent key={key} value={key} className="mt-6">
-              {key === "document_recipients" ? (
-                <DocumentRecipientsManager token={token} user={user} />
-              ) : (
-                <ConfigSection
-                  section={fields[key]}
-                  sectionKey={key}
-                  config={config?.[key]}
-                  fields={fields[key]?.fields || []}
-                  onSave={handleSave}
-                  onTest={handleTest}
-                />
-              )}
-            </TabsContent>
-          ))}
-          
-          <TabsContent value="rgpd" className="mt-6">
-            <RGPDTab />
-          </TabsContent>
-          
-          <TabsContent value="maintenance" className="mt-6">
-            <MaintenanceSection />
-          </TabsContent>
-        </Tabs>
+            {/* Mobile: Dropdown + Chips */}
+            <div className="lg:hidden space-y-3">
+              <Select value={activeTab} onValueChange={setActiveTab}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Selecionar categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sections.map((key) => {
+                    const Icon = SECTION_ICONS[key] || Settings;
+                    return (
+                      <SelectItem key={key} value={key}>
+                        <span className="flex items-center gap-2">
+                          <Icon className="h-4 w-4" />
+                          {fields[key]?.title?.split(" ")[0] || key}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                  <SelectItem value="rgpd">
+                    <span className="flex items-center gap-2">
+                      <FileSignature className="h-4 w-4" />
+                      RGPD
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="maintenance">
+                    <span className="flex items-center gap-2">
+                      <Wrench className="h-4 w-4" />
+                      Manutenção
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              {/* Horizontal scrollable chips for quick access */}
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{scrollbarWidth: "none", msOverflowStyle: "none"}}>
+                {sections.map((key) => {
+                  const Icon = SECTION_ICONS[key] || Settings;
+                  const isActive = activeTab === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setActiveTab(key)}
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+                        isActive
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-muted text-muted-foreground hover:border-muted-foreground/50"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {fields[key]?.title?.split(" ")[0] || key}
+                    </button>
+                  );
+                })}
+                {["rgpd", "maintenance"].map((key) => {
+                  const Icon = key === "rgpd" ? FileSignature : Wrench;
+                  const isActive = activeTab === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setActiveTab(key)}
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+                        isActive
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-muted text-muted-foreground hover:border-muted-foreground/50"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {key === "rgpd" ? "RGPD" : "Manutenção"}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+
+          {/* ─── Right: Content Area ─── */}
+          <main className="min-w-0 flex-1">
+            {activeTab === "document_recipients" && <DocumentRecipientsManager token={token} user={user} />}
+            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && (
+              <ConfigSection
+                section={fields[activeTab]}
+                sectionKey={activeTab}
+                config={config?.[activeTab]}
+                fields={fields[activeTab]?.fields || []}
+                onSave={handleSave}
+                onTest={handleTest}
+              />
+            )}
+            {activeTab === "rgpd" && <RGPDTab />}
+            {activeTab === "maintenance" && <MaintenanceSection />}
+          </main>
+        </div>
       </div>
     </DashboardLayout>
   );
