@@ -465,6 +465,7 @@ class ProcessUpdate(BaseModel):
     co_applicants: Optional[List[dict]] = None  # Co-proponentes de simulação/IRS
     vendedor: Optional[dict] = None  # Dados do vendedor do CPCV
     mediador: Optional[dict] = None  # Dados do mediador imobiliário
+    monitored_emails: Optional[List[str]] = None  # Emails adicionais monitorizados
     
     @field_validator('client_email', 'client_phone', mode='before')
     @classmethod

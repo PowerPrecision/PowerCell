@@ -1860,6 +1860,8 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         if data.mediador is not None:
             _sanitize_dict_names(data.mediador)
             update_data["mediador"] = data.mediador
+        if data.monitored_emails is not None:
+            update_data["monitored_emails"] = data.monitored_emails
         
         if data.status and can_update_status and (data.status in valid_statuses or not valid_statuses):
             await log_history(process_id, user, "Alterou estado", "status", process["status"], data.status)
