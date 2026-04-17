@@ -484,6 +484,10 @@ const PublicClientForm = ({ previewMode = false }) => {
     // Capital e Financiamento
     capital_proprio: "",
     valor_financiado: "",
+
+    // Contas abertas (Créditos e Capital)
+    tem_creditos_activos: "",
+    valor_creditos_activos: "",
     
     // Consentimento
     consent_data: false,
@@ -836,6 +840,9 @@ const PublicClientForm = ({ previewMode = false }) => {
           tempo_restante_credito: formData.tempo_restante_credito || null,
           capital_proprio: formData.capital_proprio ? parseFloat(formData.capital_proprio) : null,
           valor_financiado: formData.valor_financiado,
+          // Contas abertas (Créditos e Capital)
+          tem_creditos_activos: formData.tem_creditos_activos === "sim" ? true : (formData.tem_creditos_activos === "nao" ? false : null),
+          valor_creditos_activos: formData.valor_creditos_activos ? parseFloat(formData.valor_creditos_activos) : null,
           // Campos de emprego
           employment_type: formData.employment_type,
           employment_duration: formData.employment_duration,
@@ -1828,6 +1835,45 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           <FieldHint>Inclui crédito habitação, automóvel, pessoal, ou cartões de crédito com saldo em dívida.</FieldHint>
         </div>
+
+        {/* Contas abertas nos Créditos e Capital */}
+        <div className="space-y-3 p-4 bg-muted/30 border rounded-lg">
+          <Label className="text-sm font-medium">Tem contas de crédito abertas neste momento?</Label>
+          <div className="flex gap-3">
+            {["sim", "nao"].map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => updateField("tem_creditos_activos", opt)}
+                data-testid={`tem-creditos-${opt}`}
+                className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border-2 transition-all ${
+                  formData.tem_creditos_activos === opt
+                    ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
+                    : "border-muted bg-white hover:border-muted-foreground/50 text-muted-foreground"
+                }`}
+              >
+                {formData.tem_creditos_activos === opt && <span className="mr-1.5">✓</span>}
+                {opt === "sim" ? "Sim" : "Não"}
+              </button>
+            ))}
+          </div>
+          {formData.tem_creditos_activos === "sim" && (
+            <div className="space-y-2 pt-2">
+              <RequiredLabel htmlFor="valor_creditos_activos">Valor total dos créditos em aberto (€)</RequiredLabel>
+              <Input
+                id="valor_creditos_activos"
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.valor_creditos_activos}
+                onChange={(e) => updateField("valor_creditos_activos", e.target.value)}
+                placeholder="Ex: 150000"
+                data-testid="fin-valor-creditos-activos"
+              />
+              <FieldHint>Soma de todas as prestações em dívida (habitação, automóvel, pessoal, cartões).</FieldHint>
+            </div>
+          )}
+        </div>
         
         {/* Pergunta sobre simulações de crédito */}
         <div className="space-y-3">
@@ -1979,7 +2025,11 @@ const PublicClientForm = ({ previewMode = false }) => {
             <CardTitle className="text-sm font-medium text-muted-foreground">Créditos Ativos</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
-            <p>{(formData.bancos_creditos || []).length > 0 ? formData.bancos_creditos.join(", ") : "Nenhum banco selecionado"}</p>
+            <p><strong>Contas abertas:</strong> {formData.tem_creditos_activos === "sim" ? <span className="text-orange-600">Sim</span> : formData.tem_creditos_activos === "nao" ? <span className="text-green-600">Não</span> : "-"}</p>
+            {formData.tem_creditos_activos === "sim" && formData.valor_creditos_activos && (
+              <p><strong>Valor total em aberto:</strong> €{formData.valor_creditos_activos}</p>
+            )}
+            <p><strong>Bancos:</strong> {(formData.bancos_creditos || []).length > 0 ? formData.bancos_creditos.join(", ") : "Nenhum banco selecionado"}</p>
           </CardContent>
         </Card>
         
