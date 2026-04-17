@@ -1826,6 +1826,19 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             await log_audit_event(process_id, user, "Alterou dados imobiliários", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["real_estate_data"] = merged_re
         
+        # Sync proprietario/owner -> vendedor if vendedor.nome is empty AND no explicit vendedor update
+        merged_re = update_data.get("real_estate_data")
+        existing_vendedor = process.get("vendedor") or {}
+        if merged_re and not existing_vendedor.get("nome") and data.vendedor is None:
+            owner_name = merged_re.get("proprietario_nome") or merged_re.get("owner_name") or ""
+            owner_contact = merged_re.get("proprietario_contacto") or merged_re.get("owner_phone") or ""
+            if owner_name:
+                update_data["vendedor"] = {
+                    **existing_vendedor,
+                    "nome": owner_name,
+                    "contacto": owner_contact,
+                }
+        
         if data.credit_data and can_update_credit:
             incoming_credit = data.credit_data.model_dump(exclude_unset=True, exclude_none=True)
             existing_credit = process.get("credit_data") or {}

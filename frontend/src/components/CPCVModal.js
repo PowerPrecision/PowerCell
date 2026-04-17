@@ -199,9 +199,9 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
       co_comprador_estado_civil: process.titular2_data?.estado_civil || "",
       
       // Dados do Vendedor (proprietário)
-      vendedor_nome: realEstateData?.owner_name || "",
-      vendedor_telefone: realEstateData?.owner_phone || "",
-      vendedor_email: realEstateData?.owner_email || "",
+      vendedor_nome: realEstateData?.owner_name || process?.vendedor?.nome || process?.vendedor?.name || realEstateData?.proprietario_nome || "",
+      vendedor_telefone: realEstateData?.owner_phone || process?.vendedor?.telefone || process?.vendedor?.contacto || "",
+      vendedor_email: realEstateData?.owner_email || process?.vendedor?.email || "",
       
       // Valores
       valor_sinal: financialData?.valor_entrada || financialData?.capital_proprio || "",
