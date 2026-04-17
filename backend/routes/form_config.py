@@ -129,7 +129,8 @@ DEFAULT_FORM_CONFIG = [
     {"field_key": "valor_financiado", "label": "Valor a financiar", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 7, "is_custom": False},
     # Step 5 - Histórico Bancário
     {"field_key": "bancos_creditos", "label": "Bancos com créditos ativos", "step": 5, "is_visible": True, "is_required": True, "field_type": "checkbox", "order": 1, "is_custom": False},
-    {"field_key": "bancos_simulacoes", "label": "Simulações efetuadas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 2, "is_custom": False},
+    {"field_key": "tem_creditos_activos", "label": "Bancos com contas abertas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 2, "is_custom": False},
+    {"field_key": "bancos_simulacoes", "label": "Simulações efetuadas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 3, "is_custom": False},
 ]
 
 

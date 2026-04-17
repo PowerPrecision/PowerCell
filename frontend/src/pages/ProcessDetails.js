@@ -156,6 +156,11 @@ const statusColors = {
   purple: "bg-purple-100 text-purple-800 border-purple-200",
 };
 
+const BANK_LIST = [
+  "ABANCA", "BBVA", "BEST", "BIG", "BPI", "CGD", "Crédito Agrícola",
+  "CTT", "Millennium bcp", "Novo Banco", "Popular", "Santander Totta", "Outro"
+];
+
 // Cores dos bancos portugueses para badges
 const BANK_COLORS = {
   "ABANCA": "bg-red-500 text-white",
@@ -874,6 +879,8 @@ const ProcessDetails = () => {
       'creditos_existentes', 'prestacao_creditos_mensal',
       // Rendimento agregado
       'rendimento_agregado',
+      // Contas abertas (bancos)
+      'tem_creditos_activos',
     ];
     
     const cleaned = {};
@@ -2773,6 +2780,72 @@ const ProcessDetails = () => {
                               {financialData.bancos_creditos.map((banco, idx) => (
                                 <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
                               ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Contas Abertas nos Bancos */}
+                      {financialData?.tem_creditos_activos?.length > 0 && (
+                        <Card className="border-l-4 border-l-amber-500">
+                          <CardContent className="pt-4">
+                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                              <CreditCard className="h-4 w-4 text-amber-500" />
+                              Contas de Crédito Abertas
+                            </h4>
+                            <div className="flex flex-wrap gap-2">
+                              {financialData.tem_creditos_activos.map((banco, idx) => (
+                                <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Editável: Bancos com contas de crédito abertas */}
+                      {canEditFinancial && (
+                        <Card className="border-l-4 border-l-amber-300 bg-amber-50/30">
+                          <CardContent className="pt-4">
+                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                              <CreditCard className="h-4 w-4 text-amber-500" />
+                              Contas de Crédito Abertas
+                              <Badge variant="outline" className="text-xs bg-amber-50 text-amber-600 border-amber-200">Edição</Badge>
+                            </h4>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setFinancialData({ ...financialData, tem_creditos_activos: [] })}
+                                className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                                  (financialData.tem_creditos_activos || []).length === 0
+                                    ? 'ring-2 ring-offset-1 ring-amber-400 scale-105 bg-slate-700 text-white border-slate-700'
+                                    : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+                                }`}
+                              >
+                                {(financialData.tem_creditos_activos || []).length === 0 && <span className="mr-1">✓</span>}
+                                Nenhuma
+                              </button>
+                              {BANK_LIST.map((banco) => {
+                                const selected = (financialData.tem_creditos_activos || []).includes(banco);
+                                return (
+                                  <button
+                                    key={`edit-contas-${banco}`}
+                                    type="button"
+                                    onClick={() => {
+                                      const current = financialData.tem_creditos_activos || [];
+                                      setFinancialData({
+                                        ...financialData,
+                                        tem_creditos_activos: current.includes(banco)
+                                          ? current.filter(b => b !== banco)
+                                          : [...current, banco]
+                                      });
+                                    }}
+                                    className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-amber-400 scale-105' : 'opacity-50 hover:opacity-80'} ${getBankColor(banco)}`}
+                                  >
+                                    {selected && <span className="mr-1">✓</span>}
+                                    {banco}
+                                  </button>
+                                );
+                              })}
                             </div>
                           </CardContent>
                         </Card>

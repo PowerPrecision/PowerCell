@@ -344,9 +344,9 @@ class FinancialData(BaseModel):
     rendimento_co_titular: Optional[float] = None  # Rendimento do co-titular
     creditos_existentes: Optional[float] = None     # Valor de créditos existentes
     prestacao_creditos_mensal: Optional[float] = None  # Prestação mensal de créditos
-    # Contas abertas (Créditos e Capital)
-    tem_creditos_activos: Optional[bool] = None       # Tem créditos ativos (Sim/Não)
-    valor_creditos_activos: Optional[float] = None     # Valor total dos créditos ativos
+    # Contas abertas (Créditos e Capital) — bancos com contas de crédito abertas
+    tem_creditos_activos: Optional[List[str]] = None  # Bancos com contas abertas (mesmo formato que bancos_creditos)
+    valor_creditos_activos: Optional[float] = None     # [Deprecated] Valor total — mantido para backward compat
 
 
 class CreditData(BaseModel):

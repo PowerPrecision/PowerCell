@@ -202,7 +202,11 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
     
     # Situação bancária
     situacao_bancaria = []
-    if financial_data.get("tem_creditos_activos"):
+    # tem_creditos_activos pode ser lista (novos dados) ou bool (legacy)
+    _tca = financial_data.get("tem_creditos_activos")
+    if isinstance(_tca, list) and len(_tca) > 0:
+        situacao_bancaria.append(f"Tem créditos ativos: {', '.join(_tca)}")
+    elif isinstance(_tca, bool) and _tca:
         situacao_bancaria.append("Tem créditos ativos")
     if personal_data.get("insolvencia") or financial_data.get("insolvencia"):
         situacao_bancaria.append("Insolvência")
@@ -405,7 +409,11 @@ def _build_professional_email_html(process: dict, user: dict, documents_list: st
     
     # Situação bancária
     situacao_bancaria = []
-    if financial_data.get("tem_creditos_activos"):
+    # tem_creditos_activos pode ser lista (novos dados) ou bool (legacy)
+    _tca2 = financial_data.get("tem_creditos_activos")
+    if isinstance(_tca2, list) and len(_tca2) > 0:
+        situacao_bancaria.append(f"Tem créditos ativos: {', '.join(_tca2)}")
+    elif isinstance(_tca2, bool) and _tca2:
         situacao_bancaria.append("Tem créditos ativos")
     if personal_data.get("insolvencia") or financial_data.get("insolvencia"):
         situacao_bancaria.append("Insolvência")

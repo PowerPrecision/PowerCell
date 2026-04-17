@@ -858,14 +858,19 @@ const ClientRegistrationsPage = () => {
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg col-span-2">
                     <CreditCard className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <p className="text-xs text-muted-foreground">Créditos Activos</p>
-                      <p className="text-sm">
-                        {detailsDialog.client.dados_financeiros?.tem_creditos_activos !== undefined
-                          ? detailsDialog.client.dados_financeiros.tem_creditos_activos
-                            ? <span className="text-orange-600">Sim - {detailsDialog.client.dados_financeiros.valor_creditos_activos ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.valor_creditos_activos) : 'Valor não especificado'}</span>
-                            : <span className="text-green-600">Não</span>
-                          : <span className="text-muted-foreground italic">Não preenchido</span>}
-                      </p>
+                      <p className="text-xs text-muted-foreground">Contas de Crédito Abertas</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {Array.isArray(detailsDialog.client.dados_financeiros?.tem_creditos_activos) && detailsDialog.client.dados_financeiros.tem_creditos_activos.length > 0
+                          ? detailsDialog.client.dados_financeiros.tem_creditos_activos.map((banco, idx) => (
+                              <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                                {banco}
+                              </span>
+                            ))
+                          : detailsDialog.client.dados_financeiros?.tem_creditos_activos === true
+                            ? <span className="text-orange-600 text-sm">Sim</span>
+                            : <span className="text-muted-foreground italic text-sm">Não preenchido</span>
+                        }
+                      </div>
                     </div>
                   </div>
                 </div>

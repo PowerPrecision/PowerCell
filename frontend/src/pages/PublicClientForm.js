@@ -840,9 +840,8 @@ const PublicClientForm = ({ previewMode = false }) => {
           tempo_restante_credito: formData.tempo_restante_credito || null,
           capital_proprio: formData.capital_proprio ? parseFloat(formData.capital_proprio) : null,
           valor_financiado: formData.valor_financiado,
-          // Contas abertas (Créditos e Capital)
-          tem_creditos_activos: formData.tem_creditos_activos === "sim" ? true : (formData.tem_creditos_activos === "nao" ? false : null),
-          valor_creditos_activos: formData.valor_creditos_activos ? parseFloat(formData.valor_creditos_activos) : null,
+          // Contas abertas (Créditos e Capital) — lista de bancos
+          tem_creditos_activos: formData.tem_creditos_activos && formData.tem_creditos_activos.length > 0 ? formData.tem_creditos_activos : null,
           // Campos de emprego
           employment_type: formData.employment_type,
           employment_duration: formData.employment_duration,
@@ -949,6 +948,15 @@ const PublicClientForm = ({ previewMode = false }) => {
       bancos_simulacoes: (prev.bancos_simulacoes || []).includes(banco)
         ? prev.bancos_simulacoes.filter(b => b !== banco)
         : [...(prev.bancos_simulacoes || []), banco]
+    }));
+  };
+
+  const toggleContasAbertas = (banco) => {
+    setFormData(prev => ({
+      ...prev,
+      tem_creditos_activos: (prev.tem_creditos_activos || []).includes(banco)
+        ? prev.tem_creditos_activos.filter(b => b !== banco)
+        : [...(prev.tem_creditos_activos || []), banco]
     }));
   };
 
@@ -1837,42 +1845,44 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
 
         {/* Contas abertas nos Créditos e Capital */}
-        <div className="space-y-3 p-4 bg-muted/30 border rounded-lg">
-          <Label className="text-sm font-medium">Tem contas de crédito abertas neste momento?</Label>
-          <div className="flex gap-3">
-            {["sim", "nao"].map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => updateField("tem_creditos_activos", opt)}
-                data-testid={`tem-creditos-${opt}`}
-                className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border-2 transition-all ${
-                  formData.tem_creditos_activos === opt
-                    ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
-                    : "border-muted bg-white hover:border-muted-foreground/50 text-muted-foreground"
-                }`}
-              >
-                {formData.tem_creditos_activos === opt && <span className="mr-1.5">✓</span>}
-                {opt === "sim" ? "Sim" : "Não"}
-              </button>
-            ))}
+        <div className="space-y-3">
+          <RequiredLabel>Bancos com contas de crédito abertas</RequiredLabel>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData(prev => ({ ...prev, tem_creditos_activos: [] }))}
+              data-testid="contas-nenhuma"
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                (formData.tem_creditos_activos || []).length === 0
+                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700'
+                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+              }`}
+            >
+              {(formData.tem_creditos_activos || []).length === 0 && <span className="mr-1">✓</span>}
+              Nenhuma
+            </button>
+            {BANCOS.map((banco) => {
+              const selected = (formData.tem_creditos_activos || []).includes(banco);
+              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+              return (
+                <button
+                  key={`contas-${banco}`}
+                  type="button"
+                  onClick={() => toggleContasAbertas(banco)}
+                  data-testid={`contas-${banco.toLowerCase().replace(/\s+/g, '-')}`}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
+                  style={selected
+                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
+                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
+                  }
+                >
+                  {selected && <span className="mr-1">✓</span>}
+                  {banco}
+                </button>
+              );
+            })}
           </div>
-          {formData.tem_creditos_activos === "sim" && (
-            <div className="space-y-2 pt-2">
-              <RequiredLabel htmlFor="valor_creditos_activos">Valor total dos créditos em aberto (€)</RequiredLabel>
-              <Input
-                id="valor_creditos_activos"
-                type="number"
-                step="0.01"
-                min="0"
-                value={formData.valor_creditos_activos}
-                onChange={(e) => updateField("valor_creditos_activos", e.target.value)}
-                placeholder="Ex: 150000"
-                data-testid="fin-valor-creditos-activos"
-              />
-              <FieldHint>Soma de todas as prestações em dívida (habitação, automóvel, pessoal, cartões).</FieldHint>
-            </div>
-          )}
+          <FieldHint>Selecione os bancos onde tem contas de crédito abertas (habitação, automóvel, pessoal, cartões).</FieldHint>
         </div>
         
         {/* Pergunta sobre simulações de crédito */}
