@@ -334,25 +334,35 @@ async def update_process_document(
                 "new": clean_email
             })
     
-    # Dados estruturados
+    # Dados estruturados — merge com dados existentes para evitar sobreposição
     if data.personal_data:
-        update_data["personal_data"] = data.personal_data.model_dump()
+        incoming = data.personal_data.model_dump(exclude_unset=True, exclude_none=True)
+        existing = process.get("personal_data") or {}
+        update_data["personal_data"] = {**existing, **incoming}
         changes.append({"field": "personal_data", "old": "...", "new": "atualizado"})
         
     if data.titular2_data:
-        update_data["titular2_data"] = data.titular2_data.model_dump()
+        incoming = data.titular2_data.model_dump(exclude_unset=True, exclude_none=True)
+        existing = process.get("titular2_data") or {}
+        update_data["titular2_data"] = {**existing, **incoming}
         changes.append({"field": "titular2_data", "old": "...", "new": "atualizado"})
         
     if data.financial_data:
-        update_data["financial_data"] = data.financial_data.model_dump()
+        incoming = data.financial_data.model_dump(exclude_unset=True, exclude_none=True)
+        existing = process.get("financial_data") or {}
+        update_data["financial_data"] = {**existing, **incoming}
         changes.append({"field": "financial_data", "old": "...", "new": "atualizado"})
         
-    if data.property_data:
-        update_data["property_data"] = data.property_data.model_dump()
-        changes.append({"field": "property_data", "old": "...", "new": "atualizado"})
+    if data.real_estate_data:
+        incoming = data.real_estate_data.model_dump(exclude_unset=True, exclude_none=True)
+        existing = process.get("real_estate_data") or {}
+        update_data["real_estate_data"] = {**existing, **incoming}
+        changes.append({"field": "real_estate_data", "old": "...", "new": "atualizado"})
         
     if data.credit_data:
-        update_data["credit_data"] = data.credit_data.model_dump()
+        incoming = data.credit_data.model_dump(exclude_unset=True, exclude_none=True)
+        existing = process.get("credit_data") or {}
+        update_data["credit_data"] = {**existing, **incoming}
         changes.append({"field": "credit_data", "old": "...", "new": "atualizado"})
     
     return update_data, changes
