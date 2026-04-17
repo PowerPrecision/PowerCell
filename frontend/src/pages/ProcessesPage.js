@@ -60,10 +60,6 @@ const ProcessesPage = () => {
     }, { replace: true });
   };
 
-  useEffect(() => {
-    fetchProcesses();
-  }, [pagination.page, pagination.size, showCompleted]);
-
   const fetchProcesses = async () => {
     try {
       setLoading(true);
@@ -109,17 +105,21 @@ const ProcessesPage = () => {
     }, { replace: true });
   };
 
-  // Debounced search
+  // Debounced search — only updates URL param, main useEffect handles fetch
   const [searchInput, setSearchInput] = useState(searchTerm);
   useEffect(() => {
     const timer = setTimeout(() => {
       if (searchInput !== searchTerm) {
         setSearchTerm(searchInput);
-        fetchProcesses();
       }
     }, 300);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  // Re-fetch when search term changes (driven by URL param sync above)
+  useEffect(() => {
+    fetchProcesses();
+  }, [pagination.page, pagination.size, showCompleted, searchTerm]);
 
   // Funções de paginação
   const goToPage = useCallback((page) => {
