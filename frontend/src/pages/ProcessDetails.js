@@ -139,6 +139,8 @@ import {
   EyeOff,
   X,
   Search,
+  RefreshCw,
+  BrainCircuit,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isAfter } from "date-fns";
@@ -262,6 +264,11 @@ const ProcessDetails = () => {
   // TAREFA 2: Estado para conflitos de dados IA
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [isDataConfirmed, setIsDataConfirmed] = useState(false);
+
+  // AI Executive Summary
+  const [aiSummary, setAiSummary] = useState(null);
+  const [aiAnalysisDate, setAiAnalysisDate] = useState(null);
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
 
   // Form states
   const [personalData, setPersonalData] = useState({});
@@ -596,6 +603,79 @@ const ProcessDetails = () => {
     }
   };
 
+  // AI Executive Summary — generate or refresh
+  const handleAiAnalysis = async (force = false) => {
+    setAiAnalysisLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/api/processes/${id}/analyze${force ? '?force=true' : ''}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          toast.warning("Já existe uma análise em curso. Aguarde.");
+        } else if (res.status === 503) {
+          toast.error("Serviço de IA não configurado. Contacte o administrador.");
+        } else {
+          toast.error(errData.detail || "Erro ao gerar análise IA");
+        }
+        return;
+      }
+      const data = await res.json();
+      setAiSummary(data.ai_executive_summary);
+      setAiAnalysisDate(data.ai_analysis_date);
+      if (data.cached) {
+        toast.info("Análise anterior carregada. Clique em 'Actualizar' para gerar nova análise.");
+      } else {
+        toast.success("Análise IA gerada com sucesso!");
+      }
+    } catch (err) {
+      console.error("Erro na análise IA:", err);
+      toast.error("Erro de ligação ao servidor.");
+    } finally {
+      setAiAnalysisLoading(false);
+    }
+  };
+
+  // Render Markdown summary as HTML (simple: just handle headings, bold, lists, blockquotes)
+  const renderAiSummary = (markdown) => {
+    if (!markdown) return null;
+    return markdown.split('\n').map((line, i) => {
+      // Headings
+      if (line.startsWith('### ')) {
+        const isAlert = line.toLowerCase().includes('alerta') || line.toLowerCase().includes('diverg');
+        return <h4 key={i} className={`font-semibold text-sm mt-4 mb-2 ${isAlert ? 'text-red-600 flex items-center gap-1.5' : 'text-foreground flex items-center gap-1.5'}`}>{line.replace('### ', '')}</h4>;
+      }
+      if (line.startsWith('## ')) return <h3 key={i} className="font-semibold text-base mt-5 mb-2">{line.replace('## ', '')}</h3>;
+      if (line.startsWith('# ')) return <h2 key={i} className="font-bold text-lg mt-5 mb-2">{line.replace('# ', '')}</h2>;
+      // Blockquote
+      if (line.startsWith('> ')) return <blockquote key={i} className="border-l-4 border-green-400 pl-3 my-2 text-sm text-muted-foreground italic">{line.replace('> ', '')}</blockquote>;
+      // Horizontal rule
+      if (line.trim() === '---') return <hr key={i} className="my-3 border-muted" />;
+      // List items
+      if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 text-sm list-disc">{renderInlineFormatting(line.replace(/^[-*]\s/, ''))}</li>;
+      // Empty line
+      if (line.trim() === '') return <div key={i} className="h-1" />;
+      // Bold line (alerts)
+      if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="text-sm font-semibold mt-1">{line.replace(/\*\*/g, '')}</p>;
+      // Normal paragraph
+      return <p key={i} className="text-sm leading-relaxed">{renderInlineFormatting(line)}</p>;
+    });
+  };
+
+  const renderInlineFormatting = (text) => {
+    // Simple bold **text** → <strong>
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} className="font-semibold">{part.replace(/\*\*/g, '')}</strong>;
+      }
+      return part;
+    });
+  };
+
   // Resolver conflito de IA (escolher valor)
   const resolveAIConflict = (field, chosenValue) => {
     // Actualizar o campo com o valor escolhido
@@ -676,6 +756,10 @@ const ProcessDetails = () => {
       setFinancialData(processData.financial_data || {});
       setRealEstateData(processData.real_estate_data || {});
       setCreditData(processData.credit_data || {});
+      
+      // AI Executive Summary — load existing summary
+      setAiSummary(processData.ai_executive_summary || null);
+      setAiAnalysisDate(processData.ai_analysis_date || null);
       
       // UNIFICAÇÃO backward-compat: se personal_data tem morada/address mas não morada_fiscal, migrar
       const pd = processData.personal_data || {};
@@ -3720,6 +3804,85 @@ const ProcessDetails = () => {
                         </div>
                       </div>
                       
+                      {/* AI Executive Summary — Analisar IA (Auditoria) */}
+                      <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10">
+                        <CardContent className="pt-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-indigo-100 dark:bg-indigo-900/40 rounded-lg">
+                                <BrainCircuit className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                              </div>
+                              <div>
+                                <h3 className="font-semibold text-sm text-indigo-800 dark:text-indigo-200">Resumo Executivo IA</h3>
+                                <p className="text-xs text-indigo-600 dark:text-indigo-400">
+                                  Auditoria cruzada entre dados declarados e documentos
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {aiAnalysisDate && (
+                                <span className="text-xs text-muted-foreground hidden sm:inline">
+                                  {new Date(aiAnalysisDate).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              )}
+                              {aiSummary && !aiAnalysisLoading ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleAiAnalysis(true)}
+                                  className="border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:text-indigo-300"
+                                >
+                                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                                  Atualizar
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleAiSummary ? handleAiAnalysis(true) : handleAiAnalysis(false)}
+                                  disabled={aiAnalysisLoading}
+                                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                                >
+                                  {aiAnalysisLoading ? (
+                                    <>
+                                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                                      A cruzar dados e a ler documentos...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                                      {aiSummary ? "Atualizar Análise IA" : "Analisar IA (Auditoria)"}
+                                    </>
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Loading state */}
+                          {aiAnalysisLoading && (
+                            <div className="mt-4 flex items-center gap-3 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
+                              <div className="flex gap-1">
+                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                              </div>
+                              <p className="text-sm text-indigo-700 dark:text-indigo-300">
+                                A IA está a cruzar os dados do formulário com os documentos extraídos...
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Summary result */}
+                          {aiSummary && !aiAnalysisLoading && (
+                            <div className="mt-4 p-4 bg-white dark:bg-gray-900 border rounded-lg max-h-[600px] overflow-y-auto">
+                              <div className="prose prose-sm dark:prose-invert max-w-none">
+                                {renderAiSummary(aiSummary)}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+
                       {/* Painel de Documentos Unificado */}
                       <Card className="border-amber-200 dark:border-amber-800">
                         <CardContent className="pt-6">
