@@ -722,3 +722,24 @@ Stage Summary:
 - Email/phone changes in ProcessDetails now propagate to `clients.contacto.email` / `clients.contacto.telefone`
 - Global search (which queries both collections) will return up-to-date contact info
 - No search cache invalidation needed (search queries MongoDB directly)
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Add likes and read receipts to team mural (Mural da Equipa)
+
+Work Log:
+- Created backend model `backend/models/announcement.py` with Pydantic schemas including `likes` and `read_by` list fields
+- Created backend routes `backend/routes/announcements.py` with 6 endpoints: GET list, POST create, DELETE, POST toggle-like, POST mark-read, GET readers
+- Registered announcements router in `backend/routes/__init__.py` and `backend/server.py`
+- Added 6 API functions to `frontend/src/services/api.js`: getAnnouncements, createAnnouncement, deleteAnnouncement, toggleAnnouncementLike, markAnnouncementRead, getAnnouncementReaders
+- Created `frontend/src/components/TeamMural.js` component with: message publishing, like toggle (heart icon, red when active), read receipts with tooltip (reader names on hover), IntersectionObserver-based auto-read (2s visibility threshold), unread indicator (blue ring + pulsing dot), visual differentiation (blue bg for own, gray for others), Ctrl+Enter to publish
+- Integrated TeamMural as new "Mural" tab in StaffDashboard.js with Rss icon
+- Resolved merge conflicts with remote (new routes: shared_email, companies, ai_analysis) during rebase
+- Pushed to dev branch: commit `d65c5b7`
+
+Stage Summary:
+- Full feature implemented: backend model + 6 API endpoints + frontend component with likes, read receipts, auto-read observer
+- Files created: `backend/models/announcement.py`, `backend/routes/announcements.py`, `frontend/src/components/TeamMural.js`
+- Files modified: `backend/routes/__init__.py`, `backend/server.py`, `frontend/src/services/api.js`, `frontend/src/pages/StaffDashboard.js`
+- Commit: `feat: add likes and read receipts to team mural`
