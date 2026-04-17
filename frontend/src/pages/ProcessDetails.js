@@ -137,6 +137,7 @@ import {
   Lock,
   Eye,
   EyeOff,
+  X,
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -304,6 +305,10 @@ const ProcessDetails = () => {
 
   // Estado para o modal de envio de documentação
   const [showSendDocsModal, setShowSendDocsModal] = useState(false);
+
+  // Estado para etiquetas (Fase 3)
+  const [newLabel, setNewLabel] = useState("");
+  const LABEL_PRESETS = ["Urgente", "Refinanciamento", "Primeira Habitação", "Investimento", "Documentação Pendente", "Aguarda Banco", "Aguarda Cliente", "Jovem"];
 
   // Buscar utilizadores
   const fetchUsers = async () => {
@@ -532,6 +537,14 @@ const ProcessDetails = () => {
       if (extractedData.estacionamento) newRealEstateData.estacionamento = extractedData.estacionamento;
       if (extractedData.arrecadacao) newRealEstateData.arrecadacao = extractedData.arrecadacao;
       setRealEstateData(newRealEstateData);
+      
+      // Dados de crédito e avaliação bancária (Fase 3)
+      const newCreditData = { ...creditData };
+      if (extractedData.valuation_value || extractedData.valor_avaliacao) newCreditData.valuation_value = extractedData.valuation_value || extractedData.valor_avaliacao;
+      if (extractedData.valuation_date || extractedData.data_avaliacao) newCreditData.valuation_date = extractedData.valuation_date || extractedData.data_avaliacao;
+      if (extractedData.valuation_bank || extractedData.banco_avaliacao) newCreditData.valuation_bank = extractedData.valuation_bank || extractedData.banco_avaliacao;
+      if (extractedData.valuation_notes || extractedData.notas_avaliacao) newCreditData.valuation_notes = extractedData.valuation_notes || extractedData.notas_avaliacao;
+      setCreditData(newCreditData);
       
       // Se há conflitos, mostrar dialog de revisão
       if (conflicts && conflicts.length > 0) {
@@ -822,6 +835,13 @@ const ProcessDetails = () => {
   // Helper para limpar dados de crédito antes de enviar
   const cleanCreditDataForSubmit = (data) => {
     const cleaned = { ...data };
+    // Converter datas para ISO
+    if (cleaned.valuation_date) {
+      cleaned.valuation_date = convertPortugueseDateToISO(cleaned.valuation_date);
+    }
+    if (cleaned.bank_approval_date) {
+      cleaned.bank_approval_date = convertPortugueseDateToISO(cleaned.bank_approval_date);
+    }
     // Remover campos undefined ou vazios
     Object.keys(cleaned).forEach(key => {
       if (cleaned[key] === undefined || cleaned[key] === '') {
@@ -918,6 +938,10 @@ const ProcessDetails = () => {
       if (process.monitored_emails && process.monitored_emails.length > 0) {
         updateData.monitored_emails = process.monitored_emails;
       }
+      // Metadados do processo (Fase 3)
+      if (process.notes !== undefined) updateData.notes = process.notes;
+      if (process.prioridade) updateData.prioridade = process.prioridade;
+      if (process.labels !== undefined) updateData.labels = process.labels;
 
       await updateProcess(id, updateData);
       toast.success("Processo atualizado com sucesso!");
@@ -1630,6 +1654,138 @@ const ProcessDetails = () => {
                 />
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Notas, Prioridade e Etiquetas (Fase 3) */}
+        <Card>
+          <CardContent className="pt-4">
+            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              Organização do Processo
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Notas */}
+              <div className="space-y-1 sm:col-span-2">
+                <Label className="text-xs text-muted-foreground">Notas do Consultor</Label>
+                <Textarea
+                  value={process?.notes || ""}
+                  onChange={(e) => setProcess(prev => ({ ...prev, notes: e.target.value }))}
+                  disabled={!canEditPersonal}
+                  rows={3}
+                  placeholder="Observações gerais sobre o caso..."
+                />
+              </div>
+              {/* Prioridade */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Prioridade</Label>
+                <Select
+                  value={process?.prioridade || "media"}
+                  onValueChange={(value) => setProcess(prev => ({ ...prev, prioridade: value }))}
+                  disabled={!canEditPersonal}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="baixa">
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-green-500" />
+                        Baixa
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="media">
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-amber-500" />
+                        Média
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="alta">
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-red-500" />
+                        Alta
+                      </span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* Etiquetas */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Etiquetas</Label>
+                <div className="flex flex-wrap gap-1.5 mb-1.5 min-h-[36px] items-center">
+                  {(process?.labels || []).map((label, idx) => (
+                    <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
+                      {label}
+                      {canEditPersonal && (
+                        <button
+                          onClick={() => setProcess(prev => ({
+                            ...prev,
+                            labels: (prev.labels || []).filter((_, i) => i !== idx)
+                          }))}
+                          className="ml-0.5 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </Badge>
+                  ))}
+                  {canEditPersonal && (
+                    <div className="flex items-center gap-1">
+                      <Input
+                        value={newLabel}
+                        onChange={(e) => setNewLabel(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && newLabel.trim()) {
+                            e.preventDefault();
+                            setProcess(prev => ({
+                              ...prev,
+                              labels: [...(prev.labels || []), newLabel.trim()]
+                            }));
+                            setNewLabel("");
+                          }
+                        }}
+                        className="h-7 w-28 text-xs"
+                        placeholder="Nova etiqueta"
+                      />
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground" title="Etiquetas predefinidas">
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-48 p-2" align="start">
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-muted-foreground px-1 mb-1">Predefinidas</p>
+                            {LABEL_PRESETS.filter(l => !(process?.labels || []).includes(l)).map((label) => (
+                              <button
+                                key={label}
+                                onClick={() => setProcess(prev => ({
+                                  ...prev,
+                                  labels: [...(prev.labels || []), label]
+                                }))}
+                                className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted transition-colors"
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            {/* Indicador visual de prioridade */}
+            {process?.prioridade && process.prioridade !== "media" && (
+              <div className={`mt-3 p-2 rounded-lg text-xs font-medium ${
+                process.prioridade === "alta"
+                  ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800"
+                  : "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800"
+              }`}>
+                {process.prioridade === "alta" ? "⚠ Prioridade Alta — Ação requerida" : "✓ Prioridade Baixa — Sem urgência"}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -3150,6 +3306,50 @@ const ProcessDetails = () => {
                               Dados do CPCV e Prazos
                             </h4>
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                              {/* Valores Financeiros do CPCV (Fase 3) */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Sinal / Entrada (€)</Label>
+                                <Input
+                                  type="number"
+                                  value={financialData.valor_entrada || ""}
+                                  onChange={(e) => setFinancialData({ ...financialData, valor_entrada: parseFloat(e.target.value) || null })}
+                                  disabled={!canEditRealEstate}
+                                  className="h-9"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Data do Sinal</Label>
+                                <Input
+                                  type="date"
+                                  value={financialData.data_sinal || ""}
+                                  onChange={(e) => setFinancialData({ ...financialData, data_sinal: e.target.value })}
+                                  disabled={!canEditRealEstate}
+                                  className="h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Reforço do Sinal (€)</Label>
+                                <Input
+                                  type="number"
+                                  value={financialData.reforco_sinal || ""}
+                                  onChange={(e) => setFinancialData({ ...financialData, reforco_sinal: parseFloat(e.target.value) || null })}
+                                  disabled={!canEditRealEstate}
+                                  className="h-9"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Comissão Mediação (€)</Label>
+                                <Input
+                                  type="number"
+                                  value={financialData.comissao_mediacao || ""}
+                                  onChange={(e) => setFinancialData({ ...financialData, comissao_mediacao: parseFloat(e.target.value) || null })}
+                                  disabled={!canEditRealEstate}
+                                  className="h-9"
+                                  placeholder="0.00"
+                                />
+                              </div>
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Data do CPCV</Label>
                                 <Input
@@ -3336,6 +3536,68 @@ const ProcessDetails = () => {
                           />
                         </div>
                       </div>
+
+                      {/* ====== Avaliação Bancária (Fase 3) ====== */}
+                      <Card className="border-l-4 border-l-emerald-500 mt-4">
+                        <CardContent className="pt-4">
+                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                            <Building2 className="h-4 w-4 text-emerald-500" />
+                            Avaliação Bancária
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Valor da Avaliação (€)</Label>
+                              <Input
+                                type="number"
+                                value={creditData.valuation_value || ""}
+                                onChange={(e) => setCreditData({ ...creditData, valuation_value: parseFloat(e.target.value) || null })}
+                                disabled={!canEditCredit}
+                                className="h-9"
+                                placeholder="0.00"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Data da Avaliação</Label>
+                              <Input
+                                type="date"
+                                value={creditData.valuation_date || ""}
+                                onChange={(e) => setCreditData({ ...creditData, valuation_date: e.target.value })}
+                                disabled={!canEditCredit}
+                                className="h-9"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Banco Avaliador</Label>
+                              <Input
+                                value={creditData.valuation_bank || ""}
+                                onChange={(e) => setCreditData({ ...creditData, valuation_bank: e.target.value })}
+                                disabled={!canEditCredit}
+                                className="h-9"
+                                placeholder="Ex: CGD, Millennium BCP"
+                              />
+                            </div>
+                            <div className="space-y-1 sm:col-span-2 md:col-span-3">
+                              <Label className="text-xs text-muted-foreground">Notas da Avaliação</Label>
+                              <Textarea
+                                value={creditData.valuation_notes || ""}
+                                onChange={(e) => setCreditData({ ...creditData, valuation_notes: e.target.value })}
+                                disabled={!canEditCredit}
+                                rows={2}
+                                placeholder="Observações sobre a avaliação bancária"
+                              />
+                            </div>
+                          </div>
+                          {/* Alerta: Avaliação abaixo do valor de compra */}
+                          {creditData.valuation_value && realEstateData.valor_imovel && creditData.valuation_value < realEstateData.valor_imovel && (
+                            <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-2">
+                              <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
+                              <p className="text-xs text-red-700 dark:text-red-300">
+                                Valor da avaliação ({creditData.valuation_value.toLocaleString('pt-PT')}€) é inferior ao valor do imóvel ({realEstateData.valor_imovel.toLocaleString('pt-PT')}€). Diferença de {Math.abs(realEstateData.valor_imovel - creditData.valuation_value).toLocaleString('pt-PT')}€.
+                              </p>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
                     )}
                   </TabsContent>
 

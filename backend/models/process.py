@@ -466,6 +466,10 @@ class ProcessUpdate(BaseModel):
     vendedor: Optional[dict] = None  # Dados do vendedor do CPCV
     mediador: Optional[dict] = None  # Dados do mediador imobiliário
     monitored_emails: Optional[List[str]] = None  # Emails adicionais monitorizados
+    # Metadados do processo (Fase 3)
+    notes: Optional[str] = None  # Notas gerais do consultor
+    prioridade: Optional[str] = None  # Nível de prioridade: baixa, media, alta
+    labels: Optional[List[str]] = None  # Etiquetas de categorização
     
     @field_validator('client_email', 'client_phone', mode='before')
     @classmethod
@@ -513,7 +517,7 @@ class ProcessResponse(BaseModel):
     notes: Optional[str] = None
     valor_financiado: Optional[str] = None
     idade_menos_35: Optional[bool] = None
-    prioridade: Optional[bool] = None
+    prioridade: Optional[str] = None  # baixa, media, alta (Fase 3: alterado de bool para str)
     labels: Optional[List[str]] = None
     onedrive_links: Optional[List[dict]] = None
     has_property: Optional[bool] = None  # Flag para indicar se cliente já tem imóvel

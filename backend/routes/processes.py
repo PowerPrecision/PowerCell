@@ -1863,6 +1863,16 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         if data.monitored_emails is not None:
             update_data["monitored_emails"] = data.monitored_emails
         
+        # Metadados do processo (Fase 3)
+        if data.notes is not None:
+            update_data["notes"] = data.notes
+        if data.prioridade is not None:
+            if data.prioridade not in ["baixa", "media", "alta"]:
+                raise HTTPException(status_code=400, detail="Prioridade inválida. Valores aceites: baixa, media, alta")
+            update_data["prioridade"] = data.prioridade
+        if data.labels is not None:
+            update_data["labels"] = data.labels
+        
         if data.status and can_update_status and (data.status in valid_statuses or not valid_statuses):
             await log_history(process_id, user, "Alterou estado", "status", process["status"], data.status)
             await log_audit_event(process_id, user, "Alterou estado", field="status", old_value=process["status"], new_value=data.status, request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
