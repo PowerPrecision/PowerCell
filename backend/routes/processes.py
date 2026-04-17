@@ -1786,18 +1786,21 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     else:
         # Staff updates
         if data.personal_data and can_update_personal:
-            await log_data_changes(process_id, user, process.get("personal_data"), data.personal_data.model_dump(), "dados pessoais")
+            personal_dict = data.personal_data.model_dump()
+            logger.info(f"Updating personal_data for process {process_id} by {user.get('email')} (role={role}): {list(personal_dict.keys())}")
+            await log_data_changes(process_id, user, process.get("personal_data"), personal_dict, "dados pessoais")
             await log_audit_event(process_id, user, "Alterou dados pessoais", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["personal_data"] = data.personal_data.model_dump()
+            update_data["personal_data"] = personal_dict
             
             # Actualizar client_name se nome_completo ou nome for fornecido
-            personal_dict = data.personal_data.model_dump()
             new_name = personal_dict.get("nome_completo") or personal_dict.get("nome")
             if new_name:
                 sanitized_name = sanitize_name(new_name)
                 if not sanitized_name:
                     raise HTTPException(status_code=400, detail="Nome do cliente inválido após sanitização")
                 update_data["client_name"] = sanitized_name
+        elif not data.personal_data and not is_indexacao:
+            logger.debug(f"No personal_data in update for process {process_id} by {user.get('email')} (role={role})")
         
         if data.financial_data and can_update_financial:
             await log_data_changes(process_id, user, process.get("financial_data"), data.financial_data.model_dump(), "dados financeiros")
