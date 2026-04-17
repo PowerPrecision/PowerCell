@@ -2955,7 +2955,7 @@ async def admin_get_user_email_config(
     """
     target = await db.users.find_one(
         {"id": user_id},
-        {"_id": 0, "password": 0, "email_config": 1, "name": 1, "email": 1}
+        {"_id": 0, "email_config": 1, "name": 1, "email": 1}
     )
     if not target:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
