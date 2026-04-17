@@ -1573,38 +1573,39 @@ const SystemConfigPage = () => {
               </p>
             )}
 
-            {/* RGPD Preview Dialog */}
-            <Dialog open={showRgpdPreview} onOpenChange={setShowRgpdPreview}>
-              <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Pré-visualização RGPD</DialogTitle>
-                  <DialogDescription>
-                    Visualização do texto tal como o cliente final o verá
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="prose prose-sm max-w-none bg-white border rounded-lg p-6"
-                  dangerouslySetInnerHTML={{
-                    __html: (templateContent || "")
-                      .replace(/\{\{NOME_CLIENTE\}\}/g, "João Silva")
-                      .replace(/\{\{NOME_EMPRESA\}\}/g, "Power Real Estate")
-                      .replace(/\{\{CONTRIBUINTE\}\}/g, "123456789")
-                      .replace(/\{\{MORADA\}\}/g, "Rua Example, 123, Lisboa")
-                      .replace(/\{\{CODIGO_POSTAL\}\}/g, "1000-001")
-                      .replace(/\{\{TIPO_DOCUMENTO\}\}/g, "Cartão de Cidadão")
-                      .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, "CC 00000000")
-                      .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, "01/01/2030")
-                      .replace(/\{\{DATA_ASSINATURA\}\}/g, new Date().toLocaleDateString("pt-PT"))
-                  }}
-                />
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setShowRgpdPreview(false)}>
-                    Fechar
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
           </CardContent>
         </Card>
+
+        {/* RGPD Preview Dialog - outside Card to avoid layout interference */}
+        <Dialog open={showRgpdPreview} onOpenChange={setShowRgpdPreview}>
+          <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Pré-visualização RGPD</DialogTitle>
+              <DialogDescription>
+                Visualização do texto tal como o cliente final o verá
+              </DialogDescription>
+            </DialogHeader>
+            <div className="prose prose-sm max-w-none bg-white border rounded-lg p-6"
+              dangerouslySetInnerHTML={{
+                __html: (templateContent || "")
+                  .replace(/\{\{NOME_CLIENTE\}\}/g, "João Silva")
+                  .replace(/\{\{NOME_EMPRESA\}\}/g, "Power Real Estate")
+                  .replace(/\{\{CONTRIBUINTE\}\}/g, "123456789")
+                  .replace(/\{\{MORADA\}\}/g, "Rua Example, 123, Lisboa")
+                  .replace(/\{\{CODIGO_POSTAL\}\}/g, "1000-001")
+                  .replace(/\{\{TIPO_DOCUMENTO\}\}/g, "Cartão de Cidadão")
+                  .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, "CC 00000000")
+                  .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, "01/01/2030")
+                  .replace(/\{\{DATA_ASSINATURA\}\}/g, new Date().toLocaleDateString("pt-PT"))
+              }}
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowRgpdPreview(false)}>
+                Fechar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Version History */}
         <Card>
