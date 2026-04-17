@@ -121,6 +121,7 @@ export default function ClientsPage() {
   const phaseFilter = searchParams.get("phase") || "all";
   const assignmentFilter = searchParams.get("assignment") || "all";
   const indexacaoFilter = searchParams.get("indexacao") || "all";
+  const showDeleted = searchParams.get("show_deleted") === "true";
   
   const updateParam = (key, value) => {
     setSearchParams(prev => {
@@ -138,6 +139,7 @@ export default function ClientsPage() {
   const setPhaseFilter = (v) => updateParam("phase", v);
   const setAssignmentFilter = (v) => updateParam("assignment", v);
   const setIndexacaoFilter = (v) => updateParam("indexacao", v);
+  const setShowDeleted = (v) => updateParam("show_deleted", v ? "true" : "");
   const setSortField = (v) => updateParam("sort", v);
   const setSortOrder = (v) => updateParam("order", v);
   
@@ -177,12 +179,17 @@ export default function ClientsPage() {
       // Filtro por processos activos
       if (statusFilter === "active") params.append("has_active_process", "true");
       if (statusFilter === "inactive") params.append("has_active_process", "false");
+      if (statusFilter === "deleted") {
+        params.append("deleted_only", "true");
+      }
       // Filtro por fase
       if (phaseFilter && phaseFilter !== "all") params.append("status_filter", phaseFilter);
       // Filtro por atribuição
       if (assignmentFilter && assignmentFilter !== "all") params.append("assignment_filter", assignmentFilter);
       // Filtro por indexação
       if (indexacaoFilter && indexacaoFilter !== "all") params.append("indexacao_filter", indexacaoFilter);
+      // Hide deleted clients by default
+      if (!showDeleted) params.append("exclude_deleted", "true");
 
       const response = await fetch(`${API_URL}/api/clients?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -199,7 +206,7 @@ export default function ClientsPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, statusFilter, phaseFilter, assignmentFilter, indexacaoFilter]);
+  }, [searchTerm, statusFilter, phaseFilter, assignmentFilter, indexacaoFilter, showDeleted]);
 
   useEffect(() => {
     fetchClients();
@@ -438,6 +445,12 @@ export default function ClientsPage() {
                       <div className="flex items-center gap-2">
                         <XCircle className="h-4 w-4 text-gray-400" />
                         Clientes Inativos
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="deleted">
+                      <div className="flex items-center gap-2">
+                        <Trash2 className="h-4 w-4 text-red-400" />
+                        Clientes Eliminados
                       </div>
                     </SelectItem>
                   </SelectContent>

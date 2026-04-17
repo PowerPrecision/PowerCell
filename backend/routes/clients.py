@@ -611,6 +611,8 @@ async def list_clients(
     status_filter: Optional[str] = Query(None, description="Filtrar por fase do processo"),
     assignment_filter: Optional[str] = Query(None, description="Filtrar por tipo de atribuição: 'both', 'consultor', 'intermediario', 'none'"),
     indexacao_filter: Optional[str] = Query(None, description="Filtrar por indexação: 'assigned' (com indexação), 'unassigned' (sem indexação)"),
+    exclude_deleted: bool = Query(False, description="Excluir clientes eliminados (status=eliminado)"),
+    deleted_only: bool = Query(False, description="Mostrar apenas clientes eliminados (status=eliminado)"),
     limit: int = Query(100, le=500),
     skip: int = Query(0),
     user: dict = Depends(get_current_user)
@@ -742,6 +744,26 @@ async def list_clients(
                 else:
                     process_query = indexacao_query
         
+        # Filtro de eliminados (soft delete)
+        if deleted_only:
+            deleted_query = {"status": "eliminado"}
+            if process_query:
+                if "$and" in process_query:
+                    process_query["$and"].append(deleted_query)
+                else:
+                    process_query = {"$and": [process_query, deleted_query]}
+            else:
+                process_query = deleted_query
+        elif exclude_deleted:
+            deleted_query = {"status": {"$ne": "eliminado"}}
+            if process_query:
+                if "$and" in process_query:
+                    process_query["$and"].append(deleted_query)
+                else:
+                    process_query = {"$and": [process_query, deleted_query]}
+            else:
+                process_query = deleted_query
+        
         # Buscar todos os processos (clientes únicos)
         # NOTA: Não aplicar limit/skip ao nível dos processos pois isso limitaria
         # o número de clientes únicos. A paginação aplica-se ao resultado final.
@@ -859,6 +881,20 @@ async def list_clients(
             ]
         }
         process_query = {"$and": [process_query, search_filter]}
+    
+    # Filtro de eliminados (soft delete) - non-show_all path
+    if deleted_only:
+        deleted_query = {"status": "eliminado"}
+        if "$and" in process_query:
+            process_query["$and"].append(deleted_query)
+        else:
+            process_query = {"$and": [process_query, deleted_query]}
+    elif exclude_deleted:
+        deleted_query = {"status": {"$ne": "eliminado"}}
+        if "$and" in process_query:
+            process_query["$and"].append(deleted_query)
+        else:
+            process_query = {"$and": [process_query, deleted_query]}
     
     # Buscar processos e transformar em "clientes"
     processes = await db.processes.find(
