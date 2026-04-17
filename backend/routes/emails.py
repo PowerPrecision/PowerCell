@@ -2137,18 +2137,34 @@ async def webmail_list(
     # 1. Emails devem pertencer ao utilizador (created_by OU synced_for_user)
     # 2. O endereço do utilizador deve aparecer no FROM/TO
     # 3. Emails legados sem user_id (antigo sync global "geral") são BLOQUEADOS
+    # 4. EXCEÇÃO: Utilizadores de roles com email partilhado (ex: indexacao)
+    #    podem ver emails sincronizados via Gmail API para esse role
     # NOTA: admin/ceo/diretor podem ver TUDO (can_see_all = True)
     if not can_see_all and user_email:
         user_id = current_user["id"]
+        user_role = current_user.get("role", "")
+
+        # Verificar se o utilizador pertence a um role com email partilhado
+        shared_role_config = None
+        if user_role:
+            shared_role_config = await db.shared_role_email_configs.find_one(
+                {"role": user_role, "is_configured": True},
+                {"_id": 0, "role": 1},
+            )
 
         # Filtro de pertença: o email deve ter sido criado por este utilizador
         # OU sincronizado para a sua conta pessoal
+        # OU sincronizado para o role partilhado do utilizador
         ownership_filter = {
             "$or": [
                 {"created_by": user_id},
                 {"synced_for_user": user_id},
             ]
         }
+
+        # Se o utilizador tem um role com email partilhado, incluir emails do role
+        if shared_role_config:
+            ownership_filter["$or"].append({"shared_role": user_role})
 
         if folder == "inbox":
             inbox_or = [
