@@ -1701,7 +1701,7 @@ const SystemConfigPage = () => {
         <div className="flex flex-col lg:flex-row gap-6">
           {/* ─── Left: Sidebar Navigation (Desktop) / Dropdown+Chips (Mobile) ─── */}
           <aside className="w-full lg:w-64 xl:w-72 shrink-0">
-            {/* Desktop: Vertical sidebar */
+            {/* Desktop: Vertical sidebar */}
             <div className="hidden lg:block sticky top-20">
               <Card className="py-2">
                 <CardContent className="p-2">
@@ -1789,7 +1789,7 @@ const SystemConfigPage = () => {
                   </SelectItem>
                 </SelectContent>
               </Select>
-              {/* Horizontal scrollable chips for quick access */
+              {/* Horizontal scrollable chips for quick access */}
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{scrollbarWidth: "none", msOverflowStyle: "none"}}>
                 {sections.map((key) => {
                   const Icon = SECTION_ICONS[key] || Settings;
