@@ -133,6 +133,7 @@ const EmailHistoryPanel = ({
   const [templates, setTemplates] = useState([]);
   const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [previewTemplate, setPreviewTemplate] = useState(null);
   
   // Anexos
   const [attachmentPreview, setAttachmentPreview] = useState(null);
@@ -386,6 +387,50 @@ const EmailHistoryPanel = ({
     } catch (error) {
       toast.error("Preview não disponível");
     }
+  };
+
+  // Pré-visualizar template com dados fictícios
+  const MOCK_DATA = {
+    "{cliente}": "João Silva",
+    "{email_cliente}": "joao.silva@email.pt",
+    "{nome_cliente}": "João Silva",
+    "{processo}": "PROC-2024-0042",
+    "{process_number}": "PROC-2024-0042",
+    "{telefone}": "912 345 678",
+    "{nif}": "234567890",
+    "{banco_atual}": "CGD",
+    "{montante_divida}": "150.000,00 €",
+    "{valor_aquisicao}": "220.000,00 €",
+    "{localidade_imovel}": "Lisboa",
+    "{p1_nome}": "João Silva",
+    "{p1_email}": "joao.silva@email.pt",
+    "{p1_telefone}": "912 345 678",
+    "{p1_nif}": "234567890",
+    "{p2_nome}": "Maria Santos",
+    "{p2_email}": "maria.santos@email.pt",
+    "{p2_telefone}": "923 456 789",
+    "{sender_name}": "Carlos Mendes",
+    "{sender_email}": "carlos@precisioncredito.pt",
+    "{sender_phone}": "911 222 333",
+    "{data}": new Date().toLocaleDateString("pt-PT"),
+  };
+
+  const renderPreviewHtml = (content) => {
+    if (!content) return "";
+    let html = content;
+    // Escape HTML first
+    html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Replace template variables with styled spans
+    Object.entries(MOCK_DATA).forEach(([key, value]) => {
+      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      html = html.replace(
+        new RegExp(escapedKey, 'gi'),
+        `<span class="inline-block bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">${value}</span>`
+      );
+    });
+    // Convert newlines
+    html = html.replace(/\n/g, '<br/>');
+    return html;
   };
 
   // Usar template
@@ -1191,9 +1236,20 @@ const EmailHistoryPanel = ({
                           <Badge variant="secondary" className="mt-2 text-xs">{template.category}</Badge>
                         )}
                       </div>
-                      <Button variant="ghost" size="sm">
-                        <Copy className="h-4 w-4" />
-                      </Button>
+                      <div className="flex flex-col gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(e) => { e.stopPropagation(); setPreviewTemplate(template); }}
+                          title="Pré-visualizar"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1204,6 +1260,71 @@ const EmailHistoryPanel = ({
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsTemplateDialogOpen(false)}>
               Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Preview de Template */}
+      <Dialog open={!!previewTemplate} onOpenChange={(open) => { if (!open) setPreviewTemplate(null); }}>
+        <DialogContent className="sm:max-w-[650px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Pré-visualização: {previewTemplate?.name}
+            </DialogTitle>
+            <DialogDescription>
+              As variáveis são substituídas por dados fictícios para demonstração
+            </DialogDescription>
+          </DialogHeader>
+
+          {previewTemplate?.subject && (
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Assunto</Label>
+              <div
+                className="p-3 bg-muted/50 rounded-lg text-sm font-medium"
+                dangerouslySetInnerHTML={{ __html: renderPreviewHtml(previewTemplate.subject) }}
+              />
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Corpo do Email</Label>
+            <div
+              className="prose prose-sm max-w-none bg-white dark:bg-gray-900 border rounded-lg p-6 overflow-y-auto max-h-[50vh] break-words text-sm"
+              dangerouslySetInnerHTML={{ __html: renderPreviewHtml(previewTemplate?.body || "") }}
+            />
+          </div>
+
+          <div className="bg-muted/50 rounded-lg p-3">
+            <p className="text-xs font-medium mb-2">Variáveis utilizadas:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.keys(MOCK_DATA).map((key) => (
+                <Badge key={key} variant="secondary" className="font-mono text-[10px]">
+                  {key}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setPreviewTemplate(null)}
+            >
+              Fechar
+            </Button>
+            <Button
+              onClick={() => {
+                if (previewTemplate) {
+                  useTemplate(previewTemplate.id);
+                  setPreviewTemplate(null);
+                  setIsTemplateDialogOpen(false);
+                }
+              }}
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              Usar este Template
             </Button>
           </DialogFooter>
         </DialogContent>

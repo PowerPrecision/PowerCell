@@ -31,6 +31,7 @@ class CompanyEmailConfigCreate(BaseModel):
     imap_port: int = 993
     smtp_server: str = ""
     smtp_port: int = 465
+    require_ssl: bool = True
 
 
 class CompanyEmailConfigResponse(BaseModel):
@@ -41,6 +42,7 @@ class CompanyEmailConfigResponse(BaseModel):
     imap_port: Optional[int] = None
     smtp_server: Optional[str] = None
     smtp_port: Optional[int] = None
+    require_ssl: bool = True
     has_encrypted_password: bool = False
     total_users: int = 0
     created_at: Optional[str] = None

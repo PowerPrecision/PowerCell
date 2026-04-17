@@ -56,6 +56,7 @@ async def list_company_configs():
             imap_port=config.get("imap_port", 993),
             smtp_server=config.get("smtp_server"),
             smtp_port=config.get("smtp_port", 465),
+            require_ssl=config.get("require_ssl", True),
             has_encrypted_password=bool(config.get("encrypted_password")),
             total_users=total_users,
             created_at=config.get("created_at"),
@@ -111,6 +112,7 @@ async def get_company_config(company_name: str):
 
     return {
         **config,
+        "require_ssl": config.get("require_ssl", True),
         "has_encrypted_password": bool(config.get("encrypted_password")),
         "total_users": total_users,
     }
@@ -144,6 +146,7 @@ async def create_company_config(payload: CompanyEmailConfigCreate):
         "imap_port": payload.imap_port,
         "smtp_server": payload.smtp_server.strip(),
         "smtp_port": payload.smtp_port,
+        "require_ssl": payload.require_ssl,
         "encrypted_password": "",
         "created_at": now,
         "updated_at": now,
@@ -186,6 +189,7 @@ async def update_company_config(company_name: str, payload: CompanyEmailConfigCr
         "imap_port": payload.imap_port,
         "smtp_server": payload.smtp_server.strip(),
         "smtp_port": payload.smtp_port,
+        "require_ssl": payload.require_ssl,
         "updated_at": now,
     }
 
