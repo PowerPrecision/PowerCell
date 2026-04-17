@@ -959,90 +959,89 @@ async def get_kanban_board(
         pass
     # Admin, CEO, Administrativo, Diretor, Indexação see all (no base filter)
 
-    # Apply additional filters (only for roles that can see all)
-    # Usar uma lista de condições para combinar filtros corretamente
+    # Apply additional filters for ALL staff roles
+    # Consultor/Mediador filters within their assigned processes; others filter globally
     filter_conditions = []
     
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR, UserRole.INDEXACAO]:
-        if consultor_id:
-            if consultor_id == "none":
-                # Sem consultor atribuído
-                filter_conditions.append({
-                    "$or": [
-                        {"assigned_consultor_ids": {"$in": [None, [], ""]}},
-                        {"assigned_consultor_ids": {"$exists": False}},
-                        {"assigned_consultor_id": None},
-                        {"assigned_consultor_id": ""},
-                        {"assigned_consultor_id": {"$exists": False}}
-                    ]
-                })
+    if consultor_id:
+        if consultor_id == "none":
+            # Sem consultor atribuído
+            filter_conditions.append({
+                "$or": [
+                    {"assigned_consultor_ids": {"$in": [None, [], ""]}},
+                    {"assigned_consultor_ids": {"$exists": False}},
+                    {"assigned_consultor_id": None},
+                    {"assigned_consultor_id": ""},
+                    {"assigned_consultor_id": {"$exists": False}}
+                ]
+            })
+        else:
+            # Filtro por consultor específico - verificar no array ou campo único
+            filter_conditions.append({
+                "$or": [
+                    {"assigned_consultor_ids": consultor_id},
+                    {"assigned_consultor_id": consultor_id}
+                ]
+            })
+
+    if mediador_id:
+        if mediador_id == "none":
+            # Sem mediador atribuído
+            filter_conditions.append({
+                "$or": [
+                    {"assigned_mediador_ids": {"$in": [None, [], ""]}},
+                    {"assigned_mediador_ids": {"$exists": False}},
+                    {"assigned_mediador_id": None},
+                    {"assigned_mediador_id": ""},
+                    {"assigned_mediador_id": {"$exists": False}}
+                ]
+            })
+        else:
+            # Filtro por mediador específico - verificar no array ou campo único
+            filter_conditions.append({
+                "$or": [
+                    {"assigned_mediador_ids": mediador_id},
+                    {"assigned_mediador_id": mediador_id}
+                ]
+            })
+
+    if indexacao_id:
+        if indexacao_id == "none":
+            # Sem indexação atribuído
+            filter_conditions.append({
+                "$or": [
+                    {"assigned_indexacao_id": {"$in": [None, ""]}},
+                    {"assigned_indexacao_id": {"$exists": False}}
+                ]
+            })
+        else:
+            # Filtro por indexação específico
+            filter_conditions.append({"assigned_indexacao_id": indexacao_id})
+
+    if parceiro_id:
+        if parceiro_id == "none":
+            # Sem parceiro atribuído
+            filter_conditions.append({
+                "$or": [
+                    {"assigned_parceiro_id": {"$in": [None, ""]}},
+                    {"assigned_parceiro_id": {"$exists": False}}
+                ]
+            })
+        else:
+            # Filtro por parceiro específico
+            filter_conditions.append({"assigned_parceiro_id": parceiro_id})
+
+    # Combinar todas as condições com AND
+    if filter_conditions:
+        if query:
+            # Se já existe uma query base (por role), combinar com os filtros
+            query = {"$and": [query] + filter_conditions}
+        else:
+            # Se não há query base, usar os filtros diretamente
+            if len(filter_conditions) == 1:
+                query = filter_conditions[0]
             else:
-                # Filtro por consultor específico - verificar no array ou campo único
-                filter_conditions.append({
-                    "$or": [
-                        {"assigned_consultor_ids": consultor_id},
-                        {"assigned_consultor_id": consultor_id}
-                    ]
-                })
-        
-        if mediador_id:
-            if mediador_id == "none":
-                # Sem mediador atribuído
-                filter_conditions.append({
-                    "$or": [
-                        {"assigned_mediador_ids": {"$in": [None, [], ""]}},
-                        {"assigned_mediador_ids": {"$exists": False}},
-                        {"assigned_mediador_id": None},
-                        {"assigned_mediador_id": ""},
-                        {"assigned_mediador_id": {"$exists": False}}
-                    ]
-                })
-            else:
-                # Filtro por mediador específico - verificar no array ou campo único
-                filter_conditions.append({
-                    "$or": [
-                        {"assigned_mediador_ids": mediador_id},
-                        {"assigned_mediador_id": mediador_id}
-                    ]
-                })
-        
-        if indexacao_id:
-            if indexacao_id == "none":
-                # Sem indexação atribuído
-                filter_conditions.append({
-                    "$or": [
-                        {"assigned_indexacao_id": {"$in": [None, ""]}},
-                        {"assigned_indexacao_id": {"$exists": False}}
-                    ]
-                })
-            else:
-                # Filtro por indexação específico
-                filter_conditions.append({"assigned_indexacao_id": indexacao_id})
-        
-        if parceiro_id:
-            if parceiro_id == "none":
-                # Sem parceiro atribuído
-                filter_conditions.append({
-                    "$or": [
-                        {"assigned_parceiro_id": {"$in": [None, ""]}},
-                        {"assigned_parceiro_id": {"$exists": False}}
-                    ]
-                })
-            else:
-                # Filtro por parceiro específico
-                filter_conditions.append({"assigned_parceiro_id": parceiro_id})
-        
-        # Combinar todas as condições com AND
-        if filter_conditions:
-            if query:
-                # Se já existe uma query base (por role), combinar com os filtros
-                query = {"$and": [query] + filter_conditions}
-            else:
-                # Se não há query base, usar os filtros diretamente
-                if len(filter_conditions) == 1:
-                    query = filter_conditions[0]
-                else:
-                    query = {"$and": filter_conditions}
+                query = {"$and": filter_conditions}
     
     # ====================================================================
     # FILTRO DE ESTADO ATIVO (view_mode) para Kanban

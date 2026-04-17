@@ -2,7 +2,7 @@
  * KanbanPage - Página dedicada ao Quadro Geral (Kanban)
  * 
  * Página principal após login - mostra o KanbanBoard com filtros por
- * consultor, intermediário e indexação. Filtros são persistidos na URL.
+ * consultor, intermediário, indexação e parceiro. Filtros são persistidos na URL.
  */
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -26,10 +26,12 @@ const KanbanPage = () => {
   const consultorFilter = searchParams.get("consultor") || "all";
   const mediadorFilter = searchParams.get("mediador") || "all";
   const indexacaoFilter = searchParams.get("indexacao") || "all";
+  const parceiroFilter = searchParams.get("parceiro") || "all";
 
   const consultors = useMemo(() => users.filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
   const intermediarios = useMemo(() => users.filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
   const indexacaoUsers = useMemo(() => users.filter(u => u.role === "indexacao"), [users]);
+  const parceiros = useMemo(() => users.filter(u => u.role === "parceiro"), [users]);
 
   useEffect(() => {
     fetchUsers();
@@ -87,7 +89,7 @@ const KanbanPage = () => {
             Quadro Geral de Processos
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Filtre por consultor, intermediário ou indexação
+            Filtre por consultor, intermediário, indexação ou parceiro
           </p>
         </div>
 
@@ -104,7 +106,7 @@ const KanbanPage = () => {
           </CardHeader>
           <CardContent className="pt-0">
             {/* Filter Controls */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
               <div className="space-y-2">
                 <Label>Filtrar por Consultor</Label>
                 <Select value={consultorFilter} onValueChange={(v) => updateFilter("consultor", v)}>
@@ -138,6 +140,17 @@ const KanbanPage = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Filtrar por Parceiro</Label>
+                <Select value={parceiroFilter} onValueChange={(v) => updateFilter("parceiro", v)}>
+                  <SelectTrigger><SelectValue placeholder="Todos os parceiros" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os Parceiros</SelectItem>
+                    <SelectItem value="none">Nenhum (sem parceiro)</SelectItem>
+                    {parceiros.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Kanban Board Component */}
@@ -147,6 +160,7 @@ const KanbanPage = () => {
               consultorFilter={consultorFilter}
               mediadorFilter={mediadorFilter}
               indexacaoFilter={indexacaoFilter}
+              parceiroFilter={parceiroFilter}
             />
           </CardContent>
         </Card>
