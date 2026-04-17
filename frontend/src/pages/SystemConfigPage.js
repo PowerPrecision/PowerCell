@@ -1757,7 +1757,7 @@ const SystemConfigPage = () => {
               <p className="text-xs text-muted-foreground/60 px-1 mt-2">Cada categoria guarda as suas definições independentemente.</p>
             </div>
 
-            {/* Mobile: Dropdown + Chips */
+            {/* Mobile: Dropdown + Chips */}
             <div className="lg:hidden space-y-3">
               <Select value={activeTab} onValueChange={setActiveTab}>
                 <SelectTrigger className="w-full">
