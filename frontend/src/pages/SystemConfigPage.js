@@ -1585,18 +1585,30 @@ const SystemConfigPage = () => {
                 Visualização do texto tal como o cliente final o verá
               </DialogDescription>
             </DialogHeader>
-            <div className="prose prose-sm max-w-none bg-white border rounded-lg p-6"
+            <div className="prose prose-sm max-w-none bg-white dark:bg-gray-900 border rounded-lg p-6 overflow-y-auto max-h-[70vh] break-words"
               dangerouslySetInnerHTML={{
-                __html: (templateContent || "")
-                  .replace(/\{\{NOME_CLIENTE\}\}/g, "João Silva")
-                  .replace(/\{\{NOME_EMPRESA\}\}/g, "Power Real Estate")
-                  .replace(/\{\{CONTRIBUINTE\}\}/g, "123456789")
-                  .replace(/\{\{MORADA\}\}/g, "Rua Example, 123, Lisboa")
-                  .replace(/\{\{CODIGO_POSTAL\}\}/g, "1000-001")
-                  .replace(/\{\{TIPO_DOCUMENTO\}\}/g, "Cartão de Cidadão")
-                  .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, "CC 00000000")
-                  .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, "01/01/2030")
-                  .replace(/\{\{DATA_ASSINATURA\}\}/g, new Date().toLocaleDateString("pt-PT"))
+                __html: (() => {
+                  // 1. Escape HTML first to prevent unclosed tags from leaking
+                  let safe = (templateContent || "")
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                  // 2. Replace variables with styled example spans
+                  safe = safe
+                    .replace(/\{\{NOME_CLIENTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
+                    .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate</span>')
+                    .replace(/\{\{CONTRIBUINTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">123456789</span>')
+                    .replace(/\{\{MORADA\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Rua Example, 123, Lisboa</span>')
+                    .replace(/\{\{CODIGO_POSTAL\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">1000-001</span>')
+                    .replace(/\{\{TIPO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Cartão de Cidadão</span>')
+                    .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">CC 00000000</span>')
+                    .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">01/01/2030</span>')
+                    .replace(/\{\{DATA_ASSINATURA\}\}/g, '<span class="bg-green-100 dark:bg-green-900/60 px-1.5 py-0.5 rounded font-medium text-green-800 dark:text-green-200">' + new Date().toLocaleDateString("pt-PT") + '</span>')
+                    .replace(/\{\{NOME\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>');
+                  // 3. Convert newlines
+                  safe = safe.replace(/\n/g, '<br/>');
+                  return safe;
+                })()
               }}
             />
             <DialogFooter>

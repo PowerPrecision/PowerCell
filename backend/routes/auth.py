@@ -424,7 +424,8 @@ async def login_v2(request: Request, data: UserLogin, response: Response):
                     "role": user["role"],
                     "created_at": user["created_at"],
                     "onedrive_folder": user.get("onedrive_folder"),
-                    "additional_roles": user.get("additional_roles", [])
+                    "additional_roles": user.get("additional_roles", []),
+                    "permissions": synced_perms,
                 }
             }
         )
