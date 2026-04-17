@@ -484,7 +484,7 @@ const SharedEmailConfigSection = () => {
   const handleGoogleAuth = async (role, emailAddress) => {
     setAuthenticating(role);
     try {
-      const params = new URLSearchParams({ role });
+      const params = new URLSearchParams();
       if (emailAddress) params.set("email_address", emailAddress);
 
       const res = await fetch(`${API_URL}/api/admin/shared-email/${role}/google/login?${params}`, {
