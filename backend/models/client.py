@@ -65,8 +65,8 @@ class ClientFinancialData(BaseModel):
     empresa: Optional[str] = None
     antiguidade_emprego: Optional[str] = None
     # Informação de crédito
-    tem_creditos_activos: Optional[bool] = None
-    valor_creditos_activos: Optional[float] = None
+    tem_creditos_activos: Optional[List[str]] = None  # Bancos com contas abertas (mesmo formato que bancos_creditos)
+    valor_creditos_activos: Optional[float] = None     # [Deprecated] Valor total — mantido para backward compat
     # Última actualização
     data_actualizacao: Optional[str] = None
 
