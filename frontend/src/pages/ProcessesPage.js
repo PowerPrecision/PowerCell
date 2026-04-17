@@ -42,11 +42,11 @@ const ProcessesPage = () => {
   
   // ================================================================
   // FILTRO DE ESTADO ATIVO
-  // Por defeito, mostra apenas processos ativos (view_mode=active_only)
-  // Quando showCompleted=true, mostra todos (view_mode=all)
+  // Por defeito, mostra todos os processos (view_mode=all)
+  // Quando showCompleted=false, mostra apenas ativos (view_mode=active_only)
   // ================================================================
   const [showCompleted, setShowCompleted] = useState(
-    searchParams.get("view_mode") === "all"
+    searchParams.get("view_mode") !== "active_only"  // Default: show ALL statuses
   );
   
   // Sort state
@@ -99,7 +99,7 @@ const ProcessesPage = () => {
         page: pagination.page,
         size: pagination.size,
         search: searchTerm || undefined,
-        view_mode: showCompleted ? "all" : "active_only"  // FILTRO DE ESTADO ATIVO
+        view_mode: showCompleted ? "all" : "active_only"  // "all" by default shows everything
       });
       
       // Suporta novo formato paginado
@@ -348,7 +348,7 @@ const ProcessesPage = () => {
                     onCheckedChange={handleToggleCompleted}
                   />
                   <Label htmlFor="show-completed" className="text-sm cursor-pointer">
-                    {showCompleted ? "Mostrando todos" : "Ocultar arquivo"}
+                    {showCompleted ? "Mostrando todos" : "Mostrar arquivo"}
                   </Label>
                 </div>
               </div>
@@ -357,7 +357,7 @@ const ProcessesPage = () => {
             {!showCompleted && (
               <div className="mb-4 p-2 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800">
                 <p className="text-xs text-blue-700 dark:text-blue-300">
-                  📋 Mostrando apenas processos ativos. Active "Ocultar arquivo" para ver concluídos e desistências.
+                  📋 Mostrando apenas processos ativos. Ative "Mostrar arquivo" para ver também concluídos e desistências.
                 </p>
               </div>
             )}

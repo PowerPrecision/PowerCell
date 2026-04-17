@@ -115,7 +115,7 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo Negócio
-    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/meus-clientes", "/registos-clientes", "/financeiro"];
+    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/meus-clientes", "/registos-clientes", "/financeiro", "/lista-processos"];
     // Rotas do grupo IA
     const iaRoutes = ["/configuracoes/ia", "/ai-insights", "/revisao-dados-ia", "/configuracoes/treino-ia"];
     // Rotas do grupo Configurações (unificado com Sistema)
@@ -195,6 +195,11 @@ const DashboardLayout = ({ children, title }) => {
       return {
         main: [
           ...baseItems,
+          {
+            label: "Processos",
+            icon: FileText,
+            href: "/lista-processos",
+          },
           statsItem,
           {
             label: "Quadro Geral",
@@ -214,22 +219,22 @@ const DashboardLayout = ({ children, title }) => {
             icon: Building2,
             items: [
               {
-                label: "Utilizadores",
-                icon: Users,
-                href: "/utilizadores",
-              },
-              {
-                label: "Registo de Clientes",
+                label: "Registos de clientes",
                 icon: Users,
                 href: "/registos-clientes",
               },
               {
-                label: "Lista de Clientes",
+                label: "Lista de processos",
+                icon: FileText,
+                href: "/lista-processos",
+              },
+              {
+                label: "Lista de clientes",
                 icon: User,
                 href: "/clientes",
               },
               {
-                label: "Gestor de Visitas",
+                label: "Gestor de visitas",
                 icon: Search,
                 href: "/leads",
               },
@@ -244,11 +249,6 @@ const DashboardLayout = ({ children, title }) => {
                 href: "/minutas",
               },
               {
-                label: "Validades Docs",
-                icon: AlertCircle,
-                href: "/validades",
-              },
-              {
                 label: "Financeiro",
                 icon: DollarSign,
                 href: "/financeiro",
@@ -260,6 +260,11 @@ const DashboardLayout = ({ children, title }) => {
             label: "Configurações",
             icon: Cog,
             items: [
+              {
+                label: "Utilizadores",
+                icon: Users,
+                href: "/utilizadores",
+              },
               {
                 label: "Sistema",
                 icon: Cog,
@@ -301,6 +306,11 @@ const DashboardLayout = ({ children, title }) => {
       return {
         main: [
           ...baseItems,
+          {
+            label: "Processos",
+            icon: FileText,
+            href: "/lista-processos",
+          },
           statsItem,
           {
             label: "Quadro Geral",
@@ -320,22 +330,22 @@ const DashboardLayout = ({ children, title }) => {
             icon: Building2,
             items: [
               {
-                label: "Utilizadores",
-                icon: Users,
-                href: "/utilizadores",
-              },
-              {
-                label: "Registo de Clientes",
+                label: "Registos de clientes",
                 icon: Users,
                 href: "/registos-clientes",
               },
               {
-                label: "Lista de Clientes",
+                label: "Lista de processos",
+                icon: FileText,
+                href: "/lista-processos",
+              },
+              {
+                label: "Lista de clientes",
                 icon: User,
                 href: "/clientes",
               },
               {
-                label: "Gestor de Visitas",
+                label: "Gestor de visitas",
                 icon: Search,
                 href: "/leads",
               },
@@ -388,6 +398,11 @@ const DashboardLayout = ({ children, title }) => {
             label: "Configurações",
             icon: Cog,
             items: [
+              {
+                label: "Utilizadores",
+                icon: Users,
+                href: "/utilizadores",
+              },
               {
                 label: "Definições",
                 icon: Settings,
@@ -514,6 +529,11 @@ const DashboardLayout = ({ children, title }) => {
       
       const mainItems = [
         ...baseItems,
+        {
+          label: "Processos",
+          icon: FileText,
+          href: "/lista-processos",
+        },
         statsItem,
         {
           label: "Quadro Geral",
@@ -529,38 +549,31 @@ const DashboardLayout = ({ children, title }) => {
       
       const negocioItems = [];
       
-      // Adicionar "Os Meus Processos" e "Os Meus Clientes" para consultores e intermediários
-      if (["consultor", "intermediario", "mediador", "consultor_intermediario"].includes(userRole)) {
-        negocioItems.push({
-          label: "Os Meus Processos",
-          icon: FileText,
-          href: "/processos",
-        });
-        negocioItems.push({
-          label: "Os Meus Clientes",
-          icon: Users,
-          href: "/meus-clientes",
-        });
-      }
-      
-      // Registo de Clientes para todos
+      // Registos de clientes para todos
       negocioItems.push({
-        label: "Registo de Clientes",
+        label: "Registos de clientes",
         icon: Users,
         href: "/registos-clientes",
       });
 
-      // Lista de Clientes (Gestão de Processos) para todos
+      // Lista de processos para todos
       negocioItems.push({
-        label: "Lista de Clientes",
+        label: "Lista de processos",
+        icon: FileText,
+        href: "/lista-processos",
+      });
+
+      // Lista de clientes para todos
+      negocioItems.push({
+        label: "Lista de clientes",
         icon: User,
         href: "/clientes",
       });
       
-      // Gestor de Visitas - NÃO para intermediários de crédito
+      // Gestor de visitas - NÃO para intermediários de crédito
       if (!["intermediario", "consultor_intermediario"].includes(userRole)) {
         negocioItems.push({
-          label: "Gestor de Visitas",
+          label: "Gestor de visitas",
           icon: Search,
           href: "/leads",
         });
@@ -582,11 +595,11 @@ const DashboardLayout = ({ children, title }) => {
         href: "/minutas",
       });
       
-      // Validades de documentos para todos os staff
+      // Financeiro para todos os staff
       negocioItems.push({
-        label: "Validades Docs",
-        icon: AlertCircle,
-        href: "/validades",
+        label: "Financeiro",
+        icon: DollarSign,
+        href: "/financeiro",
       });
       
       // Estados do Workflow apenas para Admin e CEO
