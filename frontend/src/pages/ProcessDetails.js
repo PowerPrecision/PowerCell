@@ -2776,10 +2776,36 @@ const ProcessDetails = () => {
                               <AlertCircle className="h-4 w-4 text-red-500" />
                               Créditos Ativos
                             </h4>
-                            <div className="flex flex-wrap gap-2">
-                              {financialData.bancos_creditos.map((banco, idx) => (
-                                <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
-                              ))}
+                            {/* Total dos créditos */}
+                            {(() => {
+                              const total = financialData.bancos_creditos.reduce((sum, item) => {
+                                if (typeof item === 'object' && item.valor) return sum + item.valor;
+                                return sum;
+                              }, 0);
+                              if (total > 0) {
+                                return (
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Total: <span className="font-semibold text-foreground">{total.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</span>
+                                  </p>
+                                );
+                              }
+                              return null;
+                            })()}
+                            <div className="space-y-2">
+                              {financialData.bancos_creditos.map((item, idx) => {
+                                const banco = typeof item === 'object' ? item.banco : item;
+                                const valor = typeof item === 'object' ? item.valor : null;
+                                return (
+                                  <div key={idx} className="flex items-center gap-2">
+                                    <Badge className={getBankColor(banco)}>{banco}</Badge>
+                                    {valor != null && valor > 0 && (
+                                      <span className="text-xs font-medium text-muted-foreground">
+                                        {valor.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </CardContent>
                         </Card>
