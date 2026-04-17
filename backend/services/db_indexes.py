@@ -725,7 +725,29 @@ async def create_ttl_indexes(db) -> dict:
                 results["skipped"].append(f"oauth_states.{idx['name']}")
             else:
                 results["errors"].append(f"oauth_states.{idx['name']}: {str(e)}")
-    
+
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'company_email_configs'
+    # ====================================================================
+    company_email_indexes = [
+        {"keys": [("company_name", 1)], "name": "idx_company_name", "unique": True},
+    ]
+    for idx in company_email_indexes:
+        try:
+            await db.company_email_configs.create_index(
+                idx["keys"],
+                name=idx["name"],
+                unique=idx.get("unique", False),
+                background=True,
+            )
+            results["created"].append(f"company_email_configs.{idx['name']}")
+            logger.info(f"Índice criado: company_email_configs.{idx['name']}")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["skipped"].append(f"company_email_configs.{idx['name']}")
+            else:
+                results["errors"].append(f"company_email_configs.{idx['name']}: {str(e)}")
+
     return results
 
 
