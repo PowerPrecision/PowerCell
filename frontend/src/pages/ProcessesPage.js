@@ -42,11 +42,11 @@ const ProcessesPage = () => {
   
   // ================================================================
   // FILTRO DE ESTADO ATIVO
-  // Por defeito, mostra todos os processos (view_mode=all)
-  // Quando showCompleted=false, mostra apenas ativos (view_mode=active_only)
+  // Por defeito, mostra apenas processos ativos (view_mode=active_only)
+  // Quando showCompleted=true, mostra todos incluindo arquivo (view_mode=all)
   // ================================================================
   const [showCompleted, setShowCompleted] = useState(
-    searchParams.get("view_mode") !== "active_only"  // Default: show ALL statuses
+    searchParams.get("view_mode") === "all"  // Default: show only active (active_only)
   );
   
   // Sort state
