@@ -1076,7 +1076,9 @@ async def update_client(
             contact_dump["telefone"] = sanitize_phone(contact_dump["telefone"]) or contact_dump["telefone"]
         if "telefone_secundario" in contact_dump and contact_dump["telefone_secundario"]:
             contact_dump["telefone_secundario"] = sanitize_phone(contact_dump["telefone_secundario"]) or contact_dump["telefone_secundario"]
-        sanitized_contacto = contact_dump
+        # Merge with existing contacto to preserve fields not in this update
+        existing_contacto = client.get("contacto") or {}
+        sanitized_contacto = {**existing_contacto, **contact_dump}
     
     sanitized_dados_pessoais = None
     if client_data.dados_pessoais:
@@ -1090,7 +1092,9 @@ async def update_client(
         for str_field in ["nome", "documento_id", "morada_fiscal", "phone", "telefone", "nacionalidade", "profissao"]:
             if str_field in pessoais_dump and pessoais_dump[str_field]:
                 pessoais_dump[str_field] = sanitize_string(str(pessoais_dump[str_field]), max_length=200)
-        sanitized_dados_pessoais = pessoais_dump
+        # Merge with existing dados_pessoais to preserve fields not in this update
+        existing_pessoais = client.get("dados_pessoais") or {}
+        sanitized_dados_pessoais = {**existing_pessoais, **pessoais_dump}
     
     sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas is not None else None
     
@@ -1103,7 +1107,9 @@ async def update_client(
     if sanitized_dados_pessoais:
         update_dict["dados_pessoais"] = sanitized_dados_pessoais
     if client_data.dados_financeiros:
-        update_dict["dados_financeiros"] = client_data.dados_financeiros.model_dump(exclude_unset=True)
+        incoming_financeiros = client_data.dados_financeiros.model_dump(exclude_unset=True)
+        existing_financeiros = client.get("dados_financeiros") or {}
+        update_dict["dados_financeiros"] = {**existing_financeiros, **incoming_financeiros}
     if client_data.tags is not None:
         update_dict["tags"] = client_data.tags
     if sanitized_notas is not None:

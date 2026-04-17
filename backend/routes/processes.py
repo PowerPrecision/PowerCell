@@ -1775,22 +1775,30 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         if process.get("client_id") != user["id"]:
             raise HTTPException(status_code=403, detail="Acesso negado")
         if data.personal_data:
-            await log_data_changes(process_id, user, process.get("personal_data"), data.personal_data.model_dump(), "dados pessoais")
+            incoming_personal = data.personal_data.model_dump(exclude_unset=True, exclude_none=True)
+            existing_personal = process.get("personal_data") or {}
+            merged_personal = {**existing_personal, **incoming_personal}
+            await log_data_changes(process_id, user, process.get("personal_data"), incoming_personal, "dados pessoais")
             # Registar no audit trail enriquecido
             await log_audit_event(process_id, user, "Alterou dados pessoais", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["personal_data"] = data.personal_data.model_dump()
+            update_data["personal_data"] = merged_personal
         if data.financial_data:
-            await log_data_changes(process_id, user, process.get("financial_data"), data.financial_data.model_dump(), "dados financeiros")
+            incoming_financial = data.financial_data.model_dump(exclude_unset=True, exclude_none=True)
+            existing_financial = process.get("financial_data") or {}
+            merged_financial = {**existing_financial, **incoming_financial}
+            await log_data_changes(process_id, user, process.get("financial_data"), incoming_financial, "dados financeiros")
             await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["financial_data"] = data.financial_data.model_dump()
+            update_data["financial_data"] = merged_financial
     else:
         # Staff updates
         if data.personal_data and can_update_personal:
-            personal_dict = data.personal_data.model_dump()
+            personal_dict = data.personal_data.model_dump(exclude_unset=True, exclude_none=True)
+            existing_personal = process.get("personal_data") or {}
+            merged_personal = {**existing_personal, **personal_dict}
             logger.info(f"Updating personal_data for process {process_id} by {user.get('email')} (role={role}): {list(personal_dict.keys())}")
             await log_data_changes(process_id, user, process.get("personal_data"), personal_dict, "dados pessoais")
             await log_audit_event(process_id, user, "Alterou dados pessoais", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["personal_data"] = personal_dict
+            update_data["personal_data"] = merged_personal
             
             # Actualizar client_name se nome_completo ou nome for fornecido
             new_name = personal_dict.get("nome_completo") or personal_dict.get("nome")
@@ -1803,19 +1811,37 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             logger.debug(f"No personal_data in update for process {process_id} by {user.get('email')} (role={role})")
         
         if data.financial_data and can_update_financial:
-            await log_data_changes(process_id, user, process.get("financial_data"), data.financial_data.model_dump(), "dados financeiros")
+            incoming_financial = data.financial_data.model_dump(exclude_unset=True, exclude_none=True)
+            existing_financial = process.get("financial_data") or {}
+            merged_financial = {**existing_financial, **incoming_financial}
+            await log_data_changes(process_id, user, process.get("financial_data"), incoming_financial, "dados financeiros")
             await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["financial_data"] = data.financial_data.model_dump()
+            update_data["financial_data"] = merged_financial
         
         if data.real_estate_data and can_update_real_estate:
-            await log_data_changes(process_id, user, process.get("real_estate_data"), data.real_estate_data.model_dump(), "dados imobiliários")
+            incoming_re = data.real_estate_data.model_dump(exclude_unset=True, exclude_none=True)
+            existing_re = process.get("real_estate_data") or {}
+            merged_re = {**existing_re, **incoming_re}
+            await log_data_changes(process_id, user, process.get("real_estate_data"), incoming_re, "dados imobiliários")
             await log_audit_event(process_id, user, "Alterou dados imobiliários", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["real_estate_data"] = data.real_estate_data.model_dump()
+            update_data["real_estate_data"] = merged_re
         
         if data.credit_data and can_update_credit:
-            await log_data_changes(process_id, user, process.get("credit_data"), data.credit_data.model_dump(), "dados de crédito")
+            incoming_credit = data.credit_data.model_dump(exclude_unset=True, exclude_none=True)
+            existing_credit = process.get("credit_data") or {}
+            merged_credit = {**existing_credit, **incoming_credit}
+            await log_data_changes(process_id, user, process.get("credit_data"), incoming_credit, "dados de crédito")
             await log_audit_event(process_id, user, "Alterou dados de crédito", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["credit_data"] = data.credit_data.model_dump()
+            update_data["credit_data"] = merged_credit
+        
+        # 2º Titular (dados de co-proponente)
+        if data.titular2_data and can_update_personal:
+            incoming_t2 = data.titular2_data.model_dump(exclude_unset=True, exclude_none=True)
+            existing_t2 = process.get("titular2_data") or {}
+            merged_t2 = {**existing_t2, **incoming_t2}
+            await log_data_changes(process_id, user, process.get("titular2_data"), incoming_t2, "dados 2º titular")
+            await log_audit_event(process_id, user, "Alterou dados do 2º titular", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
+            update_data["titular2_data"] = merged_t2
         
         # Actualizar email e telefone do cliente
         if data.client_email is not None:

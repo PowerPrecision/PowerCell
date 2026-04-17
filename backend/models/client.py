@@ -5,7 +5,7 @@ Um cliente pode ter múltiplos processos de compra/financiamento.
 Isto permite acompanhar diferentes negócios para o mesmo cliente.
 """
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import re
@@ -25,10 +25,13 @@ def validate_nif(nif: str) -> str:
 
 class ClientPersonalData(BaseModel):
     """Dados pessoais do cliente (imutáveis entre processos)."""
+    model_config = ConfigDict(extra="allow")
+    
     nif: Optional[str] = None
     documento_id: Optional[str] = None
     data_validade_cc: Optional[str] = None
     data_nascimento: Optional[str] = None
+    birth_date: Optional[str] = None           # Alias para data_nascimento
     naturalidade: Optional[str] = None
     nacionalidade: Optional[str] = None
     morada_fiscal: Optional[str] = None
@@ -36,6 +39,10 @@ class ClientPersonalData(BaseModel):
     profissao: Optional[str] = None
     nome_pai: Optional[str] = None
     nome_mae: Optional[str] = None
+    sexo: Optional[str] = None                   # M ou F
+    compra_tipo: Optional[str] = None           # Tipo de compra
+    menor_35_anos: Optional[bool] = None        # Checkbox apoio ao estado
+    altura: Optional[str] = None                # Altura em metros
     
     @field_validator('nif', mode='before')
     @classmethod
@@ -47,6 +54,8 @@ class ClientPersonalData(BaseModel):
 
 class ClientFinancialData(BaseModel):
     """Dados financeiros do cliente (podem variar ao longo do tempo)."""
+    model_config = ConfigDict(extra="allow")
+    
     rendimento_mensal: Optional[float] = None
     rendimento_bruto: Optional[float] = None
     rendimento_anual: Optional[float] = None

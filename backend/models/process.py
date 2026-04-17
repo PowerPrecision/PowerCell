@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List, Any
 from enum import Enum
 import re
@@ -104,7 +104,10 @@ class PersonalData(BaseModel):
     - nif (validado: 9 dígitos), documento_id, naturalidade, nacionalidade, morada_fiscal
     - birth_date/data_nascimento, estado_civil, compra_tipo, menor_35_anos
     - data_validade_cc, sexo, altura, nome_pai, nome_mae
+    - email, phone, profissao, morada, codigo_postal (extraídos por IA)
     """
+    model_config = ConfigDict(extra="allow")
+    
     # Nome completo (sincronizado com client_name)
     nome_completo: Optional[str] = Field(None, max_length=200, description="Nome completo do cliente")
     nome: Optional[str] = Field(None, max_length=200, description="Nome completo (alias)")
@@ -126,6 +129,12 @@ class PersonalData(BaseModel):
     # Filiação
     nome_pai: Optional[str] = Field(None, max_length=200, description="Nome do pai")
     nome_mae: Optional[str] = Field(None, max_length=200, description="Nome da mãe")
+    # Campos extraídos por IA / usados em formulários
+    email: Optional[str] = Field(None, max_length=200, description="Email")
+    phone: Optional[str] = Field(None, max_length=20, description="Telefone")
+    profissao: Optional[str] = Field(None, max_length=200, description="Profissão")
+    morada: Optional[str] = Field(None, max_length=500, description="Morada completa")
+    codigo_postal: Optional[str] = Field(None, max_length=20, description="Código postal")
     
     @field_validator('nif', mode='before')
     @classmethod
@@ -186,6 +195,7 @@ class PersonalData(BaseModel):
 
 class Titular2Data(BaseModel):
     """Dados do segundo titular."""
+    model_config = ConfigDict(extra="allow")
     name: Optional[str] = None
     email: Optional[str] = None
     nif: Optional[str] = None
@@ -224,6 +234,8 @@ class RealEstateData(BaseModel):
     - Dados do proprietário: owner_name, owner_email, owner_phone
     - Dados do CPCV: valor_imovel, datas, etc.
     """
+    model_config = ConfigDict(extra="allow")
+    
     tipo_imovel: Optional[str] = None
     num_quartos: Optional[str] = None
     localizacao: Optional[str] = None
@@ -283,7 +295,10 @@ class FinancialData(BaseModel):
     - Dados do CPCV: valor_entrada, valor_pretendido, etc.
     - Situação profissional: employment_type, employment_duration, employer_name
     - Credenciais de portais: portal_financas_utilizador, portal_financas_senha, etc.
+    - Campos extraídos por IA: rendimento_mensal, rendimento_bruto, empresa, etc.
     """
+    model_config = ConfigDict(extra="allow")
+    
     acesso_portal_financas: Optional[str] = None
     chave_movel_digital: Optional[str] = None
     renda_habitacao_atual: Optional[float] = None
@@ -313,6 +328,22 @@ class FinancialData(BaseModel):
     portal_financas_senha: Optional[str] = Field(None, max_length=100, description="Senha de acesso ao Portal das Finanças")
     seg_social_utilizador: Optional[str] = Field(None, max_length=100, description="Utilizador da Segurança Social Direta")
     seg_social_senha: Optional[str] = Field(None, max_length=100, description="Senha de acesso à Segurança Social Direta")
+    # Campos extraídos por IA / recibos de vencimento
+    rendimento_mensal: Optional[float] = None      # Rendimento líquido mensal (IA)
+    rendimento_bruto: Optional[float] = None       # Rendimento bruto mensal (IA)
+    rendimento_agregado: Optional[float] = None    # Rendimento agregado familiar (IA)
+    salario_liquido: Optional[float] = None        # Salário líquido (alias)
+    salario_bruto: Optional[float] = None          # Salário bruto (alias)
+    empresa: Optional[str] = None                   # Nome da empresa (IA)
+    tipo_contrato: Optional[str] = None             # Tipo de contrato (IA)
+    categoria_profissional: Optional[str] = None    # Categoria profissional (IA)
+    subsidiario_alimentacao: Optional[float] = None  # Subsídio alimentação (IA)
+    data_referencia: Optional[str] = None           # Data de referência do recibo (IA)
+    nr_dependentes: Optional[int] = None            # Número de dependentes
+    number_of_dependents: Optional[int] = None      # Número de dependentes (alias)
+    rendimento_co_titular: Optional[float] = None  # Rendimento do co-titular
+    creditos_existentes: Optional[float] = None     # Valor de créditos existentes
+    prestacao_creditos_mensal: Optional[float] = None  # Prestação mensal de créditos
 
 
 class CreditData(BaseModel):
@@ -322,6 +353,8 @@ class CreditData(BaseModel):
     Inclui campos de avaliação bancária para alertas automáticos
     quando valor de avaliação < valor de compra.
     """
+    model_config = ConfigDict(extra="allow")
+    
     requested_amount: Optional[float] = None
     loan_term_years: Optional[int] = None
     interest_rate: Optional[float] = None

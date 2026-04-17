@@ -735,6 +735,46 @@ const ProcessDetails = () => {
     return cleaned;
   };
 
+  // Helper para limpar dados do 2º titular antes de enviar
+  const cleanTitular2DataForSubmit = (data) => {
+    const cleaned = { ...data };
+    // Converter data de nascimento para formato ISO
+    if (cleaned.birth_date) {
+      cleaned.birth_date = convertPortugueseDateToISO(cleaned.birth_date);
+    }
+    // Remover campos undefined ou vazios
+    Object.keys(cleaned).forEach(key => {
+      if (cleaned[key] === undefined || cleaned[key] === '') {
+        delete cleaned[key];
+      }
+    });
+    return cleaned;
+  };
+
+  // Helper para limpar dados do imóvel antes de enviar
+  const cleanRealEstateDataForSubmit = (data) => {
+    const cleaned = { ...data };
+    // Remover campos undefined ou vazios
+    Object.keys(cleaned).forEach(key => {
+      if (cleaned[key] === undefined || cleaned[key] === '') {
+        delete cleaned[key];
+      }
+    });
+    return cleaned;
+  };
+
+  // Helper para limpar dados de crédito antes de enviar
+  const cleanCreditDataForSubmit = (data) => {
+    const cleaned = { ...data };
+    // Remover campos undefined ou vazios
+    Object.keys(cleaned).forEach(key => {
+      if (cleaned[key] === undefined || cleaned[key] === '') {
+        delete cleaned[key];
+      }
+    });
+    return cleaned;
+  };
+
   // Helper para limpar dados financeiros para envio
   const cleanFinancialDataForSubmit = (data) => {
     // Campos válidos do modelo FinancialData no backend
@@ -794,21 +834,21 @@ const ProcessDetails = () => {
       if (user.role !== "indexacao") {
         updateData.personal_data = cleanedPersonalData;
         updateData.financial_data = cleanedFinancialData;
-        updateData.titular2_data = titular2Data;
+        updateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
       } else {
         updateData.financial_data = cleanedFinancialData;
       }
 
       // Consultor e admin podem editar dados do imóvel
       if (user.role === "consultor" || user.role === "admin") {
-        updateData.real_estate_data = realEstateData;
+        updateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
       }
 
       // Mediador pode editar dados de crédito em fases avançadas
       if (user.role === "mediador" || user.role === "admin") {
         const allowedStatuses = workflowStatuses.filter(s => s.order >= 3).map(s => s.name);
         if (allowedStatuses.includes(process.status) || process.status === "ch_aprovado" || process.status === "fase_bancaria") {
-          updateData.credit_data = creditData;
+          updateData.credit_data = cleanCreditDataForSubmit(creditData);
         }
       }
 
