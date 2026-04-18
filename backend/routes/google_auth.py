@@ -131,16 +131,11 @@ async def google_login(
         )
 
         # Configurar parâmetros de autorização
-        flow.params["access_type"] = "offline"
-        flow.params["prompt"] = "consent"
-        flow.params["state"] = state_token
-        if email_address:
-            flow.params["login_hint"] = email_address
-
         authorization_url, _ = flow.authorization_url(
             access_type="offline",
             prompt="consent",
             state=state_token,
+            login_hint=email_address if email_address else None,
         )
 
         logger.info(
