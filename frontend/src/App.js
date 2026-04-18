@@ -327,6 +327,16 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* Alias: sidebar navega para /lista-processos */}
+          <Route
+            path="/lista-processos"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <ProcessesPage />
+              </ProtectedRoute>
+            }
+          />
           
           {/* Properties Page - Staff and Admin */}
           <Route
