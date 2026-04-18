@@ -99,7 +99,9 @@ const ProcessesPage = () => {
         page: pagination.page,
         size: pagination.size,
         search: searchTerm || undefined,
-        view_mode: showCompleted ? "all" : "active_only"  // "all" by default shows everything
+        view_mode: showCompleted ? "all" : "active_only",
+        sort_field: sortField,
+        sort_order: sortOrder
       });
       
       // Suporta novo formato paginado
@@ -148,50 +150,15 @@ const ProcessesPage = () => {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Client-side sort when processes or sort params change
+  // Sorting is handled server-side — sortedProcesses mirrors processes directly
   useEffect(() => {
-    const sorted = [...processes].sort((a, b) => {
-      let aVal, bVal;
+    setSortedProcesses(processes);
+  }, [processes]);
 
-      if (sortField === "client_name") {
-        aVal = (a.client_name || "").toLowerCase();
-        bVal = (b.client_name || "").toLowerCase();
-      } else if (sortField === "contacto") {
-        aVal = (a.client_email || a.client_phone || "").toLowerCase();
-        bVal = (b.client_email || b.client_phone || "").toLowerCase();
-      } else if (sortField === "property_location") {
-        aVal = (a.property_location || "").toLowerCase();
-        bVal = (b.property_location || "").toLowerCase();
-      } else if (sortField === "property_value") {
-        aVal = a.property_value || 0;
-        bVal = b.property_value || 0;
-      } else if (sortField === "status") {
-        aVal = (a.status || "").toLowerCase();
-        bVal = (b.status || "").toLowerCase();
-      } else if (sortField === "priority") {
-        const prio = { high: 3, medium: 2, low: 1 };
-        aVal = prio[a.priority] || 0;
-        bVal = prio[b.priority] || 0;
-      } else if (sortField === "created_at" || sortField === "updated_at") {
-        aVal = new Date(a[sortField] || 0).getTime();
-        bVal = new Date(b[sortField] || 0).getTime();
-      } else {
-        aVal = a[sortField];
-        bVal = b[sortField];
-        if (typeof aVal === "string") { aVal = aVal.toLowerCase(); bVal = (bVal || "").toLowerCase(); }
-      }
-
-      if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
-      if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
-      return 0;
-    });
-    setSortedProcesses(sorted);
-  }, [processes, sortField, sortOrder]);
-
-  // Re-fetch when search term changes (driven by URL param sync above)
+  // Re-fetch when search, sort, or view mode changes (driven by URL param sync)
   useEffect(() => {
     fetchProcesses();
-  }, [pagination.page, pagination.size, showCompleted, searchTerm]);
+  }, [pagination.page, pagination.size, showCompleted, searchTerm, sortField, sortOrder]);
 
   // Funções de paginação
   const goToPage = useCallback((page) => {

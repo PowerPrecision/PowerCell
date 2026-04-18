@@ -643,6 +643,8 @@ async def get_processes(
     status: Optional[str] = Query(None, description="Filtrar por status"),
     search: Optional[str] = Query(None, description="Pesquisar por nome/email"),
     view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all, historical"),
+    sort_field: Optional[str] = Query(None, description="Campo de ordenação: client_name, status, created_at, updated_at, priority, property_value, property_location"),
+    sort_order: Optional[str] = Query("asc", description="Ordem: asc ou desc"),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -761,8 +763,36 @@ async def get_processes(
     # NOTA: personal_data e financial_data NÃO são projetados, então não precisam de desencriptação
     processes = decrypt_processes_list(processes, fields_to_decrypt=["client_phone", "client_nif"])
     
-    # Ordenação composta: 1ª por fase do workflow (ordem definida), 2ª por nome do cliente
-    processes.sort(key=lambda p: (status_order.get(p.get("status"), 999), (p.get("client_name") or "").lower()))
+    # Ordenação: usar sort_field/sort_order se fornecidos, senão ordenação padrão por workflow
+    if sort_field and sort_field in ("client_name", "status", "created_at", "updated_at",
+                                       "priority", "property_value", "property_location",
+                                       "contacto"):
+        # Mapear campos para valores extraíveis
+        _priority_map = {"high": 3, "medium": 2, "low": 1}
+
+        def _sort_key(p):
+            if sort_field == "client_name":
+                return (p.get("client_name") or "").lower()
+            elif sort_field == "status":
+                return (p.get("status") or "").lower()
+            elif sort_field == "priority":
+                return _priority_map.get(p.get("priority"), 0)
+            elif sort_field in ("created_at", "updated_at"):
+                return p.get(sort_field) or ""
+            elif sort_field == "contacto":
+                return (p.get("client_email") or p.get("client_phone") or "").lower()
+            else:
+                return p.get(sort_field) or ""
+
+        reverse = sort_order.lower() == "desc"
+        try:
+            processes.sort(key=_sort_key, reverse=reverse)
+        except TypeError:
+            # Fallback para tipos mistos (ex: strings vs None)
+            processes.sort(key=lambda p: str(_sort_key(p)), reverse=reverse)
+    else:
+        # Ordenação padrão: 1ª por fase do workflow, 2ª por nome do cliente
+        processes.sort(key=lambda p: (status_order.get(p.get("status"), 999), (p.get("client_name") or "").lower()))
     
     # Total e paginação (após ordenação)
     total = len(processes)
