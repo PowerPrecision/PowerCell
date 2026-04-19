@@ -117,7 +117,7 @@ export default function ClientsPage() {
   const searchTerm = searchParams.get("search") || "";
   const sortField = searchParams.get("sort") || "created_at";
   const sortOrder = searchParams.get("order") || "desc";
-  const statusFilter = searchParams.get("status") || "active";
+  const statusFilter = searchParams.get("status") || "all";
   const phaseFilter = searchParams.get("phase") || "all";
   const assignmentFilter = searchParams.get("assignment") || "all";
   const indexacaoFilter = searchParams.get("indexacao") || "all";
@@ -125,7 +125,7 @@ export default function ClientsPage() {
   
   const updateParam = (key, value) => {
     setSearchParams(prev => {
-      if (value && value !== "all" && value !== "created_at_desc") {
+      if (value && value !== "all") {
         prev.set(key, value);
       } else {
         prev.delete(key);
@@ -231,6 +231,9 @@ export default function ClientsPage() {
       } else if (sortField === "fase") {
         aVal = (a.fase_principal?.status_label || "").toLowerCase();
         bVal = (b.fase_principal?.status_label || "").toLowerCase();
+      } else if (sortField === "process_count") {
+        aVal = a.active_processes_count || 0;
+        bVal = b.active_processes_count || 0;
       } else {
         aVal = a[sortField];
         bVal = b[sortField];
@@ -494,7 +497,9 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={`${sortField}_${sortOrder}`} onValueChange={(v) => {
-                  const [field, order] = v.split('_');
+                  const lastIdx = v.lastIndexOf('_');
+                  const field = v.substring(0, lastIdx);
+                  const order = v.substring(lastIdx + 1);
                   setSortField(field);
                   setSortOrder(order);
                 }}>
