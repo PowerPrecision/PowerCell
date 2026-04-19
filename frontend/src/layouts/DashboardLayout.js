@@ -526,7 +526,73 @@ const DashboardLayout = ({ children, title }) => {
           groups: [],
         };
       }
-      
+
+      // Menu simplificado para CONSULTORES E INTERMEDIÁRIOS
+      if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
+        const isConsultor = ["consultor", "mediador"].includes(userRole);
+
+        const externalMain = [
+          ...baseItems,
+          {
+            label: "Os Meus Processos",
+            icon: FileText,
+            href: "/processos",
+          },
+          statsItem,
+          {
+            label: "Email",
+            icon: Mail,
+            href: "/webmail",
+          },
+        ];
+
+        const externalNegocio = [
+          {
+            label: "Os Meus Clientes",
+            icon: Users,
+            href: "/meus-clientes",
+          },
+          {
+            label: "Lista de processos",
+            icon: FileText,
+            href: "/lista-processos",
+          },
+          {
+            label: "Imóveis",
+            icon: Building2,
+            href: "/imoveis",
+          },
+        ];
+
+        // Gestor de visitas apenas para consultor
+        if (isConsultor) {
+          externalNegocio.push({
+            label: "Gestor de visitas",
+            icon: Search,
+            href: "/leads",
+          });
+        }
+
+        externalNegocio.push({
+          label: "Minutas",
+          icon: FileArchive,
+          href: "/minutas",
+        });
+
+        return {
+          main: externalMain,
+          groups: [
+            {
+              id: "negocio",
+              label: "Negócio",
+              icon: Building2,
+              items: externalNegocio,
+            },
+          ],
+        };
+      }
+
+      // Menu para DIRETOR e ADMINISTRATIVO (sem Financeiro — só Admin/CEO)
       const mainItems = [
         ...baseItems,
         {
@@ -546,9 +612,9 @@ const DashboardLayout = ({ children, title }) => {
           href: "/webmail",
         },
       ];
-      
+
       const negocioItems = [];
-      
+
       // Registos de clientes para todos
       negocioItems.push({
         label: "Registos de clientes",
@@ -569,64 +635,30 @@ const DashboardLayout = ({ children, title }) => {
         icon: User,
         href: "/clientes",
       });
-      
-      // Gestor de visitas - NÃO para intermediários de crédito
-      if (!["intermediario", "consultor_intermediario"].includes(userRole)) {
-        negocioItems.push({
-          label: "Gestor de visitas",
-          icon: Search,
-          href: "/leads",
-        });
-      }
-      
-      // Imóveis apenas para roles que não são intermediário/mediador
-      if (!["intermediario", "mediador", "consultor_intermediario"].includes(userRole)) {
-        negocioItems.push({
-          label: "Imóveis",
-          icon: Building2,
-          href: "/imoveis",
-        });
-      }
-      
-      // Minutas para todos os staff
+
+      // Gestor de visitas
+      negocioItems.push({
+        label: "Gestor de visitas",
+        icon: Search,
+        href: "/leads",
+      });
+
+      // Imóveis
+      negocioItems.push({
+        label: "Imóveis",
+        icon: Building2,
+        href: "/imoveis",
+      });
+
+      // Minutas
       negocioItems.push({
         label: "Minutas",
         icon: FileArchive,
         href: "/minutas",
       });
-      
-      // Financeiro para todos os staff
-      negocioItems.push({
-        label: "Financeiro",
-        icon: DollarSign,
-        href: "/financeiro",
-      });
-      
-      // Estados do Workflow apenas para Admin e CEO
-      const configItems = [];
-      if (["admin", "ceo"].includes(userRole)) {
-        configItems.push({
-          label: "Estados do Workflow",
-          icon: Settings,
-          href: "/workflow-estados",
-        });
-        configItems.push({
-          label: "Automacoes",
-          icon: Zap,
-          href: "/automation",
-        });
-        configItems.push({
-          label: "Perfis e Permissoes",
-          icon: Shield,
-          href: "/configuracoes-perfis",
-        });
-        configItems.push({
-          label: "Gestao do Formulario",
-          icon: FileSignature,
-          href: "/gestao-formulario",
-        });
-      }
-      
+
+      // NOTA: Financeiro NÃO incluído — apenas disponível para Admin e CEO
+
       return {
         main: mainItems,
         groups: [
@@ -635,12 +667,6 @@ const DashboardLayout = ({ children, title }) => {
             label: "Negócio",
             icon: Building2,
             items: negocioItems,
-          }] : []),
-          ...(configItems.length > 0 ? [{
-            id: "configuracoes",
-            label: "Configurações",
-            icon: Cog,
-            items: configItems,
           }] : []),
         ],
       };
