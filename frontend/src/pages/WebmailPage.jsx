@@ -155,6 +155,10 @@ const WebmailPage = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [account, setAccount] = useState(defaultAccount);
 
+  // Tab-based mailbox state
+  const [activeBox, setActiveBox] = useState(null); // "personal", "general", or "shared_indexacao"
+  const [unreadByBox, setUnreadByBox] = useState({ personal: 0, general: 0 });
+
   // Composer state
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerData, setComposerData] = useState({
@@ -212,6 +216,23 @@ const WebmailPage = () => {
   const searchTimeoutRef = useRef(null);
 
   // ============================================================
+  // ROLE-BASED TABS: Initialize activeBox
+  // ============================================================
+  useEffect(() => {
+    const role = user?.role;
+    if (role === 'consultor') setActiveBox('personal');
+    else if (role === 'indexacao') setActiveBox('shared_indexacao');
+    else setActiveBox('personal'); // admin/ceo/diretor/administrativa default to personal
+  }, [user?.role]);
+
+  // Derived UI state
+  const showTabs = ['admin', 'ceo', 'diretor', 'administrativa'].includes(user?.role);
+  const showAccountSelector = showTabs && activeBox === 'personal';
+  const pageSubtitle = !showTabs
+    ? (user?.role === 'indexacao' ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
+    : null;
+
+  // ============================================================
   // FETCH LABELS
   // ============================================================
   const fetchLabels = useCallback(async () => {
@@ -259,6 +280,47 @@ const WebmailPage = () => {
   }, [fetchCustomFolders]);
 
   // ============================================================
+  // FETCH UNREAD COUNTS (for tab badges)
+  // ============================================================
+  const fetchUnreadCounts = useCallback(async () => {
+    if (!token) return;
+    const role = user?.role;
+    if (!role) return;
+
+    if (['admin', 'ceo', 'diretor', 'administrativa'].includes(role)) {
+      // Fetch both personal and general unread counts
+      try {
+        const [personalRes, generalRes] = await Promise.all([
+          fetch(`${API_URL}/api/emails/webmail-stats?box=personal`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_URL}/api/emails/webmail-stats?box=general`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        const pData = personalRes.ok ? await personalRes.json() : {};
+        const gData = generalRes.ok ? await generalRes.json() : {};
+        setUnreadByBox({ personal: pData.unread_count || 0, general: gData.unread_count || 0 });
+      } catch {
+        // Silently fail
+      }
+    } else if (role === 'indexacao') {
+      try {
+        const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=shared_indexacao`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          const data = await res.json();
+          setUnreadByBox({ personal: 0, general: 0, shared_indexacao: data.unread_count || 0 });
+        }
+      } catch {
+        // Silently fail
+      }
+    }
+    // For consultor, the regular unreadCount from fetchEmails is sufficient
+  }, [token, user?.role]);
+
+  useEffect(() => {
+    fetchUnreadCounts();
+    const interval = setInterval(fetchUnreadCounts, 60000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadCounts]);
+
+  // ============================================================
   // FETCH EMAILS
   // ============================================================
   const fetchEmails = useCallback(async (folder, page, search, label, customFolderId) => {
@@ -280,6 +342,9 @@ const WebmailPage = () => {
       }
       if (customFolderId) {
         params.append("custom_folder", customFolderId);
+      }
+      if (activeBox) {
+        params.append("box", activeBox);
       }
 
       const response = await fetch(
@@ -308,7 +373,7 @@ const WebmailPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, activeFolder, account]);
+  }, [token, activeFolder, account, activeBox]);
 
   // Carregar emails quando muda pasta, página ou label
   useEffect(() => {
@@ -321,7 +386,7 @@ const WebmailPage = () => {
     setEmailDetail(null);
     setShowMobileReading(false);
     setSelectedEmails(new Set());
-  }, [activeFolder, currentPage, selectedLabel, activeCustomFolder, fetchEmails]);
+  }, [activeFolder, currentPage, selectedLabel, activeCustomFolder, activeBox, fetchEmails]);
 
   // Debounced search
   const handleSearchChange = useCallback((value) => {
@@ -355,12 +420,18 @@ const WebmailPage = () => {
     if (!token || syncing) return;
     setSyncing(true);
     try {
+      // Determine sync endpoint based on role and active box
+      const isGeneralSync = activeBox === 'general' && showTabs;
+      const syncEndpoint = isGeneralSync
+        ? `${API_URL}/api/emails/webmail/sync`
+        : `${API_URL}/api/emails/webmail/sync-user`;
+
       const params = new URLSearchParams({ days: "7" });
-      if (account) {
+      if (account && !isGeneralSync) {
         params.append("account", account);
       }
       const response = await fetch(
-        `${API_URL}/api/emails/webmail/sync?${params.toString()}`,
+        `${syncEndpoint}?${params.toString()}`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
@@ -392,7 +463,7 @@ const WebmailPage = () => {
     } finally {
       setSyncing(false);
     }
-  }, [token, account, syncing, handleRefresh]);
+  }, [token, account, syncing, handleRefresh, activeBox, showTabs]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
@@ -555,6 +626,7 @@ const WebmailPage = () => {
         body_html: "",
         cc_emails: ccList,
         process_id: composerData.process_id,
+        from_box: activeBox,
       };
 
       // Include attachment_ids if any uploads
@@ -585,7 +657,7 @@ const WebmailPage = () => {
     } finally {
       setComposerSending(false);
     }
-  }, [composerData, token, handleRefresh, uploadAttachments]);
+  }, [composerData, token, handleRefresh, uploadAttachments, activeBox]);
 
   // ============================================================
   // LINK TO PROCESS
@@ -986,6 +1058,7 @@ const WebmailPage = () => {
           </div>
 
           {/* Account selector */}
+          {showAccountSelector && (
           <Select value={account} onValueChange={setAccount}>
             <SelectTrigger className="w-[160px] h-8 text-xs">
               <SelectValue />
@@ -995,6 +1068,7 @@ const WebmailPage = () => {
               <SelectItem value="power">Power Real Estate</SelectItem>
             </SelectContent>
           </Select>
+          )}
 
           {/* Select (multi-select toggle) */}
           <Tooltip>
@@ -1050,6 +1124,42 @@ const WebmailPage = () => {
           )}
         </div>
 
+        {/* ===== TAB BAR (role-based) ===== */}
+        {showTabs && (
+          <div className="flex items-center gap-1 px-4 py-2 border-b bg-muted/20 shrink-0">
+            <button
+              onClick={() => { setActiveBox('personal'); setCurrentPage(1); }}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                activeBox === 'personal'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+            >
+              Caixa Pessoal
+              {unreadByBox.personal > 0 && (
+                <Badge variant="secondary" className="ml-2 h-5 text-[10px] px-1.5">
+                  {unreadByBox.personal}
+                </Badge>
+              )}
+            </button>
+            <button
+              onClick={() => { setActiveBox('general'); setCurrentPage(1); }}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                activeBox === 'general'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+            >
+              Caixa Geral
+              {unreadByBox.general > 0 && (
+                <Badge variant="secondary" className="ml-2 h-5 text-[10px] px-1.5">
+                  {unreadByBox.general}
+                </Badge>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* ===== THREE PANE LAYOUT ===== */}
         <div className="flex flex-1 overflow-hidden">
           {/* ========== COLUMN 1: SIDEBAR ========== */}
@@ -1084,6 +1194,8 @@ const WebmailPage = () => {
               {FOLDERS.map((folder) => {
                 const Icon = folder.icon;
                 const isActive = activeFolder === folder.id && !selectedLabel && !activeCustomFolder;
+                // Show role-specific label for inbox on non-tab roles
+                const folderLabel = (folder.id === 'inbox' && pageSubtitle) ? pageSubtitle : folder.label;
                 return (
                   <button
                     key={folder.id}
@@ -1104,7 +1216,7 @@ const WebmailPage = () => {
                     `}
                   >
                     <Icon className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 truncate">{folder.label}</span>
+                    <span className="flex-1 truncate">{folderLabel}</span>
                     {folder.id === "inbox" && unreadCount > 0 && (
                       <Badge
                         variant="secondary"

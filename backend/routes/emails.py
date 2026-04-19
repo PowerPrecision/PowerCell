@@ -2105,6 +2105,7 @@ async def webmail_list(
     search: Optional[str] = Query(None, description="Pesquisa texto"),
     label: Optional[str] = Query(None, description="Filtrar por label"),
     custom_folder: Optional[str] = Query(None, description="ID de pasta personalizada"),
+    box: Optional[str] = Query(None, description="Caixa: personal, general, shared_indexacao"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -2114,6 +2115,11 @@ async def webmail_list(
     - admin/ceo/diretor: podem ver TODOS os emails (caixa geral)
     - outros roles (consultor, intermediario, etc.): só vêem emails onde são
       recipient (inbox) ou sender (sent). Filtragem por endereço de email.
+    
+    BOX PARAM (Tabbed webmail):
+    - personal: emails do utilizador (synced_for_user ou created_by)
+    - general: emails partilhados da caixa geral (shared_role=geral)
+    - shared_indexacao: emails partilhados do role indexacao
     
     - inbox: emails recebidos (direction=received, não arquivados)
     - sent: emails enviados (direction=sent)
@@ -2126,7 +2132,28 @@ async def webmail_list(
     
     user_email = (current_user.get("email") or "").lower().strip()
     user_role = current_user.get("role", "")
+    user_id = current_user.get("id", "")
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    
+    # === BOX FILTER: permissões e isolamento por caixa ===
+    if box == "general":
+        # Blocked for consultor and indexacao
+        if user_role in (UserRole.CONSULTOR, UserRole.INDEXACAO):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Acesso à caixa 'geral' não permitido para o role '{user_role}'."
+            )
+        logger.info(f"[Webmail List] box=general, user={user_email}, role={user_role}")
+    elif box == "shared_indexacao":
+        # Blocked for everyone except admin and indexacao
+        if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Acesso à caixa 'shared_indexacao' não permitido para o role '{user_role}'."
+            )
+        logger.info(f"[Webmail List] box=shared_indexacao, user={user_email}, role={user_role}")
+    elif box == "personal":
+        logger.info(f"[Webmail List] box=personal, user={user_email}, role={user_role}")
     
     # === OBTER EMAIL DA CONTA IMAP SELECIONADA ===
     # Quando o user seleciona uma conta (ex: "power"), obtém o email dessa conta
@@ -2148,22 +2175,66 @@ async def webmail_list(
     and_conditions = []
     
     # === ISOLAMENTO POR UTILIZADOR ===
-    # Regras estritas de isolamento para utilizadores não-admin:
-    # 1. Emails devem pertencer ao utilizador (created_by OU synced_for_user)
-    # 2. O endereço do utilizador deve aparecer no FROM/TO
-    # 3. Emails legados sem user_id (antigo sync global "geral") são BLOQUEADOS
-    # 4. EXCEÇÃO: Utilizadores de roles com email partilhado (ex: indexacao)
-    #    podem ver emails sincronizados via Gmail API para esse role
-    # NOTA: admin/ceo/diretor podem ver TUDO (can_see_all = True)
-    if not can_see_all and user_email:
-        user_id = current_user["id"]
-        user_role = current_user.get("role", "")
+    # Quando box é fornecido, ele substitui a lógica de isolamento padrão.
+    # Quando box não é fornecido, mantém o comportamento actual.
+    if box:
+        # --- BOX-SPECIFIC ISOLATION ---
+        if box == "personal":
+            # Emails onde synced_for_user ou created_by corresponde ao utilizador
+            ownership_filter = {
+                "$or": [
+                    {"created_by": user_id},
+                    {"synced_for_user": user_id},
+                ]
+            }
+            if folder == "inbox":
+                inbox_or = [
+                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                ]
+                if account_email and account_email != user_email:
+                    inbox_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
+                and_conditions.append({"$and": [ownership_filter, {"$or": inbox_or}]})
+            elif folder == "sent":
+                sent_or = [
+                    {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+                ]
+                if account_email and account_email != user_email:
+                    sent_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
+                and_conditions.append({"$and": [ownership_filter, {"$or": sent_or}]})
+            elif folder == "drafts":
+                and_conditions.append({"created_by": user_id})
+            elif folder in ("starred", "trash", "custom"):
+                shared_or = [
+                    {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                ]
+                if account_email and account_email != user_email:
+                    shared_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
+                    shared_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
+                and_conditions.append({"$and": [ownership_filter, {"$or": shared_or}]})
+        elif box == "general":
+            # Emails com shared_role=geral (caixa geral)
+            and_conditions.append({"shared_role": "geral"})
+        elif box == "shared_indexacao":
+            # Emails com shared_role=indexacao
+            and_conditions.append({"shared_role": "indexacao"})
+    elif not can_see_all and user_email:
+        # --- DEFAULT ISOLATION (backward compatibility) ---
+        # Regras estritas de isolamento para utilizadores não-admin:
+        # 1. Emails devem pertencer ao utilizador (created_by OU synced_for_user)
+        # 2. O endereço do utilizador deve aparecer no FROM/TO
+        # 3. Emails legados sem user_id (antigo sync global "geral") são BLOQUEADOS
+        # 4. EXCEÇÃO: Utilizadores de roles com email partilhado (ex: indexacao)
+        #    podem ver emails sincronizados via Gmail API para esse role
+        # NOTA: admin/ceo/diretor podem ver TUDO (can_see_all = True)
+        user_id_isolation = current_user["id"]
+        user_role_isolation = current_user.get("role", "")
 
         # Verificar se o utilizador pertence a um role com email partilhado
         shared_role_config = None
-        if user_role:
+        if user_role_isolation:
             shared_role_config = await db.shared_role_email_configs.find_one(
-                {"role": user_role, "is_configured": True},
+                {"role": user_role_isolation, "is_configured": True},
                 {"_id": 0, "role": 1},
             )
 
@@ -2172,14 +2243,14 @@ async def webmail_list(
         # OU sincronizado para o role partilhado do utilizador
         ownership_filter = {
             "$or": [
-                {"created_by": user_id},
-                {"synced_for_user": user_id},
+                {"created_by": user_id_isolation},
+                {"synced_for_user": user_id_isolation},
             ]
         }
 
         # Se o utilizador tem um role com email partilhado, incluir emails do role
         if shared_role_config:
-            ownership_filter["$or"].append({"shared_role": user_role})
+            ownership_filter["$or"].append({"shared_role": user_role_isolation})
 
         if folder == "inbox":
             inbox_or = [
@@ -2198,7 +2269,7 @@ async def webmail_list(
             and_conditions.append({"$and": [ownership_filter, {"$or": sent_or}]})
         elif folder == "drafts":
             # Rascunhos: criados pelo utilizador
-            and_conditions.append({"created_by": user_id})
+            and_conditions.append({"created_by": user_id_isolation})
         elif folder in ("starred", "trash", "custom"):
             shared_or = [
                 {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
@@ -2292,8 +2363,20 @@ async def webmail_list(
             {"is_read": False},
             {"is_archived": False},
         ]
-        # Aplicar isolamento ao unread_count também
-        if not can_see_all and user_email:
+        # Aplicar box filter ao unread_count
+        if box == "personal":
+            unread_and.append({
+                "$or": [
+                    {"created_by": user_id},
+                    {"synced_for_user": user_id},
+                ]
+            })
+        elif box == "general":
+            unread_and.append({"shared_role": "geral"})
+        elif box == "shared_indexacao":
+            unread_and.append({"shared_role": "indexacao"})
+        elif not can_see_all and user_email:
+            # Default isolation (backward compat)
             user_id_unread = current_user["id"]
             unread_and.append({
                 "$and": [
@@ -2339,6 +2422,7 @@ async def webmail_list(
 
 @router.get("/webmail-stats")
 async def webmail_stats(
+    box: Optional[str] = Query(None, description="Caixa: personal, general, shared_indexacao"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -2347,6 +2431,8 @@ async def webmail_stats(
     Retorna contadores de emails não lidos, enviados hoje e rascunhos pendentes.
     Respeita o isolamento de dados: consultor/intermediário só vê os seus.
     Admin/CEO/Diretor vêem a caixa geral.
+    
+    BOX PARAM: filtra as estatísticas por caixa (personal, general, shared_indexacao).
     """
     from models.auth import UserRole
     
@@ -2354,6 +2440,22 @@ async def webmail_stats(
     user_role = current_user.get("role", "")
     user_id = current_user.get("id", "")
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    
+    # === BOX permission checks ===
+    if box == "general":
+        if user_role in (UserRole.CONSULTOR, UserRole.INDEXACAO):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Acesso à caixa 'geral' não permitido para o role '{user_role}'."
+            )
+        logger.info(f"[Webmail Stats] box=general, user={user_email}, role={user_role}")
+    elif box == "shared_indexacao":
+        if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Acesso à caixa 'shared_indexacao' não permitido para o role '{user_role}'."
+            )
+        logger.info(f"[Webmail Stats] box=shared_indexacao, user={user_email}, role={user_role}")
     
     # Base queries
     inbox_base = {
@@ -2371,8 +2473,27 @@ async def webmail_stats(
         "is_archived": False,
     }
     
-    # Apply user isolation
-    if not can_see_all and user_email:
+    # Apply box filter or default isolation
+    if box == "personal":
+        inbox_base["$or"] = [
+            {"created_by": user_id},
+            {"synced_for_user": user_id},
+        ]
+        sent_base["$or"] = [
+            {"created_by": user_id},
+            {"synced_for_user": user_id},
+        ]
+        drafts_base["created_by"] = user_id
+    elif box == "general":
+        inbox_base["shared_role"] = "geral"
+        sent_base["shared_role"] = "geral"
+        drafts_base["shared_role"] = "geral"
+    elif box == "shared_indexacao":
+        inbox_base["shared_role"] = "indexacao"
+        sent_base["shared_role"] = "indexacao"
+        drafts_base["shared_role"] = "indexacao"
+    elif not can_see_all and user_email:
+        # Apply user isolation (default backward compat)
         inbox_base["to_emails"] = {"$regex": re.escape(user_email), "$options": "i"}
         sent_base["from_email"] = {"$regex": re.escape(user_email), "$options": "i"}
         drafts_base["created_by"] = user_id
@@ -2863,14 +2984,55 @@ async def send_email_endpoint(
     - outros roles (consultor, intermediario, etc.): obrigatoriamente usam
       a conta pessoal configurada no seu perfil (email_config).
       Se não tiver email configurado, o envio é bloqueado.
+    
+    BOX SUPPORT (from_box):
+    - indexacao: ao enviar, usa automaticamente a conta partilhada do role
+    - general (from_box): CEO/admin/diretor podem enviar da caixa geral (shared_role=geral)
     """
     from models.auth import UserRole
     
     user_role = current_user.get("role", "")
     can_use_global_accounts = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    from_box = payload.from_box
     
-    # Para utilizadores não-admin, forçar uso da conta pessoal
-    if not can_use_global_accounts:
+    # === indexacao role: auto-use shared email account ===
+    if user_role == UserRole.INDEXACAO:
+        shared_config = await db.shared_role_email_configs.find_one(
+            {"role": UserRole.INDEXACAO, "is_configured": True},
+            {"_id": 0, "email_address": 1, "email": 1},
+        )
+        if shared_config:
+            # Force account to use the shared email config name
+            shared_email_addr = shared_config.get("email_address") or shared_config.get("email", "")
+            account = "personal"  # The send_email service uses email_config for "personal"
+            logger.info(f"[Send Email] indexacao user {current_user.get('email')}: using shared account {shared_email_addr}")
+        else:
+            # Fallback: try personal config
+            user_id = current_user["id"]
+            user = await db.users.find_one(
+                {"id": user_id},
+                {"_id": 0, "email_config": 1}
+            )
+            if not user or not user.get("email_config", {}).get("is_configured"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Configuração de email partilhada para indexacao não encontrada. Contacte o administrador."
+                )
+            account = "personal"
+    
+    # === from_box == "general": use shared geral account ===
+    elif from_box == "general":
+        if user_role not in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
+            raise HTTPException(
+                status_code=403,
+                detail="Apenas admin, CEO e diretor podem enviar emails a partir da caixa geral."
+            )
+        # Use "power" (default) account for general box
+        account = "power"
+        logger.info(f"[Send Email] user {current_user.get('email')} ({user_role}): sending from geral box (account={account})")
+    
+    # Para utilizadores não-admin sem box, forçar uso da conta pessoal
+    elif not can_use_global_accounts:
         user_id = current_user["id"]
         user = await db.users.find_one(
             {"id": user_id},
