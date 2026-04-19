@@ -1596,25 +1596,31 @@ const WebmailPage = () => {
                         {emailDetail.is_starred ? "Remover destaque" : "Destacar"}
                       </TooltipContent>
                     </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-xs gap-1.5"
-                          onClick={handleOpenLinkDialog}
-                          disabled={!!emailDetail.process_id}
-                        >
-                          <Link2 className="h-3.5 w-3.5" />
-                          {emailDetail.process_id ? "Associado" : "Associar"}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {emailDetail.process_id
-                          ? "Já associado a um processo"
-                          : "Associar a processo"}
-                      </TooltipContent>
-                    </Tooltip>
+                    {emailDetail.process_id ? (
+                      <Badge
+                        variant="secondary"
+                        className="h-8 text-xs gap-1.5 cursor-pointer hover:bg-accent"
+                        onClick={() => navigate(`/processo/${emailDetail.process_id}`)}
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                        {emailDetail.process_id} Associado
+                      </Badge>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs gap-1.5"
+                            onClick={handleOpenLinkDialog}
+                          >
+                            <Link2 className="h-3.5 w-3.5" />
+                            Ligar a Processo
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Ligar a Processo</TooltipContent>
+                      </Tooltip>
+                    )}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button

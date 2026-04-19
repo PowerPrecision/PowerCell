@@ -2723,7 +2723,12 @@ async def associate_email_to_client(
     data: dict = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
-    """Associar um email existente a um processo/cliente específico."""
+    """Associar um email existente a um processo/cliente específico.
+
+    SEGURANÇA: Não-admin só pode associar emails que lhe pertencem.
+    """
+    from models.auth import UserRole
+
     email_id = data.get("email_id")
     process_id = data.get("process_id")
     
@@ -2741,6 +2746,23 @@ async def associate_email_to_client(
     
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
+
+    # === ISOLAMENTO: verificar que o utilizador tem acesso ao email ===
+    user_role = current_user.get("role", "")
+    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+
+    if not can_see_all:
+        user_id = current_user["id"]
+        is_owner = (
+            email.get("created_by") == user_id
+            or email.get("synced_for_user") == user_id
+        )
+        is_shared_role = (
+            email.get("shared_role")
+            and email.get("shared_role") == user_role
+        )
+        if not (is_owner or is_shared_role):
+            raise HTTPException(status_code=403, detail="Sem permissão para associar este email")
     
     if email.get("process_id") == process_id:
         return {"success": True, "message": "Email já está associado a este processo"}
@@ -2771,16 +2793,44 @@ async def search_emails(
     limit: int = Query(20, le=100),
     current_user: dict = Depends(get_current_user)
 ):
-    """Pesquisar emails para associação manual."""
+    """Pesquisar emails para associação manual.
+
+    SEGURANÇA: Não-admin só pode pesquisar nos seus próprios emails.
+    """
+    from models.auth import UserRole
+
     if len(q) < 3:
         raise HTTPException(status_code=400, detail="Termo deve ter pelo menos 3 caracteres")
-    
-    query = {
+
+    # === ISOLAMENTO DE DADOS ===
+    user_role = current_user.get("role", "")
+    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+
+    text_filter = {
         "$or": [
             {"subject": {"$regex": q, "$options": "i"}},
             {"from_email": {"$regex": q, "$options": "i"}}
         ]
     }
+
+    if can_see_all:
+        query = text_filter
+    else:
+        user_id = current_user["id"]
+        ownership_filter = {
+            "$or": [
+                {"created_by": user_id},
+                {"synced_for_user": user_id},
+            ]
+        }
+        # Incluir emails do role partilhado
+        shared_config = await db.shared_role_email_configs.find_one(
+            {"role": user_role, "is_configured": True}, {"_id": 0, "role": 1}
+        )
+        if shared_config:
+            ownership_filter["$or"].append({"shared_role": user_role})
+
+        query = {"$and": [ownership_filter, text_filter]}
     
     emails = await db.emails.find(
         query,
@@ -3151,11 +3201,46 @@ async def get_email(
     email_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Obter detalhes de um email."""
+    """Obter detalhes de um email.
+
+    SEGURANÇA: Não-admin só pode ver emails que lhe pertencem.
+    Verifica created_by, synced_for_user ou shared_role.
+    """
+    from models.auth import UserRole
+
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
 
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
+
+    # === ISOLAMENTO DE DADOS ===
+    user_role = current_user.get("role", "")
+    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+
+    if not can_see_all:
+        user_id = current_user["id"]
+        user_email = (current_user.get("email") or "").lower().strip()
+
+        # Verificar se o utilizador tem acesso a este email
+        is_owner = (
+            email.get("created_by") == user_id
+            or email.get("synced_for_user") == user_id
+        )
+        is_shared_role = (
+            email.get("shared_role")
+            and email.get("shared_role") == user_role
+        )
+        is_in_conversation = False
+        if user_email:
+            from_emails = email.get("from_email") or ""
+            to_emails = email.get("to_emails") or []
+            is_in_conversation = (
+                user_email in from_emails.lower()
+                or any(user_email in addr.lower() for addr in to_emails)
+            )
+
+        if not (is_owner or is_shared_role or is_in_conversation):
+            raise HTTPException(status_code=403, detail="Sem permissão para ver este email")
 
     enriched = await enrich_email(email)
 
