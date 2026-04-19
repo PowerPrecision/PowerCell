@@ -528,8 +528,9 @@ const DashboardLayout = ({ children, title }) => {
       }
 
       // Menu simplificado para CONSULTORES E INTERMEDIÁRIOS
-      // Mostra apenas os seus processos atribuídos
       if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
+        const isConsultor = ["consultor", "mediador"].includes(userRole);
+
         const externalMain = [
           ...baseItems,
           {
@@ -552,11 +553,31 @@ const DashboardLayout = ({ children, title }) => {
             href: "/meus-clientes",
           },
           {
-            label: "Minutas",
-            icon: FileArchive,
-            href: "/minutas",
+            label: "Lista de processos",
+            icon: FileText,
+            href: "/lista-processos",
+          },
+          {
+            label: "Imóveis",
+            icon: Building2,
+            href: "/imoveis",
           },
         ];
+
+        // Gestor de visitas apenas para consultor
+        if (isConsultor) {
+          externalNegocio.push({
+            label: "Gestor de visitas",
+            icon: Search,
+            href: "/leads",
+          });
+        }
+
+        externalNegocio.push({
+          label: "Minutas",
+          icon: FileArchive,
+          href: "/minutas",
+        });
 
         return {
           main: externalMain,
