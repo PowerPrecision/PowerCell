@@ -42,6 +42,9 @@ import {
   FileSpreadsheet,
   CloudUpload,
   Zap,
+  AlertTriangle,
+  User,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -85,12 +88,50 @@ const StatusLabels = {
 };
 
 /**
+ * Formatar data de prazo com indicação visual de atraso.
+ * Retorna { text, isOverdue, isToday, isSoon }.
+ */
+const formatDueDate = (dueDate) => {
+  if (!dueDate) return null;
+  const now = new Date();
+  const due = new Date(dueDate);
+  const diffMs = due - now;
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  const isOverdue = diffMs < 0;
+  const isToday = !isOverdue && diffDays === 0;
+  const isSoon = !isOverdue && !isToday && diffDays <= 3;
+
+  let text = '';
+  if (isOverdue) {
+    const daysLate = Math.abs(diffDays);
+    text = daysLate === 0 ? 'Atrasado hoje' : daysLate === 1 ? 'Atrasado 1 dia' : `Atrasado ${daysLate} dias`;
+  } else if (isToday) {
+    text = 'Entrega hoje';
+  } else if (diffDays === 1) {
+    text = 'Amanhã';
+  } else {
+    text = `em ${due.toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })}`;
+  }
+
+  return { text, isOverdue, isToday, isSoon };
+};
+
+/**
  * Componente de item de tarefa individual
  */
 const TaskItem = ({ task, onAcknowledge, onCancel }) => {
   const TaskIcon = TaskTypeIcons[task.task_type] || Activity;
   const isActive = task.status === "pending" || task.status === "processing";
-  
+  const dueDateInfo = formatDueDate(task.due_date);
+
+  // Badge de prioridade
+  const priorityConfig = {
+    alta: { label: 'Alta', className: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800' },
+    media: { label: 'Média', className: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800' },
+    baixa: { label: 'Baixa', className: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-700' },
+  };
+  const priority = priorityConfig[task.priority];
+
   return (
     <div
       className={cn(
@@ -98,12 +139,13 @@ const TaskItem = ({ task, onAcknowledge, onCancel }) => {
         task.status === "completed" && !task.acknowledged_at && "bg-green-50/50 dark:bg-green-950/20 border-green-200 dark:border-green-800",
         task.status === "failed" && !task.acknowledged_at && "bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-800",
         isActive && "bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800",
+        dueDateInfo?.isOverdue && isActive && "ring-1 ring-red-300 dark:ring-red-700",
       )}
     >
       <div className="flex items-start gap-3">
         {/* Ícone */}
         <div className={cn(
-          "p-2 rounded-md",
+          "p-2 rounded-md shrink-0",
           StatusColors[task.status]
         )}>
           {task.status === "processing" ? (
@@ -119,20 +161,37 @@ const TaskItem = ({ task, onAcknowledge, onCancel }) => {
         
         {/* Conteúdo */}
         <div className="flex-1 min-w-0">
+          {/* Título + Prioridade + Cancelar */}
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-medium truncate">{task.title}</p>
-            {isActive && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                onClick={() => onCancel(task.task_id)}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            )}
+            <div className="flex items-center gap-1 shrink-0">
+              {priority && (
+                <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-5 font-semibold border", priority.className)}>
+                  {priority.label}
+                </Badge>
+              )}
+              {isActive && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                  onClick={() => onCancel(task.task_id)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
           </div>
-          
+
+          {/* Cliente / Processo associado */}
+          {task.process_name && (
+            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1 truncate">
+              <FileText className="h-3 w-3 shrink-0" />
+              {task.process_name}
+            </p>
+          )}
+
+          {/* Descrição (opcional) */}
           {task.description && (
             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
               {task.description}
@@ -142,44 +201,48 @@ const TaskItem = ({ task, onAcknowledge, onCancel }) => {
           {/* Barra de progresso */}
           {task.status === "processing" && (
             <div className="mt-2">
-              <Progress 
-                value={task.progress || 0} 
-                className="h-1.5"
-              />
+              <Progress value={task.progress || 0} className="h-1.5" />
               {task.progress_message && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  {task.progress_message}
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">{task.progress_message}</p>
               )}
             </div>
           )}
-          
-          {/* Processo associado */}
-          {task.process_name && (
-            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-              <FileText className="h-3 w-3" />
-              {task.process_name}
-            </p>
-          )}
+
+          {/* Prazo + Meta-dados */}
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            {dueDateInfo && (
+              <span className={cn(
+                "inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full border",
+                dueDateInfo.isOverdue
+                  ? "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/40 dark:text-red-300 dark:border-red-800"
+                  : dueDateInfo.isToday
+                    ? "bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/40 dark:text-orange-300 dark:border-orange-800"
+                    : dueDateInfo.isSoon
+                      ? "bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800"
+                      : "bg-muted text-muted-foreground border-border"
+              )}>
+                <CalendarClock className="h-3 w-3" />
+                {dueDateInfo.text}
+              </span>
+            )}
+            {task.assigned_to_name && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <User className="h-3 w-3" />
+                {task.assigned_to_name}
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <TaskIcon className="h-3 w-3" />
+              {TaskTypeLabels[task.task_type] || task.task_type}
+            </span>
+          </div>
           
           {/* Ações para tarefas concluídas/falhadas */}
           {(task.status === "completed" || task.status === "failed") && !task.acknowledged_at && (
             <div className="flex items-center gap-2 mt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => onAcknowledge(task.task_id)}
-              >
-                OK
-              </Button>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => onAcknowledge(task.task_id)}>OK</Button>
               {task.result_url && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => window.open(task.result_url, "_blank")}
-                >
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => window.open(task.result_url, "_blank")}>
                   <ExternalLink className="h-3 w-3 mr-1" />
                   Ver resultado
                 </Button>

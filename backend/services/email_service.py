@@ -623,7 +623,7 @@ async def test_email_connection(account_name: str = None) -> Dict[str, Any]:
 def _fetch_all_from_folder_sync(
     account: EmailAccount,
     folder: str = "INBOX",
-    since_days: int = 7,
+    since_days: int = 30,
     max_emails: int = 100
 ) -> Dict[str, Any]:
     """
@@ -755,7 +755,7 @@ def _fetch_all_from_folder_sync(
 
 async def sync_webmail_emails(
     account_name: str = None,
-    days: int = 7,
+    days: int = 30,
     max_emails: int = 100
 ) -> Dict[str, Any]:
     """
@@ -947,7 +947,7 @@ async def sync_webmail_emails(
     }
 
 
-async def sync_user_emails(user_id: str, days: int = 7, max_emails: int = 100) -> Dict[str, Any]:
+async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) -> Dict[str, Any]:
     """
     Sincronizar emails para um utilizador específico usando a sua configuração pessoal.
     
@@ -1149,7 +1149,7 @@ async def sync_user_emails(user_id: str, days: int = 7, max_emails: int = 100) -
     }
 
 
-async def sync_all_user_emails(days: int = 7) -> Dict[str, Any]:
+async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     """
     Sincronizar emails para TODOS os utilizadores com configuração ativa.
     Usa asyncio.gather para execução concorrente.
