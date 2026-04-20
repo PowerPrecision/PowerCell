@@ -117,7 +117,7 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo O Meu Negócio
-    const meuNegocioRoutes = ["/registos-clientes", "/clientes/novo", "/meus-clientes", "/processos", "/kanban", "/imoveis", "/financeiro"];
+    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/kanban", "/imoveis", "/financeiro"];
     // Rotas do grupo Visão Global
     const visaoGlobalRoutes = ["/clientes", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
@@ -198,11 +198,6 @@ const DashboardLayout = ({ children, title }) => {
       label: "O Meu Negócio",
       icon: Building2,
       items: [
-        {
-          label: "Novo Registo",
-          icon: Users,
-          href: "/clientes/novo",
-        },
         {
           label: "Os Meus Clientes",
           icon: User,
@@ -380,7 +375,6 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
       const consultorNegocioItems = [
-        { label: "Novo Registo", icon: Users, href: "/clientes/novo" },
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
         { label: "Os Meus Processos", icon: FileText, href: "/processos" },
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },

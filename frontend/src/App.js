@@ -472,16 +472,6 @@ function App() {
             }
           />
 
-          {/* Clientes Novo - Alias para criacao de clientes */}
-          <Route
-            path="/clientes/novo"
-            element={
-              <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ClientRegistrationsPage />
-              </ProtectedRoute>
-            }
-          />
-          
           {/* Expiring Documents Dashboard - All Staff (filtered by role) */}
           <Route
             path="/validades"

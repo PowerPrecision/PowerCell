@@ -409,6 +409,16 @@ export default function ClientsPage() {
               Gerir todos os clientes da empresa
             </p>
           </div>
+          {canCreateClients && (
+            <Button
+              onClick={() => setShowCreateDialog(true)}
+              className="gap-2"
+              data-testid="btn-novo-cliente"
+            >
+              <Plus className="h-4 w-4" />
+              Novo Cliente
+            </Button>
+          )}
         </div>
 
         {/* Search, Filters & Stats */}
