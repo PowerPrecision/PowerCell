@@ -411,8 +411,24 @@ const DashboardLayout = ({ children, title }) => {
         meuNegocioGroup,
         visaoGlobalGroup,
         comunicacoesGroup,
-        gestaoOperacoesGroup,
       ];
+
+      // Gestão e Operações — para admin, remover itens redundantes
+      // (acessíveis via Definições Gerais > Destinatários, RGPD)
+      if (isAdmin) {
+        // Admin só vê "Análise e Estatísticas" neste grupo
+        allGroups.push({
+          id: "gestao-operacoes",
+          label: "Gestão e Operações",
+          icon: Settings,
+          items: gestaoOperacoesGroup.items.filter(
+            (item) => item.href === "/estatisticas"
+          ),
+        });
+      } else {
+        // CEO e Administrativo vêem todos os itens
+        allGroups.push(gestaoOperacoesGroup);
+      }
 
       // Configurações de Sistema apenas para admin
       if (isAdmin) {
