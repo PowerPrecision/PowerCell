@@ -403,10 +403,10 @@ export default function ClientsPage() {
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Users className="h-6 w-6 text-primary" />
-              Gestão de Processos
+              Todos os Clientes
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Gerir processos de compra e financiamento
+              Gerir todos os clientes da empresa
             </p>
           </div>
         </div>

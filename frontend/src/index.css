@@ -20,6 +20,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================
+   ESCALA GLOBAL DA APLICAÇÃO (80%)
+   Dá um aspeto mais profissional e panorâmico.
+   Modais e overlays continuam centrados corretamente.
+   ============================================ */
+html {
+    zoom: 0.8;
+    -moz-transform: scale(0.8);
+    -moz-transform-origin: top left;
+    width: 125%; /* Compensar a redução de escala no Firefox */
+}
+
+/* Reset para modais e overlays — manter escala original */
+[data-radix-popper-content-wrapper],
+[role="dialog"],
+.fixed {
+    zoom: 1.25 !important; /* 1 / 0.8 para neutralizar o zoom global */
+    -moz-transform: scale(1) !important;
+    width: auto !important;
+}
+
 /* Estilos base do corpo */
 body {
     margin: 0;
