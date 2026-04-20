@@ -183,9 +183,9 @@ const MyClientsPage = () => {
         {/* Header */}
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Os Meus Processos</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Os Meus Clientes</h1>
             <p className="text-gray-500 text-sm mt-1">
-              Visão geral dos processos atribuídos a si
+              Clientes atribuídos ao meu perfil
             </p>
           </div>
         </div>

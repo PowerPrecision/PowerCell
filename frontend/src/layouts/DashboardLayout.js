@@ -62,6 +62,7 @@ import {
   DollarSign,
   Lock,
   Mail,
+  Eye,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -114,17 +115,23 @@ const DashboardLayout = ({ children, title }) => {
   const getInitialOpenSections = () => {
     const path = location.pathname;
     
-    // Rotas do grupo Negócio
-    const negocioRoutes = ["/utilizadores", "/processos", "/clientes", "/leads", "/imoveis", "/minutas", "/meus-clientes", "/registos-clientes", "/financeiro", "/lista-processos"];
-    // Rotas do grupo IA
-    const iaRoutes = ["/configuracoes/ia", "/ai-insights", "/revisao-dados-ia", "/configuracoes/treino-ia"];
-    // Rotas do grupo Configurações (unificado com Sistema)
-    const configuracoesRoutes = ["/configuracoes", "/definicoes", "/configuracoes/notificacoes", "/admin/backups", "/admin/logs", "/admin/mapeamentos-nif", "/admin/processos-background", "/validades", "/auditoria", "/workflow-estados", "/automation", "/configuracoes-perfis", "/gestao-formulario", "/admin/migracao-rgpd", "/diagnosticos"];
+    // Rotas do grupo O Meu Negócio
+    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/kanban", "/imoveis", "/financeiro"];
+    // Rotas do grupo Visão Global
+    const visaoGlobalRoutes = ["/clientes", "/lista-processos"];
+    // Rotas do grupo Comunicações e Ficheiros
+    const comunicacoesRoutes = ["/webmail", "/minutas", "/leads"];
+    // Rotas do grupo Gestão e Operações
+    const gestaoRoutes = ["/utilizadores", "/estatisticas", "/gestao-formulario", "/auditoria"];
+    // Rotas do grupo Configurações de Sistema
+    const configRoutes = ["/configuracoes", "/definicoes", "/automation", "/configuracoes/ia", "/admin/backups", "/admin/logs", "/validades", "/workflow-estados", "/configuracoes-perfis", "/admin/migracao-rgpd", "/diagnosticos", "/admin/processos-background"];
     
     return {
-      negocio: negocioRoutes.some(r => path.startsWith(r)),
-      ia: iaRoutes.some(r => path.startsWith(r)),
-      configuracoes: configuracoesRoutes.some(r => path.startsWith(r)),
+      "meu-negocio": meuNegocioRoutes.some(r => path.startsWith(r)),
+      "visao-global": visaoGlobalRoutes.some(r => path.startsWith(r)),
+      "comunicacoes": comunicacoesRoutes.some(r => path.startsWith(r)),
+      "gestao-operacoes": gestaoRoutes.some(r => path.startsWith(r)),
+      "config-sistema": configRoutes.some(r => path.startsWith(r)),
     };
   };
   
@@ -157,522 +164,269 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const getNavItems = () => {
-    // Admin vai para /admin, outros staff vão para /processos
-    const isAdmin = effectiveRole?.toLowerCase() === "admin";
-    const dashboardHref = isAdmin ? "/admin" : "/processos";
-    
-    const baseItems = [
-      {
-        label: isAdmin ? "Dashboard" : "Processos",
-        icon: LayoutDashboard,
-        href: dashboardHref,
-      },
-    ];
-
-    // Estatísticas para todos os utilizadores autenticados
-    const statsItem = {
-      label: "Estatísticas",
-      icon: BarChart3,
-      href: "/estatisticas",
-    };
-
-    // Definições para admin e ceo
-    const settingsItem = {
-      label: "Definições",
-      icon: Settings,
-      href: "/definicoes",
-    };
-
-    if (effectiveRole === "cliente") {
-      return [
-        ...baseItems,
-        statsItem,
-      ];
-    }
-
-    // CEO tem menu limitado
-    if (effectiveRole?.toLowerCase() === "ceo") {
-      return {
-        main: [
-          ...baseItems,
-          {
-            label: "Processos",
-            icon: FileText,
-            href: "/lista-processos",
-          },
-          statsItem,
-          {
-            label: "Quadro Geral",
-            icon: LayoutGrid,
-            href: "/staff",
-          },
-          {
-            label: "Email",
-            icon: Mail,
-            href: "/webmail",
-          },
-        ],
-        groups: [
-          {
-            id: "negocio",
-            label: "Negócio",
-            icon: Building2,
-            items: [
-              {
-                label: "Registos de clientes",
-                icon: Users,
-                href: "/registos-clientes",
-              },
-              {
-                label: "Lista de processos",
-                icon: FileText,
-                href: "/lista-processos",
-              },
-              {
-                label: "Lista de clientes",
-                icon: User,
-                href: "/clientes",
-              },
-              {
-                label: "Gestor de visitas",
-                icon: Search,
-                href: "/leads",
-              },
-              {
-                label: "Imóveis",
-                icon: Building2,
-                href: "/imoveis",
-              },
-              {
-                label: "Minutas",
-                icon: FileArchive,
-                href: "/minutas",
-              },
-              {
-                label: "Financeiro",
-                icon: DollarSign,
-                href: "/financeiro",
-              },
-            ],
-          },
-          {
-            id: "configuracoes",
-            label: "Configurações",
-            icon: Cog,
-            items: [
-              {
-                label: "Utilizadores",
-                icon: Users,
-                href: "/utilizadores",
-              },
-              {
-                label: "Sistema",
-                icon: Cog,
-                href: "/configuracoes",
-              },
-              {
-                label: "Estados do Workflow",
-                icon: Settings,
-                href: "/workflow-estados",
-              },
-              {
-                label: "Automacoes",
-                icon: Zap,
-                href: "/automation",
-              },
-              {
-                label: "Perfis e Permissoes",
-                icon: Shield,
-                href: "/configuracoes-perfis",
-              },
-              {
-                label: "Gestao do Formulario",
-                icon: FileSignature,
-                href: "/gestao-formulario",
-              },
-              {
-                label: "Auditoria",
-                icon: ClipboardList,
-                href: "/auditoria",
-              },
-            ],
-          },
-        ],
-      };
-    }
-
-    // Admin tem menu completo
-    if (effectiveRole?.toLowerCase() === "admin") {
-      return {
-        main: [
-          ...baseItems,
-          {
-            label: "Processos",
-            icon: FileText,
-            href: "/lista-processos",
-          },
-          statsItem,
-          {
-            label: "Quadro Geral",
-            icon: LayoutGrid,
-            href: "/staff",
-          },
-          {
-            label: "Email",
-            icon: Mail,
-            href: "/webmail",
-          },
-        ],
-        groups: [
-          {
-            id: "negocio",
-            label: "Negócio",
-            icon: Building2,
-            items: [
-              {
-                label: "Registos de clientes",
-                icon: Users,
-                href: "/registos-clientes",
-              },
-              {
-                label: "Lista de processos",
-                icon: FileText,
-                href: "/lista-processos",
-              },
-              {
-                label: "Lista de clientes",
-                icon: User,
-                href: "/clientes",
-              },
-              {
-                label: "Gestor de visitas",
-                icon: Search,
-                href: "/leads",
-              },
-              {
-                label: "Imóveis",
-                icon: Building2,
-                href: "/imoveis",
-              },
-              {
-                label: "Minutas",
-                icon: FileArchive,
-                href: "/minutas",
-              },
-              {
-                label: "Financeiro",
-                icon: DollarSign,
-                href: "/financeiro",
-              },
-            ],
-          },
-          {
-            id: "ia",
-            label: "Ferramentas IA",
-            icon: Brain,
-            items: [
-              {
-                label: "Configuração de IA",
-                icon: Sparkles,
-                href: "/configuracoes/ia",
-              },
-              {
-                label: "Treino do Agente",
-                icon: Brain,
-                href: "/configuracoes/treino-ia",
-              },
-              {
-                label: "Agente IA",
-                icon: Brain,
-                href: "/ai-insights",
-              },
-              {
-                label: "Revisão Dados IA",
-                icon: FileText,
-                href: "/revisao-dados-ia",
-              },
-            ],
-          },
-          {
-            id: "configuracoes",
-            label: "Configurações",
-            icon: Cog,
-            items: [
-              {
-                label: "Utilizadores",
-                icon: Users,
-                href: "/utilizadores",
-              },
-              {
-                label: "Definições",
-                icon: Settings,
-                href: "/definicoes",
-              },
-              {
-                label: "Sistema",
-                icon: Cog,
-                href: "/configuracoes",
-              },
-              {
-                label: "Validades Docs",
-                icon: AlertCircle,
-                href: "/validades",
-              },
-              {
-                label: "Processos Background",
-                icon: LayoutGrid,
-                href: "/admin/processos-background",
-              },
-              {
-                label: "Backups",
-                icon: Database,
-                href: "/admin/backups",
-              },
-              {
-                label: "Logs do Sistema",
-                icon: AlertCircle,
-                href: "/admin/logs",
-              },
-              {
-                label: "Auditoria",
-                icon: ClipboardList,
-                href: "/auditoria",
-              },
-              {
-                label: "Migracao RGPD",
-                icon: Lock,
-                href: "/admin/migracao-rgpd",
-              },
-              {
-                label: "Diagnosticos",
-                icon: Activity,
-                href: "/diagnosticos",
-              },
-              {
-                label: "Estados do Workflow",
-                icon: Settings,
-                href: "/workflow-estados",
-              },
-              {
-                label: "Automacoes",
-                icon: Zap,
-                href: "/automation",
-              },
-              {
-                label: "Perfis e Permissoes",
-                icon: Shield,
-                href: "/configuracoes-perfis",
-              },
-              {
-                label: "Gestao do Formulario",
-                icon: FileSignature,
-                href: "/gestao-formulario",
-              },
-            ],
-          },
-        ],
-      };
-    }
-
-    // Para roles de staff (consultor, mediador, intermediario, ceo, etc.)
     const userRole = effectiveRole?.toLowerCase();
+    const isAdmin = userRole === "admin";
+    const isGlobalOps = ["admin", "ceo", "administrativa"].includes(userRole);
+    const isStaff = ["consultor", "mediador", "intermediario", "consultor_intermediario", "indexacao", "diretor", "administrativa", "ceo", "admin"].includes(userRole);
+
+    // Permissões personalizadas (se definidas)
     const userPermissions = user?.permissions || {};
     const userPages = userPermissions?.pages || [];
-    const userActions = userPermissions?.actions || [];
 
-    if (["consultor", "mediador", "intermediario", "consultor_intermediario", "ceo", "diretor", "administrativo", "indexacao"].includes(userRole)) {
-      // Menu para INDEXACAO - simplificado e focado no fluxo de trabalho
-      if (userRole === "indexacao") {
-        const indexacaoMain = [];
+    // Se o utilizador tem permissões definidas, verificar acesso
+    const hasPageAccess = (page) => {
+      if (userPages.length === 0) return true; // Sem permissões = acesso total
+      return userPages.includes(page);
+    };
 
-        // "Quadro Geral" (Kanban) - página principal
-        if (userPages.includes("kanban")) {
-          indexacaoMain.push({
-            label: "Quadro Geral",
-            icon: LayoutGrid,
-            href: "/kanban",
-          });
-        }
+    // ====================================================================
+    // DASHBOARD (Visível para todos)
+    // ====================================================================
+    const dashboardHref = isAdmin ? "/admin" : "/kanban";
+    const dashboardItem = {
+      label: "Dashboard",
+      icon: LayoutDashboard,
+      href: dashboardHref,
+    };
 
-        // "Os Meus Processos" - processos atribuídos ao utilizador
-        if (userPages.includes("processes")) {
-          indexacaoMain.push({
-            label: "Os Meus Processos",
-            icon: FileText,
-            href: "/processos",
-          });
-        }
-
-        // "Lista de Clientes"
-        if (userPages.includes("clients")) {
-          indexacaoMain.push({
-            label: "Lista de Clientes",
-            icon: Users,
-            href: "/clientes",
-          });
-        }
-
-        // "Email" (Webmail)
-        if (userPages.includes("webmail")) {
-          indexacaoMain.push({
-            label: "Email",
-            icon: Mail,
-            href: "/webmail",
-          });
-        }
-
-        return {
-          main: indexacaoMain,
-          groups: [],
-        };
-      }
-
-      // Menu simplificado para CONSULTORES E INTERMEDIÁRIOS
-      if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
-        const isConsultor = ["consultor", "mediador"].includes(userRole);
-
-        const externalMain = [
-          ...baseItems,
-          {
-            label: "Os Meus Processos",
-            icon: FileText,
-            href: "/processos",
-          },
-          statsItem,
-          {
-            label: "Email",
-            icon: Mail,
-            href: "/webmail",
-          },
-        ];
-
-        const externalNegocio = [
-          {
-            label: "Os Meus Clientes",
-            icon: Users,
-            href: "/meus-clientes",
-          },
-          {
-            label: "Lista de processos",
-            icon: FileText,
-            href: "/lista-processos",
-          },
-          {
-            label: "Imóveis",
-            icon: Building2,
-            href: "/imoveis",
-          },
-        ];
-
-        // Gestor de visitas apenas para consultor
-        if (isConsultor) {
-          externalNegocio.push({
-            label: "Gestor de visitas",
-            icon: Search,
-            href: "/leads",
-          });
-        }
-
-        externalNegocio.push({
-          label: "Minutas",
-          icon: FileArchive,
-          href: "/minutas",
-        });
-
-        return {
-          main: externalMain,
-          groups: [
-            {
-              id: "negocio",
-              label: "Negócio",
-              icon: Building2,
-              items: externalNegocio,
-            },
-          ],
-        };
-      }
-
-      // Menu para DIRETOR e ADMINISTRATIVO (sem Financeiro — só Admin/CEO)
-      const mainItems = [
-        ...baseItems,
+    // ====================================================================
+    // O MEU NEGÓCIO (Visível para todos)
+    // ====================================================================
+    const meuNegocioGroup = {
+      id: "meu-negocio",
+      label: "O Meu Negócio",
+      icon: Building2,
+      items: [
         {
-          label: "Processos",
-          icon: FileText,
-          href: "/lista-processos",
+          label: "Novo Registo",
+          icon: Users,
+          href: "/registos-clientes",
         },
-        statsItem,
+        {
+          label: "Os Meus Clientes",
+          icon: User,
+          href: "/meus-clientes",
+        },
+        {
+          label: "Os Meus Processos",
+          icon: FileText,
+          href: "/processos",
+        },
         {
           label: "Quadro Geral",
           icon: LayoutGrid,
           href: "/kanban",
         },
         {
-          label: "Email",
+          label: "Imóveis e Visitas",
+          icon: Search,
+          href: "/imoveis",
+        },
+        {
+          label: "Financeiro",
+          icon: DollarSign,
+          href: "/financeiro",
+        },
+      ],
+    };
+
+    // ====================================================================
+    // VISÃO GLOBAL (Apenas admin, ceo, administrativa)
+    // ====================================================================
+    const visaoGlobalGroup = {
+      id: "visao-global",
+      label: "Visão Global",
+      icon: Eye,
+      items: [
+        {
+          label: "Todos os Clientes",
+          icon: Users,
+          href: "/clientes",
+        },
+        {
+          label: "Todos os Processos",
+          icon: FileText,
+          href: "/lista-processos",
+        },
+      ],
+    };
+
+    // ====================================================================
+    // COMUNICAÇÕES E FICHEIROS (Visível para todos)
+    // ====================================================================
+    const comunicacoesGroup = {
+      id: "comunicacoes",
+      label: "Comunicações e Ficheiros",
+      icon: Mail,
+      items: [
+        {
+          label: "Webmail",
           icon: Mail,
           href: "/webmail",
         },
-      ];
+        {
+          label: "Minutas",
+          icon: FileArchive,
+          href: "/minutas",
+        },
+        {
+          label: "Ficheiros",
+          icon: FileText,
+          href: "/leads",
+        },
+      ],
+    };
 
-      const negocioItems = [];
+    // ====================================================================
+    // GESTÃO E OPERAÇÕES (Apenas admin, ceo, administrativa)
+    // ====================================================================
+    const gestaoOperacoesGroup = {
+      id: "gestao-operacoes",
+      label: "Gestão e Operações",
+      icon: Settings,
+      items: [
+        {
+          label: "Destinatários",
+          icon: Users,
+          href: "/utilizadores",
+        },
+        {
+          label: "Análise e Estatísticas",
+          icon: BarChart3,
+          href: "/estatisticas",
+        },
+        {
+          label: "Rascunhos",
+          icon: FileSignature,
+          href: "/gestao-formulario",
+        },
+        {
+          label: "RGPD",
+          icon: Shield,
+          href: "/auditoria",
+        },
+      ],
+    };
 
-      // Registos de clientes para todos
-      negocioItems.push({
-        label: "Registos de clientes",
-        icon: Users,
-        href: "/registos-clientes",
-      });
+    // ====================================================================
+    // CONFIGURAÇÕES DE SISTEMA (Apenas admin)
+    // ====================================================================
+    const configSistemaGroup = {
+      id: "config-sistema",
+      label: "Configurações de Sistema",
+      icon: Cog,
+      items: [
+        {
+          label: "Utilizadores e Equipas",
+          icon: Users,
+          href: "/utilizadores",
+        },
+        {
+          label: "Integrações",
+          icon: Zap,
+          href: "/automation",
+        },
+        {
+          label: "Gestão de Formulários",
+          icon: FileSignature,
+          href: "/gestao-formulario",
+        },
+      ],
+    };
 
-      // Lista de processos para todos
-      negocioItems.push({
-        label: "Lista de processos",
-        icon: FileText,
-        href: "/lista-processos",
-      });
-
-      // Lista de clientes para todos
-      negocioItems.push({
-        label: "Lista de clientes",
-        icon: User,
-        href: "/clientes",
-      });
-
-      // Gestor de visitas
-      negocioItems.push({
-        label: "Gestor de visitas",
-        icon: Search,
-        href: "/leads",
-      });
-
-      // Imóveis
-      negocioItems.push({
-        label: "Imóveis",
-        icon: Building2,
-        href: "/imoveis",
-      });
-
-      // Minutas
-      negocioItems.push({
-        label: "Minutas",
-        icon: FileArchive,
-        href: "/minutas",
-      });
-
-      // NOTA: Financeiro NÃO incluído — apenas disponível para Admin e CEO
+    // ====================================================================
+    // MENU PARA INDEXAÇÃO (simplificado)
+    // ====================================================================
+    if (userRole === "indexacao") {
+      const indexacaoGroups = [];
+      if (hasPageAccess("kanban")) {
+        indexacaoGroups.push({
+          id: "meu-negocio",
+          label: "O Meu Negócio",
+          icon: Building2,
+          items: [
+            { label: "Os Meus Processos", icon: FileText, href: "/processos" },
+            { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
+          ],
+        });
+      }
+      if (hasPageAccess("webmail")) {
+        indexacaoGroups.push({
+          id: "comunicacoes",
+          label: "Comunicações e Ficheiros",
+          icon: Mail,
+          items: [
+            { label: "Webmail", icon: Mail, href: "/webmail" },
+            { label: "Minutas", icon: FileArchive, href: "/minutas" },
+            { label: "Ficheiros", icon: FileText, href: "/leads" },
+          ],
+        });
+      }
 
       return {
-        main: mainItems,
+        main: [dashboardItem],
+        groups: indexacaoGroups,
+      };
+    }
+
+    // ====================================================================
+    // MENU PARA CONSULTORES, INTERMEDIÁRIOS, MEDIADORES
+    // ====================================================================
+    if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
+      const consultorNegocioItems = [
+        { label: "Novo Registo", icon: Users, href: "/registos-clientes" },
+        { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
+        { label: "Os Meus Processos", icon: FileText, href: "/processos" },
+        { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
+        { label: "Imóveis e Visitas", icon: Search, href: "/imoveis" },
+      ];
+
+      return {
+        main: [dashboardItem],
         groups: [
-          ...(negocioItems.length > 0 ? [{
-            id: "negocio",
-            label: "Negócio",
-            icon: Building2,
-            items: negocioItems,
-          }] : []),
+          { id: "meu-negocio", label: "O Meu Negócio", icon: Building2, items: consultorNegocioItems },
+          comunicacoesGroup,
         ],
       };
     }
 
-    return { main: [...baseItems], groups: [] };
+    // ====================================================================
+    // MENU PARA DIRETOR
+    // ====================================================================
+    if (userRole === "diretor") {
+      return {
+        main: [dashboardItem],
+        groups: [
+          { ...meuNegocioGroup, items: meuNegocioGroup.items.filter(i => i.href !== "/financeiro") },
+          comunicacoesGroup,
+        ],
+      };
+    }
+
+    // ====================================================================
+    // MENU PARA ADMINISTRATIVA, CEO e ADMIN
+    // ====================================================================
+    if (["administrativa", "ceo", "admin"].includes(userRole)) {
+      const allGroups = [
+        meuNegocioGroup,
+        visaoGlobalGroup,
+        comunicacoesGroup,
+        gestaoOperacoesGroup,
+      ];
+
+      // Configurações de Sistema apenas para admin
+      if (isAdmin) {
+        allGroups.push(configSistemaGroup);
+      }
+
+      return {
+        main: [dashboardItem],
+        groups: allGroups,
+      };
+    }
+
+    // Fallback
+    return { main: [dashboardItem], groups: [] };
   };
 
   const navData = getNavItems();
