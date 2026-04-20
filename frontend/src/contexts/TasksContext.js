@@ -80,7 +80,7 @@ export const TaskStatus = {
 /**
  * Labels amigáveis para tipos de tarefas
  */
-const TaskTypeLabels = {
+export const TaskTypeLabels = {
   PDF_GEN: "Geração de PDF",
   AI_ANALYSIS: "Análise com IA",
   EMAIL_SEND: "Envio de Email",
