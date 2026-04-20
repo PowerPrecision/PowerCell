@@ -19,7 +19,7 @@ from models.rgpd import (
     RGPDCreate, RGPDResponse, RGPDStatusResponse,
     RGPDConsentData, RGPDPublicView, RGPDStatusEnum
 )
-from services.auth import get_current_user, require_staff, require_roles
+from services.auth import get_current_user, require_staff, require_roles, require_management
 from models.auth import UserRole
 from services.rgpd_service import (
     create_rgpd_request,
@@ -643,7 +643,7 @@ Assinatura: _________________________________"""
 
 @router.get("/admin/template")
 async def get_rgpd_template(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """
     Obter o template de texto RGPD.
@@ -686,7 +686,7 @@ RGPD_TEMPLATE_VERSIONS_COLLECTION = "rgpd_template_versions"
 @router.put("/admin/template")
 async def update_rgpd_template(
     template_data: RGPDTemplateUpdate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """
     Atualizar o template de texto RGPD (com versionamento).
@@ -759,7 +759,7 @@ async def update_rgpd_template(
 
 @router.get("/admin/template/versions")
 async def list_rgpd_template_versions(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """
     Listar todas as versões do template RGPD (sem conteúdo completo).
@@ -785,7 +785,7 @@ async def list_rgpd_template_versions(
 @router.get("/admin/template/versions/{version_id}")
 async def get_rgpd_template_version(
     version_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """
     Obter o conteúdo completo de uma versão específica do template RGPD.
