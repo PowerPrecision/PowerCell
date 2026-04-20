@@ -24,6 +24,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { useWebSocket } from "../hooks/useWebSocket";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import {
@@ -95,7 +96,7 @@ const NotificationsDropdown = () => {
   const intervalRef = useRef(null);
   const consecutiveSuccessRef = useRef(0);
 
-  // Play notification sound
+  // Play notification sound — declared before useWebSocket callback reference
   const playNotificationSound = useCallback(() => {
     if (!soundEnabled) return;
     
@@ -131,6 +132,37 @@ const NotificationsDropdown = () => {
       // Audio not available
     }
   }, [soundEnabled]);
+
+  // ====================================================================
+  // WEBSOCKET — Real-time notifications from server push events
+  // Complementa o polling: o polling cobre o caso de o WebSocket falhar,
+  // enquanto o WebSocket fornece updates instantâneos.
+  // ====================================================================
+  useWebSocket({
+    autoConnect: true,
+    onNotification: useCallback((notification) => {
+      if (!notification) return;
+
+      // Increment unread counter immediately
+      setUnreadCount(prev => prev + 1);
+      previousUnreadCount.current += 1;
+
+      // Prepend to local notifications list
+      setNotifications(prev => [notification, ...prev].slice(0, 50));
+
+      // Play sound + show toast for real-time push notifications
+      playNotificationSound();
+      toast.info(notification.message || "Nova notificação", {
+        description: notification.client_name || notification.process_name || "Nova notificação",
+        action: notification.process_id ? {
+          label: "Ver",
+          onClick: () => navigate(`/process/${notification.process_id}`),
+        } : undefined,
+        duration: 8000,
+        icon: <Bell className="h-4 w-4 text-blue-500" />,
+      });
+    }, [navigate, playNotificationSound]),
+  });
 
   const fetchNotifications = useCallback(async () => {
     try {
