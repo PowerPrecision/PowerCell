@@ -396,7 +396,7 @@ export default function ClientsPage() {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout title="Todos os Clientes">
       <div className="space-y-4 md:space-y-6" data-testid="clients-page">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">

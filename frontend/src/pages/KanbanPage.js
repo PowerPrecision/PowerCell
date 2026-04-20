@@ -64,7 +64,7 @@ const KanbanPage = () => {
 
   if (loading) {
     return (
-      <DashboardLayout>
+      <DashboardLayout title="Quadro Geral">
         <div className="space-y-6">
           <div className="flex items-start justify-between">
             <div className="space-y-1.5">
@@ -80,7 +80,7 @@ const KanbanPage = () => {
   }
 
   return (
-    <DashboardLayout>
+    <DashboardLayout title="Quadro Geral">
       <div className="space-y-6">
         {/* Header */}
         <div>

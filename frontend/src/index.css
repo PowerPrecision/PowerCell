@@ -21,24 +21,14 @@
 @tailwind utilities;
 
 /* ============================================
-   ESCALA GLOBAL DA APLICAÇÃO (80%)
-   Dá um aspeto mais profissional e panorâmico.
-   Modais e overlays continuam centrados corretamente.
+   UI COMPACTA — Base Font Size
+   Reduzir a fonte base de 16px (padrão) para 14px
+   torna todo o layout nativamente mais compacto.
+   Todas as medidas rem do Tailwind/CSS adaptam-se
+   de forma fluida sem quebrar flexbox, vh ou fixed.
    ============================================ */
 html {
-    zoom: 0.8;
-    -moz-transform: scale(0.8);
-    -moz-transform-origin: top left;
-    width: 125%; /* Compensar a redução de escala no Firefox */
-}
-
-/* Reset para modais e overlays — manter escala original */
-[data-radix-popper-content-wrapper],
-[role="dialog"],
-.fixed {
-    zoom: 1.25 !important; /* 1 / 0.8 para neutralizar o zoom global */
-    -moz-transform: scale(1) !important;
-    width: auto !important;
+    font-size: 14px;
 }
 
 /* Estilos base do corpo */

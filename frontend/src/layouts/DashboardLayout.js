@@ -166,8 +166,8 @@ const DashboardLayout = ({ children, title }) => {
   const getNavItems = () => {
     const userRole = effectiveRole?.toLowerCase();
     const isAdmin = userRole === "admin";
-    const isGlobalOps = ["admin", "ceo", "administrativa"].includes(userRole);
-    const isStaff = ["consultor", "mediador", "intermediario", "consultor_intermediario", "indexacao", "diretor", "administrativa", "ceo", "admin"].includes(userRole);
+    const isGlobalOps = ["admin", "ceo", "administrativo"].includes(userRole);
+    const isStaff = ["consultor", "mediador", "intermediario", "consultor_intermediario", "indexacao", "diretor", "administrativo", "ceo", "admin"].includes(userRole);
 
     // Permissões personalizadas (se definidas)
     const userPermissions = user?.permissions || {};
@@ -231,7 +231,7 @@ const DashboardLayout = ({ children, title }) => {
     };
 
     // ====================================================================
-    // VISÃO GLOBAL (Apenas admin, ceo, administrativa)
+    // VISÃO GLOBAL (Apenas admin, ceo, administrativo)
     // ====================================================================
     const visaoGlobalGroup = {
       id: "visao-global",
@@ -278,7 +278,7 @@ const DashboardLayout = ({ children, title }) => {
     };
 
     // ====================================================================
-    // GESTÃO E OPERAÇÕES (Apenas admin, ceo, administrativa)
+    // GESTÃO E OPERAÇÕES (Apenas admin, ceo, administrativo)
     // ====================================================================
     const gestaoOperacoesGroup = {
       id: "gestao-operacoes",
@@ -406,7 +406,7 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     // MENU PARA ADMINISTRATIVA, CEO e ADMIN
     // ====================================================================
-    if (["administrativa", "ceo", "admin"].includes(userRole)) {
+    if (["administrativo", "ceo", "admin"].includes(userRole)) {
       const allGroups = [
         meuNegocioGroup,
         visaoGlobalGroup,
