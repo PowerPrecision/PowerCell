@@ -625,12 +625,16 @@ def _fetch_all_from_folder_sync(
     folder: str = "INBOX",
     since_days: int = 7,
     max_emails: int = 100
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
     Buscar TODOS os emails de uma pasta IMAP (sem filtro de processo).
     Versão síncrona para execução em thread.
+    
+    Returns:
+        Dict with 'emails' (list) and 'connection_error' (str or None).
     """
     emails_found = []
+    connection_error = None
     
     try:
         context = ssl.create_default_context()
@@ -736,9 +740,17 @@ def _fetch_all_from_folder_sync(
         logger.info(f"[Webmail Sync] {len(emails_found)} emails extraídos de {folder} ({account.name})")
         
     except Exception as e:
-        logger.error(f"[Webmail Sync] Erro ao conectar IMAP {account.name}: {e}")
+        error_msg = str(e)
+        logger.error(f"[Webmail Sync] Erro ao conectar IMAP {account.name}: {error_msg}")
+        # Detectar erros de autenticação para mensagem mais clara
+        if "login failed" in error_msg.lower() or "authentication failed" in error_msg.lower() or "invalid username or password" in error_msg.lower():
+            connection_error = f"Autenticação IMAP falhou para {account.email} — verifique email/password nas Configurações do Perfil"
+        elif "connection refused" in error_msg.lower() or "timed out" in error_msg.lower():
+            connection_error = f"Ligação IMAP falhou para {account.email} — servidor inatingível ({account.imap_server}:{account.imap_port})"
+        else:
+            connection_error = f"Erro IMAP para {account.email}: {error_msg}"
     
-    return emails_found
+    return {"emails": emails_found, "connection_error": connection_error}
 
 
 async def sync_webmail_emails(
@@ -778,21 +790,30 @@ async def sync_webmail_emails(
             
             # Buscar da INBOX
             loop = asyncio.get_event_loop()
-            inbox_emails = await loop.run_in_executor(
+            inbox_result = await loop.run_in_executor(
                 _email_executor,
                 lambda: _fetch_all_from_folder_sync(account, "INBOX", days, max_emails)
             )
-            all_emails.extend(inbox_emails)
+            
+            # Verificar erro de conexão IMAP
+            if inbox_result.get("connection_error"):
+                logger.warning(f"[Webmail Sync] Erro IMAP para {account.name}: {inbox_result['connection_error']}")
+                results[account.name] = {"error": inbox_result["connection_error"], "synced": 0, "duplicates": 0, "total_fetched": 0}
+                total_errors += 1
+                continue
+            
+            all_emails.extend(inbox_result.get("emails", []))
             
             # Buscar da pasta de Enviados (tentar vários nomes)
             for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados", "INBOX.Enviados"]:
                 try:
-                    sent_emails = await loop.run_in_executor(
+                    sent_result = await loop.run_in_executor(
                         _email_executor,
                         lambda f=sent_folder: _fetch_all_from_folder_sync(account, f, days, max_emails)
                     )
-                    if sent_emails:
-                        all_emails.extend(sent_emails)
+                    sent_list = sent_result.get("emails", []) if sent_result else []
+                    if sent_list:
+                        all_emails.extend(sent_list)
                         break
                 except Exception:
                     continue
@@ -978,21 +999,36 @@ async def sync_user_emails(user_id: str, days: int = 7, max_emails: int = 100) -
         loop = asyncio.get_event_loop()
         
         # Buscar da INBOX
-        inbox_emails = await loop.run_in_executor(
+        inbox_result = await loop.run_in_executor(
             _email_executor,
             lambda: _fetch_all_from_folder_sync(account, "INBOX", days, max_emails)
         )
+        
+        # Verificar erro de conexão IMAP
+        if inbox_result.get("connection_error"):
+            logger.error(f"[User Email Sync] Erro IMAP: {inbox_result['connection_error']}")
+            return {
+                "success": False,
+                "total_synced": 0,
+                "total_duplicates": 0,
+                "total_errors": 1,
+                "user_id": user_id,
+                "error": inbox_result["connection_error"],
+            }
+        
+        inbox_emails = inbox_result.get("emails", [])
         
         # Buscar da pasta de Enviados
         sent_emails = []
         for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados"]:
             try:
-                emails = await loop.run_in_executor(
+                sent_result = await loop.run_in_executor(
                     _email_executor,
                     lambda f=sent_folder: _fetch_all_from_folder_sync(account, f, days, max_emails)
                 )
-                if emails:
-                    sent_emails = emails
+                sent_emails_list = sent_result.get("emails", []) if sent_result else []
+                if sent_emails_list:
+                    sent_emails = sent_emails_list
                     break
             except Exception:
                 continue

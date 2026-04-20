@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   BarChart3,
@@ -129,6 +129,37 @@ const VariationIndicator = ({ value }) => {
       <Minus className="h-3 w-3 mr-1" />
       0%
     </span>
+  );
+};
+
+// ====================================================================
+// SAFE CHART CONTAINER — prevents Recharts -1 dimension errors
+// ====================================================================
+
+const SafeChartContainer = ({ children, className = "" }) => {
+  const containerRef = useRef(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const check = () => {
+      const rect = el.getBoundingClientRect();
+      setReady(rect.width > 0 && rect.height > 0);
+    };
+
+    check();
+
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} className={className}>
+      {ready ? children : <div className="flex items-center justify-center h-full text-muted-foreground text-sm" />}
+    </div>
   );
 };
 
@@ -460,8 +491,8 @@ const AreaDetail = ({ area, data, monthlyData, performanceData, selectedYear }) 
           <CardDescription>Receita, comissões e lucro líquido</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-[200px] sm:h-[300px]">
-            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
+          <SafeChartContainer className="h-[200px] sm:h-[300px] min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={areaChartData}>
                 <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                 <XAxis dataKey="name" fontSize={12} />
@@ -476,7 +507,7 @@ const AreaDetail = ({ area, data, monthlyData, performanceData, selectedYear }) 
                 <Bar dataKey="Lucro Líquido" fill="#22c55e" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          </div>
+          </SafeChartContainer>
         </CardContent>
       </Card>
 
@@ -770,8 +801,8 @@ const FinanceDashboard = () => {
                     <CardDescription>Receita mensal por área de negócio</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-[200px] sm:h-[300px]">
-                      <ResponsiveContainer width="100%" height="100%" minHeight={200}>
+                    <SafeChartContainer className="h-[200px] sm:h-[300px] min-w-0">
+                      <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={comparisonChartData}>
                           <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                           <XAxis dataKey="name" fontSize={12} />
@@ -782,7 +813,7 @@ const FinanceDashboard = () => {
                           <Bar dataKey="Crédito" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                         </BarChart>
                       </ResponsiveContainer>
-                    </div>
+                    </SafeChartContainer>
                   </CardContent>
                 </Card>
 

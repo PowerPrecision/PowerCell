@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -28,6 +28,37 @@ import { toast } from "sonner";
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+// ====================================================================
+// SAFE CHART CONTAINER — prevents Recharts -1 dimension errors
+// ====================================================================
+
+const SafeChartContainer = ({ children, className = "" }) => {
+  const containerRef = useRef(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const check = () => {
+      const rect = el.getBoundingClientRect();
+      setReady(rect.width > 0 && rect.height > 0);
+    };
+
+    check();
+
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} className={className}>
+      {ready ? children : <div className="flex items-center justify-center h-full text-muted-foreground text-sm" />}
+    </div>
+  );
+};
 
 const StatisticsPage = () => {
   const { user, token } = useAuth();
@@ -259,16 +290,18 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-80">
-                <ResponsiveContainer width="100%" height="100%" minHeight={250}>
-                  <BarChart data={statusData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="value" fill="#3b82f6" name="Processos" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <SafeChartContainer className="h-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={statusData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="value" fill="#3b82f6" name="Processos" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </SafeChartContainer>
               </CardContent>
             </Card>
           </TabsContent>
@@ -282,25 +315,27 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-80">
-                <ResponsiveContainer width="100%" height="100%" minHeight={250}>
-                  <PieChart>
-                    <Pie
-                      data={prioridadeData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={(entry) => `${entry.name}: ${entry.value}`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {prioridadeData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                <SafeChartContainer className="h-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={prioridadeData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={(entry) => `${entry.name}: ${entry.value}`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {prioridadeData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </SafeChartContainer>
               </CardContent>
             </Card>
           </TabsContent>
@@ -314,16 +349,18 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-80">
-                <ResponsiveContainer width="100%" height="100%" minHeight={250}>
-                  <BarChart data={valorPorFaseData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="value" fill="#10b981" name="Valor (k€)" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <SafeChartContainer className="h-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={valorPorFaseData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="value" fill="#10b981" name="Valor (k€)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </SafeChartContainer>
               </CardContent>
             </Card>
           </TabsContent>
@@ -340,19 +377,21 @@ const StatisticsPage = () => {
                 </CardHeader>
                 <CardContent className="h-80">
                   {leadsStats?.funnel_data && Array.isArray(leadsStats.funnel_data) && (
-                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
-                      <BarChart data={leadsStats.funnel_data} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" />
-                        <YAxis dataKey="stage" type="category" width={100} />
-                        <Tooltip />
-                        <Bar dataKey="count" fill="#3b82f6" name="Leads">
-                          {leadsStats.funnel_data.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <SafeChartContainer className="h-full min-w-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={leadsStats.funnel_data} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis type="number" />
+                          <YAxis dataKey="stage" type="category" width={100} />
+                          <Tooltip />
+                          <Bar dataKey="count" fill="#3b82f6" name="Leads">
+                            {leadsStats.funnel_data.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </SafeChartContainer>
                   )}
                 </CardContent>
               </Card>
@@ -367,26 +406,28 @@ const StatisticsPage = () => {
                 </CardHeader>
                 <CardContent className="h-80">
                   {Array.isArray(leadsStats?.leads_by_source) && leadsStats.leads_by_source.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
-                      <PieChart>
-                        <Pie
-                          data={leadsStats.leads_by_source}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={(entry) => `${entry.source}: ${entry.count}`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="count"
-                          nameKey="source"
-                        >
-                          {leadsStats.leads_by_source.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <SafeChartContainer className="h-full min-w-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={leadsStats.leads_by_source}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={(entry) => `${entry.source}: ${entry.count}`}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="count"
+                            nameKey="source"
+                          >
+                            {leadsStats.leads_by_source.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </SafeChartContainer>
                   ) : (
                     <div className="flex items-center justify-center h-full text-muted-foreground">
                       Sem dados de origem disponíveis

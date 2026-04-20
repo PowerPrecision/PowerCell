@@ -79,10 +79,15 @@ def _get_google_config():
     }
 
 
-def _build_redirect_uri(request: Request, configured_uri: str) -> str:
-    """Constrói a redirect URI para o callback."""
-    if configured_uri:
-        return configured_uri
+def _build_redirect_uri(request: Request) -> str:
+    """Constrói a redirect URI para o callback do shared email.
+
+    IMPORTANTE: Ignora o GOOGLE_REDIRECT_URI genérico porque esse aponta
+    para /api/auth/google/callback (autenticação de utilizadores).
+    O shared email tem o seu próprio callback dedicado para garantir que
+    os tokens são guardados na config partilhada (shared_role_email_configs)
+    e não no perfil individual do utilizador.
+    """
     scheme = request.headers.get("x-forwarded-proto", "https")
     host = request.headers.get("host", "localhost:8000")
     return f"{scheme}://{host}/api/admin/shared-email/google/callback"
@@ -171,7 +176,7 @@ async def shared_email_google_callback(
 
         # Verificar state
         shared_role = None
-        redirect_uri = google_cfg["redirect_uri"]
+        redirect_uri = None
         email_address = None
         admin_user_id = None
 
@@ -180,7 +185,7 @@ async def shared_email_google_callback(
             if stored_state:
                 shared_role = stored_state.get("shared_role")
                 admin_user_id = stored_state.get("user_id")
-                redirect_uri = stored_state.get("redirect_uri") or google_cfg["redirect_uri"]
+                redirect_uri = stored_state.get("redirect_uri")
                 email_address = stored_state.get("email_address")
                 await db.oauth_states.delete_one({"_id": stored_state["_id"]})
 
@@ -192,7 +197,7 @@ async def shared_email_google_callback(
             )
 
         if not redirect_uri:
-            redirect_uri = _build_redirect_uri(request, "")
+            redirect_uri = _build_redirect_uri(request)
 
         # Trocar code por tokens
         flow = Flow.from_client_config(
@@ -455,7 +460,7 @@ async def shared_email_google_login(
 
         from google_auth_oauthlib.flow import Flow
 
-        redirect_uri = _build_redirect_uri(request, google_cfg["redirect_uri"])
+        redirect_uri = _build_redirect_uri(request)
 
         flow = Flow.from_client_config(
             client_config={
