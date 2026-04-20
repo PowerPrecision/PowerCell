@@ -97,6 +97,40 @@ class EmailUpdate(BaseModel):
     labels: Optional[List[str]] = None
 
 
+class EmailMessage(BaseModel):
+    """MongoDB document for a stored email — wider than EmailResponse."""
+    id: str
+    process_id: Optional[str] = None
+    direction: EmailDirection
+    from_email: str
+    to_emails: List[str]
+    cc_emails: Optional[List[str]] = []
+    bcc_emails: Optional[List[str]] = []
+    subject: str
+    body: str = ""
+    body_html: Optional[str] = None
+    attachments: Optional[List[EmailAttachment]] = []
+    status: EmailStatus = EmailStatus.SYNCED
+    sent_at: Optional[str] = None
+    created_at: str = ""
+    created_by: Optional[str] = None
+    created_by_name: Optional[str] = None
+    notes: Optional[str] = None
+    is_important: bool = False
+    is_read: bool = False
+    is_starred: bool = False
+    is_archived: bool = False
+    labels: Optional[List[str]] = []
+    account: Optional[str] = None
+    message_id: Optional[str] = None
+    in_reply_to: Optional[str] = None
+    references: Optional[List[str]] = []
+    synced_for_user: Optional[str] = None
+    shared_role: Optional[str] = None
+    is_read_web: Optional[bool] = None
+    source: Optional[str] = None
+
+
 class EmailResponse(BaseModel):
     """Resposta de email."""
     id: str
@@ -124,6 +158,8 @@ class EmailResponse(BaseModel):
     is_archived: bool = False
     labels: Optional[List[str]] = []
     account: Optional[str] = None
+    in_reply_to: Optional[str] = None
+    references: Optional[List[str]] = []
 
 
 class EmailFilter(BaseModel):

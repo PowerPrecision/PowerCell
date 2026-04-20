@@ -2678,8 +2678,16 @@ async def get_process_emails(
     """
     Listar emails de um processo.
     
-    Se force_refresh=True, elimina todos os emails sincronizados do processo
-    e faz uma nova sincronização IMAP antes de devolver os resultados.
+    Retorna todos os emails associados ao processo (via process_id),
+    ordenados por data descendente.
+    
+    Associação de emails a processos é feita automaticamente por:
+    1. Smart Threading (herança de process_id via In-Reply-To / References)
+    2. Tag Mágica [Proc-{id}] no assunto
+    3. Associação manual pelo utilizador (botão Ligar a Processo no Webmail)
+    
+    Se force_refresh=True, limpa emails sincronizados em cache e
+    dispara sincronização global (smart threading + tags aplicam-se automaticamente).
     """
     if force_refresh:
         # Limpar cache: apagar emails sincronizados (marcados com "Sincronizado de" nas notes)

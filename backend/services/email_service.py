@@ -311,751 +311,26 @@ def get_email_body(msg) -> tuple:
     return body_text, body_html
 
 
-async def fetch_emails_by_name(
-    account: EmailAccount,
-    client_name: str,
-    since_days: int = 30,
-    folder: str = "INBOX"
-) -> List[Dict[str, Any]]:
-    """
-    Buscar emails do cliente de duas formas:
-    1. Por nome no assunto
-    2. Em subpastas que correspondam ao nome do cliente
-    
-    Args:
-        account: Configuração da conta
-        client_name: Nome do cliente para buscar
-        since_days: Buscar emails dos últimos X dias
-        folder: Pasta IMAP base
-    
-    Returns:
-        Lista de emails encontrados
-    """
-    if not client_name or len(client_name) < 3:
-        return []
-    
-    # Executar operação IMAP em thread separada para não bloquear o event loop
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        _email_executor,
-        lambda: _fetch_emails_by_name_sync(account, client_name, since_days, folder)
-    )
-
-
-def _fetch_emails_by_name_sync(
-    account: EmailAccount,
-    client_name: str,
-    since_days: int = 30,
-    folder: str = "INBOX"
-) -> List[Dict[str, Any]]:
-    """Versão síncrona de fetch_emails_by_name para ser executada em thread."""
-    emails_found = []
-    search_name = client_name.strip()
-    # Extrair partes do nome para matching de subpastas
-    name_parts = [p.lower() for p in search_name.split() if len(p) >= 3]
-    
-    try:
-        context = ssl.create_default_context()
-        mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context)
-        mail.login(account.email, account.password)
-        
-        logger.info(f"Buscando emails para '{search_name}' em {account.name}")
-        
-        seen_ids = set()
-        since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
-        
-        # 1. Procurar em subpastas que correspondam ao nome do cliente
-        list_result = mail.list()
-        folders = list_result[1] if list_result and len(list_result) >= 2 else []
-        matching_folders = []
-        
-        for folder_info in folders:
-            try:
-                # folder_info pode ser bytes ou str
-                if isinstance(folder_info, bytes):
-                    folder_str = folder_info.decode('utf-8', errors='replace')
-                else:
-                    folder_str = str(folder_info)
-                # Extrair nome da pasta (está entre aspas ou após o último /)
-                if '"' in folder_str:
-                    folder_name = folder_str.split('"')[-2]
-                else:
-                    folder_name = folder_str.split('/')[-1]
-                
-                folder_name_lower = folder_name.lower()
-                
-                # Verificar se alguma parte do nome está no nome da pasta
-                for part in name_parts:
-                    if part in folder_name_lower:
-                        # Extrair o nome completo da pasta para seleção
-                        if '"' in folder_str:
-                            full_folder = '"' + folder_str.split('"')[-2] + '"'
-                        else:
-                            parts = folder_str.split(' ')[-1]
-                            full_folder = parts
-                        matching_folders.append(full_folder)
-                        logger.info(f"Pasta encontrada para '{search_name}': {full_folder}")
-                        break
-            except Exception:
-                continue
-        
-        # 2. Buscar emails nas pastas encontradas
-        for folder_name in matching_folders:
-            try:
-                result, _ = mail.select(folder_name)
-                if result != 'OK':
-                    continue
-                
-                message_numbers = _safe_search_result(mail.search(None, 'ALL'))
-                
-                for num in message_numbers[0].split():
-                    try:
-                        fetch_result = mail.fetch(num, "(RFC822)")
-                        email_bytes = _extract_email_bytes_from_fetch(fetch_result)
-                        if not email_bytes:
-                            continue
-                        msg = email.message_from_bytes(email_bytes)
-                        
-                        msg_id = msg.get("Message-ID", "")
-                        if msg_id in seen_ids:
-                            continue
-                        seen_ids.add(msg_id)
-                        
-                        from_email = extract_email_address(msg.get("From", ""))
-                        to_emails = [extract_email_address(e) for e in (msg.get("To", "")).split(",")]
-                        cc_emails = [extract_email_address(e) for e in (msg.get("Cc", "") or "").split(",") if e.strip()]
-                        subject = decode_email_header(msg.get("Subject", ""))
-                        date_str = msg.get("Date", "")
-                        body_text, body_html = get_email_body(msg)
-                        
-                        direction = "sent" if from_email.lower() == account.email.lower() else "received"
-                        
-                        email_date = None
-                        if date_str:
-                            try:
-                                email_date = email.utils.parsedate_to_datetime(date_str)
-                            except:
-                                email_date = datetime.now()
-                        
-                        emails_found.append({
-                            "message_id": msg_id,
-                            "from_email": from_email,
-                            "to_emails": to_emails,
-                            "cc_emails": cc_emails,
-                            "subject": subject,
-                            "body": body_text or body_html or "",
-                            "date": email_date.isoformat() if email_date else datetime.now().isoformat(),
-                            "direction": direction,
-                            "source": "imap_sync",
-                            "account": account.name,
-                            "matched_by": "client_folder"
-                        })
-                        
-                    except Exception as e:
-                        logger.warning(f"Erro ao processar email: {e}")
-                        continue
-                        
-            except Exception as e:
-                logger.warning(f"Erro ao aceder pasta {folder_name}: {e}")
-        
-        # 3. Também buscar na INBOX/base folder por nome no assunto
-        try:
-            # Garantir que seleccionamos a pasta antes de fazer SEARCH
-            result, _ = mail.select(folder)
-            if result != 'OK':
-                logger.warning(f"Não foi possível seleccionar pasta {folder}")
-            else:
-                # Encoding UTF-8 para suportar caracteres especiais (ç, á, é, etc.)
-                # Usar charset UTF-8 na busca IMAP
-                try:
-                    # Tentar busca com UTF-8
-                    search_query = f'(SUBJECT "{search_name}" SINCE {since_date})'
-                    message_numbers = _safe_search_result(mail.search('UTF-8', search_query.encode('utf-8')))
-                except:
-                    # Fallback: buscar sem charset específico (pode não encontrar alguns resultados)
-                    try:
-                        # Remover caracteres especiais para busca básica
-                        import unicodedata
-                        search_name_ascii = unicodedata.normalize('NFKD', search_name).encode('ASCII', 'ignore').decode('ASCII')
-                        message_numbers = _safe_search_result(mail.search(None, f'(SUBJECT "{search_name_ascii}" SINCE {since_date})'))
-                    except:
-                        message_numbers = [b'']
-                
-                for num in message_numbers[0].split():
-                    try:
-                        fetch_result = mail.fetch(num, "(RFC822)")
-                        email_bytes = _extract_email_bytes_from_fetch(fetch_result)
-                        if not email_bytes:
-                            continue
-                        msg = email.message_from_bytes(email_bytes)
-                        
-                        msg_id = msg.get("Message-ID", "")
-                        if msg_id in seen_ids:
-                            continue
-                        seen_ids.add(msg_id)
-                        
-                        from_email = extract_email_address(msg.get("From", ""))
-                        to_emails = [extract_email_address(e) for e in (msg.get("To", "")).split(",")]
-                        cc_emails = [extract_email_address(e) for e in (msg.get("Cc", "") or "").split(",") if e.strip()]
-                        subject = decode_email_header(msg.get("Subject", ""))
-                        date_str = msg.get("Date", "")
-                        body_text, body_html = get_email_body(msg)
-                        
-                        direction = "sent" if from_email.lower() == account.email.lower() else "received"
-                        
-                        email_date = None
-                        if date_str:
-                            try:
-                                email_date = email.utils.parsedate_to_datetime(date_str)
-                            except:
-                                email_date = datetime.now()
-                        
-                        emails_found.append({
-                            "message_id": msg_id,
-                            "from_email": from_email,
-                            "to_emails": to_emails,
-                            "cc_emails": cc_emails,
-                            "subject": subject,
-                            "body": body_text or body_html or "",
-                            "date": email_date.isoformat() if email_date else datetime.now().isoformat(),
-                            "direction": direction,
-                            "source": "imap_sync",
-                            "account": account.name,
-                            "matched_by": "client_name_subject"
-                        })
-                        
-                    except Exception as e:
-                        logger.warning(f"Erro ao processar email: {e}")
-                        continue
-                    
-        except Exception as e:
-            logger.warning(f"Erro na busca por assunto: {e}")
-        
-        # 4. Buscar por nome no CORPO do email (emails recentes e filtrar localmente)
-        try:
-            # Garantir que seleccionamos a pasta antes de fazer SEARCH
-            result, _ = mail.select(folder)
-            if result != 'OK':
-                logger.warning(f"Não foi possível seleccionar pasta {folder} para busca por corpo")
-                raise Exception(f"SELECT failed: {result}")
-            
-            message_numbers = _safe_search_result(mail.search(None, f'(SINCE {since_date})'))
-            
-            # Limitar a 200 emails mais recentes para performance
-            nums = message_numbers[0].split()[-200:] if message_numbers[0] else []
-            
-            for num in nums:
-                try:
-                    fetch_result = mail.fetch(num, "(RFC822)")
-                    email_bytes = _extract_email_bytes_from_fetch(fetch_result)
-                    if not email_bytes:
-                        continue
-                    msg = email.message_from_bytes(email_bytes)
-                    
-                    msg_id = msg.get("Message-ID", "")
-                    if msg_id in seen_ids:
-                        continue
-                    
-                    body_text, body_html = get_email_body(msg)
-                    body_content = (body_text or body_html or "").lower()
-                    
-                    # Verificar se o nome do cliente aparece no corpo
-                    name_in_body = any(part in body_content for part in name_parts)
-                    if not name_in_body:
-                        continue
-                    
-                    seen_ids.add(msg_id)
-                    
-                    from_email = extract_email_address(msg.get("From", ""))
-                    to_emails = [extract_email_address(e) for e in (msg.get("To", "")).split(",")]
-                    cc_emails = [extract_email_address(e) for e in (msg.get("Cc", "") or "").split(",") if e.strip()]
-                    subject = decode_email_header(msg.get("Subject", ""))
-                    date_str = msg.get("Date", "")
-                    
-                    direction = "sent" if from_email.lower() == account.email.lower() else "received"
-                    
-                    email_date = None
-                    if date_str:
-                        try:
-                            email_date = email.utils.parsedate_to_datetime(date_str)
-                        except:
-                            email_date = datetime.now()
-                    
-                    emails_found.append({
-                        "message_id": msg_id,
-                        "from_email": from_email,
-                        "to_emails": to_emails,
-                        "cc_emails": cc_emails,
-                        "subject": subject,
-                        "body": body_text or body_html or "",
-                        "date": email_date.isoformat() if email_date else datetime.now().isoformat(),
-                        "direction": direction,
-                        "source": "imap_sync",
-                        "account": account.name,
-                        "matched_by": "client_name_body"
-                    })
-                    
-                except Exception:
-                    continue
-                    
-        except Exception as e:
-            logger.warning(f"Erro na busca por corpo: {e}")
-        
-        mail.logout()
-        logger.info(f"Encontrados {len(emails_found)} emails para '{search_name}' em {account.name}")
-        
-    except Exception as e:
-        logger.error(f"Erro ao buscar emails por nome em {account.name}: {e}")
-    
-    return emails_found
-
-
-async def fetch_emails_from_account(
-    account: EmailAccount,
-    client_emails: List[str],
-    since_days: int = 30,
-    folder: str = "INBOX"
-) -> List[Dict[str, Any]]:
-    """
-    Buscar emails de uma conta IMAP relacionados com clientes.
-    
-    Args:
-        account: Configuração da conta
-        client_emails: Lista de emails de clientes para filtrar
-        since_days: Buscar emails dos últimos X dias
-        folder: Pasta IMAP (INBOX, Sent, etc.)
-    
-    Returns:
-        Lista de emails encontrados
-    """
-    # Executar operação IMAP em thread separada para não bloquear o event loop
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        _email_executor,
-        lambda: _fetch_emails_from_account_sync(account, client_emails, since_days, folder)
-    )
-
-
-def _fetch_emails_from_account_sync(
-    account: EmailAccount,
-    client_emails: List[str],
-    since_days: int = 30,
-    folder: str = "INBOX"
-) -> List[Dict[str, Any]]:
-    """Versão síncrona de fetch_emails_from_account para ser executada em thread."""
-    emails_found = []
-    
-    try:
-        # Conectar ao servidor IMAP
-        context = ssl.create_default_context()
-        mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context)
-        mail.login(account.email, account.password)
-        
-        logger.info(f"Conectado a {account.name} ({account.email})")
-        
-        # Selecionar pasta - verificar sucesso
-        result, _ = mail.select(folder)
-        if result != 'OK':
-            logger.warning(f"Não foi possível seleccionar pasta {folder}")
-            mail.logout()
-            return emails_found
-        
-        # Calcular data de início
-        since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
-        
-        # Buscar emails
-        for client_email in client_emails:
-            if not client_email:
-                continue
-                
-            # Buscar emails de/para/cc este cliente
-            for search_type in ["FROM", "TO", "CC"]:
-                try:
-                    # Tentar busca com UTF-8 para suportar caracteres especiais
-                    try:
-                        search_query = f'({search_type} "{client_email}" SINCE {since_date})'
-                        message_numbers = _safe_search_result(mail.search('UTF-8', search_query.encode('utf-8')))
-                    except:
-                        # Fallback para busca sem charset
-                        message_numbers = _safe_search_result(mail.search(None, f'({search_type} "{client_email}" SINCE {since_date})'))
-                    
-                    for num in message_numbers[0].split():
-                        try:
-                            fetch_result = mail.fetch(num, "(RFC822)")
-                            email_bytes = _extract_email_bytes_from_fetch(fetch_result)
-                            if not email_bytes:
-                                continue
-                            msg = email.message_from_bytes(email_bytes)
-                            
-                            # Extrair informações
-                            from_email = extract_email_address(msg.get("From", ""))
-                            to_emails = [extract_email_address(e) for e in (msg.get("To", "")).split(",")]
-                            cc_emails = [extract_email_address(e) for e in (msg.get("Cc", "")).split(",") if e]
-                            subject = decode_email_header(msg.get("Subject", ""))
-                            date_str = msg.get("Date", "")
-                            body_text, body_html = get_email_body(msg)
-                            
-                            # Determinar direcção
-                            direction = "received" if from_email == client_email else "sent"
-                            
-                            # Parsear data
-                            try:
-                                from email.utils import parsedate_to_datetime
-                                sent_at = parsedate_to_datetime(date_str).isoformat()
-                            except:
-                                sent_at = datetime.now(timezone.utc).isoformat()
-                            
-                            email_data = {
-                                "account": account.name,
-                                "direction": direction,
-                                "from_email": from_email,
-                                "to_emails": to_emails,
-                                "cc_emails": cc_emails,
-                                "subject": subject,
-                                "body": body_text or body_html,
-                                "body_html": body_html,
-                                "sent_at": sent_at,
-                                "client_email": client_email,
-                                "message_id": msg.get("Message-ID", "")
-                            }
-                            
-                            emails_found.append(email_data)
-                            
-                        except Exception as e:
-                            logger.warning(f"Erro ao processar email {num}: {e}")
-                            
-                except Exception as e:
-                    logger.warning(f"Erro na pesquisa {search_type} para {client_email}: {e}")
-        
-        mail.close()
-        mail.logout()
-        
-        logger.info(f"Encontrados {len(emails_found)} emails em {account.name}")
-        
-    except Exception as e:
-        logger.error(f"Erro ao conectar a {account.name}: {e}")
-    
-    return emails_found
-
-
 
 async def sync_emails_for_process(process_id: str, days: int = 30, user_email: str = None) -> Dict[str, Any]:
     """
     Sincronizar emails para um processo específico.
     
-    NOVAS REGRAS DE FILTRAGEM (3 regras):
-    =====================================
-    Regra A — Comunicação com Atores Específicos (Comercial / Cliente):
-      FROM ou TO/CC cruza com email do Cliente OU Comercial Angariador.
-      Se for exclusivo com o Comercial (sem Cliente no FROM/TO/CC), exige
-      validação extra: Nome do Cliente ou NIF no Subject/Body.
+    DEPRECATED: A associação de emails a processos é agora feita automaticamente por:
+    1. Smart Threading (herança de process_id via In-Reply-To / References)
+    2. Tag Mágica [Proc-{id}] no assunto
+    3. Associação manual pelo utilizador (botão Ligar a Processo)
     
-    Regra B — Identificação Forte / Absoluta:
-      Assunto OU Corpo contém NIF do Cliente OU Referência do Processo (#1234).
-      Independentemente de quem envia/recebe.
-    
-    Regra C — Comunicação Geral B2B:
-      Email entre contas internas da equipa e contas gerais externas.
-      CONDIÇÃO OBRIGATÓRIA: Nome do Cliente OU NIF no Subject/Body.
-    
-    Args:
-        process_id: ID do processo
-        days: Número de dias para sincronizar (default 30)
-        user_email: Email do utilizador logado (consultor/funcionário)
+    Esta função é mantida por compatibilidade mas não faz mais IMAP search.
     """
-    # Obter processo
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        return {"success": False, "error": "Processo não encontrado"}
-    
-    # ===== VARIÁVEIS DO PROCESSO =====
-    client_name = process.get("client_name", "")
-    client_name_parts = [p.lower() for p in client_name.split() if len(p) >= 3] if client_name else []
-    
-    # NIF do cliente
-    personal_data = process.get("personal_data", {}) or {}
-    client_nif = (personal_data.get("nif") or "").strip()
-    client_nif_normalized = re.sub(r'[^\d]', '', client_nif) if client_nif else ""
-    client_nif_forms = set()
-    if client_nif_normalized:
-        client_nif_forms.add(client_nif_normalized)
-        if len(client_nif_normalized) == 9:
-            client_nif_forms.add(f"{client_nif_normalized[:3]}.{client_nif_normalized[3:6]}.{client_nif_normalized[6:]}")
-        client_nif_forms.add(client_nif.lower())
-    
-    # Referência do processo (ex: #1234)
-    process_number = process.get("process_number")
-    process_ref = f"#{process_number}" if process_number else None
-    
-    # Emails do Cliente (suporta múltiplos)
-    raw_client_email = personal_data.get("email") or process.get("client_email")
-    client_emails = []
-    if raw_client_email:
-        cleaned = raw_client_email
-        if "[" in cleaned and "]" in cleaned:
-            cleaned_emails = re.findall(r'[\w\.-]+@[\w\.-]+', cleaned)
-        else:
-            cleaned_emails = re.split(r'[,;\s]+', cleaned)
-        seen = set()
-        for email in cleaned_emails:
-            email = email.strip().lower()
-            if email and "@" in email and email not in seen:
-                seen.add(email)
-                client_emails.append(email)
-    client_email = client_emails[0] if client_emails else None
-    
-    # Email do Comercial Angariador (owner_email)
-    real_estate_data = process.get("real_estate_data", {}) or {}
-    owner_email = real_estate_data.get("owner_email")
-    if owner_email:
-        owner_email = owner_email.lower().strip()
-    
-    # Email do Utilizador Logado
-    user_email_lower = user_email.lower().strip() if user_email else None
-    
-    # Emails monitorizados
-    monitored_emails = process.get("monitored_emails", [])
-    monitored_emails = [e.lower().strip() for e in (monitored_emails or []) if e and "@" in e]
-    
-    # Destinatários de documentação (configurações do sistema)
-    doc_recipient_to_emails = []
-    try:
-        from services.system_config import get_system_config
-        sys_config = await get_system_config()
-        doc_rec_config = sys_config.document_recipients
-        if doc_rec_config.default_to_emails:
-            import json as _json
-            try:
-                parsed = _json.loads(doc_rec_config.default_to_emails)
-                if isinstance(parsed, list):
-                    doc_recipient_to_emails = [e.lower().strip() for e in parsed if e and "@" in str(e)]
-            except (_json.JSONDecodeError, TypeError):
-                pass
-        if not doc_recipient_to_emails and doc_rec_config.default_to and "@" in str(doc_rec_config.default_to):
-            doc_recipient_to_emails = [doc_rec_config.default_to.lower().strip()]
-    except Exception as e:
-        logger.warning(f"Não foi possível carregar destinatários de documentação: {e}")
-    
-    # Contas de email IMAP para busca
-    accounts = await get_email_accounts_async()
-    if not accounts:
-        return {"success": False, "error": "Nenhuma conta de email configurada. Configure IMAP/SMTP nas Configurações do Sistema."}
-    
-    # Contas internas da equipa (para identificação em Regra C)
-    internal_emails = set()
-    if user_email_lower:
-        internal_emails.add(user_email_lower)
-    for acc in accounts:
-        # EmailAccount é uma classe com atributo 'email', não um dicionário
-        acc_user = (acc.email or "").lower().strip() if hasattr(acc, 'email') else ""
-        if acc_user and "@" in acc_user:
-            internal_emails.add(acc_user)
-    for de in doc_recipient_to_emails:
-        internal_emails.add(de)
-    
-    # Emails relevantes para busca IMAP (todos os associados ao processo)
-    assigned_emails = set()
-    if user_email_lower:
-        assigned_emails.add(user_email_lower)
-    assigned_emails.update(client_emails)
-    if owner_email:
-        assigned_emails.add(owner_email)
-    assigned_emails.update(monitored_emails)
-    assigned_emails.update(doc_recipient_to_emails)
-    
-    logger.info(f"Sincronizando emails para processo {process_id}")
-    logger.info(f"  - Cliente: {client_name} | NIF: {client_nif or 'N/A'} | Ref: {process_ref or 'N/A'}")
-    logger.info(f"  - Email(s) cliente: {client_emails}")
-    logger.info(f"  - Email comercial (owner): {owner_email}")
-    logger.info(f"  - Email utilizador logado: {user_email_lower}")
-    logger.info(f"  - Emails monitorizados: {monitored_emails}")
-    logger.info(f"  - Destinatários doc TO: {doc_recipient_to_emails}")
-    logger.info(f"  - Contas internas (Regra C): {internal_emails}")
-    
-    all_emails = []
-    
-    # Buscar emails de todas as contas IMAP
-    for account in accounts:
-        search_list = list(assigned_emails)
-        
-        # 1. Buscar por NOME DO CLIENTE no assunto/corpo
-        if client_name:
-            try:
-                inbox_by_name = await fetch_emails_by_name(account, client_name, days, "INBOX")
-                all_emails.extend(inbox_by_name)
-                for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados"]:
-                    try:
-                        sent_by_name = await fetch_emails_by_name(account, client_name, days, sent_folder)
-                        all_emails.extend(sent_by_name)
-                        break
-                    except:
-                        continue
-            except Exception as e:
-                logger.warning(f"Erro ao buscar por nome na conta {account.name if hasattr(account, 'name') else '?'}: {e}")
-        
-        # 2. Buscar por endereços de email relevantes
-        if search_list:
-            try:
-                inbox_emails = await fetch_emails_from_account(account, search_list, days, "INBOX")
-                all_emails.extend(inbox_emails)
-                for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados"]:
-                    try:
-                        sent_emails = await fetch_emails_from_account(account, search_list, days, sent_folder)
-                        all_emails.extend(sent_emails)
-                        break
-                    except:
-                        continue
-            except Exception as e:
-                logger.warning(f"Erro ao buscar por emails na conta {account.name if hasattr(account, 'name') else '?'}: {e}")
-    
-    # ====================================================================
-    # NOVAS REGRAS DE FILTRAGEM (3 regras de negócio)
-    # ====================================================================
-    
-    def get_email_content(em: Dict) -> str:
-        """Extrair conteúdo combinado (subject + body + body_html) do email em minúsculas."""
-        subject = (em.get("subject") or "").lower()
-        body = (em.get("body") or "").lower()
-        body_html = (em.get("body_html") or "").lower()
-        return subject + " " + body + " " + body_html
-    
-    def has_client_name_or_nif(em: Dict) -> bool:
-        """
-        Verifica se o NOME DO CLIENTE ou o NIF aparece no conteúdo do email.
-        Nome: partes >= 3 caracteres.
-        NIF: múltiplos formatos (123456789, 123.456.789).
-        """
-        content = get_email_content(em)
-        if client_name_parts and any(part in content for part in client_name_parts):
-            return True
-        if client_nif_forms:
-            for nif_form in client_nif_forms:
-                if nif_form and nif_form.lower() in content:
-                    return True
-        return False
-    
-    def has_process_reference(em: Dict) -> bool:
-        """
-        Verifica se o NIF do Cliente OU a Referência do Processo (#1234)
-        aparecem no conteúdo do email.
-        """
-        content = get_email_content(em)
-        if client_nif_forms:
-            for nif_form in client_nif_forms:
-                if nif_form and nif_form.lower() in content:
-                    return True
-        if process_ref and process_ref.lower() in content:
-            return True
-        return False
-    
-    def get_all_participants(em: Dict) -> set:
-        """Retorna todos os participantes do email (from + to + cc) em lowercase."""
-        participants = set()
-        from_email = (em.get("from_email") or "").lower().strip()
-        if from_email:
-            participants.add(from_email)
-        for e in (em.get("to_emails") or []):
-            e = e.lower().strip()
-            if e:
-                participants.add(e)
-        for e in (em.get("cc_emails") or []):
-            e = e.lower().strip()
-            if e:
-                participants.add(e)
-        return participants
-    
-    def email_matches_rule_a(em: Dict) -> bool:
-        """
-        REGRA A: Comunicação com Atores Específicos (Comercial / Cliente)
-        
-        FROM ou TO/CC cruza com email do Cliente OU Comercial Angariador.
-        Segurança extra: se comunicação for EXCLUSIVA com o Comercial
-        (sem participação direta do Cliente no FROM/TO/CC),
-        exige Nome do Cliente ou NIF no Subject/Body.
-        """
-        participants = get_all_participants(em)
-        
-        has_client = bool(client_emails and participants.intersection(client_emails))
-        has_comercial = bool(owner_email and owner_email in participants)
-        
-        if not (has_client or has_comercial):
-            return False
-        
-        if has_client:
-            logger.debug(f"Regra A: email com cliente direto (participantes incluem email cliente)")
-            return True
-        
-        if has_comercial and not has_client:
-            if has_client_name_or_nif(em):
-                logger.debug(f"Regra A: email com comercial exclusivo + identificador cliente ✓")
-                return True
-            else:
-                logger.debug(f"Regra A: email com comercial exclusivo SEM identificador cliente ✗ → descartado")
-                return False
-        
-        return False
-    
-    def email_matches_rule_b(em: Dict) -> bool:
-        """
-        REGRA B: Identificação Forte / Absoluta
-        
-        Assunto OU Corpo contém NIF do Cliente OU Referência do Processo (#1234).
-        Independentemente de quem envia/recebe.
-        """
-        if has_process_reference(em):
-            logger.debug(f"Regra B: identificação forte (NIF ou referência processo) ✓")
-            return True
-        return False
-    
-    def email_matches_rule_c(em: Dict) -> bool:
-        """
-        REGRA C: Comunicação Geral B2B
-        
-        Email entre contas internas da equipa e contas gerais externas.
-        CONDIÇÃO OBRIGATÓRIA: Nome do Cliente OU NIF no Subject/Body.
-        """
-        participants = get_all_participants(em)
-        
-        has_internal = bool(participants.intersection(internal_emails))
-        if not has_internal:
-            return False
-        
-        if has_client_name_or_nif(em):
-            logger.debug(f"Regra C: B2B com conta interna + identificador cliente ✓")
-            return True
-        else:
-            logger.debug(f"Regra C: B2B com conta interna SEM identificador cliente ✗ → descartado")
-            return False
-    
-    def email_matches_rules(em: Dict) -> bool:
-        """
-        Aplica as 3 regras de filtragem de negócio.
-        Um email SÓ É associado se cumprir pelo menos UMA regra.
-        """
-        if email_matches_rule_a(em):
-            return True
-        if email_matches_rule_b(em):
-            return True
-        if email_matches_rule_c(em):
-            return True
-        return False
-    
-    # Filtrar emails pelas 3 regras
-    filtered_emails = [em for em in all_emails if email_matches_rules(em)]
-    
-    # Remover duplicados por Message-ID
-    seen_ids = set()
-    unique_emails = []
-    for em in filtered_emails:
-        msg_id = em.get("message_id", "")
-        if msg_id and msg_id in seen_ids:
-            continue
-        if msg_id:
-            seen_ids.add(msg_id)
-        unique_emails.append(em)
-    
-    logger.info(f"Emails encontrados: {len(all_emails)}, após filtro: {len(unique_emails)}")
-
+    logger.info(f"[sync_emails_for_process] Chamada obsoleta para processo {process_id}. "
+                f"A associação é agora automática via Smart Threading + Tag Mágica.")
+    return {
+        "success": True,
+        "message": "Associação de emails agora é automática via Smart Threading e Tag Mágica. Use a sincronização global do Webmail.",
+        "synced": 0,
+        "method": "smart_threading"
+    }
 
 async def send_email(
     account_name: str,
@@ -1174,6 +449,14 @@ async def send_email(
                 return {"success": False, "error": "Nenhuma conta de email configurada"}
     
     try:
+        # === TAG MÁGICA: Injetar [Proc-{id}] no assunto ===
+        # Se o email está associado a um processo e o assunto ainda não tem a tag
+        if process_id:
+            tag = f"[Proc-{process_id}]"
+            if tag not in subject:
+                subject = f"{subject} {tag}"
+                logger.info(f"[Tag Mágica] Injetada tag {tag} no assunto do email")
+        
         has_attachments = attachments and len(attachments) > 0
         
         if has_attachments:
@@ -1393,6 +676,17 @@ def _fetch_all_from_folder_sync(
                 date_str = msg.get("Date", "")
                 body_text, body_html, _ = get_email_body_with_embedded_images(msg)
                 
+                # === SMART THREADING: Extrair cabeçalhos de rastreio ===
+                in_reply_to = msg.get("In-Reply-To", "")
+                if in_reply_to:
+                    in_reply_to = in_reply_to.strip()
+                
+                references_raw = msg.get("References", "")
+                references_list = []
+                if references_raw:
+                    # References header contém Message-IDs separados por espaços
+                    references_list = [ref.strip() for ref in references_raw.split() if ref.strip()]
+                
                 direction = "sent" if from_email.lower() == account.email.lower() else "received"
                 
                 email_date = None
@@ -1429,6 +723,8 @@ def _fetch_all_from_folder_sync(
                     "direction": direction,
                     "source": "webmail_sync",
                     "account": account.name,
+                    "in_reply_to": in_reply_to or None,
+                    "references": references_list,
                 })
                 
             except Exception as e:
@@ -1531,15 +827,55 @@ async def sync_webmail_emails(
                     except Exception:
                         sent_at = datetime.now(timezone.utc).isoformat()
                     
+                    # === SMART THREADING: Herdar process_id do email "pai" ===
+                    resolved_process_id = None
+                    in_reply_to = em.get("in_reply_to")
+                    references = em.get("references", [])
+                    
+                    # Coletar todos os Message-IDs parentes para buscar
+                    parent_msg_ids = []
+                    if in_reply_to:
+                        parent_msg_ids.append(in_reply_to)
+                    if references:
+                        parent_msg_ids.extend(references)
+                    
+                    if parent_msg_ids:
+                        # Buscar qualquer email pai que tenha process_id
+                        parent_email = await db.emails.find_one(
+                            {
+                                "message_id": {"$in": parent_msg_ids},
+                                "process_id": {"$ne": None, "$exists": True},
+                            },
+                            {"_id": 0, "process_id": 1, "message_id": 1}
+                        )
+                        if parent_email:
+                            resolved_process_id = parent_email["process_id"]
+                            logger.info(f"[Smart Threading] Email {msg_id[:30]} herdou process_id={resolved_process_id} do pai {parent_email.get('message_id', '?')[:30]}")
+                    
+                    # === TAG MÁGICA: Parsear [Proc-{id}] do assunto ===
+                    subject = em.get("subject", "")
+                    if not resolved_process_id and subject:
+                        tag_match = re.search(r'\[Proc-([^\]]+)\]', subject)
+                        if tag_match:
+                            tag_process_id = tag_match.group(1).strip()
+                            # Validar que o processo existe
+                            proc_exists = await db.processes.find_one(
+                                {"id": tag_process_id},
+                                {"_id": 0, "id": 1}
+                            )
+                            if proc_exists:
+                                resolved_process_id = tag_process_id
+                                logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id} via tag no assunto")
+                    
                     email_doc = {
                         "id": str(uuid.uuid4()),
-                        "process_id": None,
+                        "process_id": resolved_process_id,
                         "direction": em.get("direction", "received"),
                         "from_email": em.get("from_email", ""),
                         "to_emails": [str(e) for e in (em.get("to_emails") or []) if e],
                         "cc_emails": [str(e) for e in (em.get("cc_emails") or []) if e],
                         "bcc_emails": [],
-                        "subject": em.get("subject", ""),
+                        "subject": subject,
                         "body": em.get("body", ""),
                         "body_html": em.get("body_html", ""),
                         "attachments": em.get("attachments", []),
@@ -1555,6 +891,8 @@ async def sync_webmail_emails(
                         "is_starred": False,
                         "is_archived": False,
                         "source": "webmail_sync",
+                        "in_reply_to": in_reply_to or None,
+                        "references": references or [],
                     }
                     
                     await db.emails.insert_one(email_doc)
@@ -1687,15 +1025,52 @@ async def sync_user_emails(user_id: str, days: int = 7, max_emails: int = 100) -
                 except Exception:
                     sent_at = datetime.now(timezone.utc).isoformat()
                 
+                # === SMART THREADING: Herdar process_id do email "pai" ===
+                resolved_process_id = None
+                in_reply_to = em.get("in_reply_to")
+                references = em.get("references", [])
+                
+                parent_msg_ids = []
+                if in_reply_to:
+                    parent_msg_ids.append(in_reply_to)
+                if references:
+                    parent_msg_ids.extend(references)
+                
+                if parent_msg_ids:
+                    parent_email = await db.emails.find_one(
+                        {
+                            "message_id": {"$in": parent_msg_ids},
+                            "process_id": {"$ne": None, "$exists": True},
+                        },
+                        {"_id": 0, "process_id": 1, "message_id": 1}
+                    )
+                    if parent_email:
+                        resolved_process_id = parent_email["process_id"]
+                        logger.info(f"[Smart Threading] Email {msg_id[:30]} herdou process_id={resolved_process_id} do pai")
+                
+                # === TAG MÁGICA: Parsear [Proc-{id}] do assunto ===
+                subject = em.get("subject", "")
+                if not resolved_process_id and subject:
+                    tag_match = re.search(r'\[Proc-([^\]]+)\]', subject)
+                    if tag_match:
+                        tag_process_id = tag_match.group(1).strip()
+                        proc_exists = await db.processes.find_one(
+                            {"id": tag_process_id},
+                            {"_id": 0, "id": 1}
+                        )
+                        if proc_exists:
+                            resolved_process_id = tag_process_id
+                            logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id}")
+                
                 email_doc = {
                     "id": str(uuid.uuid4()),
-                    "process_id": None,
+                    "process_id": resolved_process_id,
                     "direction": em.get("direction", "received"),
                     "from_email": em.get("from_email", ""),
                     "to_emails": [str(e) for e in (em.get("to_emails") or []) if e],
                     "cc_emails": [str(e) for e in (em.get("cc_emails") or []) if e],
                     "bcc_emails": [],
-                    "subject": em.get("subject", ""),
+                    "subject": subject,
                     "body": em.get("body", ""),
                     "body_html": em.get("body_html", ""),
                     "attachments": em.get("attachments", []),
@@ -1712,6 +1087,8 @@ async def sync_user_emails(user_id: str, days: int = 7, max_emails: int = 100) -
                     "is_starred": False,
                     "is_archived": False,
                     "source": "user_webmail_sync",
+                    "in_reply_to": in_reply_to or None,
+                    "references": references or [],
                 }
                 
                 await db.emails.insert_one(email_doc)
