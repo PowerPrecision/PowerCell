@@ -222,11 +222,11 @@ const WebmailPage = () => {
     const role = user?.role;
     if (role === 'consultor') setActiveBox('personal');
     else if (role === 'indexacao') setActiveBox('shared_indexacao');
-    else setActiveBox('personal'); // admin/ceo/diretor/administrativa default to personal
+    else setActiveBox('personal'); // admin/ceo/diretor/administrativo default to personal
   }, [user?.role]);
 
   // Derived UI state
-  const showTabs = ['admin', 'ceo', 'diretor', 'administrativa'].includes(user?.role);
+  const showTabs = ['admin', 'ceo', 'diretor', 'administrativo'].includes(user?.role);
   const showAccountSelector = showTabs && activeBox === 'personal';
   const pageSubtitle = !showTabs
     ? (user?.role === 'indexacao' ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
@@ -287,7 +287,7 @@ const WebmailPage = () => {
     const role = user?.role;
     if (!role) return;
 
-    if (['admin', 'ceo', 'diretor', 'administrativa'].includes(role)) {
+    if (['admin', 'ceo', 'diretor', 'administrativo'].includes(role)) {
       // Fetch both personal and general unread counts
       try {
         const [personalRes, generalRes] = await Promise.all([

@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -28,9 +28,15 @@ import { TableSkeleton } from "../components/ui/skeletons";
 
 const ProcessesPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Determinar título baseado na rota
+  // /lista-processos → "Todos os Processos" (Visão Global)
+  // /processos → "Os Meus Processos" (O Meu Negócio)
+  const pageTitle = location.pathname === "/lista-processos" ? "Todos os Processos" : "Os Meus Processos";
   
   // Estado de paginação
   const [pagination, setPagination] = useState({
@@ -251,7 +257,7 @@ const ProcessesPage = () => {
 
   if (loading) {
     return (
-      <DashboardLayout title="Todos os Processos">
+      <DashboardLayout title={pageTitle}>
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -259,7 +265,7 @@ const ProcessesPage = () => {
                 <div>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <FileText className="h-5 w-5" />
-                    Lista de Processos
+                    {pageTitle}
                   </CardTitle>
                   <CardDescription>
                     A carregar processos...
@@ -277,7 +283,7 @@ const ProcessesPage = () => {
   }
 
   return (
-    <DashboardLayout title="Todos os Processos">
+    <DashboardLayout title={pageTitle}>
       <div className="space-y-6">
         <Card>
           <CardHeader>
@@ -285,7 +291,7 @@ const ProcessesPage = () => {
               <div>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <FileText className="h-5 w-5" />
-                  Lista de Processos
+                  {pageTitle}
                 </CardTitle>
                 <CardDescription>
                   Total de {pagination.total} processos no sistema

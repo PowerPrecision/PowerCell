@@ -168,7 +168,7 @@ const MyClientsPage = () => {
 
   if (loading) {
     return (
-      <DashboardLayout>
+      <DashboardLayout title="Os Meus Clientes">
         <div className="space-y-6" data-testid="loading-spinner">
           <div className="h-8 w-48 bg-muted animate-pulse rounded" />
           <TableSkeleton rows={8} columns={5} />
@@ -178,7 +178,7 @@ const MyClientsPage = () => {
   }
 
   return (
-    <DashboardLayout>
+    <DashboardLayout title="Os Meus Clientes">
       <div className="space-y-6" data-testid="my-clients-page">
         {/* Header */}
         <div className="flex justify-between items-center">
