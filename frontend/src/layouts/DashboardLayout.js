@@ -63,7 +63,6 @@ import {
   Lock,
   Mail,
   Eye,
-  UserPlus,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -198,11 +197,6 @@ const DashboardLayout = ({ children, title }) => {
       label: "O Meu Negócio",
       icon: Building2,
       items: [
-        {
-          label: "Criar Novo Cliente",
-          icon: UserPlus,
-          href: "/registo",
-        },
         {
           label: "Novo Registo",
           icon: Users,
@@ -351,7 +345,6 @@ const DashboardLayout = ({ children, title }) => {
           label: "O Meu Negócio",
           icon: Building2,
           items: [
-            { label: "Criar Novo Cliente", icon: UserPlus, href: "/registo" },
             { label: "Os Meus Processos", icon: FileText, href: "/processos" },
             { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
           ],
@@ -381,7 +374,6 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
       const consultorNegocioItems = [
-        { label: "Criar Novo Cliente", icon: UserPlus, href: "/registo" },
         { label: "Novo Registo", icon: Users, href: "/registos-clientes" },
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
         { label: "Os Meus Processos", icon: FileText, href: "/processos" },
