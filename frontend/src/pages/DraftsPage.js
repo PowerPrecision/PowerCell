@@ -99,9 +99,9 @@ const DraftsPage = () => {
         const data = await response.json();
         setDrafts(data.drafts || []);
       }
+      // Se 404, a endpoint ainda nao existe no backend — mostrar lista vazia silenciosamente
     } catch (error) {
-      console.error("Erro ao carregar rascunhos:", error);
-      // Silently fail - drafts endpoint may not exist yet
+      // Silently fail — drafts endpoint may not exist yet
     } finally {
       setLoading(false);
     }

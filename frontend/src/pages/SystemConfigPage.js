@@ -471,10 +471,12 @@ const SharedEmailConfigSection = () => {
     const handleMessage = (event) => {
       if (event.data?.type === "shared_google_oauth_success") {
         toast.success(`Google OAuth conectado para ${event.data.email}`);
+        setAuthenticating(null);
         fetchConfigs();
       }
       if (event.data?.type === "shared_google_oauth_error") {
         toast.error(`Autenticação cancelada: ${event.data.error}`);
+        setAuthenticating(null);
       }
     };
     window.addEventListener("message", handleMessage);
@@ -505,14 +507,8 @@ const SharedEmailConfigSection = () => {
       );
 
       if (popup) {
-        const poll = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(poll);
-            setAuthenticating(null);
-            fetchConfigs();
-          }
-        }, 500);
-        setTimeout(() => { clearInterval(poll); setAuthenticating(null); }, 120000);
+        // Timeout de segurança — limpa o estado de autenticação após 2 minutos
+        setTimeout(() => { setAuthenticating(null); }, 120000);
       } else {
         toast.error("Popup bloqueado. Permita popups para este site.");
         setAuthenticating(null);
