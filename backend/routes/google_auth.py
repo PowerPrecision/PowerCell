@@ -192,11 +192,19 @@ async def google_callback(
             <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
                 <h2 style="color: #e74c3c;">Autenticação Cancelada</h2>
                 <p>O acesso ao Gmail foi cancelado: {error_description or error}</p>
-                <p>Pode fechar esta janela e tentar novamente.</p>
+                <p id="status" style="color: #888;">A comunicar com a aplicação...</p>
                 <script>
-                    if (window.opener) {{
-                        window.opener.postMessage({{ type: 'google_oauth_error', error: '{error}' }}, '*');
+                    try {{
+                        if (window.opener && window.opener !== window) {{
+                            window.opener.postMessage({{ type: 'google_oauth_error', error: '{error}' }}, '*');
+                            document.getElementById('status').textContent = 'Pode fechar esta janela e tentar novamente.';
+                        }} else {{
+                            document.getElementById('status').textContent = 'Autenticação cancelada. Por favor, feche esta janela e atualize a página principal.';
+                        }}
+                    }} catch (e) {{
+                        document.getElementById('status').textContent = 'Autenticação cancelada. Por favor, feche esta janela e atualize a página principal.';
                     }}
+                    try {{ window.close(); }} catch(e) {{}}
                 </script>
             </body>
             </html>
@@ -365,15 +373,23 @@ async def google_callback(
                 <h2 style="color: #27ae60;">Gmail Conectado com Sucesso!</h2>
                 <p>Email: <strong>{google_email or email_address or 'N/A'}</strong></p>
                 <p>Refresh Token: <strong>{has_refresh_text}</strong></p>
-                <p>Pode fechar esta janela.</p>
+                <p id="status">A comunicar com a aplicação...</p>
                 <script>
-                    if (window.opener) {{
-                        window.opener.postMessage({{
-                            type: 'google_oauth_success',
-                            email: '{google_email or email_address or ""}',
-                            has_refresh_token: {str(bool(refresh_token)).lower()}
-                        }}, '*');
+                    try {{
+                        if (window.opener && window.opener !== window) {{
+                            window.opener.postMessage({{
+                                type: 'google_oauth_success',
+                                email: '{google_email or email_address or ""}',
+                                has_refresh_token: {str(bool(refresh_token)).lower()}
+                            }}, '*');
+                            document.getElementById('status').textContent = 'Pode fechar esta janela.';
+                        }} else {{
+                            document.getElementById('status').textContent = 'Autenticação concluída! Por favor, feche esta janela e atualize a página principal.';
+                        }}
+                    }} catch (e) {{
+                        document.getElementById('status').textContent = 'Autenticação concluída! Por favor, feche esta janela e atualize a página principal.';
                     }}
+                    try {{ window.close(); }} catch(e) {{}}
                 </script>
             </body>
             </html>

@@ -5,7 +5,7 @@
  * Separada do FormManagementPage para evitar partilha de rota/componente.
  * Disponivel para admin, ceo e administrativo.
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -59,8 +59,6 @@ import {
   FileSignature,
 } from "lucide-react";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
-
 // Categorias de rascunhos
 const CATEGORIAS = [
   { id: "email", label: "Emails", color: "bg-blue-500" },
@@ -70,9 +68,30 @@ const CATEGORIAS = [
   { id: "outro", label: "Outros", color: "bg-gray-500" },
 ];
 
+const DRAFTS_STORAGE_KEY = "powercell_drafts";
+
+const loadDraftsFromStorage = () => {
+  try {
+    const stored = localStorage.getItem(DRAFTS_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveDraftsToStorage = (drafts) => {
+  try {
+    localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
+  } catch {
+    // localStorage may be full or unavailable
+  }
+};
+
+const generateId = () => `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
 const DraftsPage = () => {
   const [drafts, setDrafts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -86,84 +105,44 @@ const DraftsPage = () => {
     tags: "",
   });
 
-  const fetchDrafts = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/drafts`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setDrafts(data.drafts || []);
-      }
-      // Se 404, a endpoint ainda nao existe no backend — mostrar lista vazia silenciosamente
-    } catch (error) {
-      // Silently fail — drafts endpoint may not exist yet
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // Load drafts from localStorage on mount (no backend API call)
   useEffect(() => {
-    fetchDrafts();
-  }, [fetchDrafts]);
+    setDrafts(loadDraftsFromStorage());
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    try {
-      const token = localStorage.getItem("token");
-      const method = selectedDraft ? "PUT" : "POST";
-      const url = selectedDraft
-        ? `${API_URL}/api/drafts/${selectedDraft.id}`
-        : `${API_URL}/api/drafts`;
+    const tags = formData.tags.split(",").map(t => t.trim()).filter(t => t);
+    const newDraft = {
+      id: selectedDraft ? selectedDraft.id : generateId(),
+      ...formData,
+      tags,
+      created_at: selectedDraft ? selectedDraft.created_at : new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      created_by_name: "Utilizador",
+    };
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          ...formData,
-          tags: formData.tags.split(",").map(t => t.trim()).filter(t => t),
-        }),
-      });
-
-      if (response.ok) {
-        toast.success(selectedDraft ? "Rascunho actualizado" : "Rascunho criado");
-        setDialogOpen(false);
-        resetForm();
-        fetchDrafts();
-      } else {
-        const error = await response.json();
-        toast.error(error.detail || "Erro ao guardar rascunho");
-      }
-    } catch (error) {
-      toast.error("Erro ao guardar rascunho");
+    let updated;
+    if (selectedDraft) {
+      updated = drafts.map(d => d.id === selectedDraft.id ? newDraft : d);
+      toast.success("Rascunho actualizado");
+    } else {
+      updated = [newDraft, ...drafts];
+      toast.success("Rascunho criado");
     }
+
+    setDrafts(updated);
+    saveDraftsToStorage(updated);
+    setDialogOpen(false);
+    resetForm();
   };
 
-  const handleDelete = async (id) => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/drafts/${id}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        toast.success("Rascunho eliminado");
-        fetchDrafts();
-      }
-    } catch (error) {
-      toast.error("Erro ao eliminar rascunho");
-    }
+  const handleDelete = (id) => {
+    const updated = drafts.filter(d => d.id !== id);
+    setDrafts(updated);
+    saveDraftsToStorage(updated);
+    toast.success("Rascunho eliminado");
   };
 
   const handleCopy = async (draft) => {
