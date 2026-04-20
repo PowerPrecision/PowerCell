@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { TableSkeleton } from "../components/ui/skeletons";
@@ -26,8 +26,9 @@ import {
 import { getMyClients, getWorkflowStatuses } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText, 
-  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus
 } from "lucide-react";
+import { CreateClientModal } from "../components/kanban";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -57,6 +58,7 @@ const MyClientsPage = () => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showCreateModal, setShowCreateModal] = useState(false);
   
   // Sync filters with URL
   const searchTerm = searchParams.get("search") || "";
@@ -85,6 +87,11 @@ const MyClientsPage = () => {
   };
 
   useEffect(() => {
+    fetchData();
+  }, []);
+
+  const handleCreateSuccess = useCallback(() => {
+    setShowCreateModal(false);
     fetchData();
   }, []);
 
@@ -188,6 +195,14 @@ const MyClientsPage = () => {
               Clientes atribuídos ao meu perfil
             </p>
           </div>
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            className="gap-2"
+            data-testid="btn-novo-cliente"
+          >
+            <Plus className="h-4 w-4" />
+            Novo Cliente
+          </Button>
         </div>
 
         {/* Estatísticas rápidas */}
@@ -407,6 +422,13 @@ const MyClientsPage = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Create Client Modal */}
+        <CreateClientModal
+          open={showCreateModal}
+          onOpenChange={setShowCreateModal}
+          onSuccess={handleCreateSuccess}
+        />
       </div>
     </DashboardLayout>
   );
