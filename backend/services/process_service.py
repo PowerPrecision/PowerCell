@@ -209,33 +209,11 @@ def build_query_filter(user: dict) -> dict:
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     
-    # Admin, CEO, Diretor, Administrativo, Indexacao, Parceiro veem todos os processos
-    global_view_roles = ["admin", "ceo", "diretor", "administrativo", "indexacao", "parceiro"]
-    if user_role in global_view_roles:
+    # Staff (incluindo indexacao) veem todos os processos
+    # Indexação precisa de ver todos para poder atribuir a consultores/intermediários
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
+    if user_role in staff_roles:
         return {}
-    
-    # Consultor: só vê os seus processos atribuídos
-    if user_role == "consultor":
-        return {"$or": [
-            {"assigned_consultor_ids": user_id},
-            {"assigned_consultor_id": user_id}
-        ]}
-    
-    # Mediador/Intermediário: só vê os seus processos atribuídos
-    if user_role in ["mediador", "intermediario"]:
-        return {"$or": [
-            {"assigned_mediador_ids": user_id},
-            {"assigned_mediador_id": user_id}
-        ]}
-    
-    # Consultor-Intermediário: vê processos como consultor OU mediador
-    if user_role == "consultor_intermediario":
-        return {"$or": [
-            {"assigned_consultor_ids": user_id},
-            {"assigned_consultor_id": user_id},
-            {"assigned_mediador_ids": user_id},
-            {"assigned_mediador_id": user_id}
-        ]}
     
     # Clientes só veem os seus próprios processos
     return {"client_id": user_id}

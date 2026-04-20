@@ -983,19 +983,11 @@ async def get_kanban_board(
             {"assigned_mediador_ids": user_id},
             {"assigned_mediador_id": user_id}
         ]
-    elif role == UserRole.CONSULTOR_INTERMEDIARIO:
-        # Consultor-Intermediário: vê processos atribuídos como consultor OU mediador
-        query["$or"] = [
-            {"assigned_consultor_ids": user_id},
-            {"assigned_consultor_id": user_id},
-            {"assigned_mediador_ids": user_id},
-            {"assigned_mediador_id": user_id}
-        ]
     elif role == UserRole.INDEXACAO:
         # Indexação vê TODOS os processos no kanban (Dashboard)
         # Os processos atribuídos a si são vistos em "Os Meus Processos" (/my-clients)
         pass
-    # Admin, CEO, Administrativo, Diretor see all (no base filter)
+    # Admin, CEO, Administrativo, Diretor, Indexação see all (no base filter)
 
     # Apply additional filters for ALL staff roles
     # Consultor/Mediador filters within their assigned processes; others filter globally
