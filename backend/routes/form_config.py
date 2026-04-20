@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from database import db
-from services.auth import require_roles
+from services.auth import require_roles, require_management
 from models.auth import UserRole
 from datetime import datetime, timezone
 import uuid
@@ -110,32 +110,48 @@ DEFAULT_FORM_CONFIG = [
     {"field_key": "morada_fiscal", "label": "Morada Fiscal", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 8, "is_custom": False},
     {"field_key": "birth_date", "label": "Data de Nascimento", "step": 1, "is_visible": True, "is_required": True, "field_type": "date", "order": 9, "is_custom": False},
     {"field_key": "estado_civil", "label": "Estado Civil", "step": 1, "is_visible": True, "is_required": True, "field_type": "select", "order": 10, "is_custom": False},
+    {"field_key": "sexo", "label": "Sexo", "step": 1, "is_visible": True, "is_required": False, "field_type": "radio", "order": 11, "is_custom": False, "options": ["Masculino", "Feminino", "Outro"]},
+    {"field_key": "codigo_postal", "label": "Código Postal", "step": 1, "is_visible": True, "is_required": False, "field_type": "text", "order": 12, "is_custom": False},
+    {"field_key": "profissao", "label": "Profissão", "step": 1, "is_visible": True, "is_required": False, "field_type": "text", "order": 13, "is_custom": False},
+    {"field_key": "altura", "label": "Altura (m)", "step": 1, "is_visible": False, "is_required": False, "field_type": "number", "order": 14, "is_custom": False},
     # Step 2 - Segundo Titular
     {"field_key": "compra_com_outra_pessoa", "label": "Compra com outra pessoa?", "step": 2, "is_visible": True, "is_required": True, "field_type": "radio", "order": 1, "is_custom": False},
     {"field_key": "titular2_name", "label": "Nome do 2º Titular", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 2, "is_custom": False},
+    {"field_key": "titular2_estado_civil", "label": "Estado Civil (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "select", "order": 3, "is_custom": False},
+    {"field_key": "titular2_rendimento", "label": "Rendimento Co-Titular (€)", "step": 2, "is_visible": True, "is_required": False, "field_type": "number", "order": 4, "is_custom": False},
     # Step 3 - Dados do Imóvel
     {"field_key": "finalidade", "label": "Finalidade do pedido", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 1, "is_custom": False},
     {"field_key": "tipo_imovel", "label": "O que procura?", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 2, "is_custom": False},
-    {"field_key": "num_quartos", "label": "Número de quartos", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 3, "is_custom": False},
-    {"field_key": "localizacao", "label": "Localização/Zona preferida", "step": 3, "is_visible": True, "is_required": True, "field_type": "text", "order": 4, "is_custom": False},
-    {"field_key": "caracteristicas", "label": "Características desejadas", "step": 3, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 5, "is_custom": False},
+    {"field_key": "tipo_compra", "label": "Tipo de Compra", "step": 3, "is_visible": True, "is_required": False, "field_type": "select", "order": 3, "is_custom": False, "options": ["Habitação Própria", "Investimento", "Segunda Habitação", "Construção"]},
+    {"field_key": "num_quartos", "label": "Número de quartos", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 4, "is_custom": False},
+    {"field_key": "localizacao", "label": "Localização/Zona preferida", "step": 3, "is_visible": True, "is_required": True, "field_type": "text", "order": 5, "is_custom": False},
+    {"field_key": "caracteristicas", "label": "Características Pretendidas", "step": 3, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 6, "is_custom": False},
+    {"field_key": "nome_vendedor", "label": "Nome do Vendedor", "step": 3, "is_visible": True, "is_required": False, "field_type": "text", "order": 7, "is_custom": False},
+    {"field_key": "contacto_vendedor", "label": "Contacto do Vendedor", "step": 3, "is_visible": True, "is_required": False, "field_type": "text", "order": 8, "is_custom": False},
     # Step 4 - Situação Financeira
     {"field_key": "chave_movel_digital", "label": "Chave Móvel Digital", "step": 4, "is_visible": True, "is_required": True, "field_type": "radio", "order": 1, "is_custom": False},
     {"field_key": "employment_type", "label": "Tipo de Contrato de Trabalho", "step": 4, "is_visible": True, "is_required": True, "field_type": "select", "order": 2, "is_custom": False},
     {"field_key": "efetivo", "label": "Efetivo?", "step": 4, "is_visible": True, "is_required": False, "field_type": "radio", "order": 3, "is_custom": False},
     {"field_key": "trabalha_estrangeiro", "label": "Trabalha no estrangeiro?", "step": 4, "is_visible": True, "is_required": False, "field_type": "radio", "order": 4, "is_custom": False},
     {"field_key": "salario_liquido", "label": "Salário mensal líquido", "step": 4, "is_visible": True, "is_required": True, "field_type": "number", "order": 5, "is_custom": False},
-    {"field_key": "capital_proprio", "label": "Capital próprio disponível", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 6, "is_custom": False},
-    {"field_key": "valor_financiado", "label": "Valor a financiar", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 7, "is_custom": False},
+    {"field_key": "rendimento_mensal", "label": "Rendimento Mensal (€)", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 6, "is_custom": False},
+    {"field_key": "rendimento_anual", "label": "Rendimento Anual (€)", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 7, "is_custom": False},
+    {"field_key": "empresa", "label": "Empresa", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 8, "is_custom": False},
+    {"field_key": "antiguidade_emprego", "label": "Antiguidade no Emprego", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 9, "is_custom": False},
+    {"field_key": "capital_proprio", "label": "Capital próprio disponível", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 10, "is_custom": False},
+    {"field_key": "valor_financiado", "label": "Valor a financiar", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 11, "is_custom": False},
+    {"field_key": "num_dependentes", "label": "Nº de Dependentes", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 12, "is_custom": False},
     # Step 5 - Histórico Bancário
     {"field_key": "bancos_creditos", "label": "Bancos com créditos ativos", "step": 5, "is_visible": True, "is_required": True, "field_type": "checkbox", "order": 1, "is_custom": False},
     {"field_key": "tem_creditos_activos", "label": "Bancos com contas abertas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 2, "is_custom": False},
-    {"field_key": "bancos_simulacoes", "label": "Simulações efetuadas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 3, "is_custom": False},
+    {"field_key": "prestacao_creditos", "label": "Prestação Créditos Mensal (€)", "step": 5, "is_visible": True, "is_required": False, "field_type": "number", "order": 3, "is_custom": False},
+    {"field_key": "rendimento_bruto", "label": "Rendimento Bruto (€)", "step": 5, "is_visible": True, "is_required": False, "field_type": "number", "order": 4, "is_custom": False},
+    {"field_key": "bancos_simulacoes", "label": "Simulações efetuadas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 5, "is_custom": False},
 ]
 
 
 @router.get("/fields")
-async def get_form_config(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_form_config(user: dict = Depends(require_management())):
     """Obter configuração atual do formulário."""
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
     if not config:
@@ -146,7 +162,7 @@ async def get_form_config(user: dict = Depends(require_roles([UserRole.ADMIN, Us
 @router.put("/fields")
 async def update_form_config(
     data: FormConfigUpdate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """Actualizar configuração do formulário."""
     now = datetime.now(timezone.utc).isoformat()
@@ -179,7 +195,7 @@ async def update_form_config(
 @router.post("/custom-field")
 async def create_custom_field(
     data: CustomFieldCreate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """Criar um campo personalizado no formulário."""
     if data.step < 1 or data.step > 6:
@@ -242,7 +258,7 @@ async def create_custom_field(
 @router.delete("/custom-field/{field_key}")
 async def delete_custom_field(
     field_key: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """Eliminar campo personalizado do formulário."""
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
@@ -353,7 +369,7 @@ SYSTEM_TEMPLATES = [TEMPLATE_CREDITO_HABITACAO, TEMPLATE_REFINANCIAMENTO, TEMPLA
 
 
 @router.get("/templates")
-async def list_templates(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def list_templates(user: dict = Depends(require_management())):
     """Listar todos os templates de formulário (sistema + personalizados)."""
     # Templates do sistema
     system = []
@@ -381,7 +397,7 @@ async def list_templates(user: dict = Depends(require_roles([UserRole.ADMIN, Use
 @router.get("/templates/{template_id}/preview")
 async def preview_template(
     template_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """Obter campos de um template para pré-visualização (sem ativar)."""
     if template_id.startswith("system_"):
@@ -414,7 +430,7 @@ async def preview_template(
 @router.post("/templates")
 async def save_as_template(
     data: TemplateSave,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """Guardar a configuração atual como template."""
     if not data.name.strip():
@@ -457,7 +473,7 @@ async def save_as_template(
 @router.post("/templates/{template_id}/activate")
 async def activate_template(
     template_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """Ativar um template, substituindo a configuração atual do formulário."""
     now = datetime.now(timezone.utc).isoformat()
@@ -498,7 +514,7 @@ async def activate_template(
 @router.post("/templates/{template_id}/duplicate")
 async def duplicate_template(
     template_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_management())
 ):
     """Duplicar um template (sistema ou personalizado) como template personalizado."""
     now = datetime.now(timezone.utc).isoformat()

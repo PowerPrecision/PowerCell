@@ -155,7 +155,9 @@ async def get_me(user: dict = Depends(get_current_user)):
         "onedrive_folder": user.get("onedrive_folder"),
         "is_active": user.get("is_active", True),
         "permissions": synced_perms,
-        "additional_roles": user.get("additional_roles", [])
+        "additional_roles": user.get("additional_roles", []),
+        # Indica se o utilizador tem email configurado para sincronização
+        "email_configured": user.get("email_config", {}).get("is_configured", False),
     }
     
     # Incluir informação de impersonate se presente

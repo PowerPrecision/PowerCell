@@ -70,6 +70,7 @@ import MobileBottomNav from "../components/layout/MobileBottomNav";
 import ContextSwitcher from "../components/layout/ContextSwitcher";
 import GlobalSearchModal from "../components/GlobalSearchModal";
 import ChatPanel from "../components/ChatPanel";
+import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 
 const roleLabels = {
@@ -726,6 +727,9 @@ const DashboardLayout = ({ children, title }) => {
       {/* Chat Panel */}
       <ChatPanel open={chatOpen} onOpenChange={setChatOpen} />
       
+      {/* Email Config Reminder Modal */}
+      <WelcomeConfigModal />
+
       {/* Keyboard Shortcuts Help Modal */}
       <Dialog open={showHelpModal} onOpenChange={setShowHelpModal}>
         <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)]">
