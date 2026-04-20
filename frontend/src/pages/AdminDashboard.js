@@ -25,7 +25,7 @@
  * <AdminDashboard />
  * // Acesso via layout protegido — só visível para roles admin/ceo/diretor
  */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -61,6 +61,36 @@ import {
 import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
+
+// ====================================================================
+// SAFE CHART CONTAINER — prevents Recharts -1 dimension errors
+// ====================================================================
+const SafeChartContainer = ({ children, className = "" }) => {
+  const containerRef = useRef(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const check = () => {
+      const rect = el.getBoundingClientRect();
+      setReady(rect.width > 0 && rect.height > 0);
+    };
+
+    check();
+
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} className={className}>
+      {ready ? children : <div className="flex items-center justify-center h-full text-muted-foreground text-sm" />}
+    </div>
+  );
+};
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -350,22 +380,24 @@ const AdminDashboard = () => {
             </CardHeader>
             <CardContent>
               {funnelData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={funnelData} layout="vertical" margin={{ left: 20, right: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" allowDecimals={false} />
-                    <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
-                    <Tooltip 
-                      formatter={(value) => [`${value} processos`, "Quantidade"]}
-                      contentStyle={{ borderRadius: "8px", fontSize: "13px" }}
-                    />
-                    <Bar dataKey="value" radius={[0, 6, 6, 0]} name="Processos">
-                      {funnelData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <SafeChartContainer className="h-[280px] min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={funnelData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" allowDecimals={false} />
+                      <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
+                      <Tooltip 
+                        formatter={(value) => [`${value} processos`, "Quantidade"]}
+                        contentStyle={{ borderRadius: "8px", fontSize: "13px" }}
+                      />
+                      <Bar dataKey="value" radius={[0, 6, 6, 0]} name="Processos">
+                        {funnelData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </SafeChartContainer>
               ) : (
                 <div className="flex items-center justify-center h-[280px] text-muted-foreground">
                   Sem dados de pipeline disponíveis

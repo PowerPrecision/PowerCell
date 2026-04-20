@@ -152,10 +152,19 @@ async def shared_email_google_callback(
             <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
                 <h2 style="color: #e74c3c;">Autenticação Cancelada</h2>
                 <p>Acesso ao Gmail cancelado: {error_description or error}</p>
+                <p id="status" style="color: #888;">A comunicar com a aplicação...</p>
                 <script>
-                    if (window.opener) {{
-                        window.opener.postMessage({{ type: 'shared_google_oauth_error', error: '{error}' }}, '*');
+                    try {{
+                        if (window.opener && window.opener !== window) {{
+                            window.opener.postMessage({{ type: 'shared_google_oauth_error', error: '{error}' }}, '*');
+                            document.getElementById('status').textContent = 'Pode fechar esta janela.';
+                        }} else {{
+                            document.getElementById('status').textContent = 'Autenticação processada. Por favor, feche esta janela e atualize a página principal.';
+                        }}
+                    }} catch (e) {{
+                        document.getElementById('status').textContent = 'Autenticação processada. Por favor, feche esta janela e atualize a página principal.';
                     }}
+                    try {{ window.close(); }} catch(e) {{}}
                 </script>
             </body></html>
             """,
@@ -282,16 +291,24 @@ async def shared_email_google_callback(
                 <p>Email Partilhado: <strong>{google_email or email_address or 'N/A'}</strong></p>
                 <p>Departamento (role): <strong>{shared_role}</strong></p>
                 <p>Refresh Token: <strong>{has_refresh_text}</strong></p>
-                <p>Pode fechar esta janela.</p>
+                <p id="status">A comunicar com a aplicação...</p>
                 <script>
-                    if (window.opener) {{
-                        window.opener.postMessage({{
-                            type: 'shared_google_oauth_success',
-                            role: '{shared_role}',
-                            email: '{google_email or email_address or ""}',
-                            has_refresh_token: {str(bool(refresh_token)).lower()}
-                        }}, '*');
+                    try {{
+                        if (window.opener && window.opener !== window) {{
+                            window.opener.postMessage({{
+                                type: 'shared_google_oauth_success',
+                                role: '{shared_role}',
+                                email: '{google_email or email_address or ""}',
+                                has_refresh_token: {str(bool(refresh_token)).lower()}
+                            }}, '*');
+                            document.getElementById('status').textContent = 'Pode fechar esta janela.';
+                        }} else {{
+                            document.getElementById('status').textContent = 'Autenticação concluída! Por favor, feche esta janela e atualize a página principal.';
+                        }}
+                    }} catch (e) {{
+                        document.getElementById('status').textContent = 'Autenticação concluída! Por favor, feche esta janela e atualize a página principal.';
                     }}
+                    try {{ window.close(); }} catch(e) {{}}
                 </script>
             </body></html>
             """,
