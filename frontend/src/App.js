@@ -75,6 +75,7 @@ const AuditTrailPage = React.lazy(() => import("./pages/AuditTrailPage"));
 const FinanceDashboard = React.lazy(() => import("./pages/FinanceDashboard"));
 const RGPDMigrationPage = React.lazy(() => import("./pages/RGPDMigrationPage"));
 const WebmailPage = React.lazy(() => import("./pages/WebmailPage"));
+const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -450,6 +451,36 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* Templates / Destinatarios - Admin, CEO, Administrativo */}
+          <Route
+            path="/templates"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+                <MinutasPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Rascunhos (Drafts) - Admin, CEO, Administrativo */}
+          <Route
+            path="/rascunhos"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+                <DraftsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Clientes Novo - Alias para criacao de clientes */}
+          <Route
+            path="/clientes/novo"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <ClientRegistrationsPage />
+              </ProtectedRoute>
+            }
+          />
           
           {/* Expiring Documents Dashboard - All Staff (filtered by role) */}
           <Route
@@ -611,6 +642,12 @@ function App() {
                 <AuditTrailPage />
               </ProtectedRoute>
             }
+          />
+
+          {/* RGPD Admin - Redirecionado para Configuracoes > RGPD */}
+          <Route
+            path="/rgpd-admin"
+            element={<Navigate to="/configuracoes?tab=rgpd" replace />}
           />
 
           {/* RGPD Migration - Admin, CEO and Diretor */}
