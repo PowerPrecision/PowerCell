@@ -237,7 +237,7 @@ async def scheduler_loop():
                             if not user_id:
                                 continue
                             try:
-                                result = await sync_user_emails(user_id, days=3, max_emails=50)
+                                result = await sync_user_emails(user_id, days=30, max_emails=50)
                                 synced = result.get("total_synced", 0)
                                 if synced > 0:
                                     logger.info(f"Webmail sync user {user_id}: {synced} novos emails")
