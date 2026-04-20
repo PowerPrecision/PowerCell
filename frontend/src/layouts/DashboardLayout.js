@@ -117,13 +117,13 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo O Meu Negócio
-    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/kanban", "/imoveis", "/financeiro"];
+    const meuNegocioRoutes = ["/registos-clientes", "/clientes/novo", "/meus-clientes", "/processos", "/kanban", "/imoveis", "/financeiro"];
     // Rotas do grupo Visão Global
     const visaoGlobalRoutes = ["/clientes", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
     const comunicacoesRoutes = ["/webmail", "/minutas", "/leads"];
     // Rotas do grupo Gestão e Operações
-    const gestaoRoutes = ["/utilizadores", "/estatisticas", "/gestao-formulario", "/auditoria"];
+    const gestaoRoutes = ["/templates", "/estatisticas", "/rascunhos", "/rgpd-admin"];
     // Rotas do grupo Configurações de Sistema
     const configRoutes = ["/configuracoes", "/definicoes", "/automation", "/configuracoes/ia", "/admin/backups", "/admin/logs", "/validades", "/workflow-estados", "/configuracoes-perfis", "/admin/migracao-rgpd", "/diagnosticos", "/admin/processos-background"];
     
@@ -201,7 +201,7 @@ const DashboardLayout = ({ children, title }) => {
         {
           label: "Novo Registo",
           icon: Users,
-          href: "/registos-clientes",
+          href: "/clientes/novo",
         },
         {
           label: "Os Meus Clientes",
@@ -289,7 +289,7 @@ const DashboardLayout = ({ children, title }) => {
         {
           label: "Destinatários",
           icon: Users,
-          href: "/utilizadores",
+          href: "/templates",
         },
         {
           label: "Análise e Estatísticas",
@@ -299,12 +299,12 @@ const DashboardLayout = ({ children, title }) => {
         {
           label: "Rascunhos",
           icon: FileSignature,
-          href: "/gestao-formulario",
+          href: "/rascunhos",
         },
         {
           label: "RGPD",
           icon: Shield,
-          href: "/auditoria",
+          href: "/rgpd-admin",
         },
       ],
     };
@@ -317,6 +317,11 @@ const DashboardLayout = ({ children, title }) => {
       label: "Configurações de Sistema",
       icon: Cog,
       items: [
+        {
+          label: "Definições Gerais",
+          icon: Settings,
+          href: "/configuracoes",
+        },
         {
           label: "Utilizadores e Equipas",
           icon: Users,
@@ -375,7 +380,7 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
       const consultorNegocioItems = [
-        { label: "Novo Registo", icon: Users, href: "/registos-clientes" },
+        { label: "Novo Registo", icon: Users, href: "/clientes/novo" },
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
         { label: "Os Meus Processos", icon: FileText, href: "/processos" },
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
