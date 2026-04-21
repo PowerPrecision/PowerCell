@@ -661,13 +661,14 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
             "name": clean_name,
             "phone": clean_phone,
             "role": data.role,
+            "additional_roles": data.additional_roles or [],
             "is_active": True,
             "onedrive_folder": None,  # Parceiros não precisam de pasta
             "created_at": now
         }
         
         await db.users.insert_one(user_doc)
-        await _audit_log("user_created", "user", user_id, user, {"role": data.role, "name": clean_name, "type": "parceiro_ghost"})
+        await _audit_log("user_created", "user", user_id, user, {"role": data.role, "additional_roles": data.additional_roles, "name": clean_name, "type": "parceiro_ghost"})
         
         # Não enviar email de boas-vindas para parceiros
         return UserResponse(**user_doc)
@@ -691,13 +692,14 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
         "name": clean_name,
         "phone": clean_phone,
         "role": data.role,
+        "additional_roles": data.additional_roles or [],
         "is_active": True,
         "onedrive_folder": data.onedrive_folder or clean_name,
         "created_at": now
     }
     
     await db.users.insert_one(user_doc)
-    await _audit_log("user_created", "user", user_id, user, {"email": clean_email, "role": data.role, "name": clean_name})
+    await _audit_log("user_created", "user", user_id, user, {"email": clean_email, "role": data.role, "additional_roles": data.additional_roles, "name": clean_name})
     
     # Enviar email de boas-vindas com dados de acesso
     try:
@@ -952,6 +954,9 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
         update_data["is_active"] = data.is_active
     if data.onedrive_folder is not None:
         update_data["onedrive_folder"] = data.onedrive_folder
+    # Processar additional_roles (múltiplos perfis)
+    if data.additional_roles is not None:
+        update_data["additional_roles"] = data.additional_roles
     # Processar alteração de password (apenas admin pode alterar password de outros)
     if data.password is not None and data.password.strip():
         update_data["password"] = hash_password(data.password)

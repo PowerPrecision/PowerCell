@@ -235,7 +235,9 @@ async def global_search(
                 "dados_pessoais": 1,
                 "contacto": 1,
                 "process_ids": 1,
-                "assigned_to": 1
+                "assigned_to": 1,
+                "status": 1,
+                "fase_principal": 1,
             }
         ).limit(limit).to_list(limit)
         
@@ -263,7 +265,8 @@ async def global_search(
                 "contacto": client.get("contacto", {}),
                 "has_process": bool(first_process_id),
                 "process_count": len(process_ids),
-                "first_process_id": first_process_id
+                "first_process_id": first_process_id,
+                "status": client.get("fase_principal", {}).get("status") or client.get("status"),
             })
         
         results["clients"] = formatted_clients

@@ -351,6 +351,8 @@ const DashboardLayout = ({ children, title }) => {
           ],
         });
       }
+      // Visão Global — acessível a todos os utilizadores
+      indexacaoGroups.push(visaoGlobalGroup);
       if (hasPageAccess("webmail")) {
         indexacaoGroups.push({
           id: "comunicacoes",
@@ -386,6 +388,7 @@ const DashboardLayout = ({ children, title }) => {
         main: [dashboardItem],
         groups: [
           { id: "meu-negocio", label: "O Meu Negócio", icon: Building2, items: consultorNegocioItems },
+          visaoGlobalGroup,
           comunicacoesGroup,
         ],
       };
@@ -399,6 +402,7 @@ const DashboardLayout = ({ children, title }) => {
         main: [dashboardItem],
         groups: [
           { ...meuNegocioGroup, items: meuNegocioGroup.items.filter(i => i.href !== "/financeiro") },
+          visaoGlobalGroup,
           comunicacoesGroup,
         ],
       };

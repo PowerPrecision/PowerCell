@@ -21,6 +21,8 @@ import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../services/api";
 
+const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
+
 const filterConfig = {
   active: {
     title: "Processos Ativos",
@@ -28,7 +30,7 @@ const filterConfig = {
     icon: TrendingUp,
     color: "text-blue-600",
     bgColor: "bg-blue-50",
-    filter: (p) => !p.status?.match(/concluidos|desistencias|eliminados/)
+    filter: (p) => !INACTIVE_STATUS_RE.test(p.status)
   },
   concluded: {
     title: "Processos Concluídos",
@@ -69,7 +71,7 @@ const filterConfig = {
     icon: FileX,
     color: "text-rose-600",
     bgColor: "bg-rose-50",
-    filter: (p) => !p.assigned_indexacao_id && !p.status?.match(/concluidos|desistencias|eliminados/)
+    filter: (p) => !p.assigned_indexacao_id && !INACTIVE_STATUS_RE.test(p.status)
   },
   waiting: {
     title: "Clientes em Espera",

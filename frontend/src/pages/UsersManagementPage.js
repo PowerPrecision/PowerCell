@@ -17,6 +17,7 @@ import { Badge } from "../components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Checkbox } from "../components/ui/checkbox";
 import { 
   Users, Search, UserPlus, Edit, Trash2, Loader2, UserX, UserCheck, Eye, EyeOff, RefreshCw, Copy, Mail
 } from "lucide-react";
@@ -51,6 +52,17 @@ const roleColors = {
   parceiro: "bg-violet-100 text-violet-800",
 };
 
+// Roles available as additional (excludes admin, cliente, parceiro)
+const additionalRoleOptions = [
+  "consultor",
+  "intermediario",
+  "mediador",
+  "diretor",
+  "administrativo",
+  "indexacao",
+  "ceo",
+];
+
 const UsersManagementPage = () => {
   const { user: currentUser, impersonate } = useAuth();
   const [users, setUsers] = useState([]);
@@ -67,6 +79,7 @@ const UsersManagementPage = () => {
     password: "",
     phone: "",
     role: "consultor",
+    additional_roles: [],
     onedrive_folder: "",
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -149,6 +162,7 @@ const UsersManagementPage = () => {
         password: "",
         phone: "",
         role: "consultor",
+        additional_roles: [],
         onedrive_folder: "",
       });
       setGeneratedPassword("");
@@ -235,6 +249,7 @@ const UsersManagementPage = () => {
       password: "",
       phone: user.phone || "",
       role: user.role,
+      additional_roles: user.additional_roles || [],
       onedrive_folder: user.onedrive_folder || "",
     });
     setIsEditDialogOpen(true);
@@ -412,7 +427,7 @@ const UsersManagementPage = () => {
                     )}
                     <div className="space-y-2">
                       <Label>Perfil</Label>
-                      <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+                      <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value, additional_roles: formData.additional_roles.filter((r) => r !== value) })}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="consultor">Consultor</SelectItem>
@@ -431,6 +446,36 @@ const UsersManagementPage = () => {
                           : "Nota: Clientes são processos, não utilizadores do sistema."}
                       </p>
                     </div>
+                    {/* Cargos Adicionais — only for non-parceiro, non-cliente */}
+                    {formData.role !== "parceiro" && formData.role !== "cliente" && (
+                      <div className="space-y-2">
+                        <Label>Cargos Adicionais</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Permitir que este utilizador alterne entre múltiplos perfis no Context Switcher.
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          {additionalRoleOptions
+                            .filter((r) => r !== formData.role)
+                            .map((role) => (
+                              <label
+                                key={role}
+                                className="flex items-center gap-2 text-sm cursor-pointer rounded-md border px-3 py-2 hover:bg-muted/50 transition-colors has-[data-state=checked]:bg-primary/10 has-[data-state=checked]:border-primary/30"
+                              >
+                                <Checkbox
+                                  checked={formData.additional_roles.includes(role)}
+                                  onCheckedChange={(checked) => {
+                                    const updated = checked
+                                      ? [...formData.additional_roles, role]
+                                      : formData.additional_roles.filter((r) => r !== role);
+                                    setFormData({ ...formData, additional_roles: updated });
+                                  }}
+                                />
+                                <span className="text-sm">{roleLabels[role]}</span>
+                              </label>
+                            ))}
+                        </div>
+                      </div>
+                    )}
                     <DialogFooter>
                       <Button type="submit" disabled={formLoading}>
                         {formLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Criar"}
@@ -484,8 +529,11 @@ const UsersManagementPage = () => {
                           <p className="font-medium truncate">{u.name}</p>
                           <p className="text-sm text-muted-foreground truncate">{u.email}</p>
                         </div>
-                        <div className="flex gap-1 shrink-0">
+                        <div className="flex gap-1 shrink-0 flex-wrap justify-end">
                           <Badge className={`${roleColors[u.role]} border text-xs`}>{roleLabels[u.role]}</Badge>
+                          {u.additional_roles?.length > 0 && u.additional_roles.map((r) => (
+                            <Badge key={r} variant="outline" className="text-xs">{roleLabels[r]}</Badge>
+                          ))}
                           <Badge className={u.is_active ? "bg-green-100 text-green-800 text-xs" : "bg-red-100 text-red-800 text-xs"}>
                             {u.is_active ? "Ativo" : "Inativo"}
                           </Badge>
@@ -539,9 +587,14 @@ const UsersManagementPage = () => {
                         <TableCell className="font-medium">{user.name}</TableCell>
                         <TableCell>{user.email}</TableCell>
                         <TableCell>
-                          <Badge className={`${roleColors[user.role]} border`}>
-                            {roleLabels[user.role]}
-                          </Badge>
+                          <div className="flex flex-wrap gap-1">
+                            <Badge className={`${roleColors[user.role]} border`}>
+                              {roleLabels[user.role]}
+                            </Badge>
+                            {user.additional_roles?.length > 0 && user.additional_roles.map((r) => (
+                              <Badge key={r} variant="outline">{roleLabels[r]}</Badge>
+                            ))}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge 
@@ -689,7 +742,7 @@ const UsersManagementPage = () => {
             )}
             <div className="space-y-2">
               <Label>Perfil</Label>
-              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value, additional_roles: formData.additional_roles.filter((r) => r !== value) })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="consultor">Consultor</SelectItem>
@@ -708,6 +761,36 @@ const UsersManagementPage = () => {
                 </p>
               )}
             </div>
+            {/* Cargos Adicionais — only for non-parceiro, non-cliente */}
+            {formData.role !== "parceiro" && formData.role !== "cliente" && (
+              <div className="space-y-2">
+                <Label>Cargos Adicionais</Label>
+                <p className="text-xs text-muted-foreground">
+                  Permitir que este utilizador alterne entre múltiplos perfis no Context Switcher.
+                </p>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  {additionalRoleOptions
+                    .filter((r) => r !== formData.role)
+                    .map((role) => (
+                      <label
+                        key={role}
+                        className="flex items-center gap-2 text-sm cursor-pointer rounded-md border px-3 py-2 hover:bg-muted/50 transition-colors has-[data-state=checked]:bg-primary/10 has-[data-state=checked]:border-primary/30"
+                      >
+                        <Checkbox
+                          checked={formData.additional_roles.includes(role)}
+                          onCheckedChange={(checked) => {
+                            const updated = checked
+                              ? [...formData.additional_roles, role]
+                              : formData.additional_roles.filter((r) => r !== role);
+                            setFormData({ ...formData, additional_roles: updated });
+                          }}
+                        />
+                        <span className="text-sm">{roleLabels[role]}</span>
+                      </label>
+                    ))}
+                </div>
+              </div>
+            )}
             <DialogFooter>
               <Button type="submit" disabled={formLoading}>
                 {formLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}

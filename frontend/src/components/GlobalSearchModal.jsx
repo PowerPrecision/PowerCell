@@ -1,8 +1,9 @@
 /**
  * GlobalSearchModal - Modal de pesquisa global (Ctrl+K)
- * Pesquisa em processos, clientes e tarefas
+ * Pesquisa em processos, clientes e tarefas.
+ * Resultados são separados em duas secções: "Resultados Ativos" e "Arquivo / Inativos".
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Dialog,
@@ -15,9 +16,18 @@ import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { 
   Search, FileText, User, CheckSquare, 
-  Building2, Loader2, ArrowRight, Users, FolderOpen
+  Building2, Loader2, ArrowRight, Users, FolderOpen,
+  Archive, AlertCircle
 } from "lucide-react";
 import api from "../services/api";
+
+// Status values that represent inactive/archived records
+const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
+
+const isItemInactive = (item) => {
+  const status = item.status || "";
+  return INACTIVE_STATUS_RE.test(status);
+};
 
 const GlobalSearchModal = ({ open, onOpenChange }) => {
   const navigate = useNavigate();
@@ -25,6 +35,30 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
   const [results, setResults] = useState({ processes: [], clients: [], tasks: [] });
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Build flat result items with type information
+  const flatResults = useMemo(() => [
+    ...results.processes.map(p => ({ type: "process", data: p })),
+    ...results.clients.map(c => ({ type: "client", data: c })),
+    ...results.tasks.map(t => ({ type: "task", data: t })),
+  ], [results]);
+
+  // Split into active and inactive
+  const { activeItems, inactiveItems } = useMemo(() => {
+    const active = [];
+    const inactive = [];
+    flatResults.forEach((item, idx) => {
+      if (isItemInactive(item.data)) {
+        inactive.push({ ...item, _flatIdx: idx });
+      } else {
+        active.push({ ...item, _flatIdx: idx });
+      }
+    });
+    return { activeItems: active, inactiveItems: inactive };
+  }, [flatResults]);
+
+  // For keyboard navigation, active items come first, then inactive
+  const orderedForNav = useMemo(() => [...activeItems, ...inactiveItems], [activeItems, inactiveItems]);
 
   // Debounced search
   useEffect(() => {
@@ -49,26 +83,19 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Flatten results for keyboard navigation
-  const flatResults = [
-    ...results.processes.map(p => ({ type: "process", data: p })),
-    ...results.clients.map(c => ({ type: "client", data: c })),
-    ...results.tasks.map(t => ({ type: "task", data: t })),
-  ];
-
   // Keyboard navigation
   const handleKeyDown = useCallback((e) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelectedIndex(prev => Math.min(prev + 1, flatResults.length - 1));
+      setSelectedIndex(prev => Math.min(prev + 1, orderedForNav.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSelectedIndex(prev => Math.max(prev - 1, 0));
-    } else if (e.key === "Enter" && flatResults[selectedIndex]) {
+    } else if (e.key === "Enter" && orderedForNav[selectedIndex]) {
       e.preventDefault();
-      handleSelect(flatResults[selectedIndex]);
+      handleSelect(orderedForNav[selectedIndex]);
     }
-  }, [flatResults, selectedIndex]);
+  }, [orderedForNav, selectedIndex]);
 
   const handleSelect = (item) => {
     onOpenChange(false);
@@ -79,14 +106,11 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
         navigate(`/processo/${item.data.id}`);
         break;
       case "client":
-        // Se o cliente tem processo, navega para o primeiro processo
         if (item.data.first_process_id) {
           navigate(`/processo/${item.data.first_process_id}`);
         } else if (item.data.has_process && item.data.id) {
-          // Fallback: navega para clientes com filtro
           navigate(`/clientes?cliente=${item.data.id}`);
         } else {
-          // Cliente sem processo: navega para página de clientes
           navigate(`/clientes?cliente=${item.data.id}`);
         }
         break;
@@ -96,6 +120,73 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
       default:
         break;
     }
+  };
+
+  // Render a single result row
+  const ResultRow = ({ item, navIdx }) => {
+    const { type, data } = item;
+    const inactive = isItemInactive(data);
+    const isSelected = selectedIndex === navIdx;
+
+    return (
+      <div
+        className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
+          isSelected ? "bg-accent" : "hover:bg-accent/50"
+        } ${inactive ? "opacity-70" : ""}`}
+        onClick={() => handleSelect(item)}
+      >
+        {type === "process" && <FileText className={`h-4 w-4 shrink-0 ${inactive ? "text-muted-foreground/60" : "text-muted-foreground"}`} />}
+        {type === "client" && <User className={`h-4 w-4 shrink-0 ${inactive ? "text-muted-foreground/60" : "text-muted-foreground"}`} />}
+        {type === "task" && <CheckSquare className={`h-4 w-4 shrink-0 ${inactive ? "text-muted-foreground/60" : "text-muted-foreground"}`} />}
+        <div className="flex-1 min-w-0">
+          {type === "process" && (
+            <>
+              <p className="font-medium truncate">{data.client_name}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {typeof data.process_type === 'string' ? data.process_type.replace(/_/g, ' ') : String(data.process_type || '')} • {typeof data.status === 'string' ? data.status.replace(/_/g, ' ') : String(data.status || '')}
+              </p>
+            </>
+          )}
+          {type === "client" && (
+            <>
+              <div className="flex items-center gap-2">
+                <p className="font-medium truncate">{data.client_name}</p>
+                {data.has_process && (
+                  <Badge variant="outline" className="text-[10px] h-4 px-1 shrink-0">
+                    <FolderOpen className="h-2.5 w-2.5 mr-0.5" />
+                    {data.process_count} processo{data.process_count !== 1 ? 's' : ''}
+                  </Badge>
+                )}
+                {inactive && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1 shrink-0 text-muted-foreground">
+                    Inativo
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground truncate">
+                {data.personal_data?.nif || data.contacto?.email || "Sem dados"}
+              </p>
+            </>
+          )}
+          {type === "task" && (
+            <>
+              <p className="font-medium truncate">{data.title}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {typeof data.status === 'string' ? data.status.replace(/_/g, ' ') : String(data.status || '')}
+              </p>
+            </>
+          )}
+        </div>
+        <ArrowRight className={`h-4 w-4 shrink-0 ${inactive ? "text-muted-foreground/40" : "text-muted-foreground"}`} />
+      </div>
+    );
+  };
+
+  // Build nav index mapping: active items get sequential indices starting from 0,
+  // inactive items continue after
+  const getNavIdx = (section, localIdx) => {
+    if (section === "active") return localIdx;
+    return activeItems.length + localIdx;
   };
 
   return (
@@ -133,92 +224,29 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
         </div>
 
         {flatResults.length > 0 && (
-          <div className="border-t max-h-[300px] overflow-y-auto">
-            {results.processes.length > 0 && (
+          <div className="border-t max-h-[350px] overflow-y-auto">
+            {/* Section 1: Active Results */}
+            {activeItems.length > 0 && (
               <div className="p-2">
-                <p className="text-xs font-medium text-muted-foreground px-2 py-1 flex items-center gap-1">
-                  <FileText className="h-3 w-3" />
-                  Processos
+                <p className="text-xs font-semibold text-foreground/70 px-2 py-1 flex items-center gap-1.5 uppercase tracking-wide">
+                  <Search className="h-3 w-3" />
+                  Resultados Ativos
                 </p>
-                {results.processes.map((process, idx) => (
-                  <div
-                    key={process.id}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer ${
-                      selectedIndex === idx ? "bg-accent" : "hover:bg-accent/50"
-                    }`}
-                    onClick={() => handleSelect({ type: "process", data: process })}
-                  >
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{process.client_name}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {typeof process.process_type === 'string' ? process.process_type.replace(/_/g, ' ') : String(process.process_type || '')} • {typeof process.status === 'string' ? process.status.replace(/_/g, ' ') : String(process.status || '')}
-                      </p>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                  </div>
+                {activeItems.map((item, idx) => (
+                  <ResultRow key={`active-${item.type}-${item.data.id}`} item={item} navIdx={getNavIdx("active", idx)} />
                 ))}
               </div>
             )}
 
-            {results.clients.length > 0 && (
-              <div className="p-2 border-t">
-                <p className="text-xs font-medium text-muted-foreground px-2 py-1 flex items-center gap-1">
-                  <Users className="h-3 w-3" />
-                  Clientes
+            {/* Section 2: Inactive / Archived Results */}
+            {inactiveItems.length > 0 && (
+              <div className={`p-2 ${activeItems.length > 0 ? "border-t" : ""}`}>
+                <p className="text-xs font-semibold text-muted-foreground px-2 py-1 flex items-center gap-1.5 uppercase tracking-wide">
+                  <Archive className="h-3 w-3" />
+                  Arquivo / Inativos
                 </p>
-                {results.clients.map((client, idx) => (
-                  <div
-                    key={client.id}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer ${
-                      selectedIndex === results.processes.length + idx ? "bg-accent" : "hover:bg-accent/50"
-                    }`}
-                    onClick={() => handleSelect({ type: "client", data: client })}
-                  >
-                    <User className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{client.client_name}</p>
-                        {client.has_process && (
-                          <Badge variant="outline" className="text-[10px] h-4 px-1">
-                            <FolderOpen className="h-2.5 w-2.5 mr-0.5" />
-                            {client.process_count} processo{client.process_count !== 1 ? 's' : ''}
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {client.personal_data?.nif || client.contacto?.email || "Sem dados"}
-                      </p>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {results.tasks.length > 0 && (
-              <div className="p-2 border-t">
-                <p className="text-xs font-medium text-muted-foreground px-2 py-1 flex items-center gap-1">
-                  <CheckSquare className="h-3 w-3" />
-                  Tarefas
-                </p>
-                {results.tasks.map((task, idx) => (
-                  <div
-                    key={task.id}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer ${
-                      selectedIndex === results.processes.length + results.clients.length + idx ? "bg-accent" : "hover:bg-accent/50"
-                    }`}
-                    onClick={() => handleSelect({ type: "task", data: task })}
-                  >
-                    <CheckSquare className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{task.title}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {typeof task.status === 'string' ? task.status.replace(/_/g, ' ') : String(task.status || '')}
-                      </p>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                  </div>
+                {inactiveItems.map((item, idx) => (
+                  <ResultRow key={`inactive-${item.type}-${item.data.id}`} item={item} navIdx={getNavIdx("inactive", idx)} />
                 ))}
               </div>
             )}

@@ -114,7 +114,7 @@ const MyClientsPage = () => {
   };
 
   // Status terminais que são excluídos por padrão
-  const TERMINAL_STATUSES = ["concluido", "arquivo", "perdido", "desistencias", "cancelado"];
+  const TERMINAL_STATUSES = ["concluido", "concluidos", "arquivo", "perdido", "desistencia", "desistencias", "cancelado", "eliminado", "eliminados", "inativo"];
 
   const filteredClients = useMemo(() => {
     const normalizedSearch = searchTerm
