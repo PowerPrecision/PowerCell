@@ -18,9 +18,7 @@ from services.ai_document import (
     map_recibo_to_financial_data,
     map_irs_to_financial_data
 )
-from services.onedrive import onedrive_service
 from services.task_log_service import task_log_service
-from config import ONEDRIVE_BASE_PATH
 
 
 logger = logging.getLogger(__name__)
@@ -36,8 +34,8 @@ class AnalyzeDocumentRequest(BaseModel):
 
 
 class AnalyzeOneDriveDocumentRequest(BaseModel):
-    """Request to analyze a document from OneDrive."""
-    client_folder: str
+    """Request to analyze a document from S3 storage."""
+    client_folder: str  # Client name used to locate S3 path
     file_name: str
     document_type: str  # 'cc', 'recibo_vencimento', 'irs', 'outro'
 
@@ -118,39 +116,74 @@ async def analyze_onedrive_document(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR]))
 ):
     """
-    Analyze a document from OneDrive using AI.
+    Analyze a document from S3 storage using AI.
     
-    The document will be fetched from the client's OneDrive folder and analyzed.
+    The document will be fetched from the client's S3 folder and analyzed.
+    client_folder is the client_name used to locate the S3 path.
     """
+    from database import db
+    from services.s3_storage import s3_service
+
     try:
-        # Build the path to the document
-        folder_path = f"{ONEDRIVE_BASE_PATH}/{request.client_folder}"
-        
-        # List files to find the document
-        files = await onedrive_service.list_files(folder_path)
-        
-        target_file = None
-        for f in files:
-            if f.name.lower() == request.file_name.lower():
-                target_file = f
+        # --- Step 1: Find the process by client name ---
+        process = await db.processes.find_one(
+            {"client_name": {"$regex": f"^{request.client_folder}$", "$options": "i"}},
+            {"id": 1, "client_name": 1, "second_client_name": 1, "titular2_data": 1, "s3_folder": 1}
+        )
+        if not process:
+            # Fallback: partial match
+            process = await db.processes.find_one(
+                {"client_name": {"$regex": request.client_folder, "$options": "i"}},
+                {"id": 1, "client_name": 1, "second_client_name": 1, "titular2_data": 1, "s3_folder": 1}
+            )
+        if not process:
+            raise HTTPException(status_code=404, detail=f"Cliente '{request.client_folder}' não encontrado")
+
+        client_id = process.get("id")
+        client_name = process.get("client_name", request.client_folder)
+        second_client_name = process.get("second_client_name") or process.get("titular2_data", {}).get("nome")
+        s3_folder = process.get("s3_folder")
+
+        # --- Step 2: Check S3 is configured ---
+        if not s3_service.is_configured():
+            raise HTTPException(status_code=503, detail="Armazenamento S3 não configurado")
+
+        # --- Step 3: List files to find the target file ---
+        files_data = s3_service.list_files(client_id, client_name, second_client_name, s3_folder=s3_folder)
+        files_by_category = files_data.get("files", {})
+
+        target_s3_key = None
+        for category, category_files in files_by_category.items():
+            if not isinstance(category_files, list):
+                continue
+            for f in category_files:
+                if f.get("name", "").lower() == request.file_name.lower():
+                    target_s3_key = f.get("path")
+                    break
+            if target_s3_key:
                 break
-        
-        if not target_file:
-            raise HTTPException(status_code=404, detail="Ficheiro não encontrado no OneDrive")
-        
-        # Get download URL
-        download_url = target_file.download_url or await onedrive_service.get_download_url(target_file.id)
-        
-        # Analyze the document
+
+        if not target_s3_key:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Ficheiro '{request.file_name}' não encontrado na pasta do cliente '{client_name}'"
+            )
+
+        # --- Step 4: Get a presigned URL for the file ---
+        download_url = s3_service.get_presigned_url(target_s3_key)
+        if not download_url:
+            raise HTTPException(status_code=500, detail="Erro ao gerar URL de download do ficheiro")
+
+        # --- Step 5: Analyze the document ---
         result = await analyze_document_from_url(download_url, request.document_type)
-        
+
         if not result.get("success", False):
             raise HTTPException(status_code=500, detail=result.get("error", "Erro ao analisar documento"))
-        
+
         # Map extracted data
         extracted_data = result.get("extracted_data", {})
         mapped_data = {}
-        
+
         if request.document_type == "cc":
             mapped_data["personal_data"] = map_cc_to_personal_data(extracted_data)
             mapped_data["name"] = extracted_data.get("nome_completo")
@@ -158,7 +191,7 @@ async def analyze_onedrive_document(
             mapped_data["financial_data"] = map_recibo_to_financial_data(extracted_data)
         elif request.document_type == "irs":
             mapped_data["financial_data"] = map_irs_to_financial_data(extracted_data)
-        
+
         return {
             "success": True,
             "document_type": request.document_type,
@@ -166,11 +199,11 @@ async def analyze_onedrive_document(
             "extracted_data": extracted_data,
             "mapped_data": mapped_data
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error analyzing OneDrive document: {e}")
+        logger.error(f"Error analyzing document from S3: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro ao analisar documento: {str(e)}")
 
 
