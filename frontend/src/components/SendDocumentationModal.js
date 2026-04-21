@@ -606,13 +606,20 @@ const SendDocumentationModal = ({
 
                 {canEditTemplate && (
                   <TabsContent value="edit" className="mt-2">
-                    <SmartRichEditor
-                      value={emailHtml}
-                      onChange={setEmailHtml}
-                      placeholder="Edite o conteúdo do email..."
-                      minHeight={300}
-                      advanced
-                    />
+                    {previewLoading ? (
+                      <div className="flex items-center justify-center py-12 border rounded-lg">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : (
+                      <SmartRichEditor
+                        key={emailHtml ? 'preview-loaded' : 'preview-empty'}
+                        value={emailHtml}
+                        onChange={setEmailHtml}
+                        placeholder="Edite o conteúdo do email..."
+                        minHeight={300}
+                        advanced
+                      />
+                    )}
                   </TabsContent>
                 )}
               </Tabs>
