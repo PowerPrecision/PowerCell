@@ -264,6 +264,24 @@ async def get_active_background_tasks(
             if is_done and is_unack:
                 completed_unacknowledged += 1
 
+            # Determine priority based on status and duration
+            priority = "normal"
+            if status == "failed":
+                priority = "alta"
+            elif status == "running":
+                # Check if running for > 5 minutes
+                try:
+                    created_str = job.get("created_at", "")
+                    if created_str:
+                        created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                        minutes_running = (datetime.now(timezone.utc) - created_dt).total_seconds() / 60
+                        if minutes_running > 5:
+                            priority = "alta"
+                except (ValueError, TypeError):
+                    pass
+            elif status == "pending":
+                priority = "media"
+
             # Só incluir jobs que ainda são relevantes
             if is_active or (is_done and is_unack):
                 tasks.append({
@@ -278,6 +296,7 @@ async def get_active_background_tasks(
                     "result_url": job.get("result_url"),
                     "error_message": job.get("error") or job.get("message") if status == "failed" else None,
                     "progress": job.get("progress"),
+                    "priority": priority,
                 })
 
         return {

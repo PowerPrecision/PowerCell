@@ -35,12 +35,12 @@ import {
 import { 
   ClipboardList, Plus, Check, RotateCcw, Trash2, Loader2, 
   MoreVertical, User, Clock, CheckCircle2, Circle, Calendar, AlertTriangle,
-  ExternalLink, Send, MessageSquare
+  ExternalLink, Send, MessageSquare, XCircle, Activity, CheckCheck
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
-import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess } from "../services/api";
+import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
 
 const TasksPanel = ({ 
   processId = null, 
@@ -51,6 +51,7 @@ const TasksPanel = ({
   showOnlyMyTasks = false  // Novo: mostrar apenas tarefas atribuídas ao utilizador atual
 }) => {
   const [tasks, setTasks] = useState([]);
+  const [backgroundJobs, setBackgroundJobs] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -104,6 +105,19 @@ const TasksPanel = ({
       }
       
       setTasks(filteredTasks);
+
+      // Fetch active background jobs (only when not in a specific process context)
+      if (!processId) {
+        try {
+          const bgRes = await getActiveBackgroundTasks();
+          setBackgroundJobs(bgRes.data.tasks || []);
+        } catch (bgErr) {
+          console.warn("Não foi possível carregar tarefas em background:", bgErr);
+          setBackgroundJobs([]);
+        }
+      } else {
+        setBackgroundJobs([]);
+      }
 
       // === FILTRO DE UTILIZADORES PARA ATRIBUIÇÃO ===
       // Se estamos num processo específico, mostrar APENAS os utilizadores
@@ -316,6 +330,37 @@ const TasksPanel = ({
     }));
   };
 
+  // Helper para exibir badge de prioridade derivada
+  const getPriorityBadge = (task) => {
+    if (task.completed) return null;
+    if (task.is_overdue) {
+      return (
+        <Badge className="text-[10px] sm:text-xs h-4 sm:h-5 bg-red-100 text-red-700 border-red-200">
+          ALTA
+        </Badge>
+      );
+    }
+    if (task.days_until_due !== null && task.days_until_due !== undefined && task.days_until_due <= 3) {
+      return (
+        <Badge className="text-[10px] sm:text-xs h-4 sm:h-5 bg-yellow-100 text-yellow-700 border-yellow-200">
+          MÉDIA
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="text-[10px] sm:text-xs h-4 sm:h-5 text-gray-500 border-gray-300">
+        NORMAL
+      </Badge>
+    );
+  };
+
+  // Extract client name from task title pattern like [Client Name] ...
+  const extractClientFromTitle = (title) => {
+    if (!title) return null;
+    const match = title.match(/^\[([^\]]+)\]/);
+    return match ? match[1] : null;
+  };
+
   // Helper para mostrar badge de prazo
   const getDueDateBadge = (task) => {
     if (!task || !task.due_date || task.completed) return null;
@@ -348,7 +393,7 @@ const TasksPanel = ({
       return (
         <Badge variant="outline" className="text-xs text-orange-600 border-orange-300">
           <Clock className="h-3 w-3 mr-1" />
-          {daysUntil} dias
+          Faltam {daysUntil} dias
         </Badge>
       );
     } else {
@@ -432,110 +477,233 @@ const TasksPanel = ({
           </div>
 
           {/* Lista de tarefas */}
-          {tasks.length === 0 ? (
+          {tasks.length === 0 && backgroundJobs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <ClipboardList className="h-12 w-12 mx-auto mb-2 opacity-20" />
               <p className="text-sm">Nenhuma tarefa {showCompleted ? "" : "pendente"}</p>
             </div>
           ) : (
             <ScrollArea style={{ maxHeight }}>
-              <div className="space-y-2">
-                {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={`flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg border transition-colors cursor-pointer ${
-                      task.completed 
-                        ? "bg-muted/30 border-muted" 
-                        : "bg-background border-border hover:bg-muted/50 hover:border-primary/30"
-                    }`}
-                    onClick={() => openTaskDetail(task)}
-                  >
-                    {/* Checkbox/Status */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (task.completed) {
-                          handleReopenTask(task.id);
-                        } else {
-                          handleCompleteTask(task.id);
-                        }
-                      }}
-                      className="mt-0.5 flex-shrink-0"
-                    >
-                      {task.completed ? (
-                        <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
-                      ) : (
-                        <Circle className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground hover:text-blue-600" />
-                      )}
-                    </button>
+              {/* Background Jobs Section */}
+              {backgroundJobs.length > 0 && (
+                <div className="mb-3">
+                  <div className="flex items-center gap-2 mb-2 px-1">
+                    <Activity className="h-4 w-4 text-violet-500" />
+                    <span className="text-xs font-semibold text-violet-600 uppercase tracking-wide">Tarefas em Background</span>
+                    {backgroundJobs.some(j => j.status === "running" || j.status === "processing" || j.status === "pending") && (
+                      <Loader2 className="h-3 w-3 text-violet-500 animate-spin" />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {backgroundJobs.map((job) => {
+                      const isActive = job.status === "running" || job.status === "processing" || job.status === "pending";
+                      const isCompleted = job.status === "completed";
+                      const isFailed = job.status === "failed";
+                      return (
+                        <div
+                          key={job.task_id}
+                          className={`flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg border ${
+                            isFailed ? "bg-red-50/50 border-red-200" : isCompleted ? "bg-green-50/50 border-green-200" : "bg-violet-50/50 border-violet-200"
+                          }`}
+                        >
+                          {/* Status icon */}
+                          <div className="mt-0.5 flex-shrink-0">
+                            {isActive ? (
+                              <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 text-violet-500 animate-spin" />
+                            ) : isCompleted ? (
+                              <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
+                            ) : (
+                              <XCircle className="h-4 w-4 sm:h-5 sm:w-5 text-red-500" />
+                            )}
+                          </div>
 
-                    {/* Conteúdo */}
-                    <div className="flex-1 min-w-0">
-                      <p className={`font-medium text-sm sm:text-base ${task.completed ? "line-through text-muted-foreground" : ""}`}>
-                        {task.title}
-                      </p>
-                      {task.description && (
-                        <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">
-                          {task.description}
-                        </p>
-                      )}
-                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2">
-                        {/* Badge de prazo */}
-                        {getDueDateBadge(task)}
-                        {/* Atribuídos */}
-                        <div className="flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs text-muted-foreground">
-                          <User className="h-3 w-3" />
-                          <span className="truncate max-w-[80px] sm:max-w-none">{task.assigned_to_names?.join(", ") || "Sem atribuição"}</span>
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <p className={`font-medium text-sm sm:text-base ${isFailed ? "text-red-700" : ""}`}>{
+                              job.title || job.type || "Tarefa"
+                            }</p>
+                            {job.description && (
+                              <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 line-clamp-2">
+                                {job.description}
+                              </p>
+                            )}
+                            {job.error_message && (
+                              <p className="text-xs text-red-600 mt-0.5 line-clamp-2">
+                                {job.error_message}
+                              </p>
+                            )}
+                            {/* Progress bar */}
+                            {job.progress !== null && job.progress !== undefined && isActive && (
+                              <div className="mt-1.5">
+                                <div className="w-full bg-violet-200 rounded-full h-1.5">
+                                  <div
+                                    className="bg-violet-600 h-1.5 rounded-full transition-all duration-300"
+                                    style={{ width: `${Math.min(100, Math.max(0, job.progress))}%` }}
+                                  />
+                                </div>
+                                <p className="text-[10px] text-violet-600 mt-0.5">{job.progress}%</p>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <Badge variant="outline" className="text-[10px] h-4 sm:h-5">
+                                {job.type || "JOB"}
+                              </Badge>
+                              {(isCompleted || isFailed) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    acknowledgeBackgroundTask(job.task_id).then(() => {
+                                      setBackgroundJobs(prev => prev.filter(j => j.task_id !== job.task_id));
+                                    }).catch(() => {});
+                                  }}
+                                >
+                                  <CheckCheck className="h-3 w-3 mr-1" />
+                                  Confirmar
+                                </Button>
+                              )}
+                              {isActive && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs text-muted-foreground hover:text-red-600"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    cancelBackgroundTask(job.task_id).then(() => {
+                                      setBackgroundJobs(prev => prev.filter(j => j.task_id !== job.task_id));
+                                    }).catch(() => {});
+                                  }}
+                                >
+                                  <XCircle className="h-3 w-3 mr-1" />
+                                  Cancelar
+                                </Button>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        {/* Processo */}
-                        {task.process_name && !processId && (
-                          <Badge variant="outline" className="text-[10px] sm:text-xs h-4 sm:h-5">
-                            {task.process_name}
-                          </Badge>
+                      );
+                    })}
+                  </div>
+                  {/* Divider between background jobs and manual tasks */}
+                  {tasks.length > 0 && <div className="border-t my-3" />}
+                </div>
+              )}
+
+              {/* Manual tasks list */}
+              {tasks.length > 0 && (
+                <div className="space-y-2">
+                  {tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className={`flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg border transition-colors cursor-pointer ${
+                        task.completed
+                          ? "bg-muted/30 border-muted"
+                          : "bg-background border-border hover:bg-muted/50 hover:border-primary/30"
+                      }`}
+                      onClick={() => openTaskDetail(task)}
+                    >
+                      {/* Checkbox/Status */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (task.completed) {
+                            handleReopenTask(task.id);
+                          } else {
+                            handleCompleteTask(task.id);
+                          }
+                        }}
+                        className="mt-0.5 flex-shrink-0"
+                      >
+                        {task.completed ? (
+                          <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
+                        ) : (
+                          <Circle className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground hover:text-blue-600" />
                         )}
-                        {/* Data de criação - hidden on very small screens */}
-                        <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock className="h-3 w-3" />
-                          {format(parseISO(task.created_at), "dd/MM/yyyy", { locale: pt })}
+                      </button>
+
+                      {/* Conteúdo */}
+                      <div className="flex-1 min-w-0">
+                        <p className={`font-medium text-sm sm:text-base ${task.completed ? "line-through text-muted-foreground" : ""}`}>
+                          {task.title}
+                        </p>
+                        {task.description && (
+                          <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">
+                            {task.description}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2">
+                          {/* Priority badge */}
+                          {getPriorityBadge(task)}
+                          {/* Badge de prazo */}
+                          {getDueDateBadge(task)}
+                          {/* Context line — Ref: process_name or extracted client */}
+                          {!processId && (
+                            task.process_name
+                              ? (
+                                <Badge variant="outline" className="text-[10px] sm:text-xs h-4 sm:h-5">
+                                  Ref: {task.process_name}
+                                </Badge>
+                              )
+                              : (() => {
+                                  const clientName = extractClientFromTitle(task.title);
+                                  return clientName ? (
+                                    <Badge variant="outline" className="text-[10px] sm:text-xs h-4 sm:h-5">
+                                      Ref: {clientName}
+                                    </Badge>
+                                  ) : null;
+                                })()
+                          )}
+                          {/* Atribuídos */}
+                          <div className="flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs text-muted-foreground">
+                            <User className="h-3 w-3" />
+                            <span className="truncate max-w-[80px] sm:max-w-none">{task.assigned_to_names?.join(", ") || "Sem atribuição"}</span>
+                          </div>
+                          {/* Data de criação - hidden on very small screens */}
+                          <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {format(parseISO(task.created_at), "dd/MM/yyyy", { locale: pt })}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Menu */}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 sm:h-8 sm:w-8 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <MoreVertical className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openTaskDetail(task); }}>
-                          <ExternalLink className="h-4 w-4 mr-2" />
-                          Ver detalhes
-                        </DropdownMenuItem>
-                        {task.completed ? (
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleReopenTask(task.id); }}>
-                            <RotateCcw className="h-4 w-4 mr-2" />
-                            Reabrir
+                      {/* Menu */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 sm:h-8 sm:w-8 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <MoreVertical className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openTaskDetail(task); }}>
+                            <ExternalLink className="h-4 w-4 mr-2" />
+                            Ver detalhes
                           </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCompleteTask(task.id); }}>
-                            <Check className="h-4 w-4 mr-2" />
-                            Concluir
+                          {task.completed ? (
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleReopenTask(task.id); }}>
+                              <RotateCcw className="h-4 w-4 mr-2" />
+                              Reabrir
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCompleteTask(task.id); }}>
+                              <Check className="h-4 w-4 mr-2" />
+                              Concluir
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTask(task.id); }}
+                            className="text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Eliminar
                           </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem 
-                          onClick={(e) => { e.stopPropagation(); handleDeleteTask(task.id); }}
-                          className="text-red-600"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Eliminar
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))}
-              </div>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  ))}
+                </div>
+              )}
             </ScrollArea>
           )}
         </CardContent>
