@@ -58,6 +58,69 @@ const api = axios.create({
 });
 
 // ====================================================================
+// REQUEST DEDUPLICATION — Prevents duplicate in-flight requests
+// ====================================================================
+// React Strict Mode double-mounts components in development, and
+// multiple components may call the same API simultaneously (e.g.
+// getUpcomingExpiries in both AdminDashboard and StaffDashboard).
+// This deduplication layer ensures identical in-flight requests
+// share the same Promise, halving the number of actual HTTP calls
+// and preventing 429 rate limit errors.
+// ====================================================================
+
+const inflightRequests = new Map();
+
+/**
+ * Generates a deduplication key from request config.
+ * Key format: "METHOD:url?sortedParams"
+ */
+function getRequestKey(config) {
+  const method = (config.method || "get").toLowerCase();
+  const url = config.url || "";
+  
+  // Sort params to ensure consistent keys regardless of insertion order
+  if (config.params && typeof config.params === "object") {
+    const sortedParams = Object.keys(config.params)
+      .sort()
+      .map(k => `${k}=${config.params[k]}`)
+      .join("&");
+    return `${method}:${url}?${sortedParams}`;
+  }
+  
+  return `${method}:${url}`;
+}
+
+/**
+ * Wraps axios request with deduplication.
+ * If an identical request is already in-flight, returns the same Promise.
+ */
+function deduplicatedRequest(config) {
+  const key = getRequestKey(config);
+  
+  if (inflightRequests.has(key)) {
+    // Request already in-flight — return existing promise
+    return inflightRequests.get(key);
+  }
+  
+  // Create new request and track it
+  const requestPromise = api(config).finally(() => {
+    inflightRequests.delete(key);
+  });
+  
+  inflightRequests.set(key, requestPromise);
+  return requestPromise;
+}
+
+// ====================================================================
+// Wrap api.get with deduplication for GET requests only.
+// POST/PUT/DELETE are never deduplicated (they must always execute).
+// This transparently deduplicates all existing api.get() calls
+// (e.g. getUpcomingExpiries, getStats, getProcesses) without
+// requiring changes to any exported API functions.
+// ====================================================================
+api.get = (url, config) => deduplicatedRequest({ method: "get", url, ...config });
+
+// ====================================================================
 // INTERCEPTOR DE REQUEST
 // ====================================================================
 api.interceptors.request.use(

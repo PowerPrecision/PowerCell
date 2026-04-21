@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -24,49 +24,11 @@ import {
 } from "lucide-react";
 import { getStats, getProcesses, getUsers } from "../services/api";
 import { toast } from "sonner";
+import SafeChartContainer from "../components/ui/SafeChartContainer";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-
-// ====================================================================
-// SAFE CHART CONTAINER — prevents Recharts -1 dimension errors
-// ====================================================================
-
-const SafeChartContainer = ({ children, className = "" }) => {
-  const containerRef = useRef(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    let rafId;
-    const check = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        setReady(rect.width > 1 && rect.height > 1);
-      });
-    };
-
-    check();
-
-    const observer = new ResizeObserver(check);
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, []);
-
-  return (
-    <div ref={containerRef} className={className} style={{ minWidth: 1, minHeight: 1 }}>
-      {ready ? children : null}
-    </div>
-  );
-};
 
 const StatisticsPage = () => {
   const { user, token } = useAuth();

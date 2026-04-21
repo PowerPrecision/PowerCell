@@ -25,7 +25,7 @@
  * <AdminDashboard />
  * // Acesso via layout protegido — só visível para roles admin/ceo/diretor
  */
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -59,47 +59,9 @@ import {
   CreateEventDialog, AIAnalysisTab 
 } from "../components/admin";
 import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
+import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
-
-// ====================================================================
-// SAFE CHART CONTAINER — prevents Recharts -1 dimension errors
-// ====================================================================
-const SafeChartContainer = ({ children, className = "" }) => {
-  const containerRef = useRef(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    let rafId;
-    const check = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        setReady(rect.width > 1 && rect.height > 1);
-      });
-    };
-
-    check();
-
-    const observer = new ResizeObserver(check);
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, []);
-
-  return (
-    <div ref={containerRef} className={className} style={{ minWidth: 1, minHeight: 1 }}>
-      {ready ? children : null}
-    </div>
-  );
-};
-
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
