@@ -591,8 +591,8 @@ export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
 export const updateRGPDTemplate = (content) => api.put("/rgpd/admin/template", { content });
 
 // ===== MAGIC LINK (Client Portal) =====
-export const generateMagicLink = (processId) => api.post(`/processes/${processId}/magic-link`);
-export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/magic-link/send`);
+export const generateMagicLink = (processId) => api.post(`/processes/${processId}/generate-magic-link`);
+export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/generate-magic-link/send`);
 
 // ===== TTL MIGRATION (Data Lifecycle Management) =====
 export const getTTLStatus = () => api.get("/diagnostics/ttl-status");
