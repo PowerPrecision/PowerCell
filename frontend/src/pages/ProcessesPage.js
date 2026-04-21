@@ -107,7 +107,8 @@ const ProcessesPage = () => {
         search: searchTerm || undefined,
         view_mode: showCompleted ? "all" : "active_only",
         sort_field: sortField,
-        sort_order: sortOrder
+        sort_order: sortOrder,
+        show_all: true
       });
       
       // Suporta novo formato paginado

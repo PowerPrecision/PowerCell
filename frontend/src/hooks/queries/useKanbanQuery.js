@@ -25,6 +25,8 @@ const fetchKanbanData = async (token, filters) => {
   
   // FILTRO DE ESTADO ATIVO: Por defeito, mostra apenas processos ativos
   params.append('view_mode', 'active_only');
+  // Visão global: mostrar todos os processos independentemente do utilizador
+  params.append('show_all', 'true');
   
   const { consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter } = filters;
   

@@ -743,3 +743,62 @@ Stage Summary:
 - Files created: `backend/models/announcement.py`, `backend/routes/announcements.py`, `frontend/src/components/TeamMural.js`
 - Files modified: `backend/routes/__init__.py`, `backend/server.py`, `frontend/src/services/api.js`, `frontend/src/pages/StaffDashboard.js`
 - Commit: `feat: add likes and read receipts to team mural`
+
+---
+Task ID: 6
+Agent: Backend Engineer (Main)
+Task: Fix email GET endpoint returning empty list despite sync engine storing emails in DB
+
+Work Log:
+- Analyzed email_service.py sync_user_emails() to understand how personal emails are saved to MongoDB
+  - Sync engine saves with `synced_for_user: user_id` (string UUID) and `account: user_imap_email`
+- Analyzed WebmailPage.jsx fetchEmails() to understand API call parameters
+  - Frontend ALWAYS sends `account=power` or `account=precision` (based on email domain auto-detection)
+  - This account param is sent regardless of which box tab (personal/general/shared) is active
+- Analyzed routes/emails.py GET /webmail endpoint query construction
+  - Found the account filter: `{"$or": [{"account": account}, {"account": {"$exists": False}}]}`
+  - This filter was applied unconditionally when `account` param was present
+- Identified root cause: When box=personal, user-synced emails have `account="user@example.com"` (their IMAP address)
+  - Filter `{"account": "power"}` does NOT match `"user@example.com"`
+  - Filter `{"account": {"$exists": False}}` does NOT match because the field exists
+  - Result: ALL personal emails filtered out, returning empty list
+- Applied fix in routes/emails.py:
+  - Line 2354: Changed `if account:` to `if account and box != "personal":` for main query
+  - Line 2448: Changed `if account:` to `if account and box != "personal":` for unread_count
+  - Added explanatory comments in Portuguese
+- Verified webmail-stats endpoint is unaffected (no account filter applied there)
+- Committed and pushed to origin/dev: `fix: align email GET endpoint query filters with database schema used by sync engine`
+
+Stage Summary:
+- Root cause: Frontend always sends account=power/precision, but personal emails have account=user_imap_email
+- Fix: Skip account filter when box=personal (personal emails are already isolated by synced_for_user)
+- Files modified: backend/routes/emails.py (2 lines changed: 2354, 2448)
+- Commit: 7b3e8bc on dev branch, pushed to origin/dev
+
+---
+Task ID: 7
+Agent: Frontend Senior Engineer (Main)
+Task: Fix toast notification loop and add unread messages badge to chat icon
+
+Work Log:
+- Analyzed all toast triggers across the frontend (useWebSocket, NotificationsDropdown, TasksContext, api.js)
+- Identified two WebSocket-triggered toast sources in NotificationsDropdown.js without deduplication:
+  1. onNotification callback (line 161) - fires toast.info for every WS notification event
+  2. onChatMessage callback (line 196) - fires toast.info for every WS chat message event
+- TasksContext.js already had debounce deduplication via lastToastTimeRef - no change needed
+- Added shownToastIds (useRef(new Set())) for notification deduplication
+- Added shownChatToastIds (useRef(new Set())) for chat message deduplication
+- Both Sets cap at 500 entries with auto-trim to 250 to prevent memory leaks
+- markNotificationRead() still fires on backend regardless of toast display
+- For unread messages badge:
+  - Added API_URL constant and MAX_UNREAD_DISPLAY (99) to DashboardLayout.js
+  - Added chatUnreadCount state + fetchChatUnreadCount callback polling /api/chat/unread-count every 30s
+  - Badge resets to 0 when ChatPanel opens
+  - Added red circle badge (absolute positioned) on MessageSquare button with dynamic aria-label
+- Files modified: NotificationsDropdown.js (+32 lines, -12 lines), DashboardLayout.js (+64 lines, -12 lines)
+- Committed: 1e4a0ef on dev branch, pushed to origin/dev
+
+Stage Summary:
+- Toast deduplication prevents infinite toast loops from WebSocket reconnections/re-emits
+- Chat icon now shows red badge with unread count (>99 shows "99+")
+- Badge disappears when user opens chat panel

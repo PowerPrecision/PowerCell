@@ -752,7 +752,7 @@ const DashboardLayout = ({ children, title }) => {
                   >
                     <MessageSquare className="h-4 w-4" />
                     {chatUnreadCount > 0 && (
-                      <span className="absolute -top-1 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm">
+                      <span className="absolute -top-1 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm">
                         {chatUnreadCount > MAX_UNREAD_DISPLAY ? `${MAX_UNREAD_DISPLAY}+` : chatUnreadCount}
                       </span>
                     )}

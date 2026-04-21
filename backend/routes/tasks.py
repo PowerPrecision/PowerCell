@@ -298,6 +298,17 @@ async def get_active_background_tasks(
                     "progress": job.get("progress"),
                     "priority": priority,
                 })
+                
+                # Auto-acknowledge: marcar jobs concluídos/falhados como acknowledged
+                # na primeira leitura para evitar loops de toast no frontend.
+                # O utilizador já recebeu a notificação (via TasksDropdown ou toast).
+                if is_done and is_unack:
+                    job_id_val = job.get("id", "")
+                    if job_id_val:
+                        await db.background_jobs.update_one(
+                            {"id": job_id_val},
+                            {"$set": {"acknowledged_at": datetime.now(timezone.utc).isoformat()}}
+                        )
 
         return {
             "tasks": tasks,
