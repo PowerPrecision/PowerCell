@@ -70,9 +70,9 @@ const MediadorDashboard = () => {
     return filteredProcesses.filter(p => p.process_type === "credito" || p.process_type === "ambos");
   }, [filteredProcesses]);
 
-  // Fetch webmail stats
+  // Fetch webmail stats (personal box only)
   useEffect(() => {
-    getWebmailStats()
+    getWebmailStats("personal")
       .then(res => setWebmailStats(res.data))
       .catch(() => {});
   }, []);

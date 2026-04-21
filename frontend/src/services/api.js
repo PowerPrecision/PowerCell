@@ -575,8 +575,9 @@ export const deleteAutoDraft = (draftId) => api.delete(`/emails/drafts/${draftId
 export const createAutoDraft = (processId, docType) =>
   api.post("/emails/drafts/create", { process_id: processId, doc_type: docType });
 
-// Webmail Stats (per-user, isolated)
-export const getWebmailStats = () => api.get("/emails/webmail-stats");
+// Webmail Stats (per-user, isolated). Pass box='personal' to filter personal emails only.
+export const getWebmailStats = (box) =>
+  api.get("/emails/webmail-stats", { params: box ? { box } : {} });
 
 // Trello
 export const getTrelloStatus = () => api.get("/trello/status");
