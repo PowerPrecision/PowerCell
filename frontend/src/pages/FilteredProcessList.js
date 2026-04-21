@@ -121,9 +121,9 @@ const FilteredProcessList = () => {
         getWorkflowStatuses(),
         getCalendarDeadlines()
       ]);
-      setProcesses(processesRes.data);
-      setWorkflowStatuses(statusesRes.data);
-      setDeadlines(deadlinesRes.data);
+      setProcesses(Array.isArray(processesRes.data) ? processesRes.data : (processesRes.data?.items || []));
+      setWorkflowStatuses(Array.isArray(statusesRes.data) ? statusesRes.data : []);
+      setDeadlines(Array.isArray(deadlinesRes.data) ? deadlinesRes.data : []);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast.error("Erro ao carregar processos");
