@@ -645,6 +645,7 @@ async def get_processes(
     view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all, historical"),
     sort_field: Optional[str] = Query(None, description="Campo de ordenação: client_name, status, created_at, updated_at, priority, property_value, property_location"),
     sort_order: Optional[str] = Query("asc", description="Ordem: asc ou desc"),
+    show_all: Optional[bool] = Query(False, description="Visão global: ignorar filtro de utilizador e mostrar todos os processos"),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -696,7 +697,10 @@ async def get_processes(
             query["is_deleted"] = {"$ne": True}
 
     # Construir query baseada no papel
-    if role == UserRole.CLIENTE:
+    # Se show_all=True (visão global), ignorar filtro por utilizador
+    if show_all:
+        pass  # Visão global absoluta — todos os processos para todos os roles
+    elif role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
     elif role == UserRole.INDEXACAO:
         query["$or"] = [
@@ -762,6 +766,36 @@ async def get_processes(
     # Desencriptar apenas campos sensíveis necessários (client_phone, client_nif)
     # NOTA: personal_data e financial_data NÃO são projetados, então não precisam de desencriptação
     processes = decrypt_processes_list(processes, fields_to_decrypt=["client_phone", "client_nif"])
+
+    # Enriquecer com nomes de utilizadores (consultor, mediador, indexacao, parceiro)
+    # Coletar todos os IDs únicos de utilizadores atribuídos
+    user_ids_to_resolve = set()
+    for p in processes:
+        if p.get("assigned_consultor_id") and not p.get("consultor_name"):
+            user_ids_to_resolve.add(p["assigned_consultor_id"])
+        if p.get("assigned_mediador_id") and not p.get("mediador_name"):
+            user_ids_to_resolve.add(p["assigned_mediador_id"])
+        if p.get("assigned_indexacao_id") and not p.get("indexacao_name"):
+            user_ids_to_resolve.add(p["assigned_indexacao_id"])
+        if p.get("assigned_parceiro_id") and not p.get("parceiro_name"):
+            user_ids_to_resolve.add(p["assigned_parceiro_id"])
+    
+    if user_ids_to_resolve:
+        user_docs = await db.users.find(
+            {"id": {"$in": list(user_ids_to_resolve)}},
+            {"_id": 0, "id": 1, "name": 1}
+        ).to_list(len(user_ids_to_resolve))
+        user_map = {u["id"]: u.get("name", "") for u in user_docs}
+        
+        for p in processes:
+            if not p.get("consultor_name") and p.get("assigned_consultor_id"):
+                p["consultor_name"] = user_map.get(p["assigned_consultor_id"], "")
+            if not p.get("mediador_name") and p.get("assigned_mediador_id"):
+                p["mediador_name"] = user_map.get(p["assigned_mediador_id"], "")
+            if not p.get("indexacao_name") and p.get("assigned_indexacao_id"):
+                p["indexacao_name"] = user_map.get(p["assigned_indexacao_id"], "")
+            if not p.get("parceiro_name") and p.get("assigned_parceiro_id"):
+                p["parceiro_name"] = user_map.get(p["assigned_parceiro_id"], "")
     
     # Ordenação: usar sort_field/sort_order se fornecidos, senão ordenação padrão por workflow
     if sort_field and sort_field in ("client_name", "status", "created_at", "updated_at",
@@ -951,6 +985,7 @@ async def get_kanban_board(
     indexacao_id: Optional[str] = None,
     parceiro_id: Optional[str] = None,
     view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all"),
+    show_all: Optional[bool] = Query(False, description="Visão global: ignorar filtro de utilizador"),
     user: dict = Depends(require_staff())
 ):
     """
@@ -973,21 +1008,19 @@ async def get_kanban_board(
     query["is_deleted"] = {"$ne": True}
     
     # Filter by role (base visibility) - suporte a múltiplos
-    if role == UserRole.CONSULTOR:
-        query["$or"] = [
-            {"assigned_consultor_ids": user_id},
-            {"assigned_consultor_id": user_id}
-        ]
-    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
-        query["$or"] = [
-            {"assigned_mediador_ids": user_id},
-            {"assigned_mediador_id": user_id}
-        ]
-    elif role == UserRole.INDEXACAO:
-        # Indexação vê TODOS os processos no kanban (Dashboard)
-        # Os processos atribuídos a si são vistos em "Os Meus Processos" (/my-clients)
-        pass
-    # Admin, CEO, Administrativo, Diretor, Indexação see all (no base filter)
+    # Se show_all=True (visão global), ignorar filtro por utilizador
+    if not show_all:
+        if role == UserRole.CONSULTOR:
+            query["$or"] = [
+                {"assigned_consultor_ids": user_id},
+                {"assigned_consultor_id": user_id}
+            ]
+        elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+            query["$or"] = [
+                {"assigned_mediador_ids": user_id},
+                {"assigned_mediador_id": user_id}
+            ]
+        # Admin, CEO, Administrativo, Diretor, Indexação see all (no base filter)
 
     # Apply additional filters for ALL staff roles
     # Consultor/Mediador filters within their assigned processes; others filter globally

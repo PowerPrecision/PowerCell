@@ -43,7 +43,7 @@ const BASE_POLLING_INTERVAL = 5000;
 // Intervalo quando não há tarefas ativas (30 segundos)
 const IDLE_POLLING_INTERVAL = 30000;
 // Tempo mínimo entre toasts para a mesma tarefa
-const TOAST_DEBOUNCE_MS = 1000;
+const TOAST_DEBOUNCE_MS = 60000; // 60s — evita loops de toast entre polls (backend auto-acknowledge é a defesa primária)
 // Circuit breaker: número de falhas consecutivas antes de parar polling
 const MAX_CONSECUTIVE_FAILURES = 3;
 // Circuit breaker: tempo de espera antes de retomar polling após circuit breaker (60s)

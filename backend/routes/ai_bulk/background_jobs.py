@@ -80,7 +80,11 @@ async def finish_background_job_db(job_id: str, success: bool, message: str = No
     
     update_data = {
         "status": status,
-        "finished_at": finished_at
+        "finished_at": finished_at,
+        # Garantir que acknowledged_at existe como None para que o frontend
+        # possa detetar a conclusão na primeira poll e exibir o toast.
+        # O endpoint GET /tasks/active fará auto-acknowledge após a primeira leitura.
+        "acknowledged_at": None,
     }
     if message:
         update_data["message"] = message
