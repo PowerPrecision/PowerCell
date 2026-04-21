@@ -93,6 +93,10 @@ const NotificationsDropdown = () => {
   const previousUnreadCount = useRef(0);
   const isFirstLoad = useRef(true);
   const lastNotifiedIdRef = useRef(null); // Track last WS notification ID to prevent duplicate toast from polling
+  // --- Deduplicação de Toasts (memória local) ---
+  // Guarda IDs de notificações e mensagens já mostradas para evitar loops.
+  const shownToastIds = useRef(new Set());
+  const shownChatToastIds = useRef(new Set());
   const pollingIntervalRef = useRef(BASE_POLLING_INTERVAL);
   const intervalRef = useRef(null);
   const consecutiveSuccessRef = useRef(0);
@@ -157,16 +161,26 @@ const NotificationsDropdown = () => {
       setNotifications(prev => [notification, ...prev].slice(0, 50));
 
       // Play sound + show toast for real-time push notifications
-      playNotificationSound();
-      toast.info(notification.message || "Nova notificação", {
-        description: notification.client_name || notification.process_name || "Nova notificação",
-        action: notification.process_id ? {
-          label: "Ver",
-          onClick: () => navigate(`/process/${notification.process_id}`),
-        } : undefined,
-        duration: 8000,
-        icon: <Bell className="h-4 w-4 text-blue-500" />,
-      });
+      // --- Deduplicação: não mostrar toast se já foi exibido ---
+      const notifId = notification.id || notification._id;
+      if (!shownToastIds.current.has(notifId)) {
+        playNotificationSound();
+        toast.info(notification.message || "Nova notificação", {
+          description: notification.client_name || notification.process_name || "Nova notificação",
+          action: notification.process_id ? {
+            label: "Ver",
+            onClick: () => navigate(`/process/${notification.process_id}`),
+          } : undefined,
+          duration: 8000,
+          icon: <Bell className="h-4 w-4 text-blue-500" />,
+        });
+        shownToastIds.current.add(notifId);
+        // Evitar memory leak: limitar o Set a 500 entradas
+        if (shownToastIds.current.size > 500) {
+          const arr = [...shownToastIds.current];
+          shownToastIds.current = new Set(arr.slice(-250));
+        }
+      }
 
       // Mark as read on backend to prevent re-display on next poll
       if (notification.id) {
@@ -189,19 +203,28 @@ const NotificationsDropdown = () => {
       previousUnreadCount.current += 1;
 
       // Show passive toast for new chat messages
-      const senderName = chatData.sender_name || chatData.from_name || "Alguém";
-      const processName = chatData.process_name || chatData.client_name || "";
-      const preview = chatData.content || chatData.body || chatData.message || "Nova mensagem";
+      // --- Deduplicação: não mostrar toast se já foi exibido ---
+      const chatMsgId = chatData.id || chatData.message_id || chatData._id;
+      if (!shownChatToastIds.current.has(chatMsgId)) {
+        const senderName = chatData.sender_name || chatData.from_name || "Alguém";
+        const processName = chatData.process_name || chatData.client_name || "";
+        const preview = chatData.content || chatData.body || chatData.message || "Nova mensagem";
 
-      toast.info(`${senderName}: ${preview.substring(0, 80)}${preview.length > 80 ? "..." : ""}`, {
-        description: processName || "Mensagem de chat",
-        action: chatData.process_id ? {
-          label: "Ver",
-          onClick: () => navigate(`/process/${chatData.process_id}`),
-        } : undefined,
-        duration: 6000,
-        icon: <MessageSquare className="h-4 w-4 text-emerald-500" />,
-      });
+        toast.info(`${senderName}: ${preview.substring(0, 80)}${preview.length > 80 ? "..." : ""}`, {
+          description: processName || "Mensagem de chat",
+          action: chatData.process_id ? {
+            label: "Ver",
+            onClick: () => navigate(`/process/${chatData.process_id}`),
+          } : undefined,
+          duration: 6000,
+          icon: <MessageSquare className="h-4 w-4 text-emerald-500" />,
+        });
+        shownChatToastIds.current.add(chatMsgId);
+        if (shownChatToastIds.current.size > 500) {
+          const arr = [...shownChatToastIds.current];
+          shownChatToastIds.current = new Set(arr.slice(-250));
+        }
+      }
     }, [navigate]),
   });
 

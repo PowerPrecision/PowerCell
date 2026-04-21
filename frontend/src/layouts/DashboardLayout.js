@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate, Link, useLocation } from "react-router-dom";
@@ -73,6 +73,11 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 
+const API_URL = process.env.REACT_APP_BACKEND_URL;
+
+// Máximo de itens para o badge de mensagens não lidas
+const MAX_UNREAD_DISPLAY = 99;
+
 const roleLabels = {
   cliente: "Cliente",
   consultor: "Consultor",
@@ -108,9 +113,48 @@ const DashboardLayout = ({ children, title }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const chatUnreadRef = useRef(0);
+  const chatUnreadIntervalRef = useRef(null);
   
   // Atalhos de teclado
   const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts({});
+
+  // --- Contagem de mensagens não lidas (Chat Interno) ---
+  const fetchChatUnreadCount = useCallback(async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/chat/unread-count`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const total = data.total || 0;
+        chatUnreadRef.current = total;
+        setChatUnreadCount(total);
+      }
+    } catch {
+      // Silently ignore fetch errors
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchChatUnreadCount();
+    // Poll every 30s for unread count
+    chatUnreadIntervalRef.current = setInterval(fetchChatUnreadCount, 30000);
+    return () => {
+      if (chatUnreadIntervalRef.current) clearInterval(chatUnreadIntervalRef.current);
+    };
+  }, [fetchChatUnreadCount]);
+
+  // Reset unread badge when chat panel opens
+  useEffect(() => {
+    if (chatOpen) {
+      setChatUnreadCount(0);
+      chatUnreadRef.current = 0;
+    }
+  }, [chatOpen]);
   
   // Determinar quais secções devem estar abertas baseado na rota actual
   const getInitialOpenSections = () => {
@@ -703,10 +747,15 @@ const DashboardLayout = ({ children, title }) => {
                     onClick={() => setChatOpen(true)}
                     className="relative h-9 w-9 sm:h-10 sm:w-10"
                     title="Chat Interno"
-                    aria-label="Chat interno"
+                    aria-label={chatUnreadCount > 0 ? `Chat interno - ${chatUnreadCount} mensagens não lidas` : "Chat interno"}
                     data-testid="open-chat-btn"
                   >
                     <MessageSquare className="h-4 w-4" />
+                    {chatUnreadCount > 0 && (
+                      <span className="absolute -top-1 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm">
+                        {chatUnreadCount > MAX_UNREAD_DISPLAY ? `${MAX_UNREAD_DISPLAY}+` : chatUnreadCount}
+                      </span>
+                    )}
                   </Button>
                   {/* Centro de Operações - Tarefas Assíncronas */}
                   <TasksDropdown compact={headerCollapsed} />

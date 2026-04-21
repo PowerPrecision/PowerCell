@@ -2348,7 +2348,10 @@ async def webmail_list(
         and_conditions.append({"folder_id": custom_folder})
     
     # === FILTRO POR CONTA IMAP ===
-    if account:
+    # Quando box=personal, os emails sao isolados por synced_for_user e o campo
+    # account guarda o endereco IMAP real do utilizador (ex: joao@empresa.pt).
+    # O filtro account=power/precision so faz sentido para box=general/shared.
+    if account and box != "personal":
         and_conditions.append({
             "$or": [
                 {"account": account},
@@ -2442,7 +2445,7 @@ async def webmail_list(
                     ]},
                 ]
             })
-        if account:
+        if account and box != "personal":
             unread_and.append({
                 "$or": [
                     {"account": account},
