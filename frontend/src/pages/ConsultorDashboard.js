@@ -48,9 +48,9 @@ const ConsultorDashboard = () => {
     fetchData
   } = useDashboardData();
 
-  // Fetch webmail stats
+  // Fetch webmail stats (personal box only)
   useEffect(() => {
-    getWebmailStats()
+    getWebmailStats("personal")
       .then(res => setWebmailStats(res.data))
       .catch(() => {});
   }, []);
