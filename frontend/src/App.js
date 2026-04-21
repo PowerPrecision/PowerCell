@@ -80,6 +80,7 @@ const WebmailPage = React.lazy(() => import("./pages/WebmailPage"));
 const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
 const TemplatesPage = React.lazy(() => import("./pages/TemplatesPage"));
 const DocumentsPage = React.lazy(() => import("./pages/DocumentsPage"));
+const FilesExplorerPage = React.lazy(() => import("./pages/FilesExplorerPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -696,12 +697,12 @@ function App() {
             }
           />
           
-          {/* Ficheiros - Unified Documents Panel (S3/OneDrive) */}
+          {/* Ficheiros - File Explorer (S3) */}
           <Route
             path="/ficheiros"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <DocumentsPage />
+                <FilesExplorerPage />
               </ProtectedRoute>
             }
           />
