@@ -40,8 +40,10 @@ const WelcomeConfigModal = () => {
     // - Utilizador está em modo de impersonate
     // - Já tem email configurado
     // - Já dispensou nesta sessão
+    // - Perfil de indexação (utilizam conta partilhada centralizada)
     if (isImpersonating) return;
     if (user.email_configured) return;
+    if (user.role === 'indexacao') return;
     if (sessionStorage.getItem(DISMISSED_KEY)) return;
 
     // Pequeno delay para não colidir com a transição de login → dashboard

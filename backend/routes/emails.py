@@ -2135,6 +2135,8 @@ async def webmail_list(
     user_id = current_user.get("id", "")
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     
+    print(f"DEBUG: User {current_user.get('email')} (id={user_id}, role={user_role}) querying box={box} folder={folder} account={account}")
+    
     # === BOX FILTER: permissões e isolamento por caixa ===
     if box == "general":
         # Blocked for consultor and indexacao
@@ -2181,26 +2183,69 @@ async def webmail_list(
         # --- BOX-SPECIFIC ISOLATION ---
         if box == "personal":
             # Emails onde synced_for_user ou created_by corresponde ao utilizador
+            # synced_for_user pode ser gravado como user_id OU como user.email,
+            # por isso procuramos por ambos.
             ownership_filter = {
                 "$or": [
                     {"created_by": user_id},
                     {"synced_for_user": user_id},
+                    {"synced_for_user": user_email},
                 ]
             }
             if folder == "inbox":
-                inbox_or = [
-                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
-                ]
+                # Quando box=personal, synced_for_user é o carimbo de propriedade.
+                # Se synced_for_user corresponde ao user, NÃO filtramos adicionalmente
+                # por to_emails — o email pode vir de uma conta IMAP com endereço diferente
+                # do login do utilizador (ex: conta partilhada da empresa).
+                # Apenas filter por to_emails quando o email NÃO tem synced_for_user.
+                ownership_only = {
+                    "$or": [
+                        {"synced_for_user": user_id},
+                        {"synced_for_user": user_email},
+                    ]
+                }
+                ownership_with_to = {
+                    "$and": [
+                        {"$or": [
+                            {"created_by": user_id},
+                        ]},
+                        {"$or": [
+                            {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                        ]},
+                    ]
+                }
                 if account_email and account_email != user_email:
-                    inbox_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
-                and_conditions.append({"$and": [ownership_filter, {"$or": inbox_or}]})
+                    ownership_with_to["$and"][1]["$or"].append(
+                        {"to_emails": {"$regex": re.escape(account_email), "$options": "i"}}
+                    )
+                and_conditions.append({
+                    "$or": [ownership_only, ownership_with_to]
+                })
             elif folder == "sent":
-                sent_or = [
-                    {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
-                ]
+                # Mesma lógica para sent: synced_for_user é suficiente
+                ownership_only = {
+                    "$or": [
+                        {"synced_for_user": user_id},
+                        {"synced_for_user": user_email},
+                    ]
+                }
+                ownership_with_from = {
+                    "$and": [
+                        {"$or": [
+                            {"created_by": user_id},
+                        ]},
+                        {"$or": [
+                            {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+                        ]},
+                    ]
+                }
                 if account_email and account_email != user_email:
-                    sent_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
-                and_conditions.append({"$and": [ownership_filter, {"$or": sent_or}]})
+                    ownership_with_from["$and"][1]["$or"].append(
+                        {"from_email": {"$regex": re.escape(account_email), "$options": "i"}}
+                    )
+                and_conditions.append({
+                    "$or": [ownership_only, ownership_with_from]
+                })
             elif folder == "drafts":
                 and_conditions.append({"created_by": user_id})
             elif folder in ("starred", "trash", "custom"):
@@ -2246,6 +2291,7 @@ async def webmail_list(
             "$or": [
                 {"created_by": user_id_isolation},
                 {"synced_for_user": user_id_isolation},
+                {"synced_for_user": user_email},
             ]
         }
 
@@ -2334,8 +2380,12 @@ async def webmail_list(
     else:
         query = {}
     
+    print(f"DEBUG: User {user_email} querying box {box} with filter {query}")
+    
     skip = (page - 1) * limit
     total = await db.emails.count_documents(query)
+    
+    print(f"DEBUG: User {user_email} box={box} => total={total}")
     
     logger.info(f"[Webmail List] folder={folder}, account={account}, user={user_email}, total={total}")
     
@@ -2370,6 +2420,7 @@ async def webmail_list(
                 "$or": [
                     {"created_by": user_id},
                     {"synced_for_user": user_id},
+                    {"synced_for_user": user_email},
                 ]
             })
         elif box == "general":
@@ -2384,6 +2435,7 @@ async def webmail_list(
                     {"$or": [
                         {"created_by": user_id_unread},
                         {"synced_for_user": user_id_unread},
+                        {"synced_for_user": user_email},
                     ]},
                     {"$or": [
                         {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
@@ -2479,10 +2531,12 @@ async def webmail_stats(
         inbox_base["$or"] = [
             {"created_by": user_id},
             {"synced_for_user": user_id},
+            {"synced_for_user": user_email},
         ]
         sent_base["$or"] = [
             {"created_by": user_id},
             {"synced_for_user": user_id},
+            {"synced_for_user": user_email},
         ]
         drafts_base["created_by"] = user_id
     elif box == "general":
