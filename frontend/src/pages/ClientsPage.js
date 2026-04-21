@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -110,7 +110,6 @@ export default function ClientsPage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState([]);
-  const [filteredClients, setFilteredClients] = useState([]);
   const [loading, setLoading] = useState(true);
   
   // Sync filters with URL search params
@@ -125,12 +124,13 @@ export default function ClientsPage() {
   
   const updateParam = (key, value) => {
     setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
       if (value && value !== "all") {
-        prev.set(key, value);
+        next.set(key, value);
       } else {
-        prev.delete(key);
+        next.delete(key);
       }
-      return prev;
+      return next;
     }, { replace: true });
   };
   
@@ -212,10 +212,10 @@ export default function ClientsPage() {
     fetchClients();
   }, [fetchClients]);
 
-  // Aplicar filtros e ordenação
-  useEffect(() => {
+  // Aplicar filtros e ordenação (useMemo — reativo e sem render extra)
+  const filteredClients = useMemo(() => {
     let result = [...clients];
-    
+
     // Ordenar
     result.sort((a, b) => {
       let aVal, bVal;
@@ -234,36 +234,39 @@ export default function ClientsPage() {
       } else if (sortField === "process_count") {
         aVal = a.active_processes_count || 0;
         bVal = b.active_processes_count || 0;
+      } else if (sortField === "nome") {
+        aVal = (a.nome || "").toLowerCase();
+        bVal = (b.nome || "").toLowerCase();
       } else {
         aVal = a[sortField];
         bVal = b[sortField];
       }
-      
+
       // Handle dates
       if (sortField === "created_at" || sortField === "updated_at") {
         aVal = new Date(aVal || 0).getTime();
         bVal = new Date(bVal || 0).getTime();
       }
-      
+
       // Handle strings
       if (typeof aVal === "string") {
         aVal = aVal.toLowerCase();
         bVal = (bVal || "").toLowerCase();
       }
-      
+
       // Handle numbers
       if (sortField === "process_count") {
         aVal = aVal || 0;
         bVal = bVal || 0;
       }
-      
+
       if (sortOrder === "asc") {
         return aVal > bVal ? 1 : -1;
       }
       return aVal < bVal ? 1 : -1;
     });
-    
-    setFilteredClients(result);
+
+    return result;
   }, [clients, sortField, sortOrder]);
 
   const toggleSort = (field) => {

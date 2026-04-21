@@ -26,7 +26,7 @@ import {
 import { getMyClients, getWorkflowStatuses } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText, 
-  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown
 } from "lucide-react";
 import { CreateClientModal } from "../components/kanban";
 import { toast } from "sonner";
@@ -64,27 +64,26 @@ const MyClientsPage = () => {
   const searchTerm = searchParams.get("search") || "";
   const statusFilter = searchParams.get("status") || "all";
   const showInactive = searchParams.get("show_inactive") === "true";
-  const setSearchTerm = (value) => {
+  const sortField = searchParams.get("sort") || "updated_at";
+  const sortOrder = searchParams.get("order") || "desc";
+
+  const updateParam = (key, value) => {
     setSearchParams(prev => {
-      if (value) prev.set("search", value);
-      else prev.delete("search");
-      return prev;
+      const next = new URLSearchParams(prev);
+      if (value && value !== "all") {
+        next.set(key, value);
+      } else {
+        next.delete(key);
+      }
+      return next;
     }, { replace: true });
   };
-  const setStatusFilter = (value) => {
-    setSearchParams(prev => {
-      if (value && value !== "all") prev.set("status", value);
-      else prev.delete("status");
-      return prev;
-    }, { replace: true });
-  };
-  const setShowInactive = (value) => {
-    setSearchParams(prev => {
-      if (value) prev.set("show_inactive", "true");
-      else prev.delete("show_inactive");
-      return prev;
-    }, { replace: true });
-  };
+
+  const setSearchTerm = (value) => updateParam("search", value);
+  const setStatusFilter = (value) => updateParam("status", value);
+  const setShowInactive = (value) => updateParam("show_inactive", value ? "true" : "");
+  const setSortField = (v) => updateParam("sort", v);
+  const setSortOrder = (v) => updateParam("order", v);
 
   useEffect(() => {
     fetchData();
@@ -121,7 +120,7 @@ const MyClientsPage = () => {
       ? searchTerm.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
       : "";
 
-    return clients.filter((client) => {
+    let result = clients.filter((client) => {
       // Excluir status terminais por padrão (a menos que o toggle esteja ativo)
       if (!showInactive && TERMINAL_STATUSES.includes(client.status)) {
         return false;
@@ -136,7 +135,31 @@ const MyClientsPage = () => {
       
       return matchesSearch && matchesStatus;
     });
-  }, [clients, searchTerm, statusFilter, showInactive]);
+
+    // Aplicar ordenação
+    result.sort((a, b) => {
+      let aVal, bVal;
+
+      if (sortField === "client_name") {
+        aVal = (a.client_name || "").toLowerCase();
+        bVal = (b.client_name || "").toLowerCase();
+      } else if (sortField === "status") {
+        aVal = (a.status_label || a.status || "").toLowerCase();
+        bVal = (b.status_label || b.status || "").toLowerCase();
+      } else {
+        // Data fields: updated_at, created_at, etc.
+        aVal = new Date(a[sortField] || 0).getTime();
+        bVal = new Date(b[sortField] || 0).getTime();
+      }
+
+      if (sortOrder === "asc") {
+        return aVal > bVal ? 1 : -1;
+      }
+      return aVal < bVal ? 1 : -1;
+    });
+
+    return result;
+  }, [clients, searchTerm, statusFilter, showInactive, sortField, sortOrder]);
 
   const getPriorityColor = (priority) => {
     switch (priority) {
@@ -275,6 +298,23 @@ const MyClientsPage = () => {
                       {status.label}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+              {/* Ordenação */}
+              <Select value={`${sortField}_${sortOrder}`} onValueChange={(v) => {
+                const lastIdx = v.lastIndexOf('_');
+                setSortField(v.substring(0, lastIdx));
+                setSortOrder(v.substring(lastIdx + 1));
+              }}>
+                <SelectTrigger className="w-full md:w-[155px]">
+                  <ArrowUpDown className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Ordenar" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="updated_at_desc">Mais Recentes</SelectItem>
+                  <SelectItem value="updated_at_asc">Mais Antigos</SelectItem>
+                  <SelectItem value="client_name_asc">Nome (A-Z)</SelectItem>
+                  <SelectItem value="client_name_desc">Nome (Z-A)</SelectItem>
                 </SelectContent>
               </Select>
               {/* Toggle: Mostrar inativos */}
