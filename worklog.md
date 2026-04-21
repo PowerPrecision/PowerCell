@@ -802,3 +802,70 @@ Stage Summary:
 - Toast deduplication prevents infinite toast loops from WebSocket reconnections/re-emits
 - Chat icon now shows red badge with unread count (>99 shows "99+")
 - Badge disappears when user opens chat panel
+
+---
+Task ID: 8
+Agent: Full-Stack Senior Engineer (Main)
+Task: 6 surgical fixes - global filters, team names, toast loop, client sort, chat badge, duplicate role
+
+Work Log:
+- **Fix 1: Visão Global Absoluta**
+  - Backend: Added `show_all` query param to `/api/processes` (line 648) and `/api/kanban` (line 958)
+  - When `show_all=True`, role-based user_id filtering is skipped for ALL roles
+  - Frontend: ProcessesPage.js sends `show_all: true` to getProcesses()
+  - Frontend: useKanbanQuery.js sends `show_all=true` param to kanban endpoint
+  - Note: ClientsPage.js already had `show_all=true` — no change needed
+
+- **Fix 2: Tabela de Processos - Nomes em vez de IDs**
+  - Added `consultor_name`, `mediador_name`, `indexacao_name`, `parceiro_name`, `assigned_parceiro_id` to PROCESS_LIST_PROJECTION
+  - Added name enrichment logic in GET /api/processes: collects missing user IDs, batch-fetches from db.users, maps names back
+  - Frontend already had proper name rendering in ProcessesPage.js — no change needed
+
+- **Fix 3: Fim Definitivo do Loop do Toast**
+  - Root cause: `finish_background_job_db()` never set `acknowledged_at`, so completed jobs were always "unacknowledged"
+  - Backend fix 1: `finish_background_job_db()` now sets `acknowledged_at: None` explicitly
+  - Backend fix 2: GET `/tasks/active` auto-acknowledges completed/failed jobs on first read (sets acknowledged_at to current timestamp)
+  - Frontend safety net: Increased `TOAST_DEBOUNCE_MS` from 1s to 60s in TasksContext.js
+
+- **Fix 4: Ordenação em Todos os Clientes**
+  - Verified: Sort combobox is fully functional — sortBy state wired, useMemo applies .sort(), URL sync works
+  - No changes needed
+
+- **Fix 5: Badge de Mensagens do Chat Interno**
+  - Added `z-10` class to badge span in DashboardLayout.js for proper stacking order
+
+- **Fix 6: Duplicação Intermediário de Crédito**
+  - Separated labels: `intermediario` → "Intermediário de Crédito", `mediador` → "Mediador"
+  - Added missing `consultor_intermediario` role to roleLabels and additionalRoleOptions
+  - Gave `mediador` distinct color (`bg-amber-100 text-amber-800`) instead of sharing with intermediario
+  - Added `consultor_intermediario` with gradient color
+
+- Files modified: 8 source files + worklog
+- Commit: b6e1c8f on dev branch, pushed to origin/dev
+
+Stage Summary:
+- Global views now show ALL records for ALL users (show_all param)
+- Process table displays real team member names (batch user resolution)
+- Toast loop eliminated via backend auto-acknowledge on first GET read
+- Chat badge has proper z-index for visibility
+- Role dropdown no longer shows duplicate "Intermediário de Crédito"
+- Client sort combobox confirmed working (no change needed)
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Implement universal IMAP 2-way sync, global views, team name formatting, notification loop fix, chat badge, client sort, and role cleanup
+
+Work Log:
+- **Fix 1 - IMAP Bidirectional Sync**: Added `_imap_store_flags_sync()` in `email_service.py` — searches by Message-ID header via `UID SEARCH HEADER Message-ID`, then applies `UID STORE +FLAGS` and optionally `EXPUNGE`. Created async wrappers `imap_mark_as_seen()`, `imap_mark_as_unseen()`, `imap_delete_message()`. Added `_get_email_account_for_email()` to resolve EmailAccount from email document fields (global accounts by name, user accounts by decrypting email_config). Modified `emails.py` mark endpoint to call IMAP STORE on read/unread, and delete endpoint to call IMAP STORE +FLAGS \\Deleted + EXPUNGE.
+- **Fix 2 - Global Views**: Verified all three global views already pass `show_all=true` (ClientsPage, ProcessesPage, useKanbanQuery) and backend correctly bypasses user_id filtering when `show_all=True`. No changes needed.
+- **Fix 3 - Team Names in Processes**: Updated `processes.py` to resolve array-based IDs (`assigned_consultor_ids`, `assigned_mediador_ids`) in addition to single IDs. Names from multiple assignees are joined with ", ". Updated `ProcessesPage.js` to display clean fallback text and handle comma-separated names in badges.
+- **Fix 4 - Toast Loop**: Backend: Added `is_notified` field to notification schema in `realtime_notifications.py`, marks `True` after WebSocket emission to prevent re-emission. Frontend: Replaced time-based debounce in `TasksContext.js` with permanent `toastedTaskIdsRef` Set — each task ID is toasted exactly once, with auto-trim at 200 entries.
+- **Fix 5 - Chat Badge + Client Sort**: Verified chat badge has correct `z-10` positioning with no parent overflow clipping. Added `created_at` to client API response (both show_all and non-show_all paths) by including it in MongoDB projection and client map builder. The sort combobox was already wired correctly — the missing `created_at` field was the root cause.
+- **Fix 6 - Role Cleanup**: Removed `mediador` from `additionalRoleOptions` in `UsersManagementPage.js` (it was a legacy alias causing duplicate "Intermediário de Crédito" entries in additional roles checkboxes). Kept `mediador: "Intermediário de Crédito"` in `roleLabels` for backward compatibility with existing users.
+
+Stage Summary:
+- Commit: `9a41f75` — "fix: implement universal IMAP 2-way sync, global views, team name formatting, and fix notification loops"
+- 9 files changed, 398 insertions, 42 deletions
+- Pushed to origin/dev
+

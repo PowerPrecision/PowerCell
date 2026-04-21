@@ -376,16 +376,20 @@ const ProcessesPage = () => {
                       // Construir lista de equipa
                       const teamMembers = [];
                       if (process.consultor_name || process.assigned_consultor_ids?.length > 0) {
-                        teamMembers.push({ role: "Consultor", name: process.consultor_name || `${process.assigned_consultor_ids?.length || 1} atribuído(s)`, color: "bg-blue-100 text-blue-800" });
+                        const name = process.consultor_name || "Consultor atribuído";
+                        teamMembers.push({ role: "Consultor", name, color: "bg-blue-100 text-blue-800" });
                       }
                       if (process.mediador_name || process.assigned_mediador_ids?.length > 0) {
-                        teamMembers.push({ role: "Intermediário", name: process.mediador_name || `${process.assigned_mediador_ids?.length || 1} atribuído(s)`, color: "bg-teal-100 text-teal-800" });
+                        const name = process.mediador_name || "Intermediário atribuído";
+                        teamMembers.push({ role: "Intermediário", name, color: "bg-teal-100 text-teal-800" });
                       }
                       if (process.indexacao_name || process.assigned_indexacao_id) {
-                        teamMembers.push({ role: "Indexação", name: process.indexacao_name || "Atribuído", color: "bg-gray-100 text-gray-800" });
+                        const name = process.indexacao_name || "Atribuído";
+                        teamMembers.push({ role: "Indexação", name, color: "bg-gray-100 text-gray-800" });
                       }
                       if (process.parceiro_name || process.assigned_parceiro_id) {
-                        teamMembers.push({ role: "Parceiro", name: process.parceiro_name || "Atribuído", color: "bg-purple-100 text-purple-800" });
+                        const name = process.parceiro_name || "Atribuído";
+                        teamMembers.push({ role: "Parceiro", name, color: "bg-purple-100 text-purple-800" });
                       }
                       
                       return (
@@ -450,7 +454,7 @@ const ProcessesPage = () => {
                               <div className="flex flex-wrap gap-1">
                                 {teamMembers.slice(0, 3).map((member, idx) => (
                                   <Badge key={idx} className={`${member.color} text-[10px] px-1.5 py-0.5`} title={`${member.role}: ${member.name}`}>
-                                    {member.name.split(' ')[0]}
+                                    {member.name.split(',')[0].trim().split(' ')[0]}
                                   </Badge>
                                 ))}
                                 {teamMembers.length > 3 && (

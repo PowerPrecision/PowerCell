@@ -768,17 +768,23 @@ async def get_processes(
     processes = decrypt_processes_list(processes, fields_to_decrypt=["client_phone", "client_nif"])
 
     # Enriquecer com nomes de utilizadores (consultor, mediador, indexacao, parceiro)
-    # Coletar todos os IDs únicos de utilizadores atribuídos
+    # Coletar todos os IDs únicos de utilizadores atribuídos (incluindo arrays)
     user_ids_to_resolve = set()
     for p in processes:
-        if p.get("assigned_consultor_id") and not p.get("consultor_name"):
+        # Single IDs
+        if p.get("assigned_consultor_id"):
             user_ids_to_resolve.add(p["assigned_consultor_id"])
-        if p.get("assigned_mediador_id") and not p.get("mediador_name"):
+        if p.get("assigned_mediador_id"):
             user_ids_to_resolve.add(p["assigned_mediador_id"])
-        if p.get("assigned_indexacao_id") and not p.get("indexacao_name"):
+        if p.get("assigned_indexacao_id"):
             user_ids_to_resolve.add(p["assigned_indexacao_id"])
-        if p.get("assigned_parceiro_id") and not p.get("parceiro_name"):
+        if p.get("assigned_parceiro_id"):
             user_ids_to_resolve.add(p["assigned_parceiro_id"])
+        # Array IDs (multiple consultants, mediadores)
+        for cid in (p.get("assigned_consultor_ids") or []):
+            user_ids_to_resolve.add(cid)
+        for mid in (p.get("assigned_mediador_ids") or []):
+            user_ids_to_resolve.add(mid)
     
     if user_ids_to_resolve:
         user_docs = await db.users.find(
@@ -788,12 +794,31 @@ async def get_processes(
         user_map = {u["id"]: u.get("name", "") for u in user_docs}
         
         for p in processes:
-            if not p.get("consultor_name") and p.get("assigned_consultor_id"):
-                p["consultor_name"] = user_map.get(p["assigned_consultor_id"], "")
-            if not p.get("mediador_name") and p.get("assigned_mediador_id"):
-                p["mediador_name"] = user_map.get(p["assigned_mediador_id"], "")
+            # Resolve consultor names — single or multiple
+            if not p.get("consultor_name"):
+                c_ids = list(set(
+                    ([p["assigned_consultor_id"]] if p.get("assigned_consultor_id") else []) + 
+                    (p.get("assigned_consultor_ids") or [])
+                ))
+                names = [user_map[cid] for cid in c_ids if user_map.get(cid)]
+                if names:
+                    p["consultor_name"] = ", ".join(names)
+            
+            # Resolve mediador names — single or multiple
+            if not p.get("mediador_name"):
+                m_ids = list(set(
+                    ([p["assigned_mediador_id"]] if p.get("assigned_mediador_id") else []) + 
+                    (p.get("assigned_mediador_ids") or [])
+                ))
+                names = [user_map[mid] for mid in m_ids if user_map.get(mid)]
+                if names:
+                    p["mediador_name"] = ", ".join(names)
+            
+            # Resolve indexacao (single only)
             if not p.get("indexacao_name") and p.get("assigned_indexacao_id"):
                 p["indexacao_name"] = user_map.get(p["assigned_indexacao_id"], "")
+            
+            # Resolve parceiro (single only)
             if not p.get("parceiro_name") and p.get("assigned_parceiro_id"):
                 p["parceiro_name"] = user_map.get(p["assigned_parceiro_id"], "")
     

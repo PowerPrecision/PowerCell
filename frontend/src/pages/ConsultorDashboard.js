@@ -1,15 +1,27 @@
 /**
- * ConsultorDashboard - Painel do Consultor
- * Refatorado para usar componentes partilhados do DashboardShared
+ * ConsultorDashboard — Painel principal da equipa (Staff)
+ * 
+ * Vista centralizada com widgets de métricas, mural da equipa, tarefas e
+ * acesso rápido ao webmail. Destinado a consultores, mediadores, diretores,
+ * administrativos e CEO.
+ *
+ * @context {AuthContext} — user, token
+ * @widget TeamMural — Mural de novidades da equipa
+ * @widget TasksPanel — Gestão de tarefas com prioridades e prazos
+ * @widget Email KPI Card — Emails não lidos (personal box)
  */
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { Users, Eye, Plus, AlertTriangle, Building2, Mail } from "lucide-react";
+import {
+  Users, Eye, Plus, AlertTriangle, Building2, Mail,
+  TrendingUp, CheckCircle, XCircle, FileX, ClipboardList, Rss, Calendar
+} from "lucide-react";
 import {
   StatCard,
   StatusBadge,
@@ -25,15 +37,31 @@ import {
   DOCUMENT_TYPES_CONSULTOR,
   formatDate
 } from "../components/dashboard/DashboardShared";
-import { getWebmailStats } from "../services/api";
+import TasksPanel from "../components/TasksPanel";
+import TeamMural from "../components/TeamMural";
+import { getWebmailStats, getCalendarDeadlines } from "../services/api";
+
+const roleLabels = {
+  admin: "Administrador",
+  ceo: "CEO",
+  consultor: "Consultor",
+  intermediario: "Intermediário de Crédito",
+  mediador: "Intermediário de Crédito",
+  diretor: "Diretor(a)",
+  administrativo: "Administrativo(a)",
+  indexacao: "Indexação",
+};
 
 const ConsultorDashboard = () => {
   const navigate = useNavigate();
-  
-  // Webmail stats
-  const [webmailStats, setWebmailStats] = useState({ unread_count: 0, sent_today_count: 0, drafts_count: 0 });
+  const { user } = useAuth();
 
-  // Hook para dados do dashboard
+  // Webmail stats (personal box)
+  const [webmailStats, setWebmailStats] = useState({ unread_count: 0, sent_today_count: 0, drafts_count: 0 });
+  // Calendar deadlines
+  const [deadlines, setDeadlines] = useState([]);
+
+  // Dashboard data hook
   const {
     processes,
     filteredProcesses,
@@ -48,14 +76,7 @@ const ConsultorDashboard = () => {
     fetchData
   } = useDashboardData();
 
-  // Fetch webmail stats (personal box only)
-  useEffect(() => {
-    getWebmailStats("personal")
-      .then(res => setWebmailStats(res.data))
-      .catch(() => {});
-  }, []);
-
-  // Hook para gestão de documentos
+  // Document management hook
   const {
     isAddExpiryOpen,
     setIsAddExpiryOpen,
@@ -72,6 +93,17 @@ const ConsultorDashboard = () => {
     analyzeDocumentWithAI
   } = useDocumentManagement(fetchData);
 
+  // Fetch webmail stats and deadlines on mount
+  useEffect(() => {
+    getWebmailStats("personal")
+      .then(res => setWebmailStats(res.data))
+      .catch(() => {});
+
+    getCalendarDeadlines()
+      .then(res => setDeadlines(res.data || []))
+      .catch(() => {});
+  }, []);
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -80,7 +112,11 @@ const ConsultorDashboard = () => {
     );
   }
 
-  // Configuração das colunas da tabela
+  // Greeting
+  const firstName = user?.name?.split(" ")[0] || "";
+  const roleLabel = roleLabels[user?.role] || user?.role || "";
+
+  // Table columns configuration
   const tableColumns = [
     { key: "client", label: "Cliente" },
     { key: "email", label: "Email" },
@@ -90,7 +126,7 @@ const ConsultorDashboard = () => {
     { key: "actions", label: "Ações", className: "text-right" }
   ];
 
-  // Função para renderizar cada linha da tabela
+  // Row renderer
   const renderRow = (process) => (
     <tr key={process.id} className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
       <td className="p-2 sm:p-3 lg:p-4 align-middle font-medium">{process.client_name}</td>
@@ -118,13 +154,67 @@ const ConsultorDashboard = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6" data-testid="consultor-dashboard">
-        <div>
-          <h1 className="text-2xl font-bold">Painel do Consultor</h1>
-          <p className="text-muted-foreground">Gestão dos seus clientes e processos imobiliários</p>
+
+        {/* ── Header ── */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h1 className="text-2xl font-bold">
+              Olá, {firstName} 👋
+            </h1>
+            <p className="text-muted-foreground">
+              {roleLabel && <Badge variant="secondary" className="mr-2 text-xs">{roleLabel}</Badge>}
+              Gestão dos seus clientes e processos
+            </p>
+          </div>
+          <Button onClick={() => navigate('/staff-dashboard')} variant="outline" className="gap-2 self-start">
+            <TrendingUp className="h-4 w-4" />
+            Quadro Geral
+          </Button>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
+        {/* ── KPI / Metrics Row ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          <Card
+            className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => navigate('/processos')}
+          >
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1">
+                  <TrendingUp className="h-5 w-5 text-blue-600" />
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.active_processes || 0}</p>
+                </div>
+                <p className="text-xs sm:text-sm text-blue-600/80">Ativos</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card
+            className="bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => navigate('/processos?view_mode=historical')}
+          >
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1">
+                  <CheckCircle className="h-5 w-5 text-emerald-600" />
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.concluded_processes || 0}</p>
+                </div>
+                <p className="text-xs sm:text-sm text-emerald-600/80">Concluídos</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card
+            className="bg-red-50 dark:bg-red-950/30 border-red-200 cursor-pointer hover:shadow-md transition-shadow"
+          >
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1">
+                  <XCircle className="h-5 w-5 text-red-600" />
+                  <p className="text-2xl sm:text-3xl font-bold text-red-600">{stats.dropped_processes || 0}</p>
+                </div>
+                <p className="text-xs sm:text-sm text-red-600/80">Desistências</p>
+              </div>
+            </CardContent>
+          </Card>
           <StatCard
             icon={Users}
             iconColor="text-blue-600"
@@ -146,45 +236,88 @@ const ConsultorDashboard = () => {
             value={upcomingExpiries.length}
             label="Docs a Expirar"
           />
-          <StatCard
-            icon={Building2}
-            iconColor="text-green-600"
-            bgColor="bg-green-100 dark:bg-green-900/30"
-            value={Array.isArray(processes) ? processes.filter(p => p.status === "aprovado").length : 0}
-            label="Aprovados"
-          />
-          {/* Email KPI Card */}
-          <Card 
+          {/* ── Email KPI Card ── */}
+          <Card
             className={`cursor-pointer hover:shadow-md transition-shadow ${webmailStats.unread_count > 0 ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200" : "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50"}`}
             onClick={() => navigate('/webmail')}
           >
             <CardContent className="pt-6">
-              <div className="flex items-center gap-4">
-                <div className={`p-3 ${webmailStats.unread_count > 0 ? "bg-amber-100 dark:bg-amber-900/30" : "bg-emerald-100 dark:bg-emerald-900/30"} rounded-lg`}>
-                  <Mail className={`h-6 w-6 ${webmailStats.unread_count > 0 ? "text-amber-600" : "text-emerald-600"}`} />
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1 mb-0.5">
+                  <Mail className="h-4 w-4" />
                 </div>
-                <div>
-                  <p className={`text-2xl font-bold ${webmailStats.unread_count > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                    {webmailStats.unread_count}
+                <p className={`text-2xl sm:text-3xl font-bold ${webmailStats.unread_count > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                  {webmailStats.unread_count}
+                </p>
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  {webmailStats.unread_count === 1 ? "Email Não Lido" : "Emails Não Lidos"}
+                </p>
+                {(webmailStats.sent_today_count > 0 || webmailStats.drafts_count > 0) && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {webmailStats.sent_today_count > 0 && `${webmailStats.sent_today_count} enviado${webmailStats.sent_today_count !== 1 ? "s" : ""} hoje`}
+                    {webmailStats.sent_today_count > 0 && webmailStats.drafts_count > 0 && " · "}
+                    {webmailStats.drafts_count > 0 && `${webmailStats.drafts_count} rascunho${webmailStats.drafts_count !== 1 ? "s" : ""}`}
                   </p>
-                  <p className="text-sm text-muted-foreground">
-                    {webmailStats.unread_count === 1 ? "Email Não Lido" : "Emails Não Lidos"}
-                  </p>
-                  <p className="text-xs font-medium text-primary hover:underline">
-                    Abrir Webmail →
-                  </p>
-                </div>
+                )}
+                <p className="text-[10px] font-medium text-primary mt-1 hover:underline">
+                  Abrir Webmail →
+                </p>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Main Tabs */}
+        {/* ── Two-column Widget Grid: Tasks + Mural ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          {/* ── Left Column: Tasks Panel ── */}
+          <Card className="border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 shrink-0" />
+                Minhas Tarefas
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Prazos, prioridades e tarefas em background
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <TasksPanel
+                showCreateButton={true}
+                compact={false}
+                maxHeight="520px"
+                showOnlyMyTasks={true}
+              />
+            </CardContent>
+          </Card>
+
+          {/* ── Right Column: Team Mural ── */}
+          <Card className="border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Rss className="h-5 w-5 shrink-0" />
+                Mural da Equipa
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Novidades, avisos e comunicação interna
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <TeamMural />
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ── Main Tabs: Clients / Documents / AI / Calendar ── */}
         <Tabs defaultValue="clients">
           <TabsList className="flex-wrap">
             <TabsTrigger value="clients" className="gap-2">
               <Users className="h-4 w-4" />
               Meus Clientes
+            </TabsTrigger>
+            <TabsTrigger value="calendar" className="gap-2">
+              <Calendar className="h-4 w-4" />
+              Próximos Prazos
             </TabsTrigger>
             <TabsTrigger value="documents" className="gap-2">
               <AlertTriangle className="h-4 w-4" />
@@ -196,7 +329,7 @@ const ConsultorDashboard = () => {
             </TabsTrigger>
           </TabsList>
 
-          {/* Clients Tab */}
+          {/* ── Clients Tab ── */}
           <TabsContent value="clients" className="mt-6">
             <Card className="border-border">
               <CardHeader>
@@ -224,7 +357,60 @@ const ConsultorDashboard = () => {
             </Card>
           </TabsContent>
 
-          {/* Documents Expiry Tab */}
+          {/* ── Calendar / Deadlines Tab ── */}
+          <TabsContent value="calendar" className="mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Calendar className="h-5 w-5" />
+                  Próximos Prazos
+                </CardTitle>
+                <CardDescription>Prazos e eventos agendados</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {deadlines.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8">Nenhum prazo agendado</p>
+                ) : (
+                  <div className="space-y-3 max-h-[520px] overflow-y-auto">
+                    {[...deadlines]
+                      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+                      .slice(0, 15)
+                      .map((deadline) => {
+                        const dueDate = new Date(deadline.due_date);
+                        const now = new Date();
+                        const daysLeft = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
+                        const urgencyClass = daysLeft < 0 ? "border-red-300 bg-red-50 dark:bg-red-950/20" :
+                          daysLeft <= 3 ? "border-orange-300 bg-orange-50 dark:bg-orange-950/20" :
+                          daysLeft <= 7 ? "border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20" :
+                          "border-border bg-muted/30";
+                        return (
+                          <div key={deadline.id} className={`flex items-center justify-between p-3 rounded-lg border ${urgencyClass}`}>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-sm truncate">{deadline.title || deadline.description || "Prazo"}</p>
+                              {deadline.process_id && (
+                                <p className="text-xs text-muted-foreground truncate">
+                                  Processo: {deadline.process_id}
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-right ml-3 shrink-0">
+                              <p className="text-sm font-medium">
+                                {dueDate.toLocaleDateString('pt-PT')}
+                              </p>
+                              <p className={`text-xs ${daysLeft < 0 ? "text-red-600" : daysLeft <= 3 ? "text-orange-600" : "text-muted-foreground"}`}>
+                                {daysLeft < 0 ? `${Math.abs(daysLeft)}d atrasado` : daysLeft === 0 ? "Hoje" : `em ${daysLeft}d`}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Documents Expiry Tab ── */}
           <TabsContent value="documents" className="mt-6">
             <Card className="border-border">
               <CardHeader>
@@ -243,7 +429,7 @@ const ConsultorDashboard = () => {
             </Card>
           </TabsContent>
 
-          {/* AI Analysis Tab */}
+          {/* ── AI Analysis Tab ── */}
           <TabsContent value="ai" className="mt-6">
             <AIAnalysisTab
               processes={processes}
@@ -260,7 +446,7 @@ const ConsultorDashboard = () => {
           </TabsContent>
         </Tabs>
 
-        {/* Add Document Expiry Dialog */}
+        {/* ── Add Document Expiry Dialog ── */}
         <AddExpiryDialog
           isOpen={isAddExpiryOpen}
           onClose={setIsAddExpiryOpen}

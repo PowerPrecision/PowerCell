@@ -33,7 +33,7 @@ from models.email import (
     FolderCreateRequest, FolderUpdateRequest
 )
 from services.auth import get_current_user
-from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails
+from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails, imap_mark_as_seen, imap_mark_as_unseen, imap_delete_message, _get_email_account_for_email
 from services.email_draft_service import (
     get_pending_drafts,
     get_draft_stats,
@@ -1566,6 +1566,24 @@ async def mark_email(
         update_data["is_spam"] = True
     
     await db.emails.update_one({"id": email_id}, {"$set": update_data})
+    
+    # === IMAP BIDIRECTIONAL SYNC: Reflect read/unread on IMAP server ===
+    message_id = email.get("message_id")
+    if message_id and mark_type in (EmailMarkType.READ, EmailMarkType.UNREAD):
+        try:
+            account_value = email.get("account", "")
+            synced_for_user = email.get("synced_for_user")
+            email_account = await _get_email_account_for_email(account_value, synced_for_user)
+            if email_account:
+                folder = "INBOX" if email.get("direction") == "received" else "Sent"
+                if mark_type == EmailMarkType.READ:
+                    imap_result = await imap_mark_as_seen(email_account, message_id, folder)
+                else:
+                    imap_result = await imap_mark_as_unseen(email_account, message_id, folder)
+                if not imap_result.get("success"):
+                    logger.warning(f"[IMAP Sync] Falha ao sincronizar flags para {email_id}: {imap_result.get('error')}")
+        except Exception as imap_err:
+            logger.warning(f"[IMAP Sync] Erro ao sincronizar flags IMAP para {email_id}: {imap_err}")
     
     logger.info(f"Email {email_id} marcado como {mark_type.value} por {current_user['email']}")
     
@@ -3535,11 +3553,26 @@ async def delete_email(
     email_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Eliminar registo de email."""
+    """Eliminar registo de email (MongoDB + IMAP server)."""
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
     
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
+    
+    # === IMAP BIDIRECTIONAL SYNC: Delete from IMAP server ===
+    message_id = email.get("message_id")
+    if message_id:
+        try:
+            account_value = email.get("account", "")
+            synced_for_user = email.get("synced_for_user")
+            email_account = await _get_email_account_for_email(account_value, synced_for_user)
+            if email_account:
+                folder = "INBOX" if email.get("direction") == "received" else "Sent"
+                imap_result = await imap_delete_message(email_account, message_id, folder)
+                if not imap_result.get("success"):
+                    logger.warning(f"[IMAP Sync] Falha ao apagar email IMAP para {email_id}: {imap_result.get('error')}")
+        except Exception as imap_err:
+            logger.warning(f"[IMAP Sync] Erro ao apagar email IMAP para {email_id}: {imap_err}")
     
     await db.emails.delete_one({"id": email_id})
     logger.info(f"Email {email_id} eliminado por {current_user['name']}")
