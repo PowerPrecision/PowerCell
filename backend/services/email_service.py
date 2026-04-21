@@ -964,8 +964,10 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
     
     user = await db.users.find_one(
         {"id": user_id},
-        {"_id": 0, "email_config": 1}
+        {"_id": 0, "email": 1, "email_config": 1}
     )
+    
+    user_login_email = (user.get("email") or "").lower().strip() if user else ""
     
     if not user or not user.get("email_config"):
         return {"success": False, "error": "Utilizador sem configuração de email"}
@@ -1130,12 +1132,14 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
                 
                 await db.emails.insert_one(email_doc)
                 total_synced += 1
+                print(f"DEBUG [sync_user_emails] Inserted email msg_id={msg_id[:40]} synced_for_user={user_id}")
                 
             except Exception as e:
                 logger.warning(f"[User Email Sync] Erro ao guardar email: {e}")
                 total_errors += 1
         
         logger.info(f"[User Email Sync] User {user_id}: {total_synced} novos, {total_duplicates} duplicados")
+        print(f"DEBUG [sync_user_emails] user_id={user_id} user_email={user_login_email} synced={total_synced} dup={total_duplicates}")
         
     except Exception as e:
         logger.error(f"[User Email Sync] Erro: {e}")

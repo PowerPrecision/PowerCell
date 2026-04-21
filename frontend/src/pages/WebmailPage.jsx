@@ -343,8 +343,10 @@ const WebmailPage = () => {
       if (customFolderId) {
         params.append("custom_folder", customFolderId);
       }
-      if (activeBox) {
-        params.append("box", activeBox);
+      // Always enforce box=shared_indexacao for indexacao role
+      const effectiveBox = user?.role === 'indexacao' ? 'shared_indexacao' : activeBox;
+      if (effectiveBox) {
+        params.append("box", effectiveBox);
       }
 
       const response = await fetch(
@@ -373,7 +375,7 @@ const WebmailPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, activeFolder, account, activeBox]);
+  }, [token, activeFolder, account, activeBox, user?.role]);
 
   // Carregar emails quando muda pasta, página ou label
   useEffect(() => {
