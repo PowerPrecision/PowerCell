@@ -121,7 +121,7 @@ const DashboardLayout = ({ children, title }) => {
     // Rotas do grupo Visão Global
     const visaoGlobalRoutes = ["/clientes", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
-    const comunicacoesRoutes = ["/webmail", "/minutas", "/leads"];
+    const comunicacoesRoutes = ["/webmail", "/minutas", "/ficheiros"];", 
     // Rotas do grupo Gestão e Operações
     const gestaoRoutes = ["/templates", "/estatisticas", "/rascunhos", "/rgpd-admin"];
     // Rotas do grupo Configurações de Sistema
@@ -359,7 +359,7 @@ const DashboardLayout = ({ children, title }) => {
           items: [
             { label: "Webmail", icon: Mail, href: "/webmail" },
             { label: "Minutas", icon: FileArchive, href: "/minutas" },
-            { label: "Ficheiros", icon: FileText, href: "/leads" },
+            { label: "Ficheiros", icon: FileText, href: "/ficheiros" },
           ],
         });
       }
