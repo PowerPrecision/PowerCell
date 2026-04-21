@@ -35,7 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { ScrollArea } from "./ui/scroll-area";
-import { Bell, BellRing, UserPlus, Clock, FileText, Calendar, AlertTriangle, CheckCircle, Volume2, VolumeX, ArrowRight, Mail, Inbox, Send } from "lucide-react";
+import { Bell, BellRing, UserPlus, Clock, FileText, Calendar, AlertTriangle, CheckCircle, Volume2, VolumeX, ArrowRight, Mail, Inbox, Send, MessageSquare } from "lucide-react";
 import { getNotifications, markNotificationRead } from "../services/api";
 import { toast } from "sonner";
 
@@ -92,6 +92,7 @@ const NotificationsDropdown = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const previousUnreadCount = useRef(0);
   const isFirstLoad = useRef(true);
+  const lastNotifiedIdRef = useRef(null); // Track last WS notification ID to prevent duplicate toast from polling
   const pollingIntervalRef = useRef(BASE_POLLING_INTERVAL);
   const intervalRef = useRef(null);
   const consecutiveSuccessRef = useRef(0);
@@ -147,6 +148,11 @@ const NotificationsDropdown = () => {
       setUnreadCount(prev => prev + 1);
       previousUnreadCount.current += 1;
 
+      // Track the notification ID to prevent duplicate toasts from polling
+      if (notification.id) {
+        lastNotifiedIdRef.current = notification.id;
+      }
+
       // Prepend to local notifications list
       setNotifications(prev => [notification, ...prev].slice(0, 50));
 
@@ -162,6 +168,36 @@ const NotificationsDropdown = () => {
         icon: <Bell className="h-4 w-4 text-blue-500" />,
       });
     }, [navigate, playNotificationSound]),
+  });
+
+  // ====================================================================
+  // WEBSOCKET — Chat message notifications
+  // Listen for new_chat_message events and show a passive toast + increment counter
+  // ====================================================================
+  useWebSocket({
+    autoConnect: true,
+    onChatMessage: useCallback((chatData) => {
+      if (!chatData) return;
+
+      // Increment unread counter
+      setUnreadCount(prev => prev + 1);
+      previousUnreadCount.current += 1;
+
+      // Show passive toast for new chat messages
+      const senderName = chatData.sender_name || chatData.from_name || "Alguém";
+      const processName = chatData.process_name || chatData.client_name || "";
+      const preview = chatData.content || chatData.body || chatData.message || "Nova mensagem";
+
+      toast.info(`${senderName}: ${preview.substring(0, 80)}${preview.length > 80 ? "..." : ""}`, {
+        description: processName || "Mensagem de chat",
+        action: chatData.process_id ? {
+          label: "Ver",
+          onClick: () => navigate(`/process/${chatData.process_id}`),
+        } : undefined,
+        duration: 6000,
+        icon: <MessageSquare className="h-4 w-4 text-emerald-500" />,
+      });
+    }, [navigate]),
   });
 
   const fetchNotifications = useCallback(async () => {
@@ -190,11 +226,11 @@ const NotificationsDropdown = () => {
       
       // Check for new notifications (after first load)
       if (!isFirstLoad.current && newUnreadCount > previousUnreadCount.current) {
-        const newCount = newUnreadCount - previousUnreadCount.current;
         const latestNotification = newNotifications.find(n => !n.read);
-        
-        // Show toast for new notification
-        if (latestNotification) {
+
+        // Skip toast if we already showed one via WebSocket for the same notification
+        // (prevents duplicate toast when both WS push and polling detect the same event)
+        if (latestNotification && latestNotification.id !== lastNotifiedIdRef.current) {
           playNotificationSound();
           
           toast.info(
