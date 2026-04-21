@@ -144,21 +144,29 @@ const SafeChartContainer = ({ children, className = "" }) => {
     const el = containerRef.current;
     if (!el) return;
 
+    let rafId;
     const check = () => {
-      const rect = el.getBoundingClientRect();
-      setReady(rect.width > 0 && rect.height > 0);
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        setReady(rect.width > 1 && rect.height > 1);
+      });
     };
 
     check();
 
     const observer = new ResizeObserver(check);
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   return (
-    <div ref={containerRef} className={className}>
-      {ready ? children : <div className="flex items-center justify-center h-full text-muted-foreground text-sm" />}
+    <div ref={containerRef} className={className} style={{ minWidth: 1, minHeight: 1 }}>
+      {ready ? children : null}
     </div>
   );
 };
