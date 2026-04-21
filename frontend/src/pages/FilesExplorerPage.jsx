@@ -630,11 +630,11 @@ const FilesExplorerPage = () => {
                 <TableBody>
                   {loading ? (
                     <>
-                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableRow>
-                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableRow>
-                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableRow>
-                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableRow>
-                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableRow>
+                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableCell></TableRow>
+                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableCell></TableRow>
+                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableCell></TableRow>
+                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableCell></TableRow>
+                      <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableCell></TableRow>
                     </>
                   ) : sortedFolders.length === 0 && sortedFiles.length === 0 ? (
                     <TableRow>
