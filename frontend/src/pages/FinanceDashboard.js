@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   BarChart3,
@@ -75,6 +75,7 @@ import {
   LineChart,
   Line,
 } from "recharts";
+import SafeChartContainer from "../components/ui/SafeChartContainer";
 
 // ====================================================================
 // HELPERS
@@ -129,45 +130,6 @@ const VariationIndicator = ({ value }) => {
       <Minus className="h-3 w-3 mr-1" />
       0%
     </span>
-  );
-};
-
-// ====================================================================
-// SAFE CHART CONTAINER — prevents Recharts -1 dimension errors
-// ====================================================================
-
-const SafeChartContainer = ({ children, className = "" }) => {
-  const containerRef = useRef(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    let rafId;
-    const check = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        setReady(rect.width > 1 && rect.height > 1);
-      });
-    };
-
-    check();
-
-    const observer = new ResizeObserver(check);
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, []);
-
-  return (
-    <div ref={containerRef} className={className} style={{ minWidth: 1, minHeight: 1 }}>
-      {ready ? children : null}
-    </div>
   );
 };
 
