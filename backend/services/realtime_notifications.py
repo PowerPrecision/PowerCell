@@ -111,6 +111,7 @@ async def send_realtime_notification(
         "link": link,
         "process_id": process_id,
         "read": False,
+        "is_notified": False,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -127,6 +128,16 @@ async def send_realtime_notification(
             user_id
         )
         logger.info(f"Notificação enviada via WebSocket para {user_id}")
+        
+        # Mark as notified to prevent re-emission on next poll/sync
+        if save_to_db:
+            try:
+                await db.notifications.update_one(
+                    {"id": notification["id"]},
+                    {"$set": {"is_notified": True}}
+                )
+            except Exception as e:
+                logger.warning(f"Erro ao marcar notificação {notification['id']} como notificada: {e}")
     else:
         logger.info(f"Utilizador {user_id} não conectado. Notificação guardada na DB.")
         # Enviar push notification quando o utilizador não está conectado via WebSocket

@@ -772,7 +772,7 @@ async def list_clients(
             {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
              "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
              "assigned_consultor_id": 1, "assigned_mediador_id": 1,
-             "consultor_name": 1, "mediador_name": 1, "is_active": 1}
+             "consultor_name": 1, "mediador_name": 1, "is_active": 1, "created_at": 1}
         ).sort("client_name", 1).to_list(length=None)
         
         # Agrupar por cliente
@@ -794,8 +794,14 @@ async def list_clients(
                     "nif": proc.get("personal_data", {}).get("nif"),
                     "process_ids": [],
                     "active_processes_count": 0,
-                    "processes": []  # Lista de processos com fase
+                    "processes": [],  # Lista de processos com fase
+                    "created_at": proc.get("created_at")  # For sorting by date
                 }
+            
+            # Update created_at to earliest process date
+            proc_date = proc.get("created_at")
+            if proc_date and (not clients_map[key].get("created_at") or proc_date < clients_map[key]["created_at"]):
+                clients_map[key]["created_at"] = proc_date
             
             # Adicionar informação do processo
             status_info = status_map.get(proc.get("status"), {})
@@ -900,7 +906,7 @@ async def list_clients(
     processes = await db.processes.find(
         process_query,
         {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
-         "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1}
+         "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1, "created_at": 1}
     ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
     
     # Agrupar por cliente (usando client_id ou client_name como chave)
@@ -921,8 +927,14 @@ async def list_clients(
                 "dados_pessoais": proc.get("personal_data", {}),
                 "nif": proc.get("personal_data", {}).get("nif"),
                 "process_ids": [],
-                "active_processes_count": 0
+                "active_processes_count": 0,
+                "created_at": proc.get("created_at")
             }
+        
+        # Update created_at to earliest process date
+        proc_date = proc.get("created_at")
+        if proc_date and (not clients_map[key].get("created_at") or proc_date < clients_map[key]["created_at"]):
+            clients_map[key]["created_at"] = proc_date
         
         clients_map[key]["process_ids"].append(proc.get("id"))
         

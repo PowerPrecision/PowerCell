@@ -114,6 +114,7 @@ export const TasksProvider = ({ children }) => {
   const pollingIntervalRef = useRef(null);
   const lastToastTimeRef = useRef({});
   const previousTaskIdsRef = useRef(new Set());
+  const toastedTaskIdsRef = useRef(new Set()); // Permanent dedup: tasks already toasted
   const consecutiveFailuresRef = useRef(0);
   const circuitBreakerActiveRef = useRef(false);
   const circuitBreakerTimeoutRef = useRef(null);
@@ -181,26 +182,30 @@ export const TasksProvider = ({ children }) => {
         const isNowFailed = task.status === TaskStatus.FAILED;
         const isUnacknowledged = !task.acknowledged_at;
         
+        // Permanent dedup: skip if already toasted this task
+        if (toastedTaskIdsRef.current.has(task.task_id)) return;
+        
         if (wasActive && isUnacknowledged) {
-          const now = Date.now();
-          const lastToast = lastToastTimeRef.current[task.task_id] || 0;
+          // Mark as toasted permanently to prevent loops
+          toastedTaskIdsRef.current.add(task.task_id);
+          // Auto-trim the set to prevent memory leak (keep last 200)
+          if (toastedTaskIdsRef.current.size > 200) {
+            const arr = [...toastedTaskIdsRef.current];
+            toastedTaskIdsRef.current = new Set(arr.slice(-200));
+          }
           
-          if (now - lastToast > TOAST_DEBOUNCE_MS) {
-            lastToastTimeRef.current[task.task_id] = now;
-            
-            if (isNowCompleted) {
-              toast.success(`${task.title} concluída!`, {
-                description: task.description || "A tarefa foi concluída com sucesso.",
-                action: task.result_url ? {
-                  label: "Ver resultado",
-                  onClick: () => window.open(task.result_url, "_blank"),
-                } : undefined,
-              });
-            } else if (isNowFailed) {
-              toast.error(`${task.title} falhou`, {
-                description: task.error_message || "Ocorreu um erro durante a execução.",
-              });
-            }
+          if (isNowCompleted) {
+            toast.success(`${task.title} concluída!`, {
+              description: task.description || "A tarefa foi concluída com sucesso.",
+              action: task.result_url ? {
+                label: "Ver resultado",
+                onClick: () => window.open(task.result_url, "_blank"),
+              } : undefined,
+            });
+          } else if (isNowFailed) {
+            toast.error(`${task.title} falhou`, {
+              description: task.error_message || "Ocorreu um erro durante a execução.",
+            });
           }
         }
       });

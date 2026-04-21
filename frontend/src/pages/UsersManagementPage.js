@@ -30,7 +30,7 @@ const roleLabels = {
   cliente: "Cliente",
   consultor: "Consultor",
   intermediario: "Intermediário de Crédito",
-  mediador: "Mediador",
+  mediador: "Intermediário de Crédito", // Legacy alias — maps to same label as intermediario
   consultor_intermediario: "Consultor/Intermediário",
   diretor: "Diretor(a)",
   administrativo: "Administrativo(a)",
@@ -44,7 +44,6 @@ const roleColors = {
   cliente: "bg-blue-100 text-blue-800",
   consultor: "bg-emerald-100 text-emerald-800",
   intermediario: "bg-purple-100 text-purple-800",
-  mediador: "bg-amber-100 text-amber-800",
   consultor_intermediario: "bg-gradient-to-r from-emerald-100 to-purple-100 text-purple-800",
   diretor: "bg-indigo-100 text-indigo-800",
   administrativo: "bg-amber-100 text-amber-800",
@@ -54,11 +53,10 @@ const roleColors = {
   parceiro: "bg-violet-100 text-violet-800",
 };
 
-// Roles available as additional (excludes admin, cliente, parceiro)
+// Roles available as additional (excludes admin, cliente, parceiro, mediador legacy)
 const additionalRoleOptions = [
   "consultor",
   "intermediario",
-  "mediador",
   "consultor_intermediario",
   "diretor",
   "administrativo",

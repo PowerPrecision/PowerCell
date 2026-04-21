@@ -1202,3 +1202,223 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
         "total_errors": total_errors,
         "users": user_results,
     }
+
+
+# =====================================================================
+# SINCRONIZAÇÃO BIDIRECIONAL IMAP — Flags (Seen, Deleted, etc.)
+# =====================================================================
+
+def _imap_store_flags_sync(
+    account: EmailAccount,
+    message_id: str,
+    flags_to_add: list,
+    flags_to_remove: list = None,
+    folder: str = "INBOX",
+    expunge: bool = False
+) -> Dict[str, Any]:
+    """
+    Apply IMAP flag changes via UID STORE for a message identified by Message-ID.
+    Runs in a thread (blocking IMAP).
+    
+    Args:
+        account: EmailAccount with IMAP credentials
+        message_id: RFC Message-ID header value (e.g. "<abc@domain.com>")
+        flags_to_add: List of flags to add, e.g. ["\\Seen"]
+        flags_to_remove: List of flags to remove, e.g. ["\\Seen"]
+        folder: IMAP folder to search in
+        expunge: If True, run EXPUNGE after STORE (for deletions)
+    
+    Returns:
+        {"success": bool, "error": str or None, "uid": int or None}
+    """
+    flags_to_remove = flags_to_remove or []
+    
+    try:
+        context = ssl.create_default_context()
+        mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context)
+        mail.login(account.email, account.password)
+        
+        # Select folder
+        result, data = mail.select(folder, readonly=False)
+        if result != 'OK':
+            mail.logout()
+            return {"success": False, "error": f"Pasta IMAP '{folder}' não encontrada"}
+        
+        # Search by Message-ID header
+        search_criteria = f'(HEADER Message-ID "{message_id}")'
+        result, data = mail.uid('search', None, search_criteria)
+        
+        if result != 'OK' or not data or not data[0]:
+            mail.logout()
+            return {"success": False, "error": "Mensagem não encontrada no servidor IMAP"}
+        
+        uid_list = data[0].split()
+        if not uid_list:
+            mail.logout()
+            return {"success": False, "error": "Nenhum UID retornado pela busca IMAP"}
+        
+        uid = uid_list[0].decode()
+        
+        # Apply flags
+        success = True
+        error_msg = None
+        
+        if flags_to_add:
+            flag_str = " ".join(flags_to_add)
+            result, _ = mail.uid('store', uid, f'+FLAGS ({flag_str})')
+            if result != 'OK':
+                success = False
+                error_msg = f"Falha ao adicionar flags: {flag_str}"
+        
+        if flags_to_remove and success:
+            flag_str = " ".join(flags_to_remove)
+            result, _ = mail.uid('store', uid, f'-FLAGS ({flag_str})')
+            if result != 'OK':
+                success = False
+                error_msg = f"Falha ao remover flags: {flag_str}"
+        
+        # EXPUNGE for deletions (permanently removes \\Deleted messages)
+        if expunge and success:
+            mail.expunge()
+        
+        mail.logout()
+        
+        if success:
+            logger.info(f"[IMAP Sync] Flags aplicadas no UID {uid} ({folder}): +{flags_to_add} -{flags_to_remove} expunge={expunge}")
+        else:
+            logger.warning(f"[IMAP Sync] Falha ao aplicar flags no UID {uid}: {error_msg}")
+        
+        return {"success": success, "error": error_msg, "uid": uid}
+        
+    except imaplib.IMAP4.error as e:
+        error_str = str(e)
+        logger.error(f"[IMAP Sync] Erro IMAP em {account.email}: {error_str}")
+        if "login failed" in error_str.lower() or "authentication failed" in error_str.lower():
+            return {"success": False, "error": f"Autenticação IMAP falhou para {account.email}"}
+        return {"success": False, "error": f"Erro IMAP: {error_str}"}
+    except Exception as e:
+        logger.error(f"[IMAP Sync] Erro inesperado em {account.email}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def imap_mark_as_seen(
+    email_account: EmailAccount,
+    message_id: str,
+    folder: str = "INBOX"
+) -> Dict[str, Any]:
+    """
+    Mark an email as read (\\Seen) on the IMAP server.
+    
+    Args:
+        email_account: EmailAccount with IMAP credentials
+        message_id: RFC Message-ID header value
+        folder: IMAP folder where the message resides
+    
+    Returns:
+        {"success": bool, "error": str or None}
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _email_executor,
+        lambda: _imap_store_flags_sync(
+            account=email_account,
+            message_id=message_id,
+            flags_to_add=["\\Seen"],
+            folder=folder
+        )
+    )
+
+
+async def imap_mark_as_unseen(
+    email_account: EmailAccount,
+    message_id: str,
+    folder: str = "INBOX"
+) -> Dict[str, Any]:
+    """
+    Mark an email as unread (remove \\Seen) on the IMAP server.
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _email_executor,
+        lambda: _imap_store_flags_sync(
+            account=email_account,
+            message_id=message_id,
+            flags_to_remove=["\\Seen"],
+            folder=folder
+        )
+    )
+
+
+async def imap_delete_message(
+    email_account: EmailAccount,
+    message_id: str,
+    folder: str = "INBOX"
+) -> Dict[str, Any]:
+    """
+    Mark an email as deleted (\\Deleted + EXPUNGE) on the IMAP server.
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _email_executor,
+        lambda: _imap_store_flags_sync(
+            account=email_account,
+            message_id=message_id,
+            flags_to_add=["\\Deleted"],
+            folder=folder,
+            expunge=True
+        )
+    )
+
+
+async def _get_email_account_for_email(account_value: str, synced_for_user: str = None) -> Optional[EmailAccount]:
+    """
+    Resolve an EmailAccount from the account value stored in the email document.
+    
+    For global accounts ("power", "precision"), looks up env vars / system_config.
+    For user-specific accounts, decrypts user's email_config.
+    
+    Args:
+        account_value: The 'account' field from the email document
+        synced_for_user: If set, this is a user-specific email
+    
+    Returns:
+        EmailAccount or None
+    """
+    if synced_for_user:
+        from services.encryption import encryption_service
+        user = await db.users.find_one(
+            {"id": synced_for_user},
+            {"_id": 0, "email_config": 1}
+        )
+        if not user or not user.get("email_config", {}).get("is_configured"):
+            return None
+        
+        config = user["email_config"]
+        encrypted_password = config.get("encrypted_password", "")
+        if not encrypted_password:
+            return None
+        
+        password = encryption_service.decrypt(encrypted_password)
+        return EmailAccount(
+            name=f"user_{synced_for_user[:8]}",
+            imap_server=config.get("imap_server", ""),
+            imap_port=int(config.get("imap_port", 993)),
+            smtp_server=config.get("smtp_server", ""),
+            smtp_port=int(config.get("smtp_port", 465)),
+            email=config.get("email_address", ""),
+            password=password,
+        )
+    
+    # Global account
+    accounts = await get_email_accounts_async()
+    for acc in accounts:
+        if acc.name == account_value:
+            return acc
+    
+    # Fallback: try matching by email address
+    if "@" in str(account_value):
+        for acc in accounts:
+            if acc.email.lower() == str(account_value).lower():
+                return acc
+    
+    return None
