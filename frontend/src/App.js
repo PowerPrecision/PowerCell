@@ -35,6 +35,7 @@ import ClientPortal from "./pages/ClientPortal";
 // - KanbanPage: importa bibliotecas de drag-drop (@dnd-kit)
 // - ProcessDetails: 164KB (o maior componente da aplicação!)
 const StaffDashboard = React.lazy(() => import("./pages/StaffDashboard"));
+const ConsultorDashboard = React.lazy(() => import("./pages/ConsultorDashboard"));
 const KanbanPage = React.lazy(() => import("./pages/KanbanPage"));
 const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
 
@@ -42,6 +43,7 @@ const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
 // PÁGINAS COM CODE SPLITTING (lazy loading)
 // ====================================================================
 const AdminDashboard = React.lazy(() => import("./pages/AdminDashboard"));
+const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const StatisticsPage = React.lazy(() => import("./pages/StatisticsPage"));
 const UsersManagementPage = React.lazy(() => import("./pages/UsersManagementPage"));
 const ProcessesPage = React.lazy(() => import("./pages/ProcessesPage"));
@@ -76,6 +78,8 @@ const FinanceDashboard = React.lazy(() => import("./pages/FinanceDashboard"));
 const RGPDMigrationPage = React.lazy(() => import("./pages/RGPDMigrationPage"));
 const WebmailPage = React.lazy(() => import("./pages/WebmailPage"));
 const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
+const TemplatesPage = React.lazy(() => import("./pages/TemplatesPage"));
+const DocumentsPage = React.lazy(() => import("./pages/DocumentsPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -189,12 +193,11 @@ const DashboardRedirect = () => {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin vai para /admin, todos os outros staff vão para /kanban (Quadro Geral)
-  // Isso melhora a performance e foco, evitando carregar o Dashboard completo
+  // Admin vai para /admin, todos os outros staff vão para /staff (Dashboard)
   if (user.role === "admin") {
     return <Navigate to="/admin" replace />;
   }
-  return <Navigate to="/kanban" replace />;
+  return <Navigate to="/staff" replace />;
 };
 
 // Componente para redirecionar a rota raiz baseado no estado de autenticação
@@ -209,13 +212,12 @@ const RootRedirect = () => {
     );
   }
 
-  // Se autenticado, redireciona para /kanban (Quadro Geral)
-  // Isso melhora a performance e foco no fluxo de trabalho principal
+  // Se autenticado, redireciona para o dashboard adequado
   if (user) {
     if (user.role === "admin") {
       return <Navigate to="/admin" replace />;
     }
-    return <Navigate to="/kanban" replace />;
+    return <Navigate to="/staff" replace />;
   }
 
   // Se não autenticado, mostra o formulário público
@@ -269,9 +271,19 @@ function App() {
             }
           />
 
-          {/* Staff Dashboard (Consultor, Mediador, Diretor, Administrativo, CEO) */}
+          {/* Staff Dashboard (Consultor, Mediador, Diretor, Administrativo, CEO) - Resumo/KPIs */}
           <Route
             path="/staff"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <ConsultorDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Staff Extended Dashboard (com Kanban integrado) - via /staff-dashboard */}
+          <Route
+            path="/staff-dashboard"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
                 <StaffDashboard />
@@ -299,11 +311,11 @@ function App() {
             }
           />
           
-          {/* Finance Dashboard - Admin and CEO only */}
+          {/* Finance Dashboard - All Staff */}
           <Route
             path="/financeiro"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
                 <FinanceDashboard />
               </ProtectedRoute>
             }
@@ -457,7 +469,7 @@ function App() {
             path="/templates"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
-                <MinutasPage />
+                <TemplatesPage />
               </ProtectedRoute>
             }
           />
@@ -588,10 +600,10 @@ function App() {
             }
           />
 
-          {/* RGPD Admin - Redirecionado para Configurações > RGPD */}
+          {/* RGPD Admin - Redirecionar para página dedicada */}
           <Route
             path="/admin/rgpd"
-            element={<Navigate to="/configuracoes?tab=rgpd" replace />}
+            element={<Navigate to="/rgpd-admin" replace />}
           />
 
           {/* Client Registrations - All staff (Registo de Clientes) */}
@@ -634,10 +646,14 @@ function App() {
             }
           />
 
-          {/* RGPD Admin - Redirecionado para Configuracoes > RGPD */}
+          {/* RGPD Admin - Página dedicada de RGPD */}
           <Route
             path="/rgpd-admin"
-            element={<Navigate to="/configuracoes?tab=rgpd" replace />}
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+                <RGPDAdminPage />
+              </ProtectedRoute>
+            }
           />
 
           {/* RGPD Migration - Admin, CEO and Diretor */}
@@ -680,6 +696,16 @@ function App() {
             }
           />
           
+          {/* Ficheiros - Unified Documents Panel (S3/OneDrive) */}
+          <Route
+            path="/ficheiros"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <DocumentsPage />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Catch-all redirect */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>

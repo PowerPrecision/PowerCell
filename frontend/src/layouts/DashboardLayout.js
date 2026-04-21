@@ -183,7 +183,7 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     // DASHBOARD (Visível para todos)
     // ====================================================================
-    const dashboardHref = isAdmin ? "/admin" : "/kanban";
+    const dashboardHref = isAdmin ? "/admin" : "/staff";
     const dashboardItem = {
       label: "Dashboard",
       icon: LayoutDashboard,
@@ -267,8 +267,8 @@ const DashboardLayout = ({ children, title }) => {
         },
         {
           label: "Ficheiros",
-          icon: FileText,
-          href: "/leads",
+          icon: Database,
+          href: "/ficheiros",
         },
       ],
     };
@@ -378,7 +378,8 @@ const DashboardLayout = ({ children, title }) => {
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
         { label: "Os Meus Processos", icon: FileText, href: "/processos" },
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
-        { label: "Imóveis e Visitas", icon: Search, href: "/imoveis" },
+        { label: "Gestor de Visitas", icon: Search, href: "/leads" },
+        { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ];
 
       return {
