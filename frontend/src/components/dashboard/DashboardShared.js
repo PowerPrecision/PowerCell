@@ -455,10 +455,12 @@ export const useDashboardData = () => {
         getUpcomingExpiries(60).catch(() => ({ data: [] })),
         getWorkflowStatuses()
       ]);
-      setProcesses(processesRes.data);
-      setStats(statsRes.data);
-      setUpcomingExpiries(expiriesRes.data);
-      setWorkflowStatuses(statusesRes.data);
+      // processes API returns paginated response: { items: [...], total, page, size, pages }
+      const processesData = processesRes.data;
+      setProcesses(Array.isArray(processesData) ? processesData : (processesData?.items || []));
+      setStats(statsRes.data || {});
+      setUpcomingExpiries(Array.isArray(expiriesRes.data) ? expiriesRes.data : []);
+      setWorkflowStatuses(Array.isArray(statusesRes.data) ? statusesRes.data : []);
     } catch (error) {
       console.error("Error fetching data:", error);
       toast.error("Erro ao carregar dados");
@@ -468,6 +470,7 @@ export const useDashboardData = () => {
   };
 
   const filteredProcesses = useMemo(() => {
+    if (!Array.isArray(processes)) return [];
     return processes.filter(process => {
       const matchesSearch =
         (process.client_name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||

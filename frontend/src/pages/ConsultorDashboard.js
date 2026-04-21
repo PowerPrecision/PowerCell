@@ -150,7 +150,7 @@ const ConsultorDashboard = () => {
             icon={Building2}
             iconColor="text-green-600"
             bgColor="bg-green-100 dark:bg-green-900/30"
-            value={processes.filter(p => p.status === "aprovado").length}
+            value={Array.isArray(processes) ? processes.filter(p => p.status === "aprovado").length : 0}
             label="Aprovados"
           />
           {/* Email KPI Card */}
