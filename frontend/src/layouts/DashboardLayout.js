@@ -199,6 +199,11 @@ const DashboardLayout = ({ children, title }) => {
       icon: Building2,
       items: [
         {
+          label: "Registos de Clientes",
+          icon: ClipboardList,
+          href: "/registos-clientes",
+        },
+        {
           label: "Os Meus Clientes",
           icon: User,
           href: "/meus-clientes",
@@ -346,6 +351,7 @@ const DashboardLayout = ({ children, title }) => {
           label: "O Meu Negócio",
           icon: Building2,
           items: [
+            { label: "Registos de Clientes", icon: ClipboardList, href: "/registos-clientes" },
             { label: "Os Meus Processos", icon: FileText, href: "/processos" },
             { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
           ],
@@ -377,6 +383,7 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
       const consultorNegocioItems = [
+        { label: "Registos de Clientes", icon: ClipboardList, href: "/registos-clientes" },
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
         { label: "Os Meus Processos", icon: FileText, href: "/processos" },
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
