@@ -81,6 +81,9 @@ export const WSEventType = {
   CONNECTION_STATUS: 'connection_status',
   USER_ONLINE: 'user_online',
   USER_OFFLINE: 'user_offline',
+
+  // Chat
+  NEW_CHAT_MESSAGE: 'new_chat_message',
 };
 
 const INITIAL_RECONNECT_INTERVAL = 1000;
@@ -580,6 +583,10 @@ export function useWebSocket(options = {}) {
 
     if (opts.onUserOffline) {
       unsubs.push(wsManager.on(WSEventType.USER_OFFLINE, opts.onUserOffline));
+    }
+
+    if (opts.onChatMessage) {
+      unsubs.push(wsManager.on(WSEventType.NEW_CHAT_MESSAGE, opts.onChatMessage));
     }
 
     return () => unsubs.forEach(unsub => unsub?.());

@@ -2213,8 +2213,9 @@ async def webmail_list(
                     shared_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
                 and_conditions.append({"$and": [ownership_filter, {"$or": shared_or}]})
         elif box == "general":
-            # Emails com shared_role=geral (caixa geral)
-            and_conditions.append({"shared_role": "geral"})
+            # Emails com shared_role=geral (caixa geral) OU is_general=True
+            # (sync global via IMAP que marca is_general=True)
+            and_conditions.append({"$or": [{"shared_role": "geral"}, {"is_general": True}]})
         elif box == "shared_indexacao":
             # Emails com shared_role=indexacao
             and_conditions.append({"shared_role": "indexacao"})
@@ -2372,7 +2373,7 @@ async def webmail_list(
                 ]
             })
         elif box == "general":
-            unread_and.append({"shared_role": "geral"})
+            unread_and.append({"$or": [{"shared_role": "geral"}, {"is_general": True}]})
         elif box == "shared_indexacao":
             unread_and.append({"shared_role": "indexacao"})
         elif not can_see_all and user_email:
@@ -2485,9 +2486,9 @@ async def webmail_stats(
         ]
         drafts_base["created_by"] = user_id
     elif box == "general":
-        inbox_base["shared_role"] = "geral"
-        sent_base["shared_role"] = "geral"
-        drafts_base["shared_role"] = "geral"
+        inbox_base["$or"] = [{"shared_role": "geral"}, {"is_general": True}]
+        sent_base["$or"] = [{"shared_role": "geral"}, {"is_general": True}]
+        drafts_base["$or"] = [{"shared_role": "geral"}, {"is_general": True}]
     elif box == "shared_indexacao":
         inbox_base["shared_role"] = "indexacao"
         sent_base["shared_role"] = "indexacao"

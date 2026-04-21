@@ -40,7 +40,7 @@ import {
 import { toast } from "sonner";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
-import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers } from "../services/api";
+import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess } from "../services/api";
 
 const TasksPanel = ({ 
   processId = null, 
@@ -104,12 +104,62 @@ const TasksPanel = ({
       }
       
       setTasks(filteredTasks);
-      // Filtrar: não clientes, não admin, não ceo
-      setUsers(usersRes.data.filter(u => 
-        u.role !== "cliente" && 
-        u.role !== "admin" && 
-        u.role !== "ceo"
-      ));
+
+      // === FILTRO DE UTILIZADORES PARA ATRIBUIÇÃO ===
+      // Se estamos num processo específico, mostrar APENAS os utilizadores
+      // envolvidos nesse processo (consultor, mediador, indexação, etc.)
+      // Caso contrário, mostrar todos os utilizadores elegíveis.
+      if (processId) {
+        try {
+          const processRes = await getProcess(processId);
+          const proc = processRes.data;
+          
+          // Recolher todos os user IDs envolvidos no processo
+          const involvedUserIds = new Set();
+          
+          // Consultores (array ou singular)
+          const consultorIds = proc.assigned_consultor_ids || [];
+          if (Array.isArray(consultorIds)) {
+            consultorIds.forEach(id => { if (id) involvedUserIds.add(String(id)); });
+          }
+          if (proc.assigned_consultor_id) involvedUserIds.add(String(proc.assigned_consultor_id));
+          
+          // Intermediários/Mediadores (array ou singular)
+          const mediadorIds = proc.assigned_mediador_ids || [];
+          if (Array.isArray(mediadorIds)) {
+            mediadorIds.forEach(id => { if (id) involvedUserIds.add(String(id)); });
+          }
+          if (proc.assigned_mediador_id) involvedUserIds.add(String(proc.assigned_mediador_id));
+          
+          // Indexação
+          if (proc.assigned_indexacao_id) involvedUserIds.add(String(proc.assigned_indexacao_id));
+          
+          // Criador do processo
+          if (proc.created_by) involvedUserIds.add(String(proc.created_by));
+          
+          // Filtrar utilizadores: apenas os envolvidos + excluir clientes
+          const involvedUsers = usersRes.data.filter(u => 
+            involvedUserIds.has(String(u.id)) && 
+            u.role !== "cliente"
+          );
+          setUsers(involvedUsers);
+        } catch (err) {
+          // Fallback: mostrar todos os elegíveis se o processo não carregar
+          console.warn("Não foi possível carregar utilizadores do processo, a usar todos:", err);
+          setUsers(usersRes.data.filter(u => 
+            u.role !== "cliente" && 
+            u.role !== "admin" && 
+            u.role !== "ceo"
+          ));
+        }
+      } else {
+        // Sem processo: mostrar todos os utilizadores elegíveis
+        setUsers(usersRes.data.filter(u => 
+          u.role !== "cliente" && 
+          u.role !== "admin" && 
+          u.role !== "ceo"
+        ));
+      }
     } catch (error) {
       console.error("Erro ao carregar tarefas:", error);
       toast.error("Erro ao carregar tarefas");

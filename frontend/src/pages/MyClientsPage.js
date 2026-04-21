@@ -215,7 +215,7 @@ const MyClientsPage = () => {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">{stats.total}</p>
-                  <p className="text-sm text-gray-500">Total de Processos</p>
+                  <p className="text-sm text-gray-500">Total de Clientes</p>
                 </div>
               </div>
             </CardContent>
@@ -302,14 +302,14 @@ const MyClientsPage = () => {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">
-              Lista de Processos ({filteredClients.length})
+              Lista de Clientes ({filteredClients.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
             {filteredClients.length === 0 ? (
               <div className="text-center py-12 text-gray-500" data-testid="empty-state">
                 <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>Nenhum processo encontrado</p>
+                <p>Nenhum cliente encontrado</p>
                 {searchTerm && (
                   <p className="text-sm mt-2">
                     Tente ajustar os filtros de pesquisa

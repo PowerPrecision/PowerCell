@@ -13,11 +13,11 @@ const MobileBottomNav = () => {
   
   // Determinar o dashboard correcto baseado no role
   const getDashboardPath = () => {
-    if (!user) return "/kanban";
+    if (!user) return "/staff";
     if (user.role === "admin") {
       return "/admin";
     }
-    return "/kanban";
+    return "/staff";
   };
 
   // Determinar o caminho correcto para clientes baseado no role
@@ -32,7 +32,7 @@ const MobileBottomNav = () => {
   };
 
   const navItems = [
-    { path: getDashboardPath(), icon: LayoutGrid, label: "Quadro Geral" },
+    { path: getDashboardPath(), icon: LayoutGrid, label: "Dashboard" },
     { path: getClientsPath(), icon: Users, label: "Clientes" },
     { path: "/leads", icon: Calendar, label: "Visitas" },
     { path: "/perfil", icon: User, label: "Perfil" },

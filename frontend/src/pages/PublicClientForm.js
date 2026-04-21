@@ -1151,6 +1151,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             type="date"
             value={formData.birth_date}
             onChange={(e) => updateField("birth_date", e.target.value)}
+            max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
             required
             data-testid="client-birth-date"
           />
@@ -2243,6 +2244,22 @@ const PublicClientForm = ({ previewMode = false }) => {
         if (!formData.birth_date) {
           errors.push("Data de nascimento é obrigatória");
           newFieldErrors.birth_date = "Data de nascimento é obrigatória";
+        } else {
+          // Validate minimum age (>= 18 years)
+          const birthDate = new Date(formData.birth_date);
+          const today = new Date();
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const monthDiff = today.getMonth() - birthDate.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+          }
+          if (age < 18) {
+            errors.push("O cliente deve ter idade igual ou superior a 18 anos");
+            newFieldErrors.birth_date = "O cliente deve ter idade igual ou superior a 18 anos";
+          } else if (age > 120) {
+            errors.push("Data de nascimento inválida");
+            newFieldErrors.birth_date = "Data de nascimento inválida";
+          }
         }
         if (!formData.estado_civil) {
           errors.push("Estado civil é obrigatório");

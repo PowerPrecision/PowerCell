@@ -22,11 +22,13 @@ import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import jwt
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import RedirectResponse, HTMLResponse
 
 from database import db
 from services.auth import get_current_user
+from config import JWT_SECRET, JWT_ALGORITHM
 from services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
@@ -71,14 +73,62 @@ def _build_redirect_uri(request: Request, configured_uri: str) -> str:
     return f"{base_url}/api/auth/google/callback"
 
 
+
+
+async def _resolve_user(request: Request, token: Optional[str] = None) -> dict:
+    """Resolve the authenticated user from the Authorization header or a ?token= query param.
+
+    Primary: ``Authorization: Bearer <jwt>`` header (standard API calls via axios/fetch).
+    Fallback: ``?token=<jwt>`` query parameter (direct browser navigation).
+
+    The fallback exists because ``window.location.href`` does NOT send headers,
+    which causes the default ``get_current_user`` dependency to return 401 and
+    the SPA to redirect to the login page — a frustrating loop for the user.
+    """
+    # --- 1. Try the standard Authorization header ---
+    auth_header = request.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        jwt_token = auth_header[7:].strip()
+        try:
+            payload = jwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+            if user and user.get("is_active", True):
+                return user
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            pass  # fall through to ?token=
+
+    # --- 2. Fallback: ?token= query parameter ---
+    if token:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+            if not user or not user.get("is_active", True):
+                raise HTTPException(status_code=401, detail="Token inválido ou conta desativada")
+            logger.info(f"[Google OAuth] User resolved via ?token= fallback: {user['id']}")
+            return user
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="Token expirado")
+        except jwt.InvalidTokenError:
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+    raise HTTPException(
+        status_code=401,
+        detail="Autenticação necessária. Envie o token JWT via Authorization header ou query param ?token=...",
+    )
+
+
 @router.get("/login")
 async def google_login(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    token: Optional[str] = Query(None, description="JWT token (fallback when Authorization header is unavailable)"),
     email_address: Optional[str] = None,
 ):
     """
     Gera e devolve o URL de autorização da Google.
+
+    Authentication:
+    - Primary: Authorization: Bearer <jwt> header
+    - Fallback: ?token=<jwt> query parameter (for direct browser navigation)
 
     Query params (opcionais):
     - email_address: se fornecido, usa este email como login_hint (pré-preenche)
@@ -89,6 +139,9 @@ async def google_login(
     Returns:
         JSON com authorization_url e state (para verificação CSRF).
     """
+    # Resolve user — try Bearer header first, then ?token= fallback
+    user = await _resolve_user(request, token=token)
+
     google_cfg = _get_google_config()
 
     try:
@@ -120,7 +173,7 @@ async def google_login(
         await db.oauth_states.insert_one(
             {
                 "state": state_token,
-                "user_id": current_user["id"],
+                "user_id": user["id"],
                 "redirect_uri": redirect_uri,
                 "email_address": email_address,
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -139,7 +192,7 @@ async def google_login(
         )
 
         logger.info(
-            f"[Google OAuth] Login iniciado para user {current_user['id']} "
+            f"[Google OAuth] Login iniciado para user {user['id']} "
             f"(email_hint={email_address or 'auto'})"
         )
 

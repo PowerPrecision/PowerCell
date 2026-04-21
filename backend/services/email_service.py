@@ -914,6 +914,7 @@ async def sync_webmail_emails(
                         "source": "webmail_sync",
                         "in_reply_to": in_reply_to or None,
                         "references": references or [],
+                        "is_general": True,
                     }
                     
                     await db.emails.insert_one(email_doc)

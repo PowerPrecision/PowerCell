@@ -11,6 +11,14 @@
  * - targetUserName: Nome do utilizador alvo (para título em modo admin)
  * - onSuccess: Callback após guardar com sucesso
  * - onCancel: Callback para cancelar/fechar
+ *
+ * GOOGLE OAUTH:
+ * O botão "Ligar Google OAuth" usa um fluxo de dois passos para evitar
+ * o bug de redirecionamento 401:
+ * 1. fetch() com Authorization header → obtém authorization_url do backend
+ * 2. window.open(authorization_url) no popup do Google
+ * Isto é necessário porque o browser NÃO envia o header Authorization
+ * durante window.location.href, causando 401 → redirect para login.
  */
 
 import React, { useState, useEffect } from "react";
@@ -20,7 +28,9 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
 import api from "../services/api";
-import { Mail, Save, RefreshCw, Loader2, Eye, EyeOff, Shield, AlertCircle } from "lucide-react";
+import { Mail, Save, RefreshCw, Loader2, Eye, EyeOff, Shield, AlertCircle, Unlink } from "lucide-react";
+
+const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onCancel }) => {
   const isSelf = mode === "self";
@@ -55,10 +65,31 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   const [testing, setTesting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [googleOAuthConnecting, setGoogleOAuthConnecting] = useState(false);
+  const [googleOAuthConnected, setGoogleOAuthConnected] = useState(false);
 
   // Load existing config
   useEffect(() => {
     loadConfig();
+  }, []);
+
+  // Listen for Google OAuth popup messages (two-step flow)
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data?.type === "google_oauth_success") {
+        toast.success("Google OAuth conectado com sucesso!");
+        setGoogleOAuthConnecting(false);
+        setGoogleOAuthConnected(true);
+        loadConfig();
+        if (onSuccess) onSuccess();
+      }
+      if (event.data?.type === "google_oauth_error") {
+        toast.error(`Autenticação Google cancelada: ${event.data.error}`);
+        setGoogleOAuthConnecting(false);
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, []);
 
   const loadConfig = async () => {
@@ -76,11 +107,87 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
           password: "",  // Never populate password from server
         });
         setWebmailConfigured(true);
+        // Check Google OAuth status
+        if (config.auth_method?.includes("google_oauth") || config.has_google_oauth || config.google_refresh_token) {
+          setGoogleOAuthConnected(true);
+        }
       }
     } catch (error) {
       setWebmailConfigured(false);
     } finally {
       setLoading(false);
+    }
+  };
+
+  /**
+   * Google OAuth — Two-step flow to prevent 401 redirect loop.
+   *
+   * Instead of doing window.location.href = '/api/auth/google/login'
+   * (which loses the Authorization header), we:
+   * 1. Call the endpoint via fetch() with the Bearer token
+   * 2. Get back the authorization_url
+   * 3. Open it in a popup
+   */
+  const handleGoogleOAuthConnect = async () => {
+    setGoogleOAuthConnecting(true);
+    try {
+      // Step 1: fetch the authorization URL (with Bearer token)
+      const token = localStorage.getItem("token");
+      const params = new URLSearchParams();
+      if (emailConfig.email_address) {
+        params.set("email_address", emailConfig.email_address);
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/auth/google/login?${params.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        toast.error(data.detail || "Erro ao iniciar autenticação Google");
+        setGoogleOAuthConnecting(false);
+        return;
+      }
+
+      const data = await response.json();
+
+      // Step 2: Open the Google auth URL in a popup
+      const popup = window.open(
+        data.authorization_url,
+        "google_oauth",
+        "width=600,height=700,left=200,top=100"
+      );
+
+      if (!popup) {
+        toast.error("Popup bloqueado. Permita popups para este site.");
+        setGoogleOAuthConnecting(false);
+        return;
+      }
+
+      // Timeout safety — clear connecting state after 2 minutes
+      setTimeout(() => {
+        setGoogleOAuthConnecting(false);
+      }, 120000);
+    } catch (error) {
+      toast.error("Erro ao iniciar autenticação Google");
+      setGoogleOAuthConnecting(false);
+    }
+  };
+
+  const handleGoogleOAuthDisconnect = async () => {
+    try {
+      await api.delete("/auth/google/disconnect");
+      setGoogleOAuthConnected(false);
+      toast.success("Google OAuth desconectado");
+      loadConfig();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Erro ao desconectar Google OAuth");
     }
   };
 
@@ -195,12 +302,57 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         ) : (
           <Badge variant="secondary">Não configurado</Badge>
         )}
+        {googleOAuthConnected && (
+          <Badge className="bg-blue-600 hover:bg-blue-700 text-white">
+            Google OAuth
+          </Badge>
+        )}
         {webmailConfigured && (
           <span className="text-xs text-muted-foreground">
             Deixe a password em branco para manter a atual
           </span>
         )}
       </div>
+
+      {/* Google OAuth Section */}
+      {isSelf && (
+        <div className="p-4 border rounded-lg bg-muted/30 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-medium">Google OAuth (Gmail)</h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Autenticação via Google para sincronização de emails
+              </p>
+            </div>
+            {googleOAuthConnected ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGoogleOAuthDisconnect}
+                className="gap-2 text-destructive hover:text-destructive"
+              >
+                <Unlink className="h-4 w-4" />
+                Desconectar
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGoogleOAuthConnect}
+                disabled={googleOAuthConnecting}
+                className="gap-2"
+              >
+                {googleOAuthConnecting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Mail className="h-4 w-4" />
+                )}
+                {googleOAuthConnecting ? "A aguardar..." : "Ligar Google OAuth"}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Form Fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
