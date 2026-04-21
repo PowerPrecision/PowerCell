@@ -850,3 +850,22 @@ Stage Summary:
 - Chat badge has proper z-index for visibility
 - Role dropdown no longer shows duplicate "Intermediário de Crédito"
 - Client sort combobox confirmed working (no change needed)
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Implement universal IMAP 2-way sync, global views, team name formatting, notification loop fix, chat badge, client sort, and role cleanup
+
+Work Log:
+- **Fix 1 - IMAP Bidirectional Sync**: Added `_imap_store_flags_sync()` in `email_service.py` — searches by Message-ID header via `UID SEARCH HEADER Message-ID`, then applies `UID STORE +FLAGS` and optionally `EXPUNGE`. Created async wrappers `imap_mark_as_seen()`, `imap_mark_as_unseen()`, `imap_delete_message()`. Added `_get_email_account_for_email()` to resolve EmailAccount from email document fields (global accounts by name, user accounts by decrypting email_config). Modified `emails.py` mark endpoint to call IMAP STORE on read/unread, and delete endpoint to call IMAP STORE +FLAGS \\Deleted + EXPUNGE.
+- **Fix 2 - Global Views**: Verified all three global views already pass `show_all=true` (ClientsPage, ProcessesPage, useKanbanQuery) and backend correctly bypasses user_id filtering when `show_all=True`. No changes needed.
+- **Fix 3 - Team Names in Processes**: Updated `processes.py` to resolve array-based IDs (`assigned_consultor_ids`, `assigned_mediador_ids`) in addition to single IDs. Names from multiple assignees are joined with ", ". Updated `ProcessesPage.js` to display clean fallback text and handle comma-separated names in badges.
+- **Fix 4 - Toast Loop**: Backend: Added `is_notified` field to notification schema in `realtime_notifications.py`, marks `True` after WebSocket emission to prevent re-emission. Frontend: Replaced time-based debounce in `TasksContext.js` with permanent `toastedTaskIdsRef` Set — each task ID is toasted exactly once, with auto-trim at 200 entries.
+- **Fix 5 - Chat Badge + Client Sort**: Verified chat badge has correct `z-10` positioning with no parent overflow clipping. Added `created_at` to client API response (both show_all and non-show_all paths) by including it in MongoDB projection and client map builder. The sort combobox was already wired correctly — the missing `created_at` field was the root cause.
+- **Fix 6 - Role Cleanup**: Removed `mediador` from `additionalRoleOptions` in `UsersManagementPage.js` (it was a legacy alias causing duplicate "Intermediário de Crédito" entries in additional roles checkboxes). Kept `mediador: "Intermediário de Crédito"` in `roleLabels` for backward compatibility with existing users.
+
+Stage Summary:
+- Commit: `9a41f75` — "fix: implement universal IMAP 2-way sync, global views, team name formatting, and fix notification loops"
+- 9 files changed, 398 insertions, 42 deletions
+- Pushed to origin/dev
+
