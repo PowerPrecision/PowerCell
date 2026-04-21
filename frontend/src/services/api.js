@@ -539,6 +539,9 @@ export const updateTask = (id, data) => api.put(`/tasks/${id}`, data);
 export const completeTask = (id) => api.put(`/tasks/${id}/complete`);
 export const reopenTask = (id) => api.put(`/tasks/${id}/reopen`);
 export const deleteTask = (id) => api.delete(`/tasks/${id}`);
+export const getActiveBackgroundTasks = () => api.get("/tasks/active");
+export const acknowledgeBackgroundTask = (taskId) => api.post(`/tasks/${taskId}/acknowledge`);
+export const cancelBackgroundTask = (taskId) => api.delete(`/tasks/${taskId}/cancel`);
 
 // Emails
 export const getProcessEmails = (processId, direction = null) => 

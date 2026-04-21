@@ -167,6 +167,11 @@ const NotificationsDropdown = () => {
         duration: 8000,
         icon: <Bell className="h-4 w-4 text-blue-500" />,
       });
+
+      // Mark as read on backend to prevent re-display on next poll
+      if (notification.id) {
+        markNotificationRead(notification.id).catch(() => {});
+      }
     }, [navigate, playNotificationSound]),
   });
 
@@ -245,6 +250,9 @@ const NotificationsDropdown = () => {
               icon: <UserPlus className="h-4 w-4 text-blue-500" />
             }
           );
+
+          // Mark as read on backend to prevent re-display on next poll
+          markNotificationRead(latestNotification.id).catch(() => {});
         }
       }
       
