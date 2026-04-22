@@ -300,6 +300,7 @@ async def upload_via_temp_link(
     uploaded_files = []
     
     for file in files:
+        filename_safe = file.filename or "unknown_file"
         try:
             # Ler conteúdo
             content = await file.read()
@@ -319,9 +320,9 @@ async def upload_via_temp_link(
                 b"PK\x03\x04": "docx/xlsx/zip",  # Office Open XML / ZIP
                 b"\xD0\xCF\x11\xE0": "doc/xls",  # OLE2 compound
             }
-            ext = (file.filename.rsplit('.', 1)[1] if '.' in file.filename else '').lower()
+            ext = (filename_safe.rsplit('.', 1)[1] if '.' in filename_safe else '').lower()
             if ext not in ALLOWED_EXTENSIONS:
-                uploaded_files.append({"filename": file.filename, "error": f"Tipo de ficheiro não permitido: .{ext}"})
+                uploaded_files.append({"filename": filename_safe, "error": f"Tipo de ficheiro não permitido: .{ext}"})
                 continue
             
             # Verificar magic bytes vs extensão (apenas para tipos suportados)
@@ -335,7 +336,7 @@ async def upload_via_temp_link(
                 elif ext == "png" and not content[:4] == b"\x89PNG":
                     detected_ok = False
                 if not detected_ok:
-                    uploaded_files.append({"filename": file.filename, "error": "Conteúdo do ficheiro não corresponde à extensão"})
+                    uploaded_files.append({"filename": filename_safe, "error": "Conteúdo do ficheiro não corresponde à extensão"})
                     continue
             
             # Determinar categoria (padrão: "Cliente Upload")
@@ -344,9 +345,8 @@ async def upload_via_temp_link(
             # Sanitizar nome
             import re
             import unicodedata
-            filename = file.filename
-            name_part = filename.rsplit('.', 1)[0] if '.' in filename else filename
-            ext = filename.rsplit('.', 1)[1] if '.' in filename else 'pdf'
+            name_part = filename_safe.rsplit('.', 1)[0] if '.' in filename_safe else filename_safe
+            ext = filename_safe.rsplit('.', 1)[1] if '.' in filename_safe else 'pdf'
             
             name_normalized = unicodedata.normalize('NFKD', name_part)
             name_normalized = name_normalized.encode('ASCII', 'ignore').decode('ASCII')
@@ -373,33 +373,47 @@ async def upload_via_temp_link(
             
             if s3_path:
                 uploaded_files.append({
-                    "original_name": file.filename,
+                    "original_name": filename_safe,
                     "normalized_name": normalized_filename,
                     "s3_path": s3_path,
                     "size": len(content),
                     "content_type": file.content_type
                 })
+            else:
+                uploaded_files.append({"filename": filename_safe, "error": "Erro no upload para o storage"})
                 
         except Exception as e:
-            logger.error(f"Erro ao fazer upload de {file.filename}: {e}")
+            logger.error(f"Erro ao fazer upload de {filename_safe}: {e}", exc_info=True)
+            uploaded_files.append({"filename": filename_safe, "error": f"Erro ao processar ficheiro: {str(e)}"})
     
-    if not uploaded_files:
-        raise HTTPException(status_code=500, detail="Nenhum ficheiro foi carregado com sucesso")
+    # Separar ficheiros com sucesso e erros
+    failed_files = [f for f in uploaded_files if "error" in f]
+    success_files = [f for f in uploaded_files if "error" not in f]
     
-    # Marcar link como usado
-    await temp_link_service.use_link(token, uploaded_files)
+    if not success_files:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nenhum ficheiro foi carregado com sucesso. Erros: {', '.join(f.get('error', 'desconhecido') for f in failed_files)}"
+        )
+    
+    # Se todos falharam, já retornamos 400 acima.
+    # Aqui: pelo menos 1 ficheiro com sucesso (ou mixed).
+    
+    # Marcar link como usado (apenas ficheiros com sucesso)
+    await temp_link_service.use_link(token, success_files)
     
     # Adicionar atividade ao processo
     activity = {
         "id": str(uuid.uuid4()),
         "process_id": process_id,
         "type": "document_upload",
-        "comment": f"Cliente carregou {len(uploaded_files)} documento(s) via link temporário",
+        "comment": f"Cliente carregou {len(success_files)} documento(s) via link temporário",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": None,  # Sistema
         "metadata": {
-            "files": [f["original_name"] for f in uploaded_files],
-            "via_temp_link": True
+            "files": [f["original_name"] for f in success_files],
+            "via_temp_link": True,
+            "failed_files": [f["filename"] for f in failed_files] if failed_files else []
         }
     }
     await db.activities.insert_one(activity)
@@ -413,18 +427,22 @@ async def upload_via_temp_link(
                 await notification_service.create_notification(
                     user_id=assigned_consultor_id,
                     title="📤 Documentos Carregados",
-                    message=f"O cliente {client_name} carregou {len(uploaded_files)} documento(s)",
+                    message=f"O cliente {client_name} carregou {len(success_files)} documento(s)",
                     type="document_upload",
                     link=f"/processo/{process_id}"
                 )
             except Exception as e:
                 logger.warning(f"Erro ao notificar consultor: {e}")
     
-    return {
-        "success": True,
-        "message": f"{len(uploaded_files)} ficheiro(s) carregado(s) com sucesso",
-        "files": uploaded_files
+    result = {
+        "success": len(failed_files) == 0,
+        "message": f"{len(success_files)} ficheiro(s) carregado(s) com sucesso" if len(failed_files) == 0 else f"{len(success_files)} de {len(files)} ficheiro(s) carregado(s)",
+        "files": success_files,
     }
+    if failed_files:
+        result["errors"] = failed_files
+    
+    return result
 
 
 @router.get("/public/{token}/download/{file_index}")
