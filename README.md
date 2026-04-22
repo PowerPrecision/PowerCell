@@ -10,10 +10,11 @@ Sistema CRM completo para gestão de processos de crédito imobiliário, cliente
 - **Frontend**: React 19 + Vite + Tailwind CSS 4 + Shadcn UI (New York style)
 - **Base de dados**: MongoDB Atlas
 - **Armazenamento**: AWS S3 (pre-signed URLs)
+- **Armazenamento (Factory)**: AWS S3, Local (filesystem), OneDrive (placeholder) — agnóstico via `storage_service.py`
 - **Cache**: Upstash Redis (REST API, degradação graciosa)
 - **Filas**: ARQ (Redis-based background worker)
 - **IA**: OpenAI GPT-4o + Gemini Flash (análise de documentos)
-- **Email**: SendGrid / Resend (transacional + rascunhos automáticos IA)
+- **Email**: SMTP transacional (SystemConfig) + IMAP sync (per-user + shared Google OAuth)
 - **Monitorização**: Sentry (frontend + backend)
 - **Acessibilidade**: axe-core (testes automáticos em dev)
 - **CI/CD**: GitHub Actions (Node.js 24 + Python 3.11)
@@ -46,6 +47,7 @@ PowerCell/
 │   │   ├── redis_cache.py     # Cache Redis com fallback
 │   │   ├── workflow_engine.py # Motor de regras de automação
 │   │   ├── s3_storage.py      # Pre-signed URLs, organização automática
+│   │   ├── storage_service.py  # Factory Pattern: Local/S3/OneDrive adapters
 │   │   ├── ai_document_analyzer.py  # Análise de documentos com confiança
 │   │   └── ...
 │   ├── models/                # Esquemas Pydantic + modelos de dados
@@ -109,7 +111,7 @@ PowerCell/
 ### Core
 - Gestão de Processos de Crédito (CRUD completo com paginação)
 - Gestão de Clientes e Leads com cursor pagination
-- Upload e Gestão de Documentação (AWS S3 com pre-signed URLs)
+- Upload e Gestão de Documentação (Storage agnóstico: S3 / Local / OneDrive via Factory Pattern)
 - Quadro Kanban com drag-drop (@dnd-kit) e filtros (data, urgência)
 - Dashboard e Estatísticas (com cache Redis)
 - Sistema de Notificações em tempo real (WebSocket + polling fallback)
@@ -158,7 +160,7 @@ PowerCell/
 - **Gestão do Formulário** (`/gestao-formulario`): Ativar/desativar campos, criar campos personalizados, gerir templates
 - **Motor de Automação** (`/automation`): Regras "Se X, Então Y" sem código
 - **Gestão de Estados do Workflow** (`/workflow-estados`): Cores, labels, ordem
-- **Configurações do Sistema** (`/configuracoes`): RGPD, DSTI, emails, backups, notificações
+- **Configurações do Sistema** (`/configuracoes`): RGPD, DSTI, emails, backups, notificações, **Integrações (SMTP Sistema, Storage Provider, Webmail Partilhado)**
 
 ### RGPD
 - **Página pública de consentimento** (`/rgpd/:token`): Assinatura digital do cliente
@@ -184,12 +186,16 @@ PowerCell/
 - **Disponível via API** e **CLI standalone** com suporte a `PROD_MONGO_URL`, `PROD_DB_NAME`, `DEV_MONGO_URL`, `DEV_DB_NAME`
 
 ### Webmail (Email IMAP)
-- **Sincronização automática**: Worker sincroniza emails via IMAP a cada 15 minutos
+- **Sincronização automática**: Background job sincroniza emails via IMAP (30 dias)
 - **Sincronização manual**: Botão "Sincronizar" no WebmailPage para trigger imediato
-- **Múltiplas caixas de email**: Suporte a Precision Crédito e Power Real Estate (IMAP separado)
-- **Envio de emails B2B**: Envio de documentação para bancos com editor de texto rico
+- **Múltiplas contas**: Suporte a Precision Crédito e Power Real Estate (IMAP separado)
+- **Per-user personal config**: Cada utilizador configura o seu IMAP/SMTP em Perfil > Config Webmail
+- **Shared role accounts**: Indexação/Suporte usam conta partilhada global (Google OAuth ou IMAP)
+- **System SMTP (Bloco A)**: Emails transacionais do sistema (documentação, alertas) via SMTP global configurado pelo Admin
+- **Smart Threading**: Threading automático por In-Reply-To/References + tag `[Proc-{id}]` no assunto
+- **Envio de emails B2B**: Envio de documentação para bancos com editor rich text (WYSIWYG)
 - **Rascunhos automáticos IA**: Geração automática de emails quando faltam documentos
-- **Upload e anexação**: Anexação automática de documentos aos emails
+- **Factory Pattern Storage**: `storage_service.py` com adapters para S3, Local e OneDrive
 
 ### Documentos
 - **Explorador S3**: Vista lista/grelha, preview lateral, renomear, mover
@@ -308,6 +314,36 @@ O histórico de processos NÃO é guardado em arrays embebidos no documento prin
 - I/O otimizado (sem reescrever documento inteiro)
 - Queries instantâneas via índice `process_id + created_at`
 - Memory bloat eliminado nas listagens
+
+### Arquitetura Agnóstica de Provedores
+
+O sistema é totalmente independente de provedores de serviços:
+
+```mermaid
+flowchart TD
+    Route["Rota da API<br/>(upload/download)"] --> StorageSvc["storage_service.py<br/>(Factory)"]
+    StorageSvc --> Config["Lê provider de<br/>system_settings"]
+    Config -->|aws_s3| S3["S3StorageAdapter<br/>(wraps S3Service)"]
+    Config -->|local| Local["LocalStorageAdapter<br/>(/tmp/powercell_uploads)"]
+    Config -->|onedrive| OD["OneDriveAdapter<br/>(placeholder)"]
+    S3 --> S3API["AWS S3 / R2 / MinIO"]
+    Local --> FS["Filesystem"]
+    
+    subgraph BlocoA["Bloco A: SMTP Sistema"]
+        EmailRoute["send_email(force_system=True)"] --> SysSMTP["SystemSMTPConfig<br/>(system_settings)"]
+        SysSMTP --> SMTP["SMTP Server<br/>(noreply@empresa.pt)"]
+    end
+    
+    subgraph BlocoC["Bloco C: Webmail Partilhado"]
+        SyncRoute["sync_shared_role_emails()"] --> SharedCfg["shared_role_email_configs<br/>ou system_webmail fallback"]
+        SharedCfg --> IMAP["IMAP Server<br/>(indexacao@empresa.pt)"]
+    end
+```
+
+**Configuração no Admin** (Definições > Integrações):
+- **Bloco A**: SMTP Host, Port, Username, Password, From Email, TLS
+- **Bloco B**: Provider (Local/S3/OneDrive) + credenciais condicionais
+- **Bloco C**: IMAP Host, Port, Email/User, App Password
 
 ### Observabilidade
 - Sentry SDK (frontend + backend) para monitorização de erros

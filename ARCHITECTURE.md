@@ -77,6 +77,10 @@ graph TB
             OrganizerSvc["Document Organizer<br/>(Categorização automática)"]
             EmailB2BSvc["EmailB2BService<br/>(Enviar p/ Balcões)"]
             AnnotationSvc["AnnotationService<br/>(5 tipos de anotação)"]
+            StorageFactory["StorageService<br/>(Factory: Local/S3/OneDrive)"]
+            SystemSMTPSvc["SystemSMTPConfig<br/>(Bloco A - Email Transacional)"]
+            SystemWebmail["SystemWebmailConfig<br/>(Bloco C - Webmail Partilhado)"]
+            SharedEmailSync["SharedEmailSync<br/>(Role-based IMAP Sync)"]
         end
 
         subgraph Middleware_Backend["Middleware"]
@@ -90,7 +94,7 @@ graph TB
         Redis[("Redis (Upstash) - Cache + Task Queue")]
         S3[("AWS S3 - Armazenamento")]
         Sentry["Sentry<br/>(Observabilidade)"]
-        SendGrid["SendGrid/Resend<br/>(Email Transacional)"]
+        SystemSMTP["System SMTP<br/>(Email Transacional via Bloco A)"]
         OpenAI["OpenAI GPT-4o<br/>(Análise de Documentos)"]
         Gemini["Gemini Flash<br/>(Análise de Documentos)"]
         TrelloAPI["Trello API<br/>(Integração)"]
@@ -514,6 +518,10 @@ erDiagram
 | **Fail-Safe Swap** | `restore_dev_from_backup.py` — BD de Dev não é modificada se o backup estiver corrompido |
 | **Temporary Collection** | `_restore_temp_*` — coleções temporárias para migração atómica de dados |
 | **RGPD Sanitization Pipeline** | `sync_prod_to_dev.py`, `restore_dev_from_backup.py` — anonimização determinística de PII (nome, NIF, email, telefone, IBAN) |
+| **Factory (Storage)** | `storage_service.py` — `get_storage_adapter()` retorna adapter correto (Local, S3, OneDrive) baseado em `system_settings.storage.provider` |
+| **Strategy (Email)** | `send_email(force_system=True)` — tenta contas nomeadas, depois SystemSMTP (Bloco A), depois erro |
+| **Fallback Chain (Webmail)** | `sync_shared_role_emails()` — tenta `shared_role_email_configs`, depois `system_webmail` (Bloco C), depois erro |
+| **Provider-Agnostic** | Storage, Email, Webmail configuráveis via Admin Settings sem alteração de código |
 
 ---
 
@@ -691,6 +699,44 @@ sequenceDiagram
 |-------|--------------------------|---------------|
 | Precision Crédito | `PRECISION_EMAIL`, `PRECISION_PASSWORD`, `PRECISION_IMAP_SERVER/PORT` | `mail.precisioncredito.pt:993` |
 | Power Real Estate | `POWER_EMAIL`, `POWER_PASSWORD`, `POWER_IMAP_SERVER/PORT` | `webmail2.hcpro.pt:993` |
+
+**Email Transacional do Sistema (Bloco A):**
+
+Quando `send_email(force_system=True)` é chamado (ex: envio de documentação para bancos):
+
+```mermaid
+flowchart TD
+    Route["send_email(force_system=True)"] --> TryNamed["Tentar conta nomeada<br/>(power/precision)"]
+    TryNamed -->|Encontrada| UseNamed["Usar conta existente"]
+    TryNamed -->|Não encontrada| TrySystemSMTP["Ler SystemSMTPConfig<br/>(system_settings)"]
+    TrySystemSMTP -->|Configurado| UseSystemSMTP["Usar Bloco A<br/>(noreply@empresa.pt)"]
+    TrySystemSMTP -->|Não configurado| Error["Erro: SMTP não configurado"]
+```
+
+**Webmail Partilhado por Role (Bloco C):**
+
+```mermaid
+flowchart TD
+    Sync["sync_shared_role_emails(indexacao)"] --> TryShared["Tentar shared_role_email_configs<br/>(coleção MongoDB)"]
+    TryShared -->|Encontrada| UseShared["Usar credenciais<br/>partilhadas + Google OAuth"]
+    TryShared -->|Não encontrada| TrySystemWebmail["Ler SystemWebmailConfig<br/>(system_settings)"]
+    TrySystemWebmail -->|Configurado| UseSystemWM["Usar Bloco C<br/>(IMAP partilhado)"]
+    TrySystemWebmail -->|Não configurado| Error["Erro: Email partilhado<br/>não configurado"]
+```
+
+**Storage Factory Pattern:**
+
+```mermaid
+flowchart TD
+    API["Rota API<br/>(upload/download)"] --> Factory["get_storage_adapter()"]
+    Factory --> ReadConfig["Ler system_settings<br/>.storage.provider"]
+    ReadConfig -->|aws_s3| S3["S3StorageAdapter"]
+    ReadConfig -->|local| Local["LocalStorageAdapter"]
+    ReadConfig -->|onedrive| OneDrive["OneDriveAdapter<br/>(placeholder)"]
+    ReadConfig|unknown| LocalFallback["LocalAdapter<br/>(fallback)"]
+    S3 --> S3Client["AWS S3 Client"]
+    Local --> FileSystem["/tmp/powercell_uploads"]
+```
 
 ---
 

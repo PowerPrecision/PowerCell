@@ -3,6 +3,177 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-04-22] - Arquitetura Agnóstica de Provedores e Correções de UI
+
+### Adicionado
+- **Arquitetura Agnóstica de Provedores** (`1dd33f6`): Sistema totalmente independente de provedores:
+  - **SystemSMTPConfig (Bloco A)**: Configuração SMTP transacional global para emails do sistema (documentação, convites, alertas) — nunca usa credenciais pessoais
+  - **SystemWebmailConfig (Bloco C)**: Conta IMAP partilhada para sincronização de email do departamento de indexação
+  - **storage_service.py**: Factory Pattern com `StorageAdapter` ABC, `LocalStorageAdapter`, `S3StorageAdapter`, `OneDriveAdapter` (placeholder) — `get_storage_adapter()` lê provider de `system_settings`
+  - **Painel de Integrações** no SystemConfigPage: Novo tab com 3 formulários (SMTP Sistema, Storage Provider, Webmail Partilhado)
+
+### Corrigido
+- **Form field sorting** (`9289f3f`): `PublicClientForm.js` e `FormManagementPage.js` agora usam `order_index ?? order ?? 0` antes de `.map()` para respeitar ordem DnD
+- **ClientsPage combobox** (`9289f3f`): Adicionada opção "Última Atualização" (updated_at_desc) ao Select de ordenação
+- **Indexacao webmail bypass** (`9289f3f`):
+  - `routes/emails.py`: `/webmail/sync-user` faz fallback para `system_webmail` (Bloco C) quando `shared_role_email_configs` não existe
+  - `email_service.py`: `sync_all_user_emails()` exclui indexacao/suporte do sync pessoal e adiciona `sync_shared_role_emails()` com fallback
+- **CI: `_save_email_to_db` undefined** (`2e4eb44`): Substituídas 2 chamadas à função inexistente por lógica inline completa (dedup, smart threading, tag parsing, insert) no sync de webmail partilhado
+- **CI: package-lock.json** (`e2ff165`): Regenerado lock file para sincronizar com `package.json` (dnd-kit + outras deps)
+
+## [2026-04-22] - Correções de Badges, Parceiros, Search e Formulário
+
+### Corrigido
+- **Header badges** (`9ea2bc1`): Chat badge faz re-fetch ao fechar (não ao abrir), elimina flicker. Notificações usa `count_documents()` para count >100. Chat badge skip polling para parceiro
+- **Parceiro role restrictions** (`9ea2bc1`, `bef386f`):
+  - Frontend: hide Chat/Tasks/Notifications para parceiro
+  - Backend: `is_staff()` usa `STAFF_ROLES` em vez de `!= CLIENTE` (parceiro passava em 15+ endpoints)
+  - Backend: `_block_parceiro()` em todos os endpoints de chat e tasks (leitura + escrita)
+- **Search indexation bidirecional** (`bef386f`): Client → Process propaga email/phone com `email_hash`, Process → Client regenera hash
+- **Public form ordering** (`9ea2bc1`): Campos ordenados por `.sort((a, b) => (a.order || 0) - (b.order || 0))`
+- **Temp-links upload** (`9a65467`): Erro 500 → 400 com per-file error reporting
+- **Finance 403** (`9a65467`, `bef386f`): Adicionado `INDEXACAO` a `FINANCE_READ_ROLES`
+- **Drag & Drop form fields** (`b4f6e8b`): Integração @dnd-kit para reordenação de campos no FormManagementPage
+
+## [2026-04-21] - Webmail Universal, Dashboards e Notificações
+
+### Adicionado
+- **Webmail universal IMAP 2-way sync** (`9a41f75`): Sync bidirecional para qualquer conta IMAP, views globais, formatação de equipa
+- **Notificação toast deduplication** (`1e4a0ef`): Badge unread messages + eliminação de loops de toast
+- **Context Switcher** (`a3df182`, `b584925`): Multi-role switching para utilizadores com dupla função
+- **Dashboard cards clicáveis** (`214277c`): Todos os 4 dashboards (Admin, Staff, Consultor, Mediador) com `cursor-pointer`, `hover:shadow-md` e `onClick={() => navigate(...)}`
+- **File Explorer** (`5abead7`): UI completa de exploração de ficheiros conectada às APIs de storage
+- **Google OAuth 2.0** (`0f95b29`, `72488b2`): Fluxo OAuth completo para conta partilhada de indexação via Gmail API
+
+### Corrigido
+- **Notificação loops** (`f4d553f`, `b6e1c8f`): Eliminados loops infinitos de toast e polling de notificações
+- **Email isolation** (`a075253`): Removido sync global 'geral', enforced user_id filtering
+- **Client sort** (`3287a91`): Corrigida lógica de ordenação na lista de clientes
+
+## [2026-04-20] - UX, Permissões e Estabilidade
+
+### Adicionado
+- **Email template preview** (`bab14f5`): Pré-visualização de templates de email + company email config UI
+- **Cascade soft delete** (`bab14f5`): Regras de eliminação em cascata para processos
+- **SmartRichEditor** (`2c85c79`): Componente abstrato para simplificar complexidade HTML para não-admins
+- **AI Executive Summary** (`b051c2f`): Resumo executivo IA com auditoria cross-reference entre formulário e documentos
+- **Credit cards editáveis** (`c888b61`, `85a40c2`): Créditos Ativos e Simulações editáveis inline
+- **Data sanitization pipeline** (`a794ae0`): Pipeline Prod→Dev com anonimização completa de PII
+
+### Corrigido
+- **OAuth redirect 401 loop** (`23c3e93`): Corrigido loop infinito no redirect OAuth
+- **Webmail database querying** (`23c3e93`): Fix de queries IMAP pessoal e geral
+- **Chart -1 dimension errors** (`65515db`, `4150cd8`, `ab7c8f5`): Proteção contra dimensões -1 em Recharts
+- **Multiple JSX/build fixes** (`ac47811`, `7f2e380`, `92d983f`): Comentários JSX não fechados, imports em falta, literais `\n`
+- **Router mismatches** (`9b1fed5`, `f0bb046`): Corrigidas rotas, links da sidebar e permissões
+- **Importações duplicadas** (`f4433df`): Removido import duplicado Plus e Trash2
+
+## [2026-04-19] - Webmail, Permissões e Financeiro
+
+### Adicionado
+- **Webmail tabbed interface** (`673e6d0`): Separação entre inbox pessoal e geral por role
+- **Strict user isolation** (`c5b73ad`): Isolamento completo de emails por utilizador
+- **Manual process association** (`c5b73ad`): UI para associação manual de emails a processos
+- **Financeiro restrito** (`be76d5c`): Financeiro acessível apenas a Admin/CEO
+
+### Corrigido
+- **Google OAuth redirect_uri** (`28f11f5`): URL de redirect corrigida para shared email
+- **IMAP connection errors** (`1eee03b`): Erros propagados ao utilizador em vez de silencioso sucesso
+- **Smart threading** (`a819d23`): Threading por In-Reply-To/References + tag `[Proc-{id}]` no assunto
+
+## [2026-04-18] - Filtros, Rotas e Segurança
+
+### Corrigido
+- **Filters/sort** (`1000728`, `436cef9`): Botões de filtro e ordenação corrigidos em clientes e processos
+- **Missing route** (`9c38a1a`): Adicionado alias `/lista-processos` à sidebar
+- **Google OAuth 500** (`265c934`, `5fd3704`): Corrigidos erros no login e callback OAuth
+
+## [2026-04-17] - Grande Sprint de Funcionalidades
+
+### Adicionado
+- **Smart email threading** (`a819d23`): Thread por In-Reply-To/References + tags `[Proc-{id}]`
+- **Custom email folders** (`5740800`): Sistema de pastas personalizadas (backend + frontend)
+- **Webmail Pro** (`80601e9`): Labels, S3 attachments, multi-select, drag-and-drop
+- **Multi-role context switching** (`a3df182`): Troca de contexto para utilizadores com múltiplos roles
+- **Settings inheritance** (`f553c23`): Herança de IMAP/SMTP do admin para utilizadores, bloqueado para indexacao
+- **AI Summary** (`b051c2f`): Resumo executivo com auditoria
+- **Field editing** (`85a40c2`): Créditos Ativos e Simulações editáveis inline
+- **Team mural likes** (`d65c5b7`): Likes e receipts no mural de equipa
+- **General info board** (`54809e5`): Quadro informativo para todos os utilizadores
+- **RGPD encryption** (`efb6e4b`, `2826cdd`): Encriptação Fernet + Blind Indexing para clientes
+- **Pipeline restauro seguro** (`ad53622`, `a794ae0`): S3 → Dev com sanitização RGPD
+- **Dedicated Collection Pattern** (`d8f6355`): Histórico em coleção separada (evita 16MB)
+- **Performance optimization** (`4c5425d`): Endpoints de listagem otimizados
+- **IDOR protection** (`8efa4b8`): Proteção em endpoint de AI suggestions
+- **Blind indexes** (`3f7b681`): Índices MongoDB para hashes de email, NIF, telefone
+
+### Corrigido
+- **Login SHA-256** (`bed2397`, `4693030`): Login aceita SHA-256 + auto-migração para bcrypt
+- **Password defaults** (`bcb9161`, `ef6e4fb`): Password default e fix-passwords endpoints
+- **MongoDB projection error** (`fe0f8fb`): Corrigido mix de exclusão/inclusão
+- **Kanban filters** (`fae6a52`): Filtros do Kanban agora atualizam corretamente
+- **Sidebar menus** (`34ba0d7`, `d10d79d`): Menus reestruturados por role
+- **20+ JSX/build fixes**: Comentários JSX, imports React, literais template, erros Vercel
+
+## [2026-04-14] - CI/CD, Documentação e Resiliência
+
+### Adicionado
+- **CI/CD Pipeline** (`05bb918`): GitHub Actions com frontend CI (ESLint + Vite build) e backend CI (Flake8 + Pytest)
+- **Documentation** (`75acd7e`, `31d629e`, `fb9bbc8`, `4e33ebc`): JSDoc (pt-PT) em componentes, docstrings Google-style em serviços e rotas
+- **429 Retry** (`800a5a6`): Exponential backoff (3 tentativas) + jitter
+- **Chunk Error Recovery** (`dbfab8a`): LazyChunkErrorBoundary para stale deployments
+- **ARQ Worker** (`6d51c43`): Motor de tarefas assíncronas com centro de operações
+- **TanStack Query** (`2a4b6b0`): Migração de estado para TanStack Query v5
+- **Direct S3 Upload** (`ad0f30f`): Pre-signed URLs para upload directo ao S3
+- **Diagnostics page** (`8c017ec`): Página de diagnóstico do sistema
+- **Security headers** (`1be514e`): HSTS, CSP, X-Frame-Options no Vercel
+- **Function Calling IA** (`fe43e83`): Migração de JSON prompting para OpenAI Function Calling
+
+### Corrigido
+- **Test async loop** (`f84765d`, `176ee0e`): Resolvido Future attached to different loop
+- **Node.js 24 CI** (`6c6cb65`, `eec4587`): Re-habilitado com ghost submodule removido
+- **pytest compatibility** (`c45f09d`): Pin pytest==8.3.5 para resolver conflito com pytest-asyncio
+- **React 19 compatibility** (`875098e`, `c3d4bf0`): react-day-picker upgrade, date-fns downgrade
+
+## [2026-04-13] - Webmail Avançado
+
+### Adicionado
+- **Webmail 3 colunas** (`fcb858b`): Interface estilo Outlook com compositor de emails
+- **Email sync background** (`fab2ef9`, `041799b`): Sync via POST + ARQ worker em background
+- **S3 attachments** (`80601e9`): Anexos de emails guardados no S3
+- **Smart threading** (`a819d23`): Threading por In-Reply-To + tag `[Proc-{id}]`
+- **IMAP fetch fixes** (`8bef4b2`, `581feea`, `83f104d`): 5+ correções em fetch response format e login credentials
+
+## [2026-04-12] - Gestão de Processos e IA
+
+### Adicionado
+- **Smart process creation** (`c226fdf`): Pesquisa inteligente de clientes com deduplicação
+- **AI Executive Summary** (`b051c2f`): Resumo executivo com cross-reference audit
+- **AI Confidence scoring** (vários): Score 0.0-1.0 por campo, alertas visuais
+
+### Corrigido
+- **Workflow states** (`350b24f`): Removido nomes internos dos estados da UI
+- **Sidebar Novo Processo** (`95da0ee`, `a90e92f`): Removido botão (processos criados via Kanban/Client)
+- **AI suggestions endpoint** (`ea57bd0`): Corrigido receive body correctly
+- **Import decrypt** (`e4d5979`): Corrigido import de decrypt_client_data
+
+## [2026-04-11] - Plataforma Estável
+
+### Adicionado
+- **CI Pipeline** (`05bb918`): GitHub Actions completo
+- **Dashboard reestruturado** (`ec4c8f6`): KPI cards, funnel, feed atividade
+- **WebSocket singleton** (`c70419a`): Uma ligação partilhada entre componentes
+- **Real-time Kanban** (`54e9d31`): Colaboração multiplayer em tempo real
+- **Client Portal** (`4eccc0b`): Magic Link passwordless
+- **CDC Audit** (`4b4e906`): Change Data Capture com Ghost Mode para indexacao
+- **Surgical cache invalidation** (`df38ac2`): Invalidação precisa de cache TanStack Query
+
+### Corrigido
+- **React Error #300** (`9007efe`): Infinite re-render loops resolvidos
+- **Multiple build/test fixes** (20+ commits): JSX, imports, projections, async loops
+- **Kanban board modularity** (`0b758a1`): Refatorado de monolito para componentes SRP
+- **Performance** (`98ae95d`): Resolvido Unbounded Arrays & I/O Degradation
+
 ## [2025-06-27] - Correções de Build e Resiliência (Vercel + Rate Limiting)
 
 ### Corrigido
