@@ -131,6 +131,7 @@ const TempLinkButton = ({ processId, clientName, clientEmail }) => {
       formData.append("max_uses", parseInt(maxUses));
       formData.append("description", description);
       formData.append("notify_email", notifyEmail);
+      formData.append("base_url", window.location.origin);
       
       if (linkType === "download" && selectedFiles.length > 0) {
         formData.append("file_paths", selectedFiles.join(","));
@@ -152,21 +153,22 @@ const TempLinkButton = ({ processId, clientName, clientEmail }) => {
       
       const linkData = await response.json();
       
+      // Construir URL com o domínio atual (não o do backend que pode estar errado)
+      const token = linkData.token;
+      const path = linkData.link_type === "upload" ? "upload" : "download";
+      const correctUrl = `${window.location.origin}/${path}/${token}`;
+      
       // Copiar URL para a área de transferência
-      if (linkData.url) {
-        try {
-          await navigator.clipboard.writeText(linkData.url);
-          toast.success(
-            linkType === "upload"
-              ? "Link de upload criado e copiado! O cliente receberá um email."
-              : "Link de download criado e copiado! O cliente receberá um email."
-          );
-        } catch {
-          toast.success("Link criado com sucesso!");
-          toast.info(`URL: ${linkData.url}`, { duration: 8000 });
-        }
-      } else {
+      try {
+        await navigator.clipboard.writeText(correctUrl);
+        toast.success(
+          linkType === "upload"
+            ? "Link de upload criado e copiado! O cliente receberá um email."
+            : "Link de download criado e copiado! O cliente receberá um email."
+        );
+      } catch {
         toast.success("Link criado com sucesso!");
+        toast.info(`URL: ${correctUrl}`, { duration: 8000 });
       }
       
       setShowDialog(false);

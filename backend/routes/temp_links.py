@@ -43,6 +43,7 @@ async def create_temp_link(
     description: Optional[str] = Form(default=None),
     file_paths: Optional[str] = Form(default=None),  # JSON string ou comma-separated
     notify_email: bool = Form(default=True),
+    base_url: Optional[str] = Form(default=None),  # URL do frontend (para construir links corretos)
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR]))
 ):
     """
@@ -122,7 +123,8 @@ async def create_temp_link(
             max_uses=max_uses,
             description=description,
             file_paths=files_list,
-            notify_email=notify_email
+            notify_email=notify_email,
+            base_url=base_url
         )
         
         logger.info(f"Link temporário criado com sucesso: {link.id}")

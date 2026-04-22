@@ -59,7 +59,8 @@ class TempLinkService:
         max_uses: int = 1,
         description: str = None,
         file_paths: List[str] = None,
-        notify_email: bool = True
+        notify_email: bool = True,
+        base_url: str = None
     ) -> TempLinkResponse:
         """
         Cria um novo link temporário.
@@ -125,13 +126,15 @@ class TempLinkService:
         # Guardar na base de dados
         await db.temp_links.insert_one(link_doc)
 
-        # Construir URL - usar variável de ambiente ou URL de produção
+        # Construir URL - usar base_url fornecido pelo frontend, env var, ou URL de produção
         import os
-        base_url = os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
+        effective_base_url = base_url or os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
+        # Remover trailing slash se existir
+        effective_base_url = effective_base_url.rstrip("/")
         if link_type == TempLinkType.UPLOAD:
-            url = f"{base_url}/upload/{token}"
+            url = f"{effective_base_url}/upload/{token}"
         else:
-            url = f"{base_url}/download/{token}"
+            url = f"{effective_base_url}/download/{token}"
 
         # Enviar email se solicitado
         if notify_email and client_email:

@@ -171,6 +171,7 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
       formData.append("max_uses", parseInt(maxUses));
       formData.append("description", description);
       formData.append("notify_email", notifyEmail);
+      formData.append("base_url", window.location.origin);
       
       // Adicionar ficheiros selecionados para download
       if (linkType === "download" && selectedFiles.length > 0) {
@@ -193,25 +194,22 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
       
       const linkData = await response.json();
       
+      // Construir URL com o domínio atual (não o do backend que pode estar errado)
+      const token = linkData.token;
+      const path = linkData.link_type === "upload" ? "upload" : "download";
+      const correctUrl = `${window.location.origin}/${path}/${token}`;
+      
       // Copiar URL para a área de transferência
-      if (linkData.url) {
-        try {
-          await navigator.clipboard.writeText(linkData.url);
-          toast.success(
-            linkType === "upload"
-              ? "Link de upload criado e copiado!"
-              : "Link de download criado e copiado!"
-          );
-        } catch {
-          toast.success("Link criado com sucesso!");
-          toast.info(`URL: ${linkData.url}`, { duration: 8000 });
-        }
-      } else {
+      try {
+        await navigator.clipboard.writeText(correctUrl);
         toast.success(
           linkType === "upload"
-            ? "Link de upload criado!"
-            : "Link de download criado!"
+            ? "Link de upload criado e copiado!"
+            : "Link de download criado e copiado!"
         );
+      } catch {
+        toast.success("Link criado com sucesso!");
+        toast.info(`URL: ${correctUrl}`, { duration: 8000 });
       }
       
       setShowCreateDialog(false);
@@ -224,9 +222,12 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
     }
   };
 
-  const handleCopyLink = async (url) => {
+  const handleCopyLink = async (url, token, linkType) => {
+    // Construir URL com o domínio atual em vez da URL do backend
+    const path = linkType === "upload" ? "upload" : "download";
+    const correctUrl = `${window.location.origin}/${path}/${token}`;
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(correctUrl);
       toast.success("Link copiado para a área de transferência!");
     } catch {
       toast.error("Não foi possível copiar o link");
@@ -387,7 +388,7 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleCopyLink(link.url)}
+                        onClick={() => handleCopyLink(link.url, link.token, link.link_type)}
                         title="Copiar link"
                       >
                         <Copy className="h-4 w-4" />
@@ -395,7 +396,7 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => window.open(link.url, "_blank")}
+                        onClick={() => window.open(`${window.location.origin}/${link.link_type}/${link.token}`, "_blank")}
                         title="Abrir link"
                       >
                         <ExternalLink className="h-4 w-4" />
