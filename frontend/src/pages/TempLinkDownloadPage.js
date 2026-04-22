@@ -97,35 +97,51 @@ const TempLinkDownloadPage = () => {
   const handleDownloadAll = async () => {
     setDownloadingIndex(-1); // -1 = batch in progress
     try {
-      // Usar endpoint batch: consome apenas 1 utilização para TODOS os ficheiros
+      // O backend retorna um ZIP com todos os ficheiros
       const response = await fetch(
         `${API_URL}/api/temp-links/public/${token}/download-all`
       );
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Erro ao descarregar ficheiros");
+        // Tentar parsear erro como JSON, fallback para texto
+        let errorMsg = "Erro ao descarregar ficheiros";
+        try {
+          const error = await response.json();
+          errorMsg = error.detail || errorMsg;
+        } catch {
+          errorMsg = await response.text() || errorMsg;
+        }
+        throw new Error(errorMsg);
       }
 
-      const data = await response.json();
-
-      if (data.files && data.files.length > 0) {
-        // Usar <a> tags com click programático em vez de window.open
-        // para evitar bloqueadores de popups do browser
-        data.files.forEach((file) => {
-          const a = document.createElement('a');
-          a.href = file.url;
-          a.download = file.filename || '';
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          // Remover após breve delay para garantir que o download inicia
-          setTimeout(() => document.body.removeChild(a), 100);
-        });
-        toast.success(`${data.files.length} download(s) iniciado(s)!`);
+      // Obter o nome do ficheiro do header Content-Disposition
+      const disposition = response.headers.get('Content-Disposition');
+      let zipName = 'documentos.zip';
+      if (disposition) {
+        const match = disposition.match(/filename[^;=\n]*=(['"]?)([^'";\n]*)\1/);
+        if (match && match[2]) {
+          zipName = match[2];
+        }
       }
+
+      // Receber o ZIP como blob e iniciar download
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = zipName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+
+      // Cleanup
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      }, 250);
+
+      toast.success(`${files.length} ficheiro(s) descarregado(s) como ZIP!`);
     } catch (err) {
       toast.error(err.message || "Erro ao descarregar ficheiros");
     } finally {
