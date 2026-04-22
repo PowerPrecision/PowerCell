@@ -182,25 +182,24 @@ const NotificationsDropdown = () => {
         }
       }
 
-      // Mark as read on backend to prevent re-display on next poll
-      if (notification.id) {
-        markNotificationRead(notification.id).catch(() => {});
-      }
+      // NOTA: Não marcamos a notificação como lida aqui.
+      // O badge permanece visível até o utilizador clicar na notificação
+      // ou abrir o dropdown. Marcar como lido imediatamente fazia
+      // o poll seguinte sobrescrever a contagem para um valor menor.
     }, [navigate, playNotificationSound]),
   });
 
   // ====================================================================
   // WEBSOCKET — Chat message notifications
-  // Listen for new_chat_message events and show a passive toast + increment counter
+  // Mostra toast para novas mensagens de chat.
+  // NOTA: NÃO incrementamos o badge de notificações (sino) aqui —
+  // mensagens de chat têm o seu próprio badge no ícone de chat.
+  // O DashboardLayout gerencia o badge de chat via useWebSocket.
   // ====================================================================
   useWebSocket({
     autoConnect: true,
     onChatMessage: useCallback((chatData) => {
       if (!chatData) return;
-
-      // Increment unread counter
-      setUnreadCount(prev => prev + 1);
-      previousUnreadCount.current += 1;
 
       // Show passive toast for new chat messages
       // --- Deduplicação: não mostrar toast se já foi exibido ---

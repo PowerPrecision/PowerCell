@@ -171,8 +171,11 @@ async def global_search(
             if email_hash:
                 process_search_conditions.append({"personal_data.email_hash": email_hash})
             process_search_conditions.append({"personal_data.email": simple_regex})
+            # Também pesquisar no campo client_email (nível raiz)
+            process_search_conditions.append({"client_email": simple_regex})
         else:
             process_search_conditions.append({"personal_data.email": simple_regex})
+            process_search_conditions.append({"client_email": simple_regex})
         
         process_query = {"$or": process_search_conditions}
         

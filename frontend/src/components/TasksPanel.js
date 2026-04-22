@@ -41,6 +41,10 @@ import { toast } from "sonner";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
+
+// Utilizador parceiro: apenas visualização
+const isParceiro = (user) => user?.role === "parceiro";
 
 const TasksPanel = ({ 
   processId = null, 
@@ -50,6 +54,7 @@ const TasksPanel = ({
   maxHeight = "400px",
   showOnlyMyTasks = false  // Novo: mostrar apenas tarefas atribuídas ao utilizador atual
 }) => {
+  const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [backgroundJobs, setBackgroundJobs] = useState([]);
   const [users, setUsers] = useState([]);
@@ -435,7 +440,7 @@ const TasksPanel = ({
                 </CardDescription>
               )}
             </div>
-            {showCreateButton && (
+            {showCreateButton && !isParceiro(user) && (
               <Button 
                 size="sm" 
                 onClick={openCreateDialog}
@@ -475,6 +480,13 @@ const TasksPanel = ({
               </div>
             )}
           </div>
+
+          {/* Parceiro: mensagem de apenas visualização */}
+          {isParceiro(user) && (
+            <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-700 dark:text-amber-400 text-xs sm:text-sm">
+              Apenas visualização disponível para parceiros. Não é possível criar tarefas.
+            </div>
+          )}
 
           {/* Lista de tarefas */}
           {tasks.length === 0 && backgroundJobs.length === 0 ? (

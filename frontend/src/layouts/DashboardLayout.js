@@ -72,6 +72,7 @@ import GlobalSearchModal from "../components/GlobalSearchModal";
 import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
+import { useWebSocket } from "../hooks/useWebSocket";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -155,6 +156,17 @@ const DashboardLayout = ({ children, title }) => {
       chatUnreadRef.current = 0;
     }
   }, [chatOpen]);
+
+  // --- WebSocket: incrementar badge de chat em tempo real ---
+  useWebSocket({
+    autoConnect: true,
+    onChatMessage: useCallback((chatData) => {
+      if (!chatData) return;
+      // Incrementar badge de chat quando uma nova mensagem é recebida
+      chatUnreadRef.current += 1;
+      setChatUnreadCount(prev => prev + 1);
+    }, []),
+  });
   
   // Determinar quais secções devem estar abertas baseado na rota actual
   const getInitialOpenSections = () => {

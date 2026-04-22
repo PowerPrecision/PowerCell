@@ -19,7 +19,7 @@ from typing import Optional, Dict, Any, Tuple
 
 from database import db
 from models.process import ProcessCreate, ProcessUpdate
-from services.encryption import encryption_service
+from services.encryption import encryption_service, generate_nif_hash, generate_email_hash, generate_telefone_hash
 
 logger = logging.getLogger(__name__)
 
@@ -424,6 +424,41 @@ async def get_user_name(user_id: str) -> str:
 
 # ==== FUNÇÕES DE ENCRIPTAÇÃO ====
 
+def _add_process_blind_indexes(data: dict) -> None:
+    """
+    Adiciona blind indexes ao documento do processo (modifica in-place).
+    
+    Gera SEMPRE (não apenas se ausente) para garantir que actualizações
+    a email/NIF/telefone são refletidas imediatamente na pesquisa.
+    
+    Gera:
+    - personal_data.nif_hash
+    - personal_data.email_hash
+    - personal_data.telefone_hash
+    """
+    if "personal_data" not in data or not isinstance(data["personal_data"], dict):
+        return
+    
+    pd = data["personal_data"]
+    
+    # Hash do NIF
+    nif = pd.get("nif")
+    if nif:
+        nif_clean = re.sub(r'[^\d]', '', str(nif))
+        if len(nif_clean) == 9:
+            pd["nif_hash"] = generate_nif_hash(nif_clean)
+    
+    # Hash do email para pesquisa
+    email = pd.get("email")
+    if email:
+        pd["email_hash"] = generate_email_hash(email)
+    
+    # Hash do telefone para pesquisa
+    telefone = pd.get("phone") or pd.get("telefone")
+    if telefone:
+        pd["telefone_hash"] = generate_telefone_hash(telefone)
+
+
 def encrypt_sensitive_data(data: dict) -> dict:
     """
     Encripta campos sensíveis de um processo antes de guardar na BD.
@@ -438,16 +473,27 @@ def encrypt_sensitive_data(data: dict) -> dict:
     - co_applicants[].nif
     - client_phone, client_nif (nível raiz)
     
+    Blind indexes gerados (para pesquisa):
+    - personal_data.nif_hash
+    - personal_data.email_hash
+    - personal_data.telefone_hash
+    
     Args:
         data: Dicionário com dados do processo
         
     Returns:
-        Dicionário com campos sensíveis encriptados
+        Dicionário com campos sensíveis encriptados e blind indexes actualizados
     """
     if not encryption_service.is_available() or not data:
-        return data
+        # Mesmo sem encriptação, gerar blind indexes
+        result = data.copy()
+        _add_process_blind_indexes(result)
+        return result
     
     result = data.copy()
+    
+    # Gerar blind indexes ANTES de encriptar (hashes calculados a partir dos valores originais)
+    _add_process_blind_indexes(result)
     
     # Encriptar campos no nível raiz
     root_fields = ["client_phone", "client_nif"]
