@@ -79,7 +79,6 @@ const RGPDMigrationPage = React.lazy(() => import("./pages/RGPDMigrationPage"));
 const WebmailPage = React.lazy(() => import("./pages/WebmailPage"));
 const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
 const TemplatesPage = React.lazy(() => import("./pages/TemplatesPage"));
-const DocumentsPage = React.lazy(() => import("./pages/DocumentsPage"));
 const FilesExplorerPage = React.lazy(() => import("./pages/FilesExplorerPage"));
 
 // ====================================================================
