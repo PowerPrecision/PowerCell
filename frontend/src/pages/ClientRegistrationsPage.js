@@ -61,6 +61,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { TableSkeleton } from "../components/ui/skeletons";
+import CreateProcessModal from "../components/CreateProcessModal";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -132,6 +133,10 @@ const ClientRegistrationsPage = () => {
   // Client details dialog
   const [detailsDialog, setDetailsDialog] = useState({ open: false, client: null });
   const [detailsLoading, setDetailsLoading] = useState(false);
+
+  // Create process modal (pre-filled from client details)
+  const [showCreateProcess, setShowCreateProcess] = useState(false);
+  const [preSelectedClient, setPreSelectedClient] = useState(null);
 
   const userRole = user?.role || "";
   const isIndexacao = userRole === "indexacao";
@@ -950,7 +955,7 @@ const ClientRegistrationsPage = () => {
             </div>
           ) : null}
 
-          <DialogFooter>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
             <Button
               variant="outline"
               onClick={() => setDetailsDialog({ open: false, client: null })}
@@ -968,9 +973,38 @@ const ClientRegistrationsPage = () => {
                 Ver Processo
               </Button>
             )}
+            {canAssign && (
+              <Button
+                onClick={() => {
+                  setPreSelectedClient({
+                    id: detailsDialog.client.id,
+                    name: detailsDialog.client.nome,
+                    nif: detailsDialog.client.nif || detailsDialog.client.dados_pessoais?.nif || "",
+                    email: detailsDialog.client.contacto?.email || "",
+                    phone: detailsDialog.client.contacto?.telefone || "",
+                  });
+                  setDetailsDialog({ open: false, client: null });
+                  setShowCreateProcess(true);
+                }}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Adicionar Processo
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Create Process Modal (pre-filled client from details dialog) */}
+      <CreateProcessModal
+        open={showCreateProcess}
+        onOpenChange={(open) => {
+          setShowCreateProcess(open);
+          if (!open) setPreSelectedClient(null);
+        }}
+        preSelectedClient={preSelectedClient}
+        onSuccess={() => fetchClients()}
+      />
     </DashboardLayout>
   );
 };

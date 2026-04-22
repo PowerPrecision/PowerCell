@@ -48,7 +48,6 @@ import {
   Phone,
   Mail,
   Hash,
-  Building2,
   UserPlus,
   Eye,
   Trash2,
@@ -69,7 +68,8 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { TableSkeleton, StatsCardSkeleton } from "../components/ui/skeletons";
-import SmartClientSearch, { PROCESS_TYPE_LABELS } from "../components/SmartClientSearch";
+import SmartClientSearch from "../components/SmartClientSearch";
+import CreateProcessModal from "../components/CreateProcessModal";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -146,14 +146,14 @@ export default function ClientsPage() {
   const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
-  const [selectedClient, setSelectedClient] = useState(null);
+  const [processModalClient, setProcessModalClient] = useState(null);
   const [newClient, setNewClient] = useState({
     nome: "",
     email: "",
     telefone: "",
     nif: "",
   });
-  const [newProcessType, setNewProcessType] = useState("credito_habitacao");
+
   
   // Verificar se pode eliminar clientes (apenas admin, ceo, diretor, administrativo)
   const canDeleteClients = ["admin", "ceo", "diretor", "administrativo"].includes(user?.role);
@@ -327,37 +327,6 @@ export default function ClientsPage() {
     }
   };
 
-  const handleCreateProcess = async () => {
-    if (!selectedClient) return;
-
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        `${API_URL}/api/clients/${selectedClient.id}/create-process?process_type=${newProcessType}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        toast.success(`Processo #${data.process_number} criado`);
-        setShowProcessDialog(false);
-        setSelectedClient(null);
-        fetchClients();
-        // Navegar para o novo processo
-        navigate(`/process/${data.process_id}`);
-      } else {
-        const error = await response.json();
-        toast.error(error.detail || "Erro ao criar processo");
-      }
-    } catch (error) {
-      console.error("Erro ao criar processo:", error);
-      toast.error("Erro ao criar processo");
-    }
-  };
-
   const handleDeleteClient = async (clientId) => {
     if (!window.confirm("Tem a certeza que deseja eliminar este cliente?")) {
       return;
@@ -384,7 +353,14 @@ export default function ClientsPage() {
   };
 
   const openCreateProcessDialog = (client) => {
-    setSelectedClient(client);
+    // Mapa do formato do cliente na listagem para o formato esperado pelo CreateProcessModal
+    setProcessModalClient({
+      id: client.id,
+      name: client.nome,
+      nif: client.dados_pessoais?.nif || "",
+      email: client.contacto?.email || "",
+      phone: client.contacto?.telefone || "",
+    });
     setShowProcessDialog(true);
   };
 
@@ -947,89 +923,17 @@ export default function ClientsPage() {
         </Dialog>
         )}
 
-        {/* Create Process Dialog */}
+        {/* Create Process Modal — reutiliza CreateProcessModal com cliente pré-selecionado */}
         {canCreateProcess && (
-        <Dialog open={showProcessDialog} onOpenChange={(open) => {
-          if (!open) { setSelectedClient(null); setNewProcessType("credito_habitacao"); }
-          setShowProcessDialog(open);
-        }}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                {selectedClient?.nome ? `Novo Processo para ${selectedClient.nome}` : "Novo Processo"}
-              </DialogTitle>
-              <DialogDescription className="sr-only">
-                Criar um novo processo para o cliente selecionado.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              {selectedClient && (
-                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <span className="text-xs font-medium text-primary">
-                      {selectedClient.nome?.charAt(0)?.toUpperCase() || "?"}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm">{selectedClient.nome}</p>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      {selectedClient.dados_pessoais?.nif && <span>NIF: {selectedClient.dados_pessoais.nif}</span>}
-                      {selectedClient.contacto?.email && <span>· {selectedClient.contacto.email}</span>}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {!selectedClient && (
-                <p className="text-sm text-muted-foreground">
-                  Selecione um cliente na lista (menu "⋯" → "Iniciar Novo Processo") para criar um processo.
-                </p>
-              )}
-              <div className="space-y-2">
-                <Label>Tipo de Processo</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { value: "credito_habitacao", label: "Crédito Habitação" },
-                    { value: "credito_pessoal", label: "Crédito Pessoal" },
-                    { value: "credito_consolidado", label: "Crédito Consolidado" },
-                    { value: "credito_automovel", label: "Crédito Automóvel" },
-                    { value: "transferencia_credito", label: "Transferência" },
-                    { value: "imobiliario", label: "Imobiliário" },
-                  ].map((type) => (
-                    <Button
-                      key={type.value}
-                      variant={
-                        newProcessType === type.value ? "default" : "outline"
-                      }
-                      size="sm"
-                      className="justify-start text-xs h-9"
-                      onClick={() => setNewProcessType(type.value)}
-                    >
-                      <Building2 className="h-3.5 w-3.5 mr-1.5" />
-                      {type.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setShowProcessDialog(false)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleCreateProcess}
-                disabled={!selectedClient}
-                data-testid="submit-new-process"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Criar Processo
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          <CreateProcessModal
+            open={showProcessDialog}
+            onOpenChange={(open) => {
+              setShowProcessDialog(open);
+              if (!open) setProcessModalClient(null);
+            }}
+            preSelectedClient={processModalClient}
+            onSuccess={() => fetchClients()}
+          />
         )}
       </div>
     </DashboardLayout>
