@@ -486,13 +486,68 @@ async def download_via_temp_link(
     if not url:
         raise HTTPException(status_code=500, detail="Erro ao gerar link de download")
     
-    # Marcar link como usado
-    await temp_link_service.use_link(token)
+    # NOTA: Não chamamos use_link() aqui porque o consumo é feito
+    # pelo endpoint /download-all (batch). Isto permite descarregar
+    # ficheiros individuais sem esgotar o limite de utilizações.
     
     return {
         "success": True,
         "url": url,
         "filename": s3_path.split("/")[-1]
+    }
+
+
+@router.get("/public/{token}/download-all")
+async def download_all_via_temp_link(token: str):
+    """
+    Descarrega TODOS os ficheiros de um link temporário numa única chamada.
+    Consome apenas 1 utilização do link (mesmo com múltiplos ficheiros).
+    Não requer autenticação.
+    """
+    # Validar link
+    validation = await temp_link_service.validate_link(token)
+    
+    if not validation["valid"]:
+        raise HTTPException(status_code=400, detail=validation.get("error"))
+    
+    link = validation["link"]
+    
+    if link["link_type"] != TempLinkType.DOWNLOAD.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Este link é para upload, não para download."
+        )
+    
+    file_paths = link.get("file_paths", [])
+    
+    if not file_paths:
+        raise HTTPException(status_code=404, detail="Nenhum ficheiro disponível")
+    
+    # Importar serviço S3
+    from services.s3_storage import s3_service
+    
+    # Gerar presigned URLs para todos os ficheiros
+    files = []
+    for s3_path in file_paths:
+        url = s3_service.get_presigned_url(s3_path)
+        if url:
+            files.append({
+                "url": url,
+                "filename": s3_path.split("/")[-1]
+            })
+        else:
+            logger.warning(f"Falha ao gerar URL para: {s3_path}")
+    
+    if not files:
+        raise HTTPException(status_code=500, detail="Erro ao gerar links de download")
+    
+    # Marcar link como usado (apenas 1 utilização para TODOS os ficheiros)
+    await temp_link_service.use_link(token)
+    
+    return {
+        "success": True,
+        "files": files,
+        "total": len(files)
     }
 
 
