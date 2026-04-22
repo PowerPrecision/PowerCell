@@ -272,7 +272,7 @@ const AdminDashboard = () => {
 
         {/* KPI Cards de Topo */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="border-border hover:shadow-md transition-shadow">
+          <Card className="border-border hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/processos')}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Activity className="h-4 w-4 text-blue-500" />
@@ -286,7 +286,7 @@ const AdminDashboard = () => {
               </p>
             </CardContent>
           </Card>
-          <Card className="border-border hover:shadow-md transition-shadow">
+          <Card className="border-border hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/financeiro')}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-emerald-500" />
@@ -305,7 +305,7 @@ const AdminDashboard = () => {
               </p>
             </CardContent>
           </Card>
-          <Card className="border-border hover:shadow-md transition-shadow">
+          <Card className="border-border hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/processos?view_mode=historical')}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Target className="h-4 w-4 text-amber-500" />
@@ -319,7 +319,7 @@ const AdminDashboard = () => {
               </p>
             </CardContent>
           </Card>
-          <Card className="border-border hover:shadow-md transition-shadow">
+          <Card className="border-border hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/processos?sort=created_at&order=desc')}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-violet-500" />

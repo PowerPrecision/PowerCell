@@ -88,8 +88,11 @@ export const formatDate = (dateString) => {
 /**
  * Card de estatísticas do dashboard
  */
-export const StatCard = ({ icon: Icon, iconColor, bgColor, value, label }) => (
-  <Card className="border-border">
+export const StatCard = ({ icon: Icon, iconColor, bgColor, value, label, onClick }) => (
+  <Card
+    className={`border-border ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+    {...(onClick ? { onClick } : {})}
+  >
     <CardContent className="pt-6">
       <div className="flex items-center gap-4">
         <div className={`p-3 ${bgColor} rounded-lg`}>

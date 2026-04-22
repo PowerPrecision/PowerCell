@@ -500,6 +500,9 @@ export default function ClientsPage() {
                     <SelectItem value="nome_desc">Nome (Z-A)</SelectItem>
                     <SelectItem value="process_count_desc">Mais Processos</SelectItem>
                     <SelectItem value="process_count_asc">Menos Processos</SelectItem>
+                    <SelectItem value="contacto_asc">Contacto (A-Z)</SelectItem>
+                    <SelectItem value="nif_asc">NIF (A-Z)</SelectItem>
+                    <SelectItem value="fase_asc">Fase (A-Z)</SelectItem>
                   </SelectContent>
                 </Select>
                 </div>

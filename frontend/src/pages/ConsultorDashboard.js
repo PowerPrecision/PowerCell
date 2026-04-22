@@ -204,6 +204,7 @@ const ConsultorDashboard = () => {
           </Card>
           <Card
             className="bg-red-50 dark:bg-red-950/30 border-red-200 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => navigate('/processos-filtrados?filter=dropped')}
           >
             <CardContent className="pt-6">
               <div className="text-center">
@@ -221,6 +222,7 @@ const ConsultorDashboard = () => {
             bgColor="bg-blue-100 dark:bg-teal-600/30"
             value={processes.length}
             label="Meus Clientes"
+            onClick={() => navigate('/clientes')}
           />
           <StatCard
             icon={AlertTriangle}
@@ -228,6 +230,7 @@ const ConsultorDashboard = () => {
             bgColor="bg-yellow-100 dark:bg-yellow-900/30"
             value={stats.pending_deadlines || 0}
             label="Prazos Pendentes"
+            onClick={() => navigate('/pendentes')}
           />
           <StatCard
             icon={AlertTriangle}
@@ -235,6 +238,7 @@ const ConsultorDashboard = () => {
             bgColor="bg-orange-100 dark:bg-orange-900/30"
             value={upcomingExpiries.length}
             label="Docs a Expirar"
+            onClick={() => navigate('/validades')}
           />
           {/* ── Email KPI Card ── */}
           <Card

@@ -1046,7 +1046,8 @@ async def send_documentation_email(
         bcc_emails=validated_bcc,
         process_id=process_id,
         created_by=current_user["id"],
-        attachments=email_attachments if email_attachments else None
+        attachments=email_attachments if email_attachments else None,
+        force_system=True,
     )
     
     if not result["success"]:
@@ -2691,13 +2692,60 @@ async def webmail_sync_user(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Sincronizar emails usando as credenciais pessoais do utilizador logado.
-    Requer que o utilizador tenha configurado o seu email em Configurações > Perfil.
+    Sincronizar emails usando as credenciais do utilizador logado.
+    
+    Para roles com email partilhado (indexacao, suporte), usa as credenciais
+    da conta partilhada do departamento em vez das credenciais pessoais.
     """
     from services.background_jobs import BackgroundJobService, JobType
     
     user_id = current_user["id"]
+    user_role = current_user.get("role", "")
     
+    # === INDEXACAO / SUPORTE: usar conta partilhada do departamento ===
+    if user_role in ("indexacao", "suporte"):
+        shared_config = await db.shared_role_email_configs.find_one(
+            {"role": user_role, "is_configured": True},
+            {"_id": 0}
+        )
+        if not shared_config:
+            return {
+                "success": False,
+                "error": f"Configuração de email partilhada para {user_role} não encontrada. Contacte o administrador."
+            }
+        
+        # Criar job em background com sync partilhado
+        job_service = BackgroundJobService()
+        job_id = await job_service.create_job(
+            job_type=JobType.EMAIL_SYNC,
+            user_id=user_id,
+            user_email=current_user.get("email", ""),
+            metadata={"sync_type": "shared_role", "role": user_role}
+        )
+        
+        async def run_shared_sync():
+            try:
+                from services.email_service import sync_shared_role_emails
+                await job_service.update_progress(job_id, 0, 1, f"A sincronizar emails partilhados ({user_role})...")
+                result = await sync_shared_role_emails(user_role)
+                if result.get("success") == False:
+                    await job_service.fail_job(job_id, result.get("error", "Erro na sincronização"))
+                else:
+                    synced = result.get("total_synced", 0)
+                    await job_service.complete_job(job_id, {"synced": synced, "details": result})
+            except Exception as e:
+                logger.error(f"Erro na sincronização shared role emails: {e}", exc_info=True)
+                await job_service.fail_job(job_id, str(e))
+        
+        asyncio.create_task(run_shared_sync())
+        
+        return {
+            "success": True,
+            "message": f"Sincronização de email partilhado ({user_role}) iniciada em background",
+            "job_id": job_id,
+        }
+    
+    # === UTILIZADORES NORMAIS: usar credenciais pessoais ===
     # Verificar se o utilizador tem configuração
     user = await db.users.find_one(
         {"id": user_id},
