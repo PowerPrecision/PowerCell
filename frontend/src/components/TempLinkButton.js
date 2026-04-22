@@ -130,7 +130,7 @@ const TempLinkButton = ({ processId, clientName, clientEmail }) => {
       formData.append("expires_in_hours", parseInt(expiresIn));
       formData.append("max_uses", parseInt(maxUses));
       formData.append("description", description);
-      formData.append("notify_email", notifyEmail);
+      formData.append("notify_email", notifyEmail ? "true" : "false");
       formData.append("base_url", window.location.origin);
       
       if (linkType === "download" && selectedFiles.length > 0) {
@@ -161,10 +161,12 @@ const TempLinkButton = ({ processId, clientName, clientEmail }) => {
       // Copiar URL para a área de transferência
       try {
         await navigator.clipboard.writeText(correctUrl);
+        const typeLabel = linkType === "upload" ? "upload" : "download";
+        const msg = `Link de ${typeLabel} criado e copiado!`;
         toast.success(
-          linkType === "upload"
-            ? "Link de upload criado e copiado! O cliente receberá um email."
-            : "Link de download criado e copiado! O cliente receberá um email."
+          notifyEmail && clientEmail
+            ? `${msg} O cliente receberá um email.`
+            : msg
         );
       } catch {
         toast.success("Link criado com sucesso!");
