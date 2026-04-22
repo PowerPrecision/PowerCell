@@ -2704,15 +2704,21 @@ async def webmail_sync_user(
     
     # === INDEXACAO / SUPORTE: usar conta partilhada do departamento ===
     if user_role in ("indexacao", "suporte"):
+        # Tenta shared_role_email_configs primeiro, depois fallback para system_webmail (Bloco C)
         shared_config = await db.shared_role_email_configs.find_one(
             {"role": user_role, "is_configured": True},
             {"_id": 0}
         )
         if not shared_config:
-            return {
-                "success": False,
-                "error": f"Configuração de email partilhada para {user_role} não encontrada. Contacte o administrador."
-            }
+            # Fallback: verificar system_webmail das Integrações (Bloco C)
+            from services.system_config import get_system_config
+            sys_config = await get_system_config()
+            sys_webmail = sys_config.system_webmail
+            if not (sys_webmail.imap_host and sys_webmail.email_user and sys_webmail.app_password):
+                return {
+                    "success": False,
+                    "error": f"Configuração de email partilhada para {user_role} não encontrada. Configure em Definições > Integrações (Bloco C) ou contacte o administrador."
+                }
         
         # Criar job em background com sync partilhado
         job_service = BackgroundJobService()

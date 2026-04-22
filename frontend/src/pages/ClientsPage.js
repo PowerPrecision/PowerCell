@@ -503,6 +503,7 @@ export default function ClientsPage() {
                     <SelectItem value="contacto_asc">Contacto (A-Z)</SelectItem>
                     <SelectItem value="nif_asc">NIF (A-Z)</SelectItem>
                     <SelectItem value="fase_asc">Fase (A-Z)</SelectItem>
+                    <SelectItem value="updated_at_desc">Última Atualização</SelectItem>
                   </SelectContent>
                 </Select>
                 </div>

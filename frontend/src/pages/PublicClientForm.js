@@ -676,7 +676,7 @@ const PublicClientForm = ({ previewMode = false }) => {
   const getCustomFieldsForStep = (stepNum) => {
     return customFields
       .filter(f => f.step === stepNum)
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
+      .sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0));
   };
 
   // Validação de NIF português

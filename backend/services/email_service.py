@@ -1445,19 +1445,30 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
         Dict com resumo global da sincronização
     """
     # Query: utilizadores com email_config.is_configured == True
+    # Excluir roles com email partilhado (indexacao, suporte) — esses usam sync_shared_role_emails
     users_with_config = await db.users.find(
-        {"email_config.is_configured": True},
+        {
+            "email_config.is_configured": True,
+            "role": {"$nin": ["indexacao", "suporte"]},
+        },
         {"_id": 0, "id": 1}
     ).to_list(200)
     
     if not users_with_config:
         return {"success": True, "message": "Nenhum utilizador com email configurado", "users_synced": 0}
     
-    # Criar tasks para cada utilizador
+    # Também sync roles partilhados
+    shared_roles = await db.users.distinct("role", {"role": {"$in": ["indexacao", "suporte"]}})
+    
+    # Criar tasks para cada utilizador pessoal
     tasks = [
         sync_user_emails(user["id"], days=days)
         for user in users_with_config
     ]
+    
+    # Adicionar tasks para roles partilhados
+    for role in shared_roles:
+        tasks.append(sync_shared_role_emails(role, days=days))
     
     # Executar concorrentemente
     results = await asyncio.gather(*tasks, return_exceptions=True)
