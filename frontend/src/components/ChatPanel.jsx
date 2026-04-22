@@ -70,6 +70,9 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 // Emojis comuns para reações rápidas
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "✅", "👎"];
 
+// Utilizador parceiro: apenas visualização
+const isParceiro = (user) => user?.role === "parceiro";
+
 const ChatPanel = ({ open, onOpenChange }) => {
   const { token, user } = useAuth();
   const [conversations, setConversations] = useState([]);
@@ -533,22 +536,26 @@ const ChatPanel = ({ open, onOpenChange }) => {
           >
             <SearchIcon className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowNewGroup(true)}
-            title="Criar grupo"
-          >
-            <Users className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowNewChat(true)}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Nova
-          </Button>
+          {!isParceiro(user) && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowNewGroup(true)}
+                title="Criar grupo"
+              >
+                <Users className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowNewChat(true)}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Nova
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1116,7 +1123,14 @@ const ChatPanel = ({ open, onOpenChange }) => {
         </div>
       )}
 
-      {/* Input */}
+      {/* Input — parceiro: apenas visualização */}
+      {isParceiro(user) ? (
+        <div className="p-4 border-t bg-muted/50 text-center">
+          <p className="text-sm text-muted-foreground italic">
+            Apenas visualização disponível para parceiros.
+          </p>
+        </div>
+      ) : (
       <form onSubmit={handleSendMessage} className="p-4 border-t flex gap-2">
         <input
           type="file"
@@ -1159,6 +1173,7 @@ const ChatPanel = ({ open, onOpenChange }) => {
           )}
         </Button>
       </form>
+      )}
     </div>
   );
 

@@ -24,6 +24,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
+def _block_parceiro(user: dict) -> None:
+    """Bloqueia utilizadores com role 'parceiro' de criar tarefas."""
+    if user.get("role") == "parceiro":
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas visualização disponível para parceiros. Não é possível criar tarefas."
+        )
+
+
 async def get_user_names(user_ids: List[str]) -> dict:
     """Obter nomes dos utilizadores por ID."""
     users = await db.users.find(
@@ -81,6 +90,7 @@ async def create_task(
     Criar nova tarefa.
     Qualquer utilizador pode criar tarefas e atribuir a qualquer pessoa.
     """
+    _block_parceiro(current_user)
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     

@@ -11,6 +11,22 @@
  * - Repor configuração padrão
  */
 import React, { useState, useEffect, useCallback } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -29,7 +45,8 @@ import {
 import { toast } from "sonner";
 import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
-  Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark
+  Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark,
+  GripHorizontal
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -61,8 +78,114 @@ const FIELD_TYPES = [
   { value: "radio", label: "Sim / Não" },
 ];
 
+/**
+ * Componente sortable para cada campo do formulário (Drag & Drop).
+ */
+const SortableFieldItem = ({ id, field, updateField, handleDeleteCustomField }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 50 : "auto",
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
+        field.is_visible
+          ? field.is_custom
+            ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50 dark:border-emerald-800/30"
+            : "bg-card border-border"
+          : "bg-muted/30 border-transparent opacity-60"
+      } ${isDragging ? "shadow-lg ring-2 ring-primary/20" : ""}`}
+      data-testid={`form-field-${field.field_key}`}
+    >
+      {/* Drag Handle */}
+      <button
+        type="button"
+        className="cursor-grab active:cursor-grabbing p-1 mr-1 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+        {...attributes}
+        {...listeners}
+        title="Arrastar para reordenar"
+      >
+        <GripHorizontal className="h-4 w-4" />
+      </button>
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        {field.is_custom ? (
+          <PenLine className="h-4 w-4 text-emerald-600 shrink-0" />
+        ) : field.is_visible ? (
+          <Eye className="h-4 w-4 text-green-600 shrink-0" />
+        ) : (
+          <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
+        )}
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">
+            {field.label}
+            {field.is_custom && (
+              <Badge className="ml-2 bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0">Personalizado</Badge>
+            )}
+          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+              {FIELD_TYPE_LABELS[field.field_type] || field.field_type}
+            </Badge>
+            {field.options && field.options.length > 0 && (
+              <span className="text-[10px] text-muted-foreground">{field.options.length} opções</span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-4 shrink-0">
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground">Obrigatório</Label>
+          <Switch
+            checked={field.is_required}
+            onCheckedChange={(v) => updateField(field._idx, "is_required", v)}
+            disabled={!field.is_visible}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground">Visível</Label>
+          <Switch
+            checked={field.is_visible}
+            onCheckedChange={(v) => updateField(field._idx, "is_visible", v)}
+          />
+        </div>
+        {field.is_custom && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 p-0"
+            onClick={() => handleDeleteCustomField(field.field_key)}
+            data-testid={`delete-field-${field.field_key}`}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const FormManagementPage = () => {
   const { token } = useAuth();
+
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
   const [fields, setFields] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -139,6 +262,34 @@ const FormManagementPage = () => {
     });
     setHasChanges(true);
   };
+
+  // DnD: reordenar campos dentro de um passo
+  const handleDragEnd = useCallback((event, stepFields) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    // Encontrar os índices globais dos fields envolvidos
+    const activeGlobalIdx = fields.findIndex(f => f.field_key === active.id);
+    const overGlobalIdx = fields.findIndex(f => f.field_key === over.id);
+    if (activeGlobalIdx === -1 || overGlobalIdx === -1) return;
+
+    // Garantir que são do mesmo passo
+    if (fields[activeGlobalIdx].step !== fields[overGlobalIdx].step) return;
+
+    const reordered = arrayMove([...fields], activeGlobalIdx, overGlobalIdx);
+
+    // Recalcular order_index para todos os campos do passo
+    const step = fields[activeGlobalIdx].step;
+    let order = 0;
+    reordered.forEach(f => {
+      if (f.step === step) {
+        f.order = order++;
+      }
+    });
+
+    setFields(reordered);
+    setHasChanges(true);
+  }, [fields]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -471,73 +622,26 @@ const FormManagementPage = () => {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    {stepFields.sort((a, b) => (a.order || 0) - (b.order || 0)).map((field) => (
-                      <div
-                        key={field.field_key}
-                        className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
-                          field.is_visible
-                            ? field.is_custom
-                              ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50 dark:border-emerald-800/30"
-                              : "bg-card border-border"
-                            : "bg-muted/30 border-transparent opacity-60"
-                        }`}
-                        data-testid={`form-field-${field.field_key}`}
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={(event) => handleDragEnd(event, stepFields)}
+                    >
+                      <SortableContext
+                        items={stepFields.map(f => f.field_key)}
+                        strategy={verticalListSortingStrategy}
                       >
-                        <div className="flex items-center gap-3 min-w-0">
-                          {field.is_custom ? (
-                            <PenLine className="h-4 w-4 text-emerald-600 shrink-0" />
-                          ) : field.is_visible ? (
-                            <Eye className="h-4 w-4 text-green-600 shrink-0" />
-                          ) : (
-                            <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
-                          )}
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">
-                              {field.label}
-                              {field.is_custom && (
-                                <Badge className="ml-2 bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0">Personalizado</Badge>
-                              )}
-                            </p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                {FIELD_TYPE_LABELS[field.field_type] || field.field_type}
-                              </Badge>
-                              {field.options && field.options.length > 0 && (
-                                <span className="text-[10px] text-muted-foreground">{field.options.length} opções</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4 shrink-0">
-                          <div className="flex items-center gap-2">
-                            <Label className="text-xs text-muted-foreground">Obrigatório</Label>
-                            <Switch
-                              checked={field.is_required}
-                              onCheckedChange={(v) => updateField(field._idx, "is_required", v)}
-                              disabled={!field.is_visible}
-                            />
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Label className="text-xs text-muted-foreground">Visível</Label>
-                            <Switch
-                              checked={field.is_visible}
-                              onCheckedChange={(v) => updateField(field._idx, "is_visible", v)}
-                            />
-                          </div>
-                          {field.is_custom && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 p-0"
-                              onClick={() => handleDeleteCustomField(field.field_key)}
-                              data-testid={`delete-field-${field.field_key}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                        {stepFields.sort((a, b) => (a.order || 0) - (b.order || 0)).map((field) => (
+                          <SortableFieldItem
+                            key={field.field_key}
+                            id={field.field_key}
+                            field={field}
+                            updateField={updateField}
+                            handleDeleteCustomField={handleDeleteCustomField}
+                          />
+                        ))}
+                      </SortableContext>
+                    </DndContext>
                   </CardContent>
                 </Card>
               ))}

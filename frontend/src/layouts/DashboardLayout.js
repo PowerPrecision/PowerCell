@@ -130,7 +130,7 @@ const DashboardLayout = ({ children, title }) => {
       });
       if (res.ok) {
         const data = await res.json();
-        const total = data.total || 0;
+        const total = data.unread_count || data.total || 0;
         chatUnreadRef.current = total;
         setChatUnreadCount(total);
       }
