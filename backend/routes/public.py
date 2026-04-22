@@ -389,16 +389,33 @@ async def public_health(request: Request):
 @router.get("/form-config")
 @limiter.limit("60/minute")
 async def get_public_form_config(request: Request):
-    """Obter configuração do formulário público (campos personalizados incluídos)."""
+    """Obter configuração do formulário público (todos os campos visíveis, ordenados).
+
+    Retorna dois conjuntos:
+    - custom_fields: apenas campos personalizados (compatibilidade com versões anteriores)
+    - all_fields: todos os campos visíveis ordenados por step + order (nativos + custom)
+    """
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
     if not config:
-        return JSONResponse(status_code=200, content={"custom_fields": []})
+        return JSONResponse(status_code=200, content={"custom_fields": [], "all_fields": []})
     
-    # Retornar apenas campos personalizados e visíveis
     fields = config.get("fields", [])
+    
+    # Compatibilidade: custom_fields (só campos personalizados visíveis)
     custom_fields = [
         f for f in fields 
         if f.get("is_custom") and f.get("is_visible")
     ]
     
-    return JSONResponse(status_code=200, content={"custom_fields": custom_fields})
+    # NOVO: all_fields — todos os campos visíveis ordenados por step + order
+    # O frontend usa isto para renderizar campos na ordem configurada pelo admin
+    all_fields = [
+        f for f in fields
+        if f.get("is_visible")
+    ]
+    all_fields.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
+    
+    return JSONResponse(status_code=200, content={
+        "custom_fields": custom_fields,
+        "all_fields": all_fields
+    })

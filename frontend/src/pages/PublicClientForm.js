@@ -29,7 +29,7 @@
  * <PublicClientForm previewMode={false} />
  * // No modo normal, submete para /api/public/client-registration
  */
-import { useState, useEffect, useCallback, useRef, forwardRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -553,17 +553,47 @@ const PublicClientForm = ({ previewMode = false }) => {
 
   // Carregar campos personalizados do backend
   const [customFields, setCustomFields] = useState([]);
+  const [allFieldsConfig, setAllFieldsConfig] = useState([]);
   useEffect(() => {
-    const fetchCustomFields = async () => {
+    const fetchFormConfig = async () => {
       try {
         const res = await axios.get(`${API_URL}/public/form-config`);
         setCustomFields(res.data.custom_fields || []);
+        setAllFieldsConfig(res.data.all_fields || []);
       } catch {
-        // Endpoint pode não existir em deployments mais antigos - formulário funciona sem campos personalizados
+        // Endpoint pode não existir em deployments mais antigos
       }
     };
-    fetchCustomFields();
+    fetchFormConfig();
   }, []);
+
+  // Mapa de ordem dos campos: field_key -> order (do config do admin)
+  // Usado para aplicar CSS order nos campos hardcoded de cada step
+  const fieldOrderMap = useMemo(() => {
+    const map = {};
+    allFieldsConfig.forEach((f) => {
+      map[f.field_key] = f.order ?? 0;
+    });
+    return map;
+  }, [allFieldsConfig]);
+
+  // Conjunto de campos que estão is_visible=false (devem ser escondidos)
+  const hiddenFields = useMemo(() => {
+    const set = new Set();
+    allFieldsConfig.forEach((f) => {
+      if (!f.is_visible) set.add(f.field_key);
+    });
+    return set;
+  }, [allFieldsConfig]);
+
+  // Helper: retorna style object com CSS order para campos do config
+  const getFieldStyle = (fieldKey) => {
+    if (!(fieldKey in fieldOrderMap)) return undefined;
+    return {
+      order: fieldOrderMap[fieldKey],
+      ...(hiddenFields.has(fieldKey) ? { display: 'none' } : {}),
+    };
+  };
 
   // Renderizar um campo personalizado dinâmico
   const renderCustomField = (field) => {
@@ -1006,7 +1036,7 @@ const PublicClientForm = ({ previewMode = false }) => {
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2 md:col-span-2">
+        <div className="space-y-2 md:col-span-2" style={getFieldStyle("name")}>
           <RequiredLabel htmlFor="name">Nome completo</RequiredLabel>
           <Input
             id="name"
@@ -1021,7 +1051,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           {fieldErrors.name && <FieldError>{fieldErrors.name}</FieldError>}
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("email")}>
           <RequiredLabel htmlFor="email">Email</RequiredLabel>
           <Input
             id="email"
@@ -1038,7 +1068,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Utilizaremos este email para comunicar consigo sobre o seu processo.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("phone")}>
           <RequiredLabel htmlFor="phone">Telemóvel</RequiredLabel>
           <Input
             id="phone"
@@ -1055,7 +1085,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Número de contacto direto para agendar visitas e reuniões.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("nif")}>
           <RequiredLabel htmlFor="nif">NIF</RequiredLabel>
           <Input
             id="nif"
@@ -1073,7 +1103,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Número de Identificação Fiscal - 9 dígitos, encontra-se no Cartão de Cidadão.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("documento_id")}>
           <RequiredLabel htmlFor="documento_id">Cartão de Cidadão/Passaporte</RequiredLabel>
           <Input
             id="documento_id"
@@ -1104,7 +1134,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Data de validade do Cartão de Cidadão.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("naturalidade")}>
           <RequiredLabel htmlFor="naturalidade">Naturalidade</RequiredLabel>
           <Input
             id="naturalidade"
@@ -1120,7 +1150,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Freguesia/concelho onde nasceu.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("nacionalidade")}>
           <RequiredLabel htmlFor="nacionalidade">Nacionalidade</RequiredLabel>
           <Input
             id="nacionalidade"
@@ -1133,7 +1163,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           />
         </div>
         
-        <div className="space-y-2 md:col-span-2">
+        <div className="space-y-2 md:col-span-2" style={getFieldStyle("morada_fiscal")}>
           <RequiredLabel htmlFor="morada_fiscal">Morada Fiscal</RequiredLabel>
           <Input
             id="morada_fiscal"
@@ -1146,7 +1176,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Morada completa conforme registada nas Finanças.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("birth_date")}>
           <RequiredLabel htmlFor="birth_date">Data de Nascimento</RequiredLabel>
           <Input
             id="birth_date"
@@ -1159,7 +1189,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           />
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("estado_civil")}>
           <RequiredLabel htmlFor="estado_civil">Estado Civil</RequiredLabel>
           <Select value={formData.estado_civil} onValueChange={(v) => updateField("estado_civil", v)}>
             <SelectTrigger data-testid="client-estado-civil">
@@ -1225,7 +1255,7 @@ const PublicClientForm = ({ previewMode = false }) => {
       
       {formData.compra_tipo === "outra_pessoa" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2 md:col-span-2">
+          <div className="space-y-2 md:col-span-2" style={getFieldStyle("titular2_name")}>
             <RequiredLabel htmlFor="titular2_name">Nome completo</RequiredLabel>
             <Input
               id="titular2_name"
@@ -1347,7 +1377,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {fieldErrors.titular2_birth_date && <FieldError>{fieldErrors.titular2_birth_date}</FieldError>}
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("titular2_estado_civil")}>
             <Label htmlFor="titular2_estado_civil">Estado Civil</Label>
             <Select value={formData.titular2_estado_civil} onValueChange={(v) => updateField("titular2_estado_civil", v)}>
               <SelectTrigger 
@@ -1386,7 +1416,7 @@ const PublicClientForm = ({ previewMode = false }) => {
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* FINALIDADE PRIMEIRO */}
-        <div className="space-y-2 md:col-span-2">
+        <div className="space-y-2 md:col-span-2" style={getFieldStyle("finalidade")}>
           <RequiredLabel>Finalidade do pedido</RequiredLabel>
           <Select value={formData.finalidade} onValueChange={(v) => updateField("finalidade", v)}>
             <SelectTrigger data-testid="imovel-finalidade">
@@ -1407,7 +1437,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         {/* CAMPOS DE IMÓVEL - SÓ SE NÃO FOR REFINANCIAMENTO */}
         {formData.finalidade !== "refinanciamento" && (
           <>
-            <div className="space-y-2">
+            <div className="space-y-2" style={getFieldStyle("tipo_imovel")}>
               <RequiredLabel>O que procura?</RequiredLabel>
               <Select value={formData.tipo_imovel} onValueChange={(v) => updateField("tipo_imovel", v)}>
                 <SelectTrigger data-testid="imovel-tipo">
@@ -1421,7 +1451,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               </Select>
             </div>
             
-            <div className="space-y-2">
+            <div className="space-y-2" style={getFieldStyle("num_quartos")}>
               <RequiredLabel>Número de quartos</RequiredLabel>
               <Select value={formData.num_quartos} onValueChange={(v) => updateField("num_quartos", v)}>
                 <SelectTrigger data-testid="imovel-quartos">
@@ -1436,7 +1466,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               <FieldHint>T0 = Estúdio/Loft, T1 = 1 quarto, T2 = 2 quartos, etc.</FieldHint>
             </div>
             
-            <div className="space-y-2 md:col-span-2">
+            <div className="space-y-2 md:col-span-2" style={getFieldStyle("localizacao")}>
               <RequiredLabel htmlFor="localizacao">Localização/Zona(s) preferida(s)</RequiredLabel>
               <Input
                 id="localizacao"
@@ -1449,7 +1479,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               <FieldHint>Pode indicar várias zonas separadas por vírgula. Quanto mais específico, melhor podemos ajudar.</FieldHint>
             </div>
             
-            <div className="space-y-3 md:col-span-2">
+            <div className="space-y-3 md:col-span-2" style={getFieldStyle("caracteristicas")}>
               <Label>Características obrigatórias (selecione apenas as imprescindíveis)</Label>
               <FieldHint>Selecione apenas características que são absolutamente essenciais. Menos seleções = mais opções de imóveis.</FieldHint>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1661,7 +1691,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Indique a que portais oficiais tem acesso. As credenciais serão solicitadas posteriormente se necessário.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("chave_movel_digital")}>
           <RequiredLabel>Chave Móvel Digital?</RequiredLabel>
           <Select value={formData.chave_movel_digital} onValueChange={(v) => updateField("chave_movel_digital", v)}>
             <SelectTrigger data-testid="fin-chave-movel">
@@ -1702,7 +1732,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Se precisa vender para ter capital de entrada ou liquidar crédito existente.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("efetivo")}>
           <Label>Efetivo?</Label>
           <Select value={formData.efetivo} onValueChange={(v) => updateField("efetivo", v)}>
             <SelectTrigger data-testid="fin-efetivo">
@@ -1716,7 +1746,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Se tem contrato de trabalho sem termo (efetivo) ou está em período experimental.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("trabalha_estrangeiro")}>
           <Label>Trabalha no estrangeiro?</Label>
           <Select value={formData.trabalha_estrangeiro} onValueChange={(v) => updateField("trabalha_estrangeiro", v)}>
             <SelectTrigger data-testid="fin-trabalha-estrangeiro">
@@ -1730,7 +1760,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Indique se trabalha fora de Portugal. Pode influenciar as condições do crédito.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("employment_type")}>
           <RequiredLabel>Tipo de Contrato de Trabalho</RequiredLabel>
           <Select value={formData.employment_type} onValueChange={(v) => updateField("employment_type", v)}>
             <SelectTrigger data-testid="fin-employment-type">
@@ -1799,7 +1829,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Ter um fiador disponível pode ajudar na aprovação do crédito.</FieldHint>
         </div>
         
-        <div className="space-y-2 md:col-span-2">
+        <div className="space-y-2 md:col-span-2" style={getFieldStyle("salario_liquido")}>
           <RequiredLabel htmlFor="salario_liquido">Salário mensal líquido (já com descontos) (€)</RequiredLabel>
           <Input
             id="salario_liquido"
@@ -1824,8 +1854,8 @@ const PublicClientForm = ({ previewMode = false }) => {
         <p className="text-muted-foreground">Informações sobre créditos e capital disponível</p>
       </div>
       
-      <div className="space-y-6">
-        <div className="space-y-3">
+      <div className="space-y-6 flex flex-col">
+        <div className="space-y-3" style={getFieldStyle("bancos_creditos")}>
           <RequiredLabel>Bancos onde tem créditos ativos</RequiredLabel>
           <div className="flex flex-wrap gap-2">
             <button
@@ -1900,7 +1930,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
 
         {/* Contas abertas nos Créditos e Capital */}
-        <div className="space-y-3">
+        <div className="space-y-3" style={getFieldStyle("tem_creditos_activos")}>
           <RequiredLabel>Bancos com contas de crédito abertas</RequiredLabel>
           <div className="flex flex-wrap gap-2">
             <button
@@ -1941,7 +1971,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         {/* Pergunta sobre simulações de crédito */}
-        <div className="space-y-3">
+        <div className="space-y-3" style={getFieldStyle("bancos_simulacoes")}>
           <Label>Efetuou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
           <div className="flex flex-wrap gap-2">
             <button
@@ -2006,7 +2036,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("capital_proprio")}>
             <RequiredLabel htmlFor="capital_proprio">Capital próprio disponível (€)</RequiredLabel>
             <Input
               id="capital_proprio"
@@ -2020,7 +2050,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             <FieldHint>Dinheiro que tem disponível para entrada + despesas (escritura, IMT, seguros).</FieldHint>
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("valor_financiado")}>
             <RequiredLabel htmlFor="valor_financiado">Valor a financiar (€)</RequiredLabel>
             <Input
               id="valor_financiado"
