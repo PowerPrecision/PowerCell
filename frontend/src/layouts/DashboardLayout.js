@@ -126,6 +126,7 @@ const DashboardLayout = ({ children, title }) => {
     try {
       const token = localStorage.getItem("token");
       if (!token) return;
+      if (user?.role === "parceiro") return;
       const res = await fetch(`${API_URL}/api/chat/unread-count`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -149,13 +150,12 @@ const DashboardLayout = ({ children, title }) => {
     };
   }, [fetchChatUnreadCount]);
 
-  // Reset unread badge when chat panel opens
+  // Re-fetch unread badge when chat panel closes (not when it opens)
   useEffect(() => {
-    if (chatOpen) {
-      setChatUnreadCount(0);
-      chatUnreadRef.current = 0;
+    if (!chatOpen) {
+      fetchChatUnreadCount();
     }
-  }, [chatOpen]);
+  }, [chatOpen, fetchChatUnreadCount]);
 
   // --- WebSocket: incrementar badge de chat em tempo real ---
   useWebSocket({
@@ -756,8 +756,8 @@ const DashboardLayout = ({ children, title }) => {
               {/* Context Switcher - Múltiplos Perfis */}
               <ContextSwitcher />
 
-              {/* Notificações - só para utilizadores autenticados (não clientes) */}
-              {user?.role !== "cliente" && (
+              {/* Notificações - só para utilizadores autenticados (não clientes/parceiros) */}
+              {user?.role !== "cliente" && user?.role !== "parceiro" && (
                 <>
                   <Button
                     variant="ghost"

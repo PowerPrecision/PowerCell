@@ -2026,7 +2026,10 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     if client_id and (data.client_email is not None or data.client_phone is not None):
         client_update = {}
         if data.client_email is not None:
-            client_update["contacto.email"] = sanitize_email(data.client_email)
+            sanitized_email = sanitize_email(data.client_email)
+            client_update["contacto.email"] = sanitized_email
+            from services.encryption import generate_email_hash
+            client_update["contacto.email_hash"] = generate_email_hash(sanitized_email)
         if data.client_phone is not None:
             client_update["contacto.telefone"] = sanitize_phone(data.client_phone)
         

@@ -179,6 +179,7 @@ async def get_tasks(
     - Se user_id='all', retorna tarefas de toda a equipa
     - Se user_id=<id_especifico>, retorna tarefas desse utilizador
     """
+    _block_parceiro(current_user)
     query = {}
     
     # Verificar se é admin/ceo para acesso global
@@ -384,6 +385,7 @@ async def get_my_tasks(
     """
     Listar tarefas atribuídas ao utilizador atual.
     """
+    _block_parceiro(current_user)
     query = {
         "assigned_to": current_user["id"]
     }
@@ -407,6 +409,7 @@ async def get_task(
     current_user: dict = Depends(get_current_user)
 ):
     """Obter detalhes de uma tarefa."""
+    _block_parceiro(current_user)
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     
     if not task:

@@ -106,8 +106,8 @@ class UserRole:
     
     @classmethod
     def is_staff(cls, role: str) -> bool:
-        """Check if role is staff (not cliente)"""
-        return role != cls.CLIENTE
+        """Check if role is staff (not cliente or parceiro)."""
+        return role in cls.STAFF_ROLES
     
     @classmethod
     def can_view_all_notifications(cls, role: str) -> bool:

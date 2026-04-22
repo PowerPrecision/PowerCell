@@ -71,6 +71,7 @@ async def get_conversations(
     Obter lista de conversas do utilizador.
     Inclui conversas diretas e grupos.
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     # Pipeline para conversas diretas
@@ -192,6 +193,7 @@ async def get_messages(
     Obter mensagens de uma conversa.
     conversation_id pode ser user_id (direto) ou group_id (grupo).
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     if is_group:
@@ -733,6 +735,7 @@ async def get_groups(
     """
     Obter grupos do utilizador.
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     groups = await db.chat_groups.find(
@@ -751,6 +754,7 @@ async def get_group(
     """
     Obter detalhes de um grupo.
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     group = await db.chat_groups.find_one(
@@ -1014,6 +1018,7 @@ async def get_unread_count(user: dict = Depends(get_current_user)):
     """
     Obter contagem total de mensagens não lidas.
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     # Mensagens diretas não lidas
@@ -1055,6 +1060,7 @@ async def get_online_users(user: dict = Depends(get_current_user)):
     """
     Obter lista de utilizadores online.
     """
+    _block_parceiro(user)
     connected_ids = manager.get_connected_users()
 
     if not connected_ids:
@@ -1076,6 +1082,7 @@ async def get_chat_users(
     """
     Obter lista de utilizadores disponíveis para chat.
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     query = {

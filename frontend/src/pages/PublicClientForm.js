@@ -674,7 +674,9 @@ const PublicClientForm = ({ previewMode = false }) => {
 
   // Obter campos personalizados para um passo específico
   const getCustomFieldsForStep = (stepNum) => {
-    return customFields.filter(f => f.step === stepNum);
+    return customFields
+      .filter(f => f.step === stepNum)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
   };
 
   // Validação de NIF português

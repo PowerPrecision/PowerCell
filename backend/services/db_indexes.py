@@ -500,6 +500,7 @@ async def create_indexes(db) -> dict:
     process_blind_indexes = [
         # NIF hash no processo - pesquisa por NIF
         {"keys": [("personal_data.nif_hash", 1)], "name": "idx_process_nif_hash", "sparse": True},
+        {"keys": [("personal_data.email_hash", 1)], "name": "idx_process_email_hash", "sparse": True},
     ]
     
     for idx in process_blind_indexes:
