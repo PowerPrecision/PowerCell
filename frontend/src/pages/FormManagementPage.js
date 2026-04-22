@@ -631,7 +631,7 @@ const FormManagementPage = () => {
                         items={stepFields.map(f => f.field_key)}
                         strategy={verticalListSortingStrategy}
                       >
-                        {stepFields.sort((a, b) => (a.order || 0) - (b.order || 0)).map((field) => (
+                        {stepFields.sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0)).map((field) => (
                           <SortableFieldItem
                             key={field.field_key}
                             id={field.field_key}
@@ -974,7 +974,7 @@ const FormManagementPage = () => {
                         </div>
 
                         <div className="ml-9 space-y-2">
-                          {stepFields.sort((a, b) => (a.order || 0) - (b.order || 0)).map((field) => (
+                          {stepFields.sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0)).map((field) => (
                             <div
                               key={field.field_key}
                               className={`p-3 rounded-lg border ${

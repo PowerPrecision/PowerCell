@@ -225,6 +225,24 @@ class AuditTrailConfig(BaseModel):
     retention_days: int = 365
 
 
+class SystemSMTPConfig(BaseModel):
+    """Configuração SMTP transacional do sistema (Bloco A) - para emails de sistema"""
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = 587
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from_email: Optional[str] = None
+    smtp_use_tls: bool = True
+
+
+class SystemWebmailConfig(BaseModel):
+    """Configuração de conta global de indexação (Bloco C) - Webmail partilhado"""
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = 993
+    email_user: Optional[str] = None
+    app_password: Optional[str] = None
+
+
 class SystemConfig(BaseModel):
     """Configuração completa do sistema"""
     storage: StorageConfig = StorageConfig()
@@ -237,6 +255,8 @@ class SystemConfig(BaseModel):
     dsti_analysis: DSTIConfig = DSTIConfig()
     auto_draft: AutoDraftConfig = AutoDraftConfig()
     audit_trail: AuditTrailConfig = AuditTrailConfig()
+    system_smtp: SystemSMTPConfig = SystemSMTPConfig()
+    system_webmail: SystemWebmailConfig = SystemWebmailConfig()
     setup_completed: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

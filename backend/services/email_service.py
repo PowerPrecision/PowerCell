@@ -419,13 +419,33 @@ async def send_email(
                     logger.warning(f"[Send Email] Erro ao desencriptar password pessoal: {e}")
     
     if not account:
-        # === force_system: nunca usar credenciais pessoais ===
+        # === force_system: tentar contas globais, depois system_smtp (Bloco A) ===
         if force_system:
-            available = [a.name for a in accounts]
-            return {
-                "success": False,
-                "error": f"Conta de sistema '{account_name}' não configurada. Contas disponíveis: {available}"
-            }
+            # Prioridade 1: Conta nomeada (power/precision)
+            if accounts:
+                account = accounts[0]
+            else:
+                # Prioridade 2: System SMTP config (Bloco A das Integrações)
+                from services.system_config import get_system_config
+                sys_config = await get_system_config()
+                sys_smtp = sys_config.system_smtp
+                if sys_smtp.smtp_host and sys_smtp.smtp_username:
+                    account = EmailAccount(
+                        name="system_smtp",
+                        imap_server=sys_smtp.smtp_host,
+                        imap_port=int(sys_smtp.smtp_port or 587),
+                        smtp_server=sys_smtp.smtp_host,
+                        smtp_port=int(sys_smtp.smtp_port or 587),
+                        email=sys_smtp.smtp_from_email or sys_smtp.smtp_username,
+                        password=sys_smtp.smtp_password or "",
+                    )
+                    logger.info(f"[Send Email] Usando System SMTP (Bloco A): from={sys_smtp.smtp_from_email}")
+                else:
+                    available = [a.name for a in accounts]
+                    return {
+                        "success": False,
+                        "error": f"Conta de sistema '{account_name}' não configurada. System SMTP (Bloco A) também não configurado. Contas disponíveis: {available}"
+                    }
         # Usar primeira conta disponível
         if accounts:
             account = accounts[0]
@@ -1188,7 +1208,22 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
     )
     
     if not shared_config:
-        return {"success": False, "error": f"Configuração de email partilhada para '{role}' não encontrada"}
+        # Fallback: try system_webmail config from system_settings (Bloco C)
+        from services.system_config import get_system_config
+        sys_config = await get_system_config()
+        sys_webmail = sys_config.system_webmail
+        if sys_webmail.imap_host and sys_webmail.email_user and sys_webmail.app_password:
+            shared_config = {
+                "imap_server": sys_webmail.imap_host,
+                "imap_port": sys_webmail.imap_port or 993,
+                "email_address": sys_webmail.email_user,
+                "raw_password": sys_webmail.app_password,
+                "smtp_server": sys_webmail.imap_host,
+                "smtp_port": 465,
+            }
+            logger.info(f"[Shared Role Sync] Using system_webmail (Bloco C) fallback for role '{role}'")
+        else:
+            return {"success": False, "error": f"Configuração de email partilhada para '{role}' não encontrada. Configure no painel de Integrações (Bloco C)."}
     
     # Prioridade 1: Gmail API (OAuth)
     if shared_config.get("google_refresh_token"):
@@ -1201,10 +1236,14 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
     
     # Prioridade 2: IMAP com credenciais partilhadas
     encrypted_password = shared_config.get("encrypted_password", "")
-    if not encrypted_password:
+    raw_password = shared_config.get("raw_password", "")
+    if not encrypted_password and not raw_password:
         return {"success": False, "error": f"Conta partilhada para '{role}' sem credenciais (OAuth ou password)"}
     
-    password = encryption_service.decrypt(encrypted_password)
+    if encrypted_password:
+        password = encryption_service.decrypt(encrypted_password)
+    else:
+        password = raw_password
     
     account = EmailAccount(
         name=f"shared_{role}",
@@ -1406,19 +1445,30 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
         Dict com resumo global da sincronização
     """
     # Query: utilizadores com email_config.is_configured == True
+    # Excluir roles com email partilhado (indexacao, suporte) — esses usam sync_shared_role_emails
     users_with_config = await db.users.find(
-        {"email_config.is_configured": True},
+        {
+            "email_config.is_configured": True,
+            "role": {"$nin": ["indexacao", "suporte"]},
+        },
         {"_id": 0, "id": 1}
     ).to_list(200)
     
     if not users_with_config:
         return {"success": True, "message": "Nenhum utilizador com email configurado", "users_synced": 0}
     
-    # Criar tasks para cada utilizador
+    # Também sync roles partilhados
+    shared_roles = await db.users.distinct("role", {"role": {"$in": ["indexacao", "suporte"]}})
+    
+    # Criar tasks para cada utilizador pessoal
     tasks = [
         sync_user_emails(user["id"], days=days)
         for user in users_with_config
     ]
+    
+    # Adicionar tasks para roles partilhados
+    for role in shared_roles:
+        tasks.append(sync_shared_role_emails(role, days=days))
     
     # Executar concorrentemente
     results = await asyncio.gather(*tasks, return_exceptions=True)
