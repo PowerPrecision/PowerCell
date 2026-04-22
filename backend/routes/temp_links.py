@@ -12,10 +12,13 @@ Funcionalidades:
 ====================================================================
 """
 import uuid
+import io
+import zipfile
 import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import StreamingResponse
 
 from database import db
 from models.auth import UserRole
@@ -502,9 +505,12 @@ async def download_via_temp_link(
 @router.get("/public/{token}/download-all")
 async def download_all_via_temp_link(token: str):
     """
-    Descarrega TODOS os ficheiros de um link temporário numa única chamada.
+    Descarrega TODOS os ficheiros de um link temporário como um ZIP.
     Consome apenas 1 utilização do link (mesmo com múltiplos ficheiros).
     Não requer autenticação.
+    
+    Retorna um ficheiro ZIP com todos os documentos, evitando problemas
+    de popup blockers e CORS que ocorrem com múltiplos window.open().
     """
     # Validar link
     validation = await temp_link_service.validate_link(token)
@@ -528,29 +534,50 @@ async def download_all_via_temp_link(token: str):
     # Importar serviço S3
     from services.s3_storage import s3_service
     
-    # Gerar presigned URLs para todos os ficheiros
-    files = []
-    for s3_path in file_paths:
-        url = s3_service.get_presigned_url(s3_path)
-        if url:
-            files.append({
-                "url": url,
-                "filename": s3_path.split("/")[-1]
-            })
-        else:
-            logger.warning(f"Falha ao gerar URL para: {s3_path}")
+    # Criar ZIP em memória com todos os ficheiros do S3
+    zip_buffer = io.BytesIO()
+    zip_files_count = 0
     
-    if not files:
-        raise HTTPException(status_code=500, detail="Erro ao gerar links de download")
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for s3_path in file_paths:
+            try:
+                file_content = s3_service.get_file_content(s3_path)
+                if file_content:
+                    filename = s3_path.split("/")[-1]
+                    # Evitar duplicados no ZIP (caso hajam ficheiros com o mesmo nome)
+                    zip_filename = filename
+                    counter = 1
+                    while zip_filename in zip_file.namelist():
+                        name_part, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
+                        zip_filename = f"{name_part}_{counter}.{ext}" if ext else f"{name_part}_{counter}"
+                        counter += 1
+                    zip_file.writestr(zip_filename, file_content)
+                    zip_files_count += 1
+                else:
+                    logger.warning(f"Falha ao obter ficheiro do S3: {s3_path}")
+            except Exception as e:
+                logger.error(f"Erro ao processar ficheiro {s3_path}: {e}")
+    
+    if zip_files_count == 0:
+        raise HTTPException(status_code=500, detail="Erro ao obter ficheiros do storage")
+    
+    zip_buffer.seek(0)
+    
+    # Construir nome do ZIP baseado no nome do cliente
+    client_name = link.get("client_name", "documentos")
+    safe_name = client_name.replace(" ", "_")[:30]
+    zip_filename = f"{safe_name}_documentos.zip"
     
     # Marcar link como usado (apenas 1 utilização para TODOS os ficheiros)
     await temp_link_service.use_link(token)
     
-    return {
-        "success": True,
-        "files": files,
-        "total": len(files)
-    }
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{zip_filename}\""
+        }
+    )
 
 
 @router.get("/public/{token}/files")
