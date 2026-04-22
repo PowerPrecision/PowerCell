@@ -195,9 +195,9 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
       const linkData = await response.json();
       
       // Construir URL com o domínio atual (não o do backend que pode estar errado)
-      const token = linkData.token;
+      const linkToken = linkData.token;
       const path = linkData.link_type === "upload" ? "upload" : "download";
-      const correctUrl = `${window.location.origin}/${path}/${token}`;
+      const correctUrl = `${window.location.origin}/${path}/${linkToken}`;
       
       // Copiar URL para a área de transferência
       try {
