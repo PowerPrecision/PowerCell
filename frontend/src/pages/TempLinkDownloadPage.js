@@ -110,13 +110,20 @@ const TempLinkDownloadPage = () => {
       const data = await response.json();
 
       if (data.files && data.files.length > 0) {
-        // Abrir cada URL com pequeno delay para evitar bloqueio do browser
-        for (let i = 0; i < data.files.length; i++) {
-          window.open(data.files[i].url, "_blank");
-          if (i < data.files.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
-        }
+        // Usar <a> tags com click programático em vez de window.open
+        // para evitar bloqueadores de popups do browser
+        data.files.forEach((file) => {
+          const a = document.createElement('a');
+          a.href = file.url;
+          a.download = file.filename || '';
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          // Remover após breve delay para garantir que o download inicia
+          setTimeout(() => document.body.removeChild(a), 100);
+        });
         toast.success(`${data.files.length} download(s) iniciado(s)!`);
       }
     } catch (err) {
