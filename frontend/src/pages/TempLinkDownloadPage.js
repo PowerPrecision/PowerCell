@@ -95,11 +95,34 @@ const TempLinkDownloadPage = () => {
   };
 
   const handleDownloadAll = async () => {
-    toast.info("A iniciar downloads...");
-    for (let i = 0; i < files.length; i++) {
-      await handleDownload(i);
-      // Pequeno delay entre downloads
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    setDownloadingIndex(-1); // -1 = batch in progress
+    try {
+      // Usar endpoint batch: consome apenas 1 utilização para TODOS os ficheiros
+      const response = await fetch(
+        `${API_URL}/api/temp-links/public/${token}/download-all`
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "Erro ao descarregar ficheiros");
+      }
+
+      const data = await response.json();
+
+      if (data.files && data.files.length > 0) {
+        // Abrir cada URL com pequeno delay para evitar bloqueio do browser
+        for (let i = 0; i < data.files.length; i++) {
+          window.open(data.files[i].url, "_blank");
+          if (i < data.files.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        }
+        toast.success(`${data.files.length} download(s) iniciado(s)!`);
+      }
+    } catch (err) {
+      toast.error(err.message || "Erro ao descarregar ficheiros");
+    } finally {
+      setDownloadingIndex(null);
     }
   };
 
