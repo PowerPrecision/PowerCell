@@ -31,7 +31,7 @@
  * // Mostrar contagem de tarefas activas no header
  * const { activeCount, tasks } = useTasks();
  */
-import { createContext, useState, useEffect, useCallback, useRef, useContext } from "react";
+import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import { toast } from "sonner";
 import api from "../services/api";
 import { useAuth } from "./AuthContext";
@@ -276,6 +276,24 @@ export const TasksProvider = ({ children }) => {
     }
   }, []);
   
+  // Ref to track current polling interval so we can restart it when activeCount changes
+  const activeCountRef = useRef(0);
+
+  // Keep activeCountRef in sync with state
+  useEffect(() => {
+    activeCountRef.current = activeCount;
+  }, [activeCount]);
+
+  /**
+   * Start polling with the appropriate interval based on active task count.
+   * Does NOT include activeCount in its dependency array to prevent infinite loop.
+   */
+  const startPolling = useCallback(() => {
+    stopPolling();
+    const interval = activeCountRef.current > 0 ? BASE_POLLING_INTERVAL : IDLE_POLLING_INTERVAL;
+    pollingIntervalRef.current = setInterval(fetchActiveTasks, interval);
+  }, [fetchActiveTasks, stopPolling]);
+
   /**
    * Iniciar polling inteligente com circuit breaker
    */
@@ -292,20 +310,20 @@ export const TasksProvider = ({ children }) => {
 
     // Buscar tarefas imediatamente
     fetchActiveTasks();
-    
-    const setupPolling = () => {
-      stopPolling();
-      
-      const interval = activeCount > 0 ? BASE_POLLING_INTERVAL : IDLE_POLLING_INTERVAL;
-      pollingIntervalRef.current = setInterval(fetchActiveTasks, interval);
-    };
-    
-    setupPolling();
+    startPolling();
     
     return () => {
       stopPolling();
     };
-  }, [fetchActiveTasks, activeCount, user, stopPolling]);
+  }, [fetchActiveTasks, user, stopPolling, startPolling]);
+
+  // Restart polling with different interval when activeCount changes
+  // (active tasks → fast polling, no active tasks → slow polling)
+  useEffect(() => {
+    if (!user) return;
+    if (circuitBreakerActiveRef.current) return;
+    startPolling();
+  }, [activeCount, startPolling, user]);
   
   /**
    * Listener para visibilidade da página
@@ -324,7 +342,7 @@ export const TasksProvider = ({ children }) => {
     };
   }, [fetchActiveTasks, user]);
   
-  const value = {
+  const value = useMemo(() => ({
     tasks,
     activeCount,
     completedUnacknowledged,
@@ -337,7 +355,7 @@ export const TasksProvider = ({ children }) => {
     TaskTypes,
     TaskStatus,
     TaskTypeLabels,
-  };
+  }), [tasks, activeCount, completedUnacknowledged, isLoading, lastFetchTime, fetchActiveTasks, acknowledgeTask, cancelTask, getTaskDetails]);
   
   return (
     <TasksContext.Provider value={value}>

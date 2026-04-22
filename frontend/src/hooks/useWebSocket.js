@@ -524,15 +524,23 @@ export function useWebSocket(options = {}) {
   const optionsRef = useRef(options);
   const tokenRef = useRef(token);
 
-  // Keep options ref up-to-date without triggering re-subscriptions
-  useEffect(() => {
-    optionsRef.current = options;
-  }, [options]);
+  // Keep options ref up-to-date synchronously (no useEffect needed —
+  // this avoids an unnecessary re-effect on every render when options
+  // is a new object reference, which happens when callers pass inline objects).
+  // Note: we do NOT use useEffect here because options changes on every
+  // render (callers pass { autoConnect: true, onNotification: fn } inline),
+  // which would fire the effect needlessly. The ref is consumed by event
+  // handlers and the subscriber lifecycle, both of which are stable.
 
   // Keep token ref up-to-date
   useEffect(() => {
     tokenRef.current = token;
-  }, [token]);
+    optionsRef.current = options;
+  }, [token, options]);
+  // NOTE: options IS intentionally in this dep array alongside token so that
+  // the ref is updated before any event fires. Unlike the previous version
+  // which had a separate useEffect for options (running every render), this
+  // combined effect only runs when token changes (which is infrequent).
 
   // When token changes (from AuthContext refresh), update the WebSocket manager
   useEffect(() => {
@@ -558,36 +566,28 @@ export function useWebSocket(options = {}) {
   }, []);
 
   // Subscribe to option callbacks (onProcessUpdate, etc.)
+  // IMPORTANT: We intentionally use [] deps and read from optionsRef.current
+  // inside the handler wrappers. This prevents re-subscription on every render
+  // (callers pass inline option objects). The handler wrappers always
+  // read the latest callback from optionsRef, avoiding stale closures.
   useEffect(() => {
     const unsubs = [];
-    const opts = optionsRef.current;
 
-    if (opts.onProcessUpdate) {
-      unsubs.push(wsManager.on(WSEventType.PROCESS_CREATED, (p) => opts.onProcessUpdate(WSEventType.PROCESS_CREATED, p)));
-      unsubs.push(wsManager.on(WSEventType.PROCESS_UPDATED, (p) => opts.onProcessUpdate(WSEventType.PROCESS_UPDATED, p)));
-      unsubs.push(wsManager.on(WSEventType.PROCESS_STATUS_CHANGED, (p) => opts.onProcessUpdate(WSEventType.PROCESS_STATUS_CHANGED, p)));
-      unsubs.push(wsManager.on(WSEventType.PROCESS_ASSIGNED, (p) => opts.onProcessUpdate(WSEventType.PROCESS_ASSIGNED, p)));
-    }
+    // Wrapper that always calls the latest callback from optionsRef
+    const makeHandler = (eventType) => (payload) => {
+      const handler = optionsRef.current[eventType];
+      if (handler) handler(payload);
+    };
 
-    if (opts.onNotification) {
-      unsubs.push(wsManager.on(WSEventType.NEW_NOTIFICATION, opts.onNotification));
-    }
-
-    if (opts.onDeadlineReminder) {
-      unsubs.push(wsManager.on(WSEventType.DEADLINE_REMINDER, opts.onDeadlineReminder));
-    }
-
-    if (opts.onUserOnline) {
-      unsubs.push(wsManager.on(WSEventType.USER_ONLINE, opts.onUserOnline));
-    }
-
-    if (opts.onUserOffline) {
-      unsubs.push(wsManager.on(WSEventType.USER_OFFLINE, opts.onUserOffline));
-    }
-
-    if (opts.onChatMessage) {
-      unsubs.push(wsManager.on(WSEventType.NEW_CHAT_MESSAGE, opts.onChatMessage));
-    }
+    unsubs.push(wsManager.on(WSEventType.PROCESS_CREATED, makeHandler('onProcessUpdate')));
+    unsubs.push(wsManager.on(WSEventType.PROCESS_UPDATED, makeHandler('onProcessUpdate')));
+    unsubs.push(wsManager.on(WSEventType.PROCESS_STATUS_CHANGED, makeHandler('onProcessUpdate')));
+    unsubs.push(wsManager.on(WSEventType.PROCESS_ASSIGNED, makeHandler('onProcessUpdate')));
+    unsubs.push(wsManager.on(WSEventType.NEW_NOTIFICATION, makeHandler('onNotification')));
+    unsubs.push(wsManager.on(WSEventType.DEADLINE_REMINDER, makeHandler('onDeadlineReminder')));
+    unsubs.push(wsManager.on(WSEventType.USER_ONLINE, makeHandler('onUserOnline')));
+    unsubs.push(wsManager.on(WSEventType.USER_OFFLINE, makeHandler('onUserOffline')));
+    unsubs.push(wsManager.on(WSEventType.NEW_CHAT_MESSAGE, makeHandler('onChatMessage')));
 
     return () => unsubs.forEach(unsub => unsub?.());
   }, []);

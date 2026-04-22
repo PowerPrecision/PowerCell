@@ -35,7 +35,7 @@
  * // Em qualquer componente protegido
  * const { user, token, logout } = useAuth();
  */
-import { createContext, useState, useEffect, useCallback, useRef, useContext } from "react";
+import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 
 const AuthContext = createContext(null);
@@ -317,24 +317,28 @@ export const AuthProvider = ({ children }) => {
     sessionStorage.setItem("activeRole", newRole);
   }, []);
 
+  // Memoize context value to prevent unnecessary re-renders of all consumers
+  // when unrelated state changes. Without useMemo, every setState call creates
+  // a new object reference, causing ALL useContext(AuthContext) consumers
+  // to re-render even if the values they use haven't changed.
+  const value = useMemo(() => ({
+    user,
+    token,
+    loading,
+    login,
+    register,
+    logout,
+    isImpersonating,
+    originalAdminName,
+    impersonate,
+    stopImpersonating,
+    activeRole,
+    switchActiveRole,
+    effectiveRole: activeRole || user?.role,
+  }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole]);
+
   return (
-    <AuthContext.Provider
-      value={{ 
-        user, 
-        token, 
-        loading, 
-        login, 
-        register, 
-        logout,
-        isImpersonating,
-        originalAdminName,
-        impersonate,
-        stopImpersonating,
-        activeRole,
-        switchActiveRole,
-        effectiveRole: activeRole || user?.role,  // The role currently being used for UI rendering
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
