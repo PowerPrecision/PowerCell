@@ -83,6 +83,10 @@ import {
   Plus,
   ShieldCheck,
   MailCheck,
+  Plug,
+  HardDrive,
+  Globe,
+  Zap,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -424,6 +428,400 @@ const ConfigSection = ({ section, sectionKey, config, fields, onSave, onTest }) 
         </div>
       </CardContent>
     </Card>
+  );
+};
+
+// ====================================================================
+// Integrations Config Section (SMTP, Storage, Webmail)
+// ====================================================================
+
+const IntegrationsConfigSection = () => {
+  const { token } = useAuth();
+  const [systemSmtp, setSystemSmtp] = useState({
+    smtp_host: "",
+    smtp_port: "587",
+    smtp_username: "",
+    smtp_password: "",
+    smtp_from_email: "",
+    smtp_use_tls: true,
+  });
+  const [storage, setStorage] = useState({
+    provider: "none",
+    aws_access_key_id: "",
+    aws_secret_access_key: "",
+    aws_bucket_name: "",
+    aws_region: "eu-west-3",
+    onedrive_tenant_id: "",
+    onedrive_client_id: "",
+    onedrive_client_secret: "",
+    onedrive_drive_id: "",
+  });
+  const [systemWebmail, setSystemWebmail] = useState({
+    imap_host: "",
+    imap_port: "993",
+    email_user: "",
+    app_password: "",
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null);
+  const [testing, setTesting] = useState(null);
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/config`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.system_smtp) {
+            setSystemSmtp((prev) => ({
+              ...prev,
+              smtp_host: data.system_smtp.smtp_host || "",
+              smtp_port: String(data.system_smtp.smtp_port || 587),
+              smtp_username: data.system_smtp.smtp_username || "",
+              smtp_password: data.system_smtp.smtp_password || "",
+              smtp_from_email: data.system_smtp.smtp_from_email || "",
+              smtp_use_tls: data.system_smtp.smtp_use_tls !== false,
+            }));
+          }
+          if (data.storage) {
+            setStorage((prev) => ({
+              ...prev,
+              provider: data.storage.provider || "none",
+              aws_access_key_id: data.storage.aws_access_key_id || "",
+              aws_secret_access_key: data.storage.aws_secret_access_key ? "••••••••" : "",
+              aws_bucket_name: data.storage.aws_bucket_name || "",
+              aws_region: data.storage.aws_region || "eu-west-3",
+              onedrive_tenant_id: data.storage.onedrive_tenant_id || "",
+              onedrive_client_id: data.storage.onedrive_client_id || "",
+              onedrive_client_secret: data.storage.onedrive_client_secret ? "••••••••" : "",
+              onedrive_drive_id: data.storage.onedrive_drive_id || "",
+            }));
+          }
+          if (data.system_webmail) {
+            setSystemWebmail((prev) => ({
+              ...prev,
+              imap_host: data.system_webmail.imap_host || "",
+              imap_port: String(data.system_webmail.imap_port || 993),
+              email_user: data.system_webmail.email_user || "",
+              app_password: data.system_webmail.app_password ? "••••••••" : "",
+            }));
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching integrations config:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchConfig();
+  }, [token]);
+
+  const handleSave = async (section) => {
+    setSaving(section);
+    try {
+      let sectionName, payload;
+      if (section === "system_smtp") {
+        sectionName = "system_smtp";
+        payload = { ...systemSmtp, smtp_port: parseInt(systemSmtp.smtp_port) || 587 };
+      } else if (section === "storage") {
+        sectionName = "storage";
+        payload = { ...storage };
+      } else if (section === "system_webmail") {
+        sectionName = "system_webmail";
+        payload = { ...systemWebmail, imap_port: parseInt(systemWebmail.imap_port) || 993 };
+      }
+
+      const res = await fetch(`${API_URL}/api/config/${sectionName}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        toast.success("Configuração guardada com sucesso");
+      } else {
+        const data = await res.json();
+        toast.error(data.detail || "Erro ao guardar configuração");
+      }
+    } catch (error) {
+      toast.error("Erro ao guardar configuração");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    setTesting("smtp");
+    try {
+      const res = await fetch(`${API_URL}/api/config/system_smtp/test`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(systemSmtp),
+      });
+      if (res.ok) {
+        toast.success("✅ SMTP conectado com sucesso!");
+      } else {
+        const data = await res.json();
+        toast.error(data.detail || "Falha na conexão SMTP");
+      }
+    } catch {
+      toast.error("Erro no teste de conexão");
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold">Integrações de Sistema</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configure os provedores de email, armazenamento e webmail partilhado. Estas configurações são globais e aplicam-se a todo o sistema.
+        </p>
+      </div>
+
+      {/* Bloco A: Email de Sistema (SMTP Transacional) */}
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-teal-100 dark:bg-teal-900/30">
+                <Mail className="h-5 w-5 text-teal-700 dark:text-teal-400" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Email de Sistema (SMTP Transacional)</CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Envio de links de documentação, convites e alertas automáticos
+                </CardDescription>
+              </div>
+            </div>
+            {systemSmtp.smtp_host && (
+              <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                Configurado
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="sys_smtp_host">SMTP Host</Label>
+              <Input id="sys_smtp_host" placeholder="smtp.gmail.com" value={systemSmtp.smtp_host}
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_host: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sys_smtp_port">SMTP Port</Label>
+              <Input id="sys_smtp_port" type="number" placeholder="587" value={systemSmtp.smtp_port}
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_port: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sys_smtp_user">SMTP Username</Label>
+              <Input id="sys_smtp_user" placeholder="noreply@empresa.pt" value={systemSmtp.smtp_username}
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_username: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sys_smtp_pass">SMTP Password</Label>
+              <Input id="sys_smtp_pass" type="password" placeholder="••••••••" value={systemSmtp.smtp_password}
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_password: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sys_smtp_from">Email Remetente (From)</Label>
+              <Input id="sys_smtp_from" placeholder="noreply@empresa.pt" value={systemSmtp.smtp_from_email}
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_email: e.target.value }))} />
+              <p className="text-xs text-muted-foreground">Endereço que aparecerá como remetente nos emails do sistema</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sys_smtp_tls">TLS</Label>
+              <div className="flex items-center gap-2 mt-2">
+                <Switch checked={systemSmtp.smtp_use_tls} onCheckedChange={(v) => setSystemSmtp((p) => ({ ...p, smtp_use_tls: v }))} />
+                <span className="text-sm text-muted-foreground">{systemSmtp.smtp_use_tls ? "Ativado" : "Desativado"}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pt-2">
+            <Button onClick={() => handleSave("system_smtp")} disabled={saving === "system_smtp"}>
+              {saving === "system_smtp" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Guardar
+            </Button>
+            <Button variant="outline" onClick={handleTestSmtp} disabled={testing === "smtp"}>
+              {testing === "smtp" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
+              Testar Conexão
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Bloco B: Armazenamento de Ficheiros */}
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+                <HardDrive className="h-5 w-5 text-blue-700 dark:text-blue-400" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Armazenamento de Ficheiros</CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Provedor e credenciais para documentos dos clientes
+                </CardDescription>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Provedor</Label>
+            <Select value={storage.provider} onValueChange={(v) => setStorage((p) => ({ ...p, provider: v }))}>
+              <SelectTrigger className="w-full md:w-72">
+                <SelectValue placeholder="Selecionar provedor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Nenhum (desativado)</SelectItem>
+                <SelectItem value="local">Local (filesystem)</SelectItem>
+                <SelectItem value="aws_s3">Amazon S3 / Cloudflare R2 / MinIO</SelectItem>
+                <SelectItem value="onedrive">Microsoft OneDrive (em breve)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {storage.provider === "aws_s3" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 p-4 rounded-lg bg-muted/50 border">
+              <div className="space-y-2">
+                <Label htmlFor="st_bucket">Bucket</Label>
+                <Input id="st_bucket" placeholder="meu-bucket" value={storage.aws_bucket_name}
+                  onChange={(e) => setStorage((p) => ({ ...p, aws_bucket_name: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="st_region">Region</Label>
+                <Input id="st_region" placeholder="eu-west-3" value={storage.aws_region}
+                  onChange={(e) => setStorage((p) => ({ ...p, aws_region: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="st_access_key">Access Key</Label>
+                <Input id="st_access_key" placeholder="AKIA..." value={storage.aws_access_key_id}
+                  onChange={(e) => setStorage((p) => ({ ...p, aws_access_key_id: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="st_secret_key">Secret Key</Label>
+                <Input id="st_secret_key" type="password" placeholder="••••••••" value={storage.aws_secret_access_key}
+                  onChange={(e) => setStorage((p) => ({ ...p, aws_secret_access_key: e.target.value }))} />
+              </div>
+            </div>
+          )}
+
+          {storage.provider === "onedrive" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 p-4 rounded-lg bg-muted/50 border">
+              <div className="space-y-2">
+                <Label htmlFor="od_tenant">Tenant ID</Label>
+                <Input id="od_tenant" placeholder="xxxxxxxx-xxxx-xxxx-xxxx" value={storage.onedrive_tenant_id}
+                  onChange={(e) => setStorage((p) => ({ ...p, onedrive_tenant_id: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="od_client_id">Client ID</Label>
+                <Input id="od_client_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx" value={storage.onedrive_client_id}
+                  onChange={(e) => setStorage((p) => ({ ...p, onedrive_client_id: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="od_client_secret">Client Secret</Label>
+                <Input id="od_client_secret" type="password" placeholder="••••••••" value={storage.onedrive_client_secret}
+                  onChange={(e) => setStorage((p) => ({ ...p, onedrive_client_secret: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="od_drive_id">Drive ID</Label>
+                <Input id="od_drive_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx" value={storage.onedrive_drive_id}
+                  onChange={(e) => setStorage((p) => ({ ...p, onedrive_drive_id: e.target.value }))} />
+              </div>
+            </div>
+          )}
+
+          {storage.provider === "local" && (
+            <div className="p-4 rounded-lg bg-muted/50 border">
+              <p className="text-sm text-muted-foreground">
+                O armazenamento local usa o filesystem do servidor. Sem configuração adicional necessária.
+                Os ficheiros serão guardados em <code className="bg-muted px-1 py-0.5 rounded text-xs">/tmp/powercell_uploads</code>.
+              </p>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 pt-2">
+            <Button onClick={() => handleSave("storage")} disabled={saving === "storage"}>
+              {saving === "storage" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Guardar Storage
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Bloco C: Conta Global de Indexação */}
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
+                <Globe className="h-5 w-5 text-amber-700 dark:text-amber-400" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Conta Global de Indexação (Webmail Partilhado)</CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Conta IMAP partilhada para sincronização de emails do departamento de indexação
+                </CardDescription>
+              </div>
+            </div>
+            {systemWebmail.imap_host && (
+              <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                Configurado
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="wm_imap_host">IMAP Host</Label>
+              <Input id="wm_imap_host" placeholder="imap.gmail.com" value={systemWebmail.imap_host}
+                onChange={(e) => setSystemWebmail((p) => ({ ...p, imap_host: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wm_imap_port">IMAP Port</Label>
+              <Input id="wm_imap_port" type="number" placeholder="993" value={systemWebmail.imap_port}
+                onChange={(e) => setSystemWebmail((p) => ({ ...p, imap_port: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wm_email">Email / User</Label>
+              <Input id="wm_email" placeholder="indexacao@empresa.pt" value={systemWebmail.email_user}
+                onChange={(e) => setSystemWebmail((p) => ({ ...p, email_user: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wm_pass">App Password</Label>
+              <Input id="wm_pass" type="password" placeholder="••••••••" value={systemWebmail.app_password}
+                onChange={(e) => setSystemWebmail((p) => ({ ...p, app_password: e.target.value }))} />
+              <p className="text-xs text-muted-foreground">Password de aplicação (não a password da conta)</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pt-2">
+            <Button onClick={() => handleSave("system_webmail")} disabled={saving === "system_webmail"}>
+              {saving === "system_webmail" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Guardar
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 
@@ -2434,6 +2832,19 @@ const SystemConfigPage = () => {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setActiveTab("integrations")}
+                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                        activeTab === "integrations"
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <Plug className={`h-4 w-4 shrink-0 ${activeTab === "integrations" ? "text-primary" : ""}`} />
+                      <span className="truncate">Integrações</span>
+                      {activeTab === "integrations" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setActiveTab("maintenance")}
                       className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
                         activeTab === "maintenance"
@@ -2487,6 +2898,12 @@ const SystemConfigPage = () => {
                       Email Partilhado
                     </span>
                   </SelectItem>
+                  <SelectItem value="integrations">
+                    <span className="flex items-center gap-2">
+                      <Plug className="h-4 w-4" />
+                      Integrações
+                    </span>
+                  </SelectItem>
                   <SelectItem value="maintenance">
                     <span className="flex items-center gap-2">
                       <Wrench className="h-4 w-4" />
@@ -2516,8 +2933,8 @@ const SystemConfigPage = () => {
                     </button>
                   );
                 })}
-                {["rgpd", "company_email", "shared_email", "maintenance"].map((key) => {
-                  const Icon = key === "rgpd" ? FileSignature : key === "company_email" ? Building2 : key === "shared_email" ? MailCheck : Wrench;
+                {["rgpd", "company_email", "shared_email", "integrations", "maintenance"].map((key) => {
+                  const Icon = key === "rgpd" ? FileSignature : key === "company_email" ? Building2 : key === "shared_email" ? MailCheck : key === "integrations" ? Plug : Wrench;
                   const isActive = activeTab === key;
                   return (
                     <button
@@ -2531,7 +2948,7 @@ const SystemConfigPage = () => {
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      {key === "rgpd" ? "RGPD" : key === "company_email" ? "Email Empresa" : key === "shared_email" ? "Email Partilhado" : "Manutenção"}
+                      {key === "rgpd" ? "RGPD" : key === "company_email" ? "Email Empresa" : key === "shared_email" ? "Email Partilhado" : key === "integrations" ? "Integrações" : "Manutenção"}
                     </button>
                   );
                 })}
@@ -2544,7 +2961,8 @@ const SystemConfigPage = () => {
             {activeTab === "document_recipients" && <DocumentRecipientsManager token={token} user={user} />}
             {activeTab === "company_email" && <CompanyEmailConfigSection />}
             {activeTab === "shared_email" && <SharedEmailConfigSection />}
-            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "company_email" && activeTab !== "shared_email" && (
+            {activeTab === "integrations" && <IntegrationsConfigSection />}
+            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "company_email" && activeTab !== "shared_email" && activeTab !== "integrations" && (
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}

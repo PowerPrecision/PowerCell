@@ -10,7 +10,8 @@ from database import db
 from models.system_config import (
     SystemConfig, StorageConfig, EmailConfig, AIConfig, 
     TrelloConfig, SystemSettings, StorageProvider, CreditServicesConfig,
-    DocumentRecipientsConfig, DSTIConfig, AutoDraftConfig, AuditTrailConfig
+    DocumentRecipientsConfig, DSTIConfig, AutoDraftConfig, AuditTrailConfig,
+    SystemSMTPConfig, SystemWebmailConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
         "aws_secret_access_key", "onedrive_client_secret", "google_client_secret", 
         "dropbox_app_secret", "smtp_password", "imap_password",
         "smtp_password_2", "imap_password_2",
+        "smtp_password_system", "app_password",
         "api_key", "api_token", "dropbox_access_token",
         "hcpro_password", "decisoes_password", "doutorfinancas_password", "custom_portal_password"
     ]
@@ -238,6 +240,14 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
             except json.JSONDecodeError:
                 logger.warning("critical_fields não é um JSON válido, a manter valor original")
         config.audit_trail = AuditTrailConfig(**current)
+    elif section == "system_smtp":
+        current = config.system_smtp.model_dump()
+        current.update(filtered_data)
+        config.system_smtp = SystemSMTPConfig(**current)
+    elif section == "system_webmail":
+        current = config.system_webmail.model_dump()
+        current.update(filtered_data)
+        config.system_webmail = SystemWebmailConfig(**current)
     else:
         raise ValueError(f"Secção desconhecida: {section}")
     
