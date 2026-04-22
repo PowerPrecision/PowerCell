@@ -191,11 +191,28 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
         throw new Error(error.detail || "Erro ao criar link");
       }
       
-      toast.success(
-        linkType === "upload" 
-          ? "Link de upload criado! O cliente receberá um email."
-          : "Link de download criado! O cliente receberá um email."
-      );
+      const linkData = await response.json();
+      
+      // Copiar URL para a área de transferência
+      if (linkData.url) {
+        try {
+          await navigator.clipboard.writeText(linkData.url);
+          toast.success(
+            linkType === "upload"
+              ? "Link de upload criado e copiado!"
+              : "Link de download criado e copiado!"
+          );
+        } catch {
+          toast.success("Link criado com sucesso!");
+          toast.info(`URL: ${linkData.url}`, { duration: 8000 });
+        }
+      } else {
+        toast.success(
+          linkType === "upload"
+            ? "Link de upload criado!"
+            : "Link de download criado!"
+        );
+      }
       
       setShowCreateDialog(false);
       resetForm();
@@ -207,9 +224,13 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
     }
   };
 
-  const handleCopyLink = (url) => {
-    navigator.clipboard.writeText(url);
-    toast.success("Link copiado para o clipboard!");
+  const handleCopyLink = async (url) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copiado para a área de transferência!");
+    } catch {
+      toast.error("Não foi possível copiar o link");
+    }
   };
 
   const handleCancelLink = async (linkId) => {
