@@ -41,6 +41,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat Interno"])
 
+
+def _block_parceiro(user: dict) -> None:
+    """Bloqueia utilizadores com role 'parceiro' de enviar mensagens ou criar grupos."""
+    if user.get("role") == "parceiro":
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas visualização disponível para parceiros. Não é possível enviar mensagens."
+        )
+
 # Tamanho máximo de anexo: 10MB
 MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024
 ALLOWED_ATTACHMENT_TYPES = [
@@ -270,6 +279,7 @@ async def send_message(
     """
     Enviar uma nova mensagem (direta ou para grupo).
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     # Sanitizar conteúdo da mensagem antes de guardar
@@ -373,6 +383,7 @@ async def upload_message_with_attachment(
     """
     Enviar mensagem com anexo.
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     # Validar ficheiro
@@ -654,6 +665,7 @@ async def create_group(
     """
     Criar um novo grupo de chat.
     """
+    _block_parceiro(user)
     user_id = user["id"]
 
     # Validar membros

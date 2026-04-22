@@ -76,6 +76,8 @@ import {
   Loader2,
   Home,
   ArrowUp,
+  Settings,
+  CloudOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
@@ -150,6 +152,11 @@ const FilesExplorerPage = () => {
   const [newFolderDialog, setNewFolderDialog] = useState({ open: false, name: "" });
   const [creatingFolder, setCreatingFolder] = useState(false);
 
+  // S3 configuration state
+  const [s3Configured, setS3Configured] = useState(null); // null = loading, true/false
+  const [configDialog, setConfigDialog] = useState({ open: false });
+  const [configLoading, setConfigLoading] = useState(false);
+
   const fileInputRef = useRef(null);
   const searchTimeoutRef = useRef(null);
 
@@ -164,12 +171,17 @@ const FilesExplorerPage = () => {
       );
       if (res.ok) {
         const data = await res.json();
+        console.log("Arquivos carregados:", data);
+        setS3Configured(true);
         setFolders(data.subfolders || []);
         setFiles(data.files || []);
       } else {
         const err = await res.json().catch(() => ({}));
+        console.error("Erro ao carregar ficheiros:", res.status, err);
         if (res.status === 403) {
           toast.error("Sem permissões para aceder ao explorador de ficheiros.");
+        } else if (res.status === 503) {
+          setS3Configured(false);
         } else {
           toast.error(err.detail || "Erro ao carregar ficheiros");
         }
@@ -428,6 +440,39 @@ const FilesExplorerPage = () => {
     }
   };
 
+  // ── Save S3 Configuration ─────────────────────────────────────────────
+  const handleSaveConfig = async (settings) => {
+    setConfigLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/settings`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          s3_bucket: settings.bucket,
+          s3_region: settings.region,
+          s3_access_key: settings.accessKey,
+          s3_secret_key: settings.secretKey,
+        }),
+      });
+      if (res.ok) {
+        toast.success("Configuração S3 guardada com sucesso");
+        setConfigDialog({ open: false });
+        setS3Configured(null);
+        fetchContents(currentPath);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.detail || "Erro ao guardar configuração");
+      }
+    } catch {
+      toast.error("Erro de ligação ao servidor");
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
   // ── Search ────────────────────────────────────────────────────────────────
   const handleSearch = (value) => {
     setSearchQuery(value);
@@ -447,6 +492,45 @@ const FilesExplorerPage = () => {
   // ── Sort: folders first, then files alphabetically ───────────────────────
   const sortedFolders = [...filteredFolders].sort((a, b) => a.name.localeCompare(b.name));
   const sortedFiles = [...filteredFiles].sort((a, b) => a.name.localeCompare(b.name));
+
+  // ── S3 Not Configured Banner ─────────────────────────────────────────
+  const S3NotConfiguredBanner = () => (
+    <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/20">
+      <CardContent className="py-6">
+        <div className="flex flex-col items-center justify-center text-center space-y-4">
+          <div className="h-16 w-16 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center">
+            <CloudOff className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-amber-800 dark:text-amber-200">
+              Armazenamento S3 Não Configurado
+            </h3>
+            <p className="text-sm text-amber-700 dark:text-amber-300 mt-1 max-w-md">
+              O Explorador de Ficheiros necessita de credenciais S3 (Amazon S3, MinIO ou compatível) para funcionar.
+              Configure o acesso nas Definições Gerais do sistema.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setConfigDialog({ open: true })}
+              className="gap-2"
+            >
+              <Settings className="h-4 w-4" />
+              Configurar Agora
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => navigate("/definicoes")}
+              className="gap-2"
+            >
+              Ir para Definições Gerais
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
   // ── Restricted access for non-admins ─────────────────────────────────────
   if (!isAdmin) {
@@ -506,6 +590,19 @@ const FilesExplorerPage = () => {
             <p className="text-sm text-muted-foreground mt-1">
               Navegue e gere os ficheiros armazenados no S3.
             </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setConfigDialog({ open: true })}
+              >
+                <Settings className="h-4 w-4" />
+                <span className="hidden sm:inline">Configuração</span>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -613,7 +710,54 @@ const FilesExplorerPage = () => {
           </CardContent>
         </Card>
 
-        {/* File Table */}
+        {/* S3 Not Configured Fallback */}
+        {s3Configured === false && <S3NotConfiguredBanner />}
+
+        {/* Empty State with helpful message */}
+        {!loading && s3Configured !== false && sortedFolders.length === 0 && sortedFiles.length === 0 && (
+          <Card className="border-dashed">
+            <CardContent className="py-12">
+              <div className="flex flex-col items-center justify-center text-center space-y-3">
+                <div className="h-14 w-14 rounded-full bg-muted/50 flex items-center justify-center">
+                  <Folder className="h-7 w-7 text-muted-foreground/40" />
+                </div>
+                <div>
+                  <p className="font-medium text-muted-foreground">Nenhum ficheiro encontrado</p>
+                  <p className="text-sm text-muted-foreground/70 mt-1">
+                    Verifique as configurações de armazenamento nas Definições Gerais.<br />
+                    {!currentPath && "Certifique-se de que o caminho base (Base Path) está correto."}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchContents(currentPath)}
+                    disabled={loading}
+                    className="gap-1.5"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                    Tentar Novamente
+                  </Button>
+                  {isAdmin && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfigDialog({ open: true })}
+                      className="gap-1.5"
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                      Verificar Configuração
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* File Table — hidden when S3 not configured or empty (fallback shown above) */}
+        {s3Configured !== false && (sortedFolders.length > 0 || sortedFiles.length > 0 || loading) && (
         <Card>
           <CardContent className="p-0">
             <div className="rounded-md border overflow-hidden">
@@ -773,6 +917,7 @@ const FilesExplorerPage = () => {
             )}
           </CardContent>
         </Card>
+        )}
       </div>
 
       {/* Hidden file input */}
@@ -832,6 +977,64 @@ const FilesExplorerPage = () => {
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
               Eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* S3 Configuration Dialog */}
+      <Dialog open={configDialog.open} onOpenChange={(open) => setConfigDialog({ open })}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Configuração do Armazenamento
+            </DialogTitle>
+            <DialogDescription>
+              Configure as credenciais S3 para ativar o Explorador de Ficheiros.
+              Pode usar Amazon S3, MinIO ou qualquer serviço compatível com S3.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="p-3 bg-muted/50 rounded-lg">
+              <p className="text-sm text-muted-foreground">
+                As credenciais S3 também podem ser configuradas na página de{" "}
+                <button
+                  onClick={() => { setConfigDialog({ open: false }); navigate("/definicoes"); }}
+                  className="text-primary underline hover:no-underline"
+                >
+                  Definições Gerais
+                </button>.
+              </p>
+            </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Bucket</label>
+                  <Input placeholder="nome-do-bucket" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Região</label>
+                  <Input placeholder="eu-west-1" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Access Key ID</label>
+                <Input placeholder="AKIAIOSFODNN7EXAMPLE" type="password" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Secret Access Key</label>
+                <Input placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" type="password" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfigDialog({ open: false })}>
+              Cancelar
+            </Button>
+            <Button onClick={() => navigate("/definicoes")} className="gap-2">
+              <Settings className="h-4 w-4" />
+              Ir para Definições Gerais
             </Button>
           </DialogFooter>
         </DialogContent>

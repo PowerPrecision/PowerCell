@@ -20,11 +20,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { 
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
-  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown
+  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
+import CreateProcessModal from "../components/CreateProcessModal";
 
 const ProcessesPage = () => {
   const navigate = useNavigate();
@@ -59,6 +60,7 @@ const ProcessesPage = () => {
   const [sortField, setSortField] = useState(searchParams.get("sort") || "created_at");
   const [sortOrder, setSortOrder] = useState(searchParams.get("order") || "desc");
   const [sortedProcesses, setSortedProcesses] = useState([]);
+  const [showCreateProcess, setShowCreateProcess] = useState(false);
 
   const toggleSort = (field) => {
     if (sortField === field) {
@@ -101,6 +103,11 @@ const ProcessesPage = () => {
   const fetchProcesses = async () => {
     try {
       setLoading(true);
+      // Para "/processos" (Os Meus Processos): NÃO enviar show_all — o backend
+      // filtra automaticamente por user_id. Para "/lista-processos": enviar show_all
+      // para mostrar TODOS os processos da empresa (visão global).
+      const isGlobalView = location.pathname === "/lista-processos";
+
       const response = await getProcesses({
         page: pagination.page,
         size: pagination.size,
@@ -108,7 +115,7 @@ const ProcessesPage = () => {
         view_mode: showCompleted ? "all" : "active_only",
         sort_field: sortField,
         sort_order: sortOrder,
-        show_all: true
+        ...(isGlobalView ? { show_all: true } : {}),
       });
       
       // Suporta novo formato paginado
@@ -298,6 +305,13 @@ const ProcessesPage = () => {
                   Total de {pagination.total} processos no sistema
                 </CardDescription>
               </div>
+              <Button
+                className="gap-2"
+                onClick={() => setShowCreateProcess(true)}
+              >
+                <Plus className="h-4 w-4" />
+                Novo Processo
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -504,6 +518,13 @@ const ProcessesPage = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Create Process Modal */}
+      <CreateProcessModal
+        open={showCreateProcess}
+        onOpenChange={setShowCreateProcess}
+        onSuccess={() => fetchProcesses()}
+      />
     </DashboardLayout>
   );
 };

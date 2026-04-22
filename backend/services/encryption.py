@@ -550,6 +550,9 @@ def _add_client_blind_indexes(data: dict) -> None:
     """
     Adiciona blind indexes ao documento do cliente (modifica in-place).
     
+    Gera SEMPRE (não apenas se ausente) para garantir que actualizações
+    a email/NIF/telefone são refletidas imediatamente na pesquisa.
+    
     Gera:
     - dados_pessoais.nif_hash
     - contacto.telefone_hash
@@ -558,7 +561,7 @@ def _add_client_blind_indexes(data: dict) -> None:
     # Hash do NIF
     if "dados_pessoais" in data and isinstance(data["dados_pessoais"], dict):
         nif = data["dados_pessoais"].get("nif")
-        if nif and not data["dados_pessoais"].get("nif_hash"):
+        if nif:
             nif_clean = re.sub(r'[^\d]', '', str(nif))
             if len(nif_clean) == 9:
                 data["dados_pessoais"]["nif_hash"] = generate_nif_hash(nif_clean)
@@ -566,18 +569,18 @@ def _add_client_blind_indexes(data: dict) -> None:
     # Hash do telefone
     if "contacto" in data and isinstance(data["contacto"], dict):
         telefone = data["contacto"].get("telefone")
-        if telefone and not data["contacto"].get("telefone_hash"):
+        if telefone:
             data["contacto"]["telefone_hash"] = generate_telefone_hash(telefone)
         
         # Hash do email para pesquisa
         email = data["contacto"].get("email")
-        if email and not data["contacto"].get("email_hash"):
+        if email:
             data["contacto"]["email_hash"] = generate_email_hash(email)
     
     # Hash do NIF do titular2
     if "titular2_data" in data and isinstance(data["titular2_data"], dict):
         nif2 = data["titular2_data"].get("nif")
-        if nif2 and not data["titular2_data"].get("nif_hash"):
+        if nif2:
             nif2_clean = re.sub(r'[^\d]', '', str(nif2))
             if len(nif2_clean) == 9:
                 data["titular2_data"]["nif_hash"] = generate_nif_hash(nif2_clean)

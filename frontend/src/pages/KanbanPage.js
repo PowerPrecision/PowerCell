@@ -10,17 +10,20 @@ import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import KanbanBoard from "../components/KanbanBoard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Loader2, LayoutGrid } from "lucide-react";
+import { Loader2, LayoutGrid, Plus } from "lucide-react";
 import { getUsers } from "../services/api";
 import { toast } from "sonner";
+import CreateProcessModal from "../components/CreateProcessModal";
 
 const KanbanPage = () => {
   const { token, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
+  const [showCreateProcess, setShowCreateProcess] = useState(false);
 
   // Ler filtros da URL
   const consultorFilter = searchParams.get("consultor") || "all";
@@ -83,14 +86,23 @@ const KanbanPage = () => {
     <DashboardLayout title="Quadro Geral">
       <div className="space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <LayoutGrid className="h-5 w-5 shrink-0" />
-            Quadro Geral de Processos
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Filtre por consultor, intermediário, indexação ou parceiro
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <LayoutGrid className="h-5 w-5 shrink-0" />
+              Quadro Geral de Processos
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Filtre por consultor, intermediário, indexação ou parceiro
+            </p>
+          </div>
+          <Button
+            className="gap-2 shrink-0"
+            onClick={() => setShowCreateProcess(true)}
+          >
+            <Plus className="h-4 w-4" />
+            Novo Processo
+          </Button>
         </div>
 
         {/* Kanban Board */}
@@ -165,6 +177,13 @@ const KanbanPage = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Create Process Modal */}
+      <CreateProcessModal
+        open={showCreateProcess}
+        onOpenChange={setShowCreateProcess}
+        onSuccess={() => fetchUsers()}
+      />
     </DashboardLayout>
   );
 };

@@ -401,6 +401,12 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     """
     Criar um novo processo/cliente.
     
+    REGRA DE NEGÓCIO (ESTRITA):
+    - É PROIBIDO criar um processo sem associar a um cliente existente.
+    - O campo client_id é OBRIGATÓRIO. Se não for fornecido, retorna erro 400.
+    - Se o cliente não existir na base de dados, retorna erro 404.
+    
+    Um cliente pode existir sem processo, mas um processo NUNCA existe sem cliente.
     Este endpoint permite que Intermediários de Crédito criem 
     processos para os seus clientes. O processo é automaticamente
     atribuído ao intermediário que o criou.
@@ -427,6 +433,17 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         raise HTTPException(
             status_code=403, 
             detail="Não tem permissão para criar clientes/processos."
+        )
+    
+    # ====================================================================
+    # REGRA DE NEGÓCIO: client_id é OBRIGATÓRIO
+    # É proibido criar um processo sem associar a um cliente existente.
+    # ====================================================================
+    if not data.client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="É obrigatório associar um cliente existente para criar um processo. "
+                   "Selecione um cliente na listagem antes de criar o processo."
         )
     
     # Obter o primeiro estado do workflow
@@ -477,20 +494,30 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # Se recebeu client_id, usar diretamente
     if data.client_id:
         existing_client = await db.clients.find_one({"id": data.client_id})
-        if existing_client:
-            client_id = existing_client["id"]
-            # Desencriptar dados do cliente existente para usar no processo
-            decrypted = decrypt_client_data(existing_client)
-            client_name = decrypted.get("nome", client_name)
-            client_email = decrypted.get("contacto", {}).get("email", client_email) or client_email
-            client_phone = decrypted.get("contacto", {}).get("telefone", client_phone) or client_phone
-            nif_val = decrypted.get("dados_pessoais", {}).get("nif", "")
-            if nif_val:
-                client_nif = nif_val
-                personal["nif"] = nif_val
-            logger.info(f"Cliente existente usado via client_id: {client_id}")
-        else:
-            logger.warning(f"client_id {data.client_id} não encontrado, vai criar novo")
+        if not existing_client:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Cliente com ID '{data.client_id}' não encontrado. "
+                       "Verifique se o cliente existe na base de dados."
+            )
+        client_id = existing_client["id"]
+        # Desencriptar dados do cliente existente para usar no processo
+        decrypted = decrypt_client_data(existing_client)
+        client_name = decrypted.get("nome", client_name)
+        client_email = decrypted.get("contacto", {}).get("email", client_email) or client_email
+        client_phone = decrypted.get("contacto", {}).get("telefone", client_phone) or client_phone
+        nif_val = decrypted.get("dados_pessoais", {}).get("nif", "")
+        if nif_val:
+            client_nif = nif_val
+            personal["nif"] = nif_val
+        logger.info(f"Cliente existente usado via client_id: {client_id}")
+    else:
+        # Esta ramificação não deve ser alcançada devido à validação acima,
+        # mas mantemos como salvaguarda.
+        raise HTTPException(
+            status_code=400,
+            detail="É obrigatório associar um cliente existente para criar um processo."
+        )
 
     # Se não encontrou por client_id, procurar por NIF ou email (deduplicação)
     if not client_id and (client_nif or client_email):

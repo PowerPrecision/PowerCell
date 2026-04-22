@@ -130,7 +130,7 @@ const DashboardLayout = ({ children, title }) => {
       });
       if (res.ok) {
         const data = await res.json();
-        const total = data.total || 0;
+        const total = data.unread_count || data.total || 0;
         chatUnreadRef.current = total;
         setChatUnreadCount(total);
       }
@@ -186,6 +186,12 @@ const DashboardLayout = ({ children, title }) => {
   useEffect(() => {
     setOpenSections(getInitialOpenSections());
   }, [location.pathname]);
+
+  // Forçar re-render completo do menu lateral quando a role muda (Context Switcher)
+  // Resetar openSections para que as secções sejam recalculadas com o novo role
+  useEffect(() => {
+    setOpenSections(getInitialOpenSections());
+  }, [effectiveRole]);
 
   // Detectar scroll para minimizar header
   useEffect(() => {

@@ -869,3 +869,26 @@ Stage Summary:
 - 9 files changed, 398 insertions, 42 deletions
 - Pushed to origin/dev
 
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix React Error #300 (Maximum update depth exceeded) in production build
+
+Work Log:
+- Cloned PowerCell repo from GitHub (dev branch)
+- Analyzed the error: React #300 = "Maximum update depth exceeded" (infinite re-render loop during commit phase)
+- Read and analyzed all dashboard components, context providers, hooks, and layout components
+- Identified ROOT CAUSE: TasksContext.js had `activeCount` in the useEffect dependency array. When `fetchActiveTasks()` called `setActiveCount(N)`, it triggered the effect to re-run, which called `fetchActiveTasks()` again, creating a loop
+- Identified SECONDARY issues: useWebSocket.js had a separate useEffect for `options` that fired on every render (callers pass inline objects), and both AuthContext and TasksContext created new context value objects on every render causing all consumers to re-render
+- Fixed TasksContext.js: Removed `activeCount` from main useEffect deps, used a ref (`activeCountRef`) + separate effect to restart polling when count changes
+- Fixed useWebSocket.js: Removed separate `options` useEffect, combined with `token` effect, replaced static handler registration with `makeHandler` wrapper that reads from `optionsRef.current` for always-fresh callbacks
+- Fixed AuthContext.js: Wrapped context value in `useMemo`
+- Fixed TasksContext.js: Wrapped context value in `useMemo`
+- Committed and pushed as `9007efe` to dev branch
+
+Stage Summary:
+- React Error #300 resolved by breaking the infinite re-render chain in TasksContext
+- 3 files modified: TasksContext.js, useWebSocket.js, AuthContext.js
+- Additional performance improvement: memoized context values to prevent cascade re-renders
+- Commit pushed to origin/dev successfully
+
