@@ -342,7 +342,8 @@ async def send_email(
     bcc_emails: Optional[List[str]] = None,
     process_id: Optional[str] = None,
     created_by: Optional[str] = None,
-    attachments: Optional[List[Dict[str, Any]]] = None
+    attachments: Optional[List[Dict[str, Any]]] = None,
+    force_system: bool = False,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -375,6 +376,8 @@ async def send_email(
             - filename (str): Nome do ficheiro.
             - content_bytes (bytes): Conteúdo binário.
             - content_type (str): Tipo MIME (ex: "application/pdf").
+        force_system: Se True, nunca faz fallback para credenciais pessoais
+            do utilizador. Usa exclusivamente a conta global do sistema.
 
     Returns:
         dict: Resultado da operação:
@@ -416,6 +419,13 @@ async def send_email(
                     logger.warning(f"[Send Email] Erro ao desencriptar password pessoal: {e}")
     
     if not account:
+        # === force_system: nunca usar credenciais pessoais ===
+        if force_system:
+            available = [a.name for a in accounts]
+            return {
+                "success": False,
+                "error": f"Conta de sistema '{account_name}' não configurada. Contas disponíveis: {available}"
+            }
         # Usar primeira conta disponível
         if accounts:
             account = accounts[0]
@@ -1151,6 +1161,119 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
         "total_duplicates": total_duplicates,
         "total_errors": total_errors,
         "user_id": user_id,
+    }
+
+
+async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 200) -> Dict[str, Any]:
+    """
+    Sincronizar emails para um role partilhado (indexacao, suporte, etc.)
+    usando a conta de email partilhada do departamento.
+    
+    Delega para o Gmail API service quando OAuth está configurado,
+    caso contrário faz sync IMAP com as credenciais partilhadas.
+    
+    Args:
+        role: Nome do role (ex: 'indexacao')
+        days: Dias para sincronizar
+        max_emails: Máximo de emails por pasta
+    
+    Returns:
+        Dict com resultado da sincronização
+    """
+    from services.encryption import encryption_service
+    
+    shared_config = await db.shared_role_email_configs.find_one(
+        {"role": role, "is_configured": True},
+        {"_id": 0}
+    )
+    
+    if not shared_config:
+        return {"success": False, "error": f"Configuração de email partilhada para '{role}' não encontrada"}
+    
+    # Prioridade 1: Gmail API (OAuth)
+    if shared_config.get("google_refresh_token"):
+        try:
+            from services.gmail_api_service import gmail_api_sync_to_db
+            return await gmail_api_sync_to_db(role=role, days=days, max_emails=max_emails)
+        except Exception as e:
+            logger.error(f"[Shared Role Sync] Gmail API falhou para {role}: {e}", exc_info=True)
+            # Fallback para IMAP abaixo
+    
+    # Prioridade 2: IMAP com credenciais partilhadas
+    encrypted_password = shared_config.get("encrypted_password", "")
+    if not encrypted_password:
+        return {"success": False, "error": f"Conta partilhada para '{role}' sem credenciais (OAuth ou password)"}
+    
+    password = encryption_service.decrypt(encrypted_password)
+    
+    account = EmailAccount(
+        name=f"shared_{role}",
+        imap_server=shared_config.get("imap_server", ""),
+        imap_port=int(shared_config.get("imap_port", 993)),
+        smtp_server=shared_config.get("smtp_server", ""),
+        smtp_port=int(shared_config.get("smtp_port", 465)),
+        email=shared_config.get("email_address", ""),
+        password=password,
+    )
+    
+    total_synced = 0
+    total_duplicates = 0
+    total_errors = 0
+    email_address = shared_config.get("email_address", "")
+    
+    try:
+        loop = asyncio.get_event_loop()
+        
+        inbox_result = await loop.run_in_executor(
+            _email_executor,
+            lambda: _fetch_all_from_folder_sync(account, "INBOX", days, max_emails)
+        )
+        
+        if inbox_result.get("connection_error"):
+            return {"success": False, "error": inbox_result["connection_error"]}
+        
+        for email_data in inbox_result.get("emails", []):
+            try:
+                email_data["account"] = "shared"
+                email_data["shared_role"] = role
+                email_data["synced_for_user"] = None
+                await _save_email_to_db(email_data, email_address, None, role)
+                total_synced += 1
+            except Exception as e:
+                if "duplicate" in str(e).lower():
+                    total_duplicates += 1
+                else:
+                    logger.error(f"[Shared Role Sync] Erro ao guardar email: {e}")
+                    total_errors += 1
+        
+        sent_result = await loop.run_in_executor(
+            _email_executor,
+            lambda: _fetch_all_from_folder_sync(account, "Sent", days, max_emails)
+        )
+        
+        for email_data in sent_result.get("emails", []):
+            try:
+                email_data["account"] = "shared"
+                email_data["shared_role"] = role
+                email_data["synced_for_user"] = None
+                await _save_email_to_db(email_data, email_address, None, role)
+                total_synced += 1
+            except Exception as e:
+                if "duplicate" in str(e).lower():
+                    total_duplicates += 1
+                else:
+                    total_errors += 1
+    
+    except Exception as e:
+        logger.error(f"[Shared Role Sync] Erro geral para {role}: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "total_synced": total_synced}
+    
+    return {
+        "success": total_errors == 0 or total_synced > 0,
+        "total_synced": total_synced,
+        "total_duplicates": total_duplicates,
+        "total_errors": total_errors,
+        "role": role,
     }
 
 

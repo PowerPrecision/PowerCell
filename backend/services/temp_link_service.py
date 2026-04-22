@@ -499,7 +499,8 @@ Equipa PowerCell
                 to_emails=[client_email],
                 subject=subject,
                 body=body_text,
-                body_html=body_html
+                body_html=body_html,
+                force_system=True,
             )
 
             if result.get("success"):
