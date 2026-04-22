@@ -164,12 +164,16 @@ const FilesExplorerPage = () => {
       );
       if (res.ok) {
         const data = await res.json();
+        console.log("Arquivos carregados:", data);
         setFolders(data.subfolders || []);
         setFiles(data.files || []);
       } else {
         const err = await res.json().catch(() => ({}));
+        console.error("Erro ao carregar ficheiros:", res.status, err);
         if (res.status === 403) {
           toast.error("Sem permissões para aceder ao explorador de ficheiros.");
+        } else if (res.status === 503) {
+          toast.error("S3 não está configurado. Contacte o administrador.");
         } else {
           toast.error(err.detail || "Erro ao carregar ficheiros");
         }

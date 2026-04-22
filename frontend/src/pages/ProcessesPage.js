@@ -101,6 +101,11 @@ const ProcessesPage = () => {
   const fetchProcesses = async () => {
     try {
       setLoading(true);
+      // Para "/processos" (Os Meus Processos): NÃO enviar show_all — o backend
+      // filtra automaticamente por user_id. Para "/lista-processos": enviar show_all
+      // para mostrar TODOS os processos da empresa (visão global).
+      const isGlobalView = location.pathname === "/lista-processos";
+
       const response = await getProcesses({
         page: pagination.page,
         size: pagination.size,
@@ -108,7 +113,7 @@ const ProcessesPage = () => {
         view_mode: showCompleted ? "all" : "active_only",
         sort_field: sortField,
         sort_order: sortOrder,
-        show_all: true
+        ...(isGlobalView ? { show_all: true } : {}),
       });
       
       // Suporta novo formato paginado

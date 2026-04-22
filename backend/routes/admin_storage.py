@@ -527,25 +527,32 @@ async def batch_update_process_s3_mappings(
 
 @router.get("/s3-folder-contents")
 async def get_s3_folder_contents(
-    folder_path: str = Query(...),
+    folder_path: str = Query("", description="Caminho da pasta S3 (vazio = raiz)"),
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    """Lista conteúdo de uma pasta S3."""
+    """Lista conteúdo de uma pasta S3. Se folder_path vazio, lista a raiz do bucket."""
     from services.s3_storage import s3_service
     
     if not s3_service.is_configured():
         raise HTTPException(status_code=503, detail="S3 não configurado")
     
+    # Se folder_path vazio, tentar prefixar com a pasta principal configurada
+    prefix = folder_path.strip()
+    if not prefix:
+        # Tentar listar a raiz — pode estar vazia, mostrar conteúdo útil
+        prefix = ""
+    
     try:
+        list_prefix = prefix if prefix.endswith("/") else f"{prefix}/"
         response = s3_service.s3_client.list_objects_v2(
             Bucket=s3_service.bucket_name,
-            Prefix=folder_path if folder_path.endswith("/") else f"{folder_path}/",
+            Prefix=list_prefix,
             Delimiter="/"
         )
         
         subfolders = []
-        for prefix in response.get("CommonPrefixes", []):
-            subfolder_path = prefix.get("Prefix", "")
+        for common_prefix in response.get("CommonPrefixes", []):
+            subfolder_path = common_prefix.get("Prefix", "")
             parts = subfolder_path.rstrip("/").split("/")
             subfolder_name = parts[-1] if parts else ""
             if subfolder_name:
@@ -557,7 +564,7 @@ async def get_s3_folder_contents(
         files = []
         for obj in response.get("Contents", []):
             key = obj.get("Key", "")
-            if key != folder_path and not key.endswith("/"):
+            if key != list_prefix and not key.endswith("/"):
                 file_name = key.split("/")[-1]
                 files.append({
                     "path": key,

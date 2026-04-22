@@ -187,6 +187,12 @@ const DashboardLayout = ({ children, title }) => {
     setOpenSections(getInitialOpenSections());
   }, [location.pathname]);
 
+  // Forçar re-render completo do menu lateral quando a role muda (Context Switcher)
+  // Resetar openSections para que as secções sejam recalculadas com o novo role
+  useEffect(() => {
+    setOpenSections(getInitialOpenSections());
+  }, [effectiveRole]);
+
   // Detectar scroll para minimizar header
   useEffect(() => {
     const handleScroll = () => {

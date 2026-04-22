@@ -216,56 +216,51 @@ export default function ClientsPage() {
   const filteredClients = useMemo(() => {
     let result = [...clients];
 
-    // Ordenar
-    result.sort((a, b) => {
-      let aVal, bVal;
-
+    // Determinar valores de ordenação para cada item
+    const getSortValue = (c) => {
       if (sortField === "contacto") {
-        aVal = (a.contacto?.email || a.contacto?.telefone || "").toLowerCase();
-        bVal = (b.contacto?.email || b.contacto?.telefone || "").toLowerCase();
-      } else if (sortField === "nif") {
-        aVal = a.dados_pessoais?.nif || "";
-        bVal = b.dados_pessoais?.nif || "";
-        aVal = aVal.toLowerCase();
-        bVal = bVal.toLowerCase();
-      } else if (sortField === "fase") {
-        aVal = (a.fase_principal?.status_label || "").toLowerCase();
-        bVal = (b.fase_principal?.status_label || "").toLowerCase();
-      } else if (sortField === "process_count") {
-        aVal = a.active_processes_count || 0;
-        bVal = b.active_processes_count || 0;
-      } else if (sortField === "nome") {
-        aVal = (a.nome || "").toLowerCase();
-        bVal = (b.nome || "").toLowerCase();
-      } else {
-        aVal = a[sortField];
-        bVal = b[sortField];
+        return (c.contacto?.email || c.contacto?.telefone || "").toLowerCase();
       }
-
-      // Handle dates
-      if (sortField === "created_at" || sortField === "updated_at") {
-        aVal = new Date(aVal || 0).getTime();
-        bVal = new Date(bVal || 0).getTime();
+      if (sortField === "nif") {
+        return (c.dados_pessoais?.nif || "").toLowerCase();
       }
-
-      // Handle strings
-      if (typeof aVal === "string") {
-        aVal = aVal.toLowerCase();
-        bVal = (bVal || "").toLowerCase();
+      if (sortField === "fase") {
+        return (c.fase_principal?.status_label || "").toLowerCase();
       }
-
-      // Handle numbers
       if (sortField === "process_count") {
-        aVal = aVal || 0;
-        bVal = bVal || 0;
+        return c.active_processes_count || 0;
+      }
+      if (sortField === "nome") {
+        return (c.nome || "").toLowerCase();
+      }
+      // Campo genérico (ex: created_at, updated_at)
+      const val = c[sortField];
+      if (sortField === "created_at" || sortField === "updated_at") {
+        return val ? new Date(val).getTime() : 0;
+      }
+      return typeof val === "string" ? val.toLowerCase() : val;
+    };
+
+    result.sort((a, b) => {
+      const aVal = getSortValue(a);
+      const bVal = getSortValue(b);
+
+      // Tipos mistos: converter para string como fallback
+      if (typeof aVal !== typeof bVal) {
+        const aStr = String(aVal || "");
+        const bStr = String(bVal || "");
+        return sortOrder === "asc"
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
       }
 
       if (sortOrder === "asc") {
-        return aVal > bVal ? 1 : -1;
+        return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
       }
-      return aVal < bVal ? 1 : -1;
+      return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
     });
 
+    console.log(`[Clientes] sort: ${sortField} ${sortOrder}, items: ${result.length}`);
     return result;
   }, [clients, sortField, sortOrder]);
 
