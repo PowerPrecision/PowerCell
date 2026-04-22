@@ -30,7 +30,7 @@
  * <Route path="/processo/:id" element={<ProcessDetails />} />
  * // O ID é obtido via useParams() internamente
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -245,6 +245,9 @@ const ProcessDetails = () => {
   const navigate = useNavigate();
   const { user, token } = useAuth();
   const [process, setProcess] = useState(null);
+  // Guardar os dados originais do processo (da BD) para componentes
+  // que precisam dos valores guardados (ex: email para notificações)
+  const savedProcessRef = useRef(null);
   const [deadlines, setDeadlines] = useState([]);
   const [activities, setActivities] = useState([]);
   const [history, setHistory] = useState([]);
@@ -748,6 +751,7 @@ const ProcessDetails = () => {
       ]);
       const processData = processRes.data;
       setProcess(processData);
+      savedProcessRef.current = processData;
       setDeadlines(deadlinesRes.data);
       setActivities(activitiesRes.data);
       setHistory(historyRes.data);
@@ -1508,8 +1512,8 @@ const ProcessDetails = () => {
                 <AutoDSTIBadge processId={id} token={token} compact={true} />
                 <TempLinkButton
                   processId={id}
-                  clientName={process?.client_name}
-                  clientEmail={process?.client_email}
+                  clientName={savedProcessRef.current?.client_name || process?.client_name}
+                  clientEmail={savedProcessRef.current?.client_email || process?.client_email}
                 />
                 <Popover>
                   <PopoverTrigger asChild>
@@ -4078,8 +4082,8 @@ const ProcessDetails = () => {
                         <CardContent className="pt-6">
                           <EmailHistoryPanel 
                             processId={id}
-                            clientEmail={process?.client_email}
-                            clientName={process?.client_name}
+                            clientEmail={savedProcessRef.current?.client_email || process?.client_email}
+                            clientName={savedProcessRef.current?.client_name || process?.client_name}
                             compact={false}
                             maxHeight="500px"
                             token={token}
