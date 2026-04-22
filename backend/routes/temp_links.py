@@ -45,7 +45,7 @@ async def create_temp_link(
     max_uses: int = Form(default=1),
     description: Optional[str] = Form(default=None),
     file_paths: Optional[str] = Form(default=None),  # JSON string ou comma-separated
-    notify_email: bool = Form(default=True),
+    notify_email: Optional[str] = Form(default="true"),
     base_url: Optional[str] = Form(default=None),  # URL do frontend (para construir links corretos)
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR]))
 ):
@@ -116,6 +116,10 @@ async def create_temp_link(
             detail="Links de download requerem pelo menos um ficheiro."
         )
     
+    # Parse notify_email: FormData envia "true"/"false" como strings,
+    # FastAPI Form(bool) trata qualquer string não-vazia como True.
+    notify_email_bool = notify_email.lower() in ("true", "1", "yes") if notify_email else True
+    
     try:
         link = await temp_link_service.create_link(
             process_id=process_id,
@@ -126,7 +130,7 @@ async def create_temp_link(
             max_uses=max_uses,
             description=description,
             file_paths=files_list,
-            notify_email=notify_email,
+            notify_email=notify_email_bool,
             base_url=base_url
         )
         
