@@ -1234,35 +1234,155 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
         
         for email_data in inbox_result.get("emails", []):
             try:
-                email_data["account"] = "shared"
-                email_data["shared_role"] = role
-                email_data["synced_for_user"] = None
-                await _save_email_to_db(email_data, email_address, None, role)
+                msg_id = email_data.get("message_id", "")
+                if not msg_id:
+                    continue
+                existing = await db.emails.find_one({"message_id": msg_id, "shared_role": role})
+                if existing:
+                    total_duplicates += 1
+                    continue
+
+                # Parsear data
+                sent_at = email_data.get("date")
+                try:
+                    sent_at = datetime.fromisoformat(sent_at.replace("Z", "+00:00")).isoformat() if sent_at else datetime.now(timezone.utc).isoformat()
+                except Exception:
+                    sent_at = datetime.now(timezone.utc).isoformat()
+
+                # Smart threading
+                resolved_process_id = None
+                parent_msg_ids = []
+                if email_data.get("in_reply_to"):
+                    parent_msg_ids.append(email_data["in_reply_to"])
+                if email_data.get("references"):
+                    parent_msg_ids.extend(email_data["references"])
+                if parent_msg_ids:
+                    parent_email = await db.emails.find_one(
+                        {"message_id": {"$in": parent_msg_ids}, "process_id": {"$ne": None, "$exists": True}},
+                        {"_id": 0, "process_id": 1, "message_id": 1}
+                    )
+                    if parent_email:
+                        resolved_process_id = parent_email["process_id"]
+
+                # Tag mágica
+                subject = email_data.get("subject", "")
+                if not resolved_process_id and subject:
+                    tag_match = re.search(r'\[Proc-([^\]]+)\]', subject)
+                    if tag_match:
+                        tag_pid = tag_match.group(1).strip()
+                        if await db.processes.find_one({"id": tag_pid}, {"_id": 0, "id": 1}):
+                            resolved_process_id = tag_pid
+
+                await db.emails.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "process_id": resolved_process_id,
+                    "direction": email_data.get("direction", "received"),
+                    "from_email": email_data.get("from_email", ""),
+                    "to_emails": [str(e) for e in (email_data.get("to_emails") or []) if e],
+                    "cc_emails": [str(e) for e in (email_data.get("cc_emails") or []) if e],
+                    "bcc_emails": [],
+                    "subject": subject,
+                    "body": email_data.get("body", ""),
+                    "body_html": email_data.get("body_html", ""),
+                    "attachments": email_data.get("attachments", []),
+                    "status": "synced",
+                    "sent_at": sent_at,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_by": None,
+                    "notes": f"Shared webmail sync - {email_address} ({role})",
+                    "synced": True,
+                    "account": "shared",
+                    "message_id": msg_id,
+                    "shared_role": role,
+                    "synced_for_user": None,
+                    "is_read": email_data.get("direction") == "sent",
+                    "is_starred": False,
+                    "is_archived": False,
+                    "source": "shared_webmail_sync",
+                    "in_reply_to": email_data.get("in_reply_to") or None,
+                    "references": email_data.get("references") or [],
+                })
                 total_synced += 1
             except Exception as e:
-                if "duplicate" in str(e).lower():
-                    total_duplicates += 1
-                else:
-                    logger.error(f"[Shared Role Sync] Erro ao guardar email: {e}")
-                    total_errors += 1
-        
+                logger.error(f"[Shared Role Sync] Erro ao guardar email INBOX: {e}")
+                total_errors += 1
+
         sent_result = await loop.run_in_executor(
             _email_executor,
             lambda: _fetch_all_from_folder_sync(account, "Sent", days, max_emails)
         )
-        
+
         for email_data in sent_result.get("emails", []):
             try:
-                email_data["account"] = "shared"
-                email_data["shared_role"] = role
-                email_data["synced_for_user"] = None
-                await _save_email_to_db(email_data, email_address, None, role)
+                msg_id = email_data.get("message_id", "")
+                if not msg_id:
+                    continue
+                existing = await db.emails.find_one({"message_id": msg_id, "shared_role": role})
+                if existing:
+                    total_duplicates += 1
+                    continue
+
+                sent_at = email_data.get("date")
+                try:
+                    sent_at = datetime.fromisoformat(sent_at.replace("Z", "+00:00")).isoformat() if sent_at else datetime.now(timezone.utc).isoformat()
+                except Exception:
+                    sent_at = datetime.now(timezone.utc).isoformat()
+
+                resolved_process_id = None
+                parent_msg_ids = []
+                if email_data.get("in_reply_to"):
+                    parent_msg_ids.append(email_data["in_reply_to"])
+                if email_data.get("references"):
+                    parent_msg_ids.extend(email_data["references"])
+                if parent_msg_ids:
+                    parent_email = await db.emails.find_one(
+                        {"message_id": {"$in": parent_msg_ids}, "process_id": {"$ne": None, "$exists": True}},
+                        {"_id": 0, "process_id": 1, "message_id": 1}
+                    )
+                    if parent_email:
+                        resolved_process_id = parent_email["process_id"]
+
+                subject = email_data.get("subject", "")
+                if not resolved_process_id and subject:
+                    tag_match = re.search(r'\[Proc-([^\]]+)\]', subject)
+                    if tag_match:
+                        tag_pid = tag_match.group(1).strip()
+                        if await db.processes.find_one({"id": tag_pid}, {"_id": 0, "id": 1}):
+                            resolved_process_id = tag_pid
+
+                await db.emails.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "process_id": resolved_process_id,
+                    "direction": email_data.get("direction", "sent"),
+                    "from_email": email_data.get("from_email", ""),
+                    "to_emails": [str(e) for e in (email_data.get("to_emails") or []) if e],
+                    "cc_emails": [str(e) for e in (email_data.get("cc_emails") or []) if e],
+                    "bcc_emails": [],
+                    "subject": subject,
+                    "body": email_data.get("body", ""),
+                    "body_html": email_data.get("body_html", ""),
+                    "attachments": email_data.get("attachments", []),
+                    "status": "synced",
+                    "sent_at": sent_at,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_by": None,
+                    "notes": f"Shared webmail sync (sent) - {email_address} ({role})",
+                    "synced": True,
+                    "account": "shared",
+                    "message_id": msg_id,
+                    "shared_role": role,
+                    "synced_for_user": None,
+                    "is_read": True,
+                    "is_starred": False,
+                    "is_archived": False,
+                    "source": "shared_webmail_sync",
+                    "in_reply_to": email_data.get("in_reply_to") or None,
+                    "references": email_data.get("references") or [],
+                })
                 total_synced += 1
             except Exception as e:
-                if "duplicate" in str(e).lower():
-                    total_duplicates += 1
-                else:
-                    total_errors += 1
+                logger.error(f"[Shared Role Sync] Erro ao guardar email SENT: {e}")
+                total_errors += 1
     
     except Exception as e:
         logger.error(f"[Shared Role Sync] Erro geral para {role}: {e}", exc_info=True)
