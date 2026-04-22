@@ -170,7 +170,7 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
       formData.append("expires_in_hours", parseInt(expiresIn));
       formData.append("max_uses", parseInt(maxUses));
       formData.append("description", description);
-      formData.append("notify_email", notifyEmail);
+      formData.append("notify_email", notifyEmail ? "true" : "false");
       formData.append("base_url", window.location.origin);
       
       // Adicionar ficheiros selecionados para download
