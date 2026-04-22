@@ -201,10 +201,14 @@ async def get_notifications(
     
     notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
     
+    # Contar total de não lidas a nível da BD (não limitado ao batch de 100)
+    unread_query = {**query, "read": False}
+    total_unread = await db.notifications.count_documents(unread_query)
+    
     return {
         "notifications": notifications,
         "total": len(notifications),
-        "unread": sum(1 for n in notifications if not n.get("read"))
+        "unread": total_unread
     }
 
 

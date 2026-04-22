@@ -1173,6 +1173,28 @@ async def update_client(
         {"$set": update_dict}
     )
     
+    # === SYNC TO LINKED PROCESSES: Propagate email/phone changes ===
+    if sanitized_contacto:
+        process_ids = client.get("process_ids", [])
+        process_sync = {}
+        new_email = sanitized_contacto.get("email")
+        new_phone = sanitized_contacto.get("telefone")
+        
+        if new_email:
+            process_sync["client_email"] = new_email
+            process_sync["personal_data.email"] = new_email
+            from services.encryption import generate_email_hash
+            process_sync["personal_data.email_hash"] = generate_email_hash(new_email)
+        if new_phone:
+            process_sync["client_phone"] = new_phone
+        
+        if process_sync and process_ids:
+            await db.processes.update_many(
+                {"id": {"$in": process_ids}},
+                {"$set": process_sync}
+            )
+            logger.info(f"Sincronizados dados de contacto para {len(process_ids)} processos do cliente {client_id}")
+    
     logger.info(f"Cliente {client_id} actualizado por {user.get('email')}")
     
     return {"success": True, "message": "Cliente actualizado"}

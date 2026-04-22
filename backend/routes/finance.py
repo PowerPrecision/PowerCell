@@ -1,9 +1,13 @@
 """
 Rotas de Finanças - PowerCell
 
-Dashboard Financeiro exclusivo para Admin e CEO.
+Dashboard Financeiro acessível a toda a equipa interna.
 Calcula receitas, despesas e lucro líquido com base nos dados dos processos,
 separados por área de negócio (Imobiliária e Crédito) com configurações dinâmicas.
+
+Permissões:
+- GET (leitura): todos os roles de staff (excepto cliente e parceiro)
+- PUT /finance/config (escrita): apenas Admin e CEO
 """
 
 import logging
@@ -20,6 +24,16 @@ from services.auth import get_current_user, require_roles
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Finance"])
+
+
+# Roles com acesso de leitura ao dashboard financeiro
+# Alinhado com a sidebar do frontend (STAFF_ROLES)
+FINANCE_READ_ROLES = [
+    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+    UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO,
+    UserRole.CONSULTOR_INTERMEDIARIO, UserRole.ADMINISTRATIVO,
+    UserRole.INDEXACAO,
+]
 
 
 # ====================================================================
@@ -242,7 +256,7 @@ class FinanceConfigUpdate(BaseModel):
 
 @router.get("/finance/config")
 async def get_finance_config(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
 ):
     """
     Obtém as configurações financeiras atuais.
@@ -330,7 +344,7 @@ async def update_finance_config(
 @router.get("/finance/summary")
 async def get_finance_summary(
     year: Optional[int] = Query(None, description="Ano para filtrar (ex: 2025)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
 ):
     """
     Resumo financeiro geral, separado por áreas de negócio.
@@ -377,7 +391,7 @@ async def get_finance_summary(
 @router.get("/finance/monthly")
 async def get_finance_monthly(
     year: Optional[int] = Query(None, description="Ano para filtrar"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
 ):
     """
     Dados financeiros agrupados por mês, separados por área.
@@ -518,7 +532,7 @@ async def get_finance_monthly(
 @router.get("/finance/commissions")
 async def get_finance_commissions(
     year: Optional[int] = Query(None, description="Ano para filtrar"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
 ):
     """
     Comissões por colaborador, usando % dinâmicas da configuração.
@@ -616,7 +630,7 @@ async def get_finance_commissions(
 @router.get("/finance/performance")
 async def get_finance_performance(
     year: Optional[int] = Query(None, description="Ano para filtrar"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
 ):
     """
     Indicadores de performance financeira, comparando ano atual com anterior.

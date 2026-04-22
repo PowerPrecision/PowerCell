@@ -377,6 +377,9 @@ class S3Service:
         except ClientError as e:
             logger.error(f"Erro no upload para S3: {e}")
             return None
+        except Exception as e:
+            logger.error(f"Erro inesperado no upload para S3: {e}", exc_info=True)
+            return None
 
     def list_files(
         self, 

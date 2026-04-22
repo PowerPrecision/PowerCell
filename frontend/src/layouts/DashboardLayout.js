@@ -72,6 +72,7 @@ import GlobalSearchModal from "../components/GlobalSearchModal";
 import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
+import { useWebSocket } from "../hooks/useWebSocket";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -125,6 +126,7 @@ const DashboardLayout = ({ children, title }) => {
     try {
       const token = localStorage.getItem("token");
       if (!token) return;
+      if (user?.role === "parceiro") return;
       const res = await fetch(`${API_URL}/api/chat/unread-count`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -148,13 +150,23 @@ const DashboardLayout = ({ children, title }) => {
     };
   }, [fetchChatUnreadCount]);
 
-  // Reset unread badge when chat panel opens
+  // Re-fetch unread badge when chat panel closes (not when it opens)
   useEffect(() => {
-    if (chatOpen) {
-      setChatUnreadCount(0);
-      chatUnreadRef.current = 0;
+    if (!chatOpen) {
+      fetchChatUnreadCount();
     }
-  }, [chatOpen]);
+  }, [chatOpen, fetchChatUnreadCount]);
+
+  // --- WebSocket: incrementar badge de chat em tempo real ---
+  useWebSocket({
+    autoConnect: true,
+    onChatMessage: useCallback((chatData) => {
+      if (!chatData) return;
+      // Incrementar badge de chat quando uma nova mensagem é recebida
+      chatUnreadRef.current += 1;
+      setChatUnreadCount(prev => prev + 1);
+    }, []),
+  });
   
   // Determinar quais secções devem estar abertas baseado na rota actual
   const getInitialOpenSections = () => {
@@ -744,8 +756,8 @@ const DashboardLayout = ({ children, title }) => {
               {/* Context Switcher - Múltiplos Perfis */}
               <ContextSwitcher />
 
-              {/* Notificações - só para utilizadores autenticados (não clientes) */}
-              {user?.role !== "cliente" && (
+              {/* Notificações - só para utilizadores autenticados (não clientes/parceiros) */}
+              {user?.role !== "cliente" && user?.role !== "parceiro" && (
                 <>
                   <Button
                     variant="ghost"
