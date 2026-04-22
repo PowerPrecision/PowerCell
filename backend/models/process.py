@@ -484,18 +484,26 @@ class ProcessUpdate(BaseModel):
 
 
 class ProcessResponse(BaseModel):
+    """
+    Modelo de resposta para dados de processo.
+
+    NOTA: ConfigDict(extra="ignore") garante que campos extra no MongoDB
+    (adicionados por $set directo ou migrações) não causam 422 ao
+    serializar a resposta. Campos desconhecidos são simplesmente ignorados.
+    """
+    model_config = ConfigDict(extra="ignore")
     id: str
     process_number: Optional[int] = None  # Número sequencial único do processo
     # Suporte a múltiplos clientes por processo (relação N:M)
     client_ids: Optional[List[str]] = None  # Lista de IDs de clientes associados
     client_id: Optional[str] = None  # ID do cliente principal (compatibilidade)
-    client_name: str
+    client_name: Optional[str] = None  # Tolerar ausência em documentos antigos
     client_email: Optional[str] = None
     client_phone: Optional[str] = None
     client_nif: Optional[str] = None
     process_type: Optional[str] = None
     type: Optional[str] = None  # Alias for process_type (from Trello import)
-    status: str
+    status: Optional[str] = None  # Tolerar ausência em documentos antigos
     personal_data: Optional[dict] = None
     titular2_data: Optional[dict] = None
     financial_data: Optional[dict] = None
@@ -536,3 +544,18 @@ class ProcessResponse(BaseModel):
     # TAREFA 2: Conflitos de Dados IA
     is_data_confirmed: Optional[bool] = None  # Se True, IA não sobrepõe dados de perfil
     ai_suggestions: Optional[List[dict]] = None  # Sugestões de dados extraídos pela IA em conflito
+
+    @field_validator('idade_menos_35', 'has_property', 'is_data_confirmed', mode='before')
+    @classmethod
+    def coerce_bool_fields(cls, v):
+        """Coerce string booleans ('true'/'false') to actual bool for MongoDB compatibility."""
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            if v.lower() in ('true', '1', 'yes'):
+                return True
+            if v.lower() in ('false', '0', 'no', ''):
+                return False
+        return v

@@ -279,7 +279,7 @@ if os.getenv("TESTING") == "true":
 # ====================================================================
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import HTTPException
+from fastapi.exceptions import HTTPException, RequestValidationError
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -354,6 +354,24 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content={"detail": exc.detail},
         headers=headers
     )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Handler para erros de validação Pydantic (422).
+    Loga os detalhes do erro para debug sem expor dados sensíveis ao cliente.
+    """
+    logger.warning(
+        f"Validation error on {request.method} {request.url.path}: "
+        f"errors={exc.errors()}"
+    )
+    # Retornar erro formatado ao cliente
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+        headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true"}
+    )
+
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
