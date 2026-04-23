@@ -219,13 +219,22 @@ async def mark_notification_read(
 ):
     """
     Marcar notificação como lida.
+    Retorna sucesso mesmo se já estava lida (idempotente).
     """
+    # Tentar por "id" primeiro, depois por "_id" para compatibilidade
     result = await db.notifications.update_one(
         {"id": notification_id},
         {"$set": {"read": True}}
     )
-    
-    if result.modified_count == 0:
+
+    if result.matched_count == 0:
+        # Fallback: tentar por _id (compatibilidade com documentos antigos)
+        result = await db.notifications.update_one(
+            {"_id": notification_id},
+            {"$set": {"read": True}}
+        )
+
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Notificação não encontrada")
-    
+
     return {"success": True}
