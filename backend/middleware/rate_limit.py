@@ -96,9 +96,13 @@ def _get_rate_limit_key(request: Request) -> str:
 
 # Instância principal do limiter
 # Usa _get_rate_limit_key que diferencia utilizadores autenticados de IPs
+#
+# NOTA: default_limits vazio — o user_rate_limit_middleware já faz rate limiting
+# por role. Aqui aplicamos limites apenas em endpoints com decorador explícito
+# (@limit_auth, @limit_write, etc.) para evitar double rate limiting.
 limiter = Limiter(
     key_func=_get_rate_limit_key,
-    default_limits=[RATE_LIMITS["default"]],
+    default_limits=[],  # Sem limite default — delegado ao middleware por role
     headers_enabled=True,  # Adiciona headers X-RateLimit-*
     strategy="fixed-window"  # Estratégia de janela fixa
 )

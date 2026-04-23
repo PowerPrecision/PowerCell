@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -132,7 +132,18 @@ const ProcessesPage = () => {
     }, { replace: true });
   };
 
-  const fetchProcesses = async () => {
+  // Ref para prevenir pedidos duplicados concorrentes
+  const fetchControllerRef = useRef(null);
+
+  const fetchProcesses = useCallback(async () => {
+    // Cancelar pedido anterior se ainda estiver em curso
+    if (fetchControllerRef.current) {
+      fetchControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    fetchControllerRef.current = controller;
+
     try {
       setLoading(true);
       // Para "/processos" (Os Meus Processos): NÃO enviar show_all — o backend
@@ -150,6 +161,9 @@ const ProcessesPage = () => {
         ...(isGlobalView ? { show_all: true } : {}),
       });
       
+      // Ignorar resposta se o pedido foi cancelado (dependency mudou entretanto)
+      if (controller.signal.aborted) return;
+
       // Suporta novo formato paginado
       if (response.data.items) {
         setProcesses(response.data.items);
@@ -168,11 +182,14 @@ const ProcessesPage = () => {
         }));
       }
     } catch (error) {
+      if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') return;
       toast.error("Erro ao carregar processos");
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
-  };
+  }, [pagination.page, pagination.size, searchTerm, showCompleted, sortField, sortOrder, location.pathname]);
   
   // Handler para toggle de processos concluídos
   const handleToggleCompleted = (checked) => {
@@ -204,7 +221,7 @@ const ProcessesPage = () => {
   // Re-fetch when search, sort, view mode, or role filter changes
   useEffect(() => {
     fetchProcesses();
-  }, [pagination.page, pagination.size, showCompleted, searchTerm, sortField, sortOrder, filterByRole]);
+  }, [fetchProcesses, filterByRole]);
 
   // Funções de paginação
   const goToPage = useCallback((page) => {
@@ -574,7 +591,7 @@ const ProcessesPage = () => {
       <CreateProcessModal
         open={showCreateProcess}
         onOpenChange={setShowCreateProcess}
-        onSuccess={() => fetchProcesses()}
+        onSuccess={fetchProcesses}
       />
     </DashboardLayout>
   );
