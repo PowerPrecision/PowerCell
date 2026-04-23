@@ -226,12 +226,17 @@ class AuditTrailConfig(BaseModel):
 
 
 class SystemSMTPConfig(BaseModel):
-    """Configuração SMTP transacional do sistema (Bloco A) - para emails de sistema"""
+    """Configuração SMTP transacional do sistema (Bloco A) - para emails de sistema.
+    
+    NOTA: Emails enviados via esta configuração são ESTRITAMENTE unidirecionais (one-way).
+    Nenhum cabeçalho Reply-To é injetado — por política administrativa.
+    """
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = 587
     smtp_username: Optional[str] = None
     smtp_password: Optional[str] = None
     smtp_from_email: Optional[str] = None
+    smtp_from_name: Optional[str] = None  # Nome do remetente (ex: Power Real Estate)
     smtp_use_tls: bool = True
 
 

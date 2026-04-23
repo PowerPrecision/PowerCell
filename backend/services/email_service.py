@@ -430,16 +430,17 @@ async def send_email(
                 sys_config = await get_system_config()
                 sys_smtp = sys_config.system_smtp
                 if sys_smtp.smtp_host and sys_smtp.smtp_username:
+                    from_email = sys_smtp.smtp_from_email or sys_smtp.smtp_username
                     account = EmailAccount(
                         name="system_smtp",
                         imap_server=sys_smtp.smtp_host,
                         imap_port=int(sys_smtp.smtp_port or 587),
                         smtp_server=sys_smtp.smtp_host,
                         smtp_port=int(sys_smtp.smtp_port or 587),
-                        email=sys_smtp.smtp_from_email or sys_smtp.smtp_username,
+                        email=from_email,
                         password=sys_smtp.smtp_password or "",
                     )
-                    logger.info(f"[Send Email] Usando System SMTP (Bloco A): from={sys_smtp.smtp_from_email}")
+                    logger.info(f"[Send Email] Usando System SMTP (Bloco A): from={from_email}, name={from_name or '(none)'}")
                 else:
                     available = [a.name for a in accounts]
                     return {
@@ -478,6 +479,16 @@ async def send_email(
             if not account:
                 return {"success": False, "error": "Nenhuma conta de email configurada"}
     
+    # Resolve from_name for system_smtp (Bloco A) — used in From header and footer
+    from_name = ""
+    if account and account.name == "system_smtp":
+        try:
+            from services.system_config import get_system_config
+            sys_config = await get_system_config()
+            from_name = sys_config.system_smtp.smtp_from_name or ""
+        except Exception:
+            pass
+
     try:
         # === TAG MÁGICA: Injetar [Proc-{id}] no assunto ===
         # Se o email está associado a um processo e o assunto ainda não tem a tag
@@ -529,12 +540,39 @@ async def send_email(
             if body_html:
                 msg.attach(MIMEText(body_html, "html", "utf-8"))
         
+        # === NO-REPLY ENFORCEMENT ===
+        # When force_system is True, this is a one-way system email.
+        # Append no-reply footer to HTML body and text body.
+        # CRITICAL: Never inject a Reply-To header for system emails.
+        if force_system:
+            _NO_REPLY_FOOTER_HTML = """
+<div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e5e5;">
+  <p style="font-size: 10px; color: #666; margin: 0; line-height: 1.5;">
+    Por favor, não responda a este email. Esta mensagem foi gerada automaticamente por uma caixa de correio não monitorizada.
+  </p>
+  <p style="font-size: 10px; color: #999; margin: 4px 0 0 0;">
+    Please do not reply to this email. This message was automatically generated from an unmonitored mailbox.
+  </p>
+</div>"""
+            _NO_REPLY_FOOTER_TEXT = "\n\n—\nPor favor, não responda a este email. Esta mensagem foi gerada automaticamente por uma caixa de correio não monitorizada.\nPlease do not reply to this email. This message was automatically generated from an unmonitored mailbox."
+            if body_html:
+                body_html = body_html + _NO_REPLY_FOOTER_HTML
+            body = body + _NO_REPLY_FOOTER_TEXT
+
         msg["Subject"] = subject
-        msg["From"] = account.email
+        # Use formatted From header for system_smtp when from_name is available
+        if account.name == "system_smtp" and from_name:
+            msg["From"] = f"{from_name} <{account.email}>"
+        else:
+            msg["From"] = account.email
         msg["To"] = ", ".join(to_emails)
         
         if cc_emails:
             msg["Cc"] = ", ".join(cc_emails)
+        
+        # === CRITICAL: Reply-To is NEVER set for any email ===
+        # Policy: all emails (system and personal) do not include Reply-To.
+        # This line intentionally does NOT exist: msg["Reply-To"] = ...
         
         # Enviar
         context = ssl.create_default_context()

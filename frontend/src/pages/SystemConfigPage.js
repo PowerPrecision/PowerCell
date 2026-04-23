@@ -444,6 +444,7 @@ const IntegrationsConfigSection = () => {
     smtp_username: "",
     smtp_password: "",
     smtp_from_email: "",
+    smtp_from_name: "",
     smtp_use_tls: true,
   });
   const [storage, setStorage] = useState({
@@ -483,6 +484,7 @@ const IntegrationsConfigSection = () => {
               smtp_username: data.system_smtp.smtp_username || "",
               smtp_password: data.system_smtp.smtp_password || "",
               smtp_from_email: data.system_smtp.smtp_from_email || "",
+              smtp_from_name: data.system_smtp.smtp_from_name || "",
               smtp_use_tls: data.system_smtp.smtp_use_tls !== false,
             }));
           }
@@ -641,16 +643,36 @@ const IntegrationsConfigSection = () => {
                 onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_password: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="sys_smtp_from">Email Remetente (From)</Label>
-              <Input id="sys_smtp_from" placeholder="noreply@empresa.pt" value={systemSmtp.smtp_from_email}
+              <Label htmlFor="sys_smtp_from">Email do Remetente (From)</Label>
+              <Input id="sys_smtp_from" placeholder="no-reply@powerealestate.pt" value={systemSmtp.smtp_from_email}
                 onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_email: e.target.value }))} />
               <p className="text-xs text-muted-foreground">Endereço que aparecerá como remetente nos emails do sistema</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sys_smtp_from_name">Nome do Remetente</Label>
+              <Input id="sys_smtp_from_name" placeholder="Power Real Estate" value={systemSmtp.smtp_from_name}
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_name: e.target.value }))} />
+              <p className="text-xs text-muted-foreground">Nome que aparecerá como remetente (ex: Power Real Estate)</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="sys_smtp_tls">TLS</Label>
               <div className="flex items-center gap-2 mt-2">
                 <Switch checked={systemSmtp.smtp_use_tls} onCheckedChange={(v) => setSystemSmtp((p) => ({ ...p, smtp_use_tls: v }))} />
                 <span className="text-sm text-muted-foreground">{systemSmtp.smtp_use_tls ? "Ativado" : "Desativado"}</span>
+              </div>
+            </div>
+          </div>
+          {/* No-Reply Policy Notice */}
+          <div className="rounded-md border border-green-200 bg-green-50 dark:border-green-900/50 dark:bg-green-950/20 p-3">
+            <div className="flex items-start gap-2">
+              <ShieldCheck className="w-4 h-4 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
+              <div className="text-xs text-green-800 dark:text-green-300">
+                <p className="font-medium">Reply-To desativado por política</p>
+                <p className="mt-0.5">
+                  Não existe nenhum campo de &quot;Reply-To&quot; nesta configuração. Todos os emails enviados
+                  via este Bloco usam exclusivamente o endereço &quot;From&quot; configurado acima, sem qualquer
+                  cabeçalho de resposta. Um aviso automático é adicionado ao rodapé de cada email.
+                </p>
               </div>
             </div>
           </div>
