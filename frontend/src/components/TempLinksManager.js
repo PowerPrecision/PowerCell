@@ -53,6 +53,7 @@ import {
   Check,
 } from "lucide-react";
 import { toast } from "sonner";
+import { safeCopyToClipboard } from "../utils/clipboard";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -200,17 +201,12 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
       const correctUrl = `${window.location.origin}/${path}/${linkToken}`;
       
       // Copiar URL para a área de transferência
-      try {
-        await navigator.clipboard.writeText(correctUrl);
-        toast.success(
-          linkType === "upload"
-            ? "Link de upload criado e copiado!"
-            : "Link de download criado e copiado!"
-        );
-      } catch {
-        toast.success("Link criado com sucesso!");
-        toast.info(`URL: ${correctUrl}`, { duration: 8000 });
-      }
+      await safeCopyToClipboard(
+        correctUrl,
+        linkType === "upload"
+          ? "Link de upload criado e copiado!"
+          : "Link de download criado e copiado!"
+      );
       
       setShowCreateDialog(false);
       resetForm();
@@ -223,15 +219,9 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
   };
 
   const handleCopyLink = async (url, token, linkType) => {
-    // Construir URL com o domínio atual em vez da URL do backend
     const path = linkType === "upload" ? "upload" : "download";
     const correctUrl = `${window.location.origin}/${path}/${token}`;
-    try {
-      await navigator.clipboard.writeText(correctUrl);
-      toast.success("Link copiado para a área de transferência!");
-    } catch {
-      toast.error("Não foi possível copiar o link");
-    }
+    await safeCopyToClipboard(correctUrl);
   };
 
   const handleCancelLink = async (linkId) => {

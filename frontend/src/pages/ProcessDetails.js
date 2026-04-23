@@ -147,6 +147,7 @@ import { toast } from "sonner";
 import { format, parseISO, isAfter } from "date-fns";
 import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
+import { safeCopyToClipboard } from "../utils/clipboard";
 
 // eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -1537,8 +1538,7 @@ const ProcessDetails = () => {
                             const res = await generateMagicLink(id);
                             const link = res.data?.magic_link || res.data?.link || res.data?.url;
                             if (link) {
-                              await navigator.clipboard.writeText(link);
-                              toast.success("Link copiado!");
+                              await safeCopyToClipboard(link);
                             } else {
                               toast.error("Não foi possível gerar o link");
                             }

@@ -43,6 +43,7 @@ import {
   Check,
 } from "lucide-react";
 import { toast } from "sonner";
+import { safeCopyToClipboard } from "../utils/clipboard";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -159,19 +160,11 @@ const TempLinkButton = ({ processId, clientName, clientEmail }) => {
       const correctUrl = `${window.location.origin}/${path}/${linkToken}`;
       
       // Copiar URL para a área de transferência
-      try {
-        await navigator.clipboard.writeText(correctUrl);
-        const typeLabel = linkType === "upload" ? "upload" : "download";
-        const msg = `Link de ${typeLabel} criado e copiado!`;
-        toast.success(
-          notifyEmail && clientEmail
-            ? `${msg} O cliente receberá um email.`
-            : msg
-        );
-      } catch {
-        toast.success("Link criado com sucesso!");
-        toast.info(`URL: ${correctUrl}`, { duration: 8000 });
-      }
+      const typeLabel = linkType === "upload" ? "upload" : "download";
+      const msg = notifyEmail && clientEmail
+        ? `Link de ${typeLabel} criado e copiado! O cliente receberá um email.`
+        : `Link de ${typeLabel} criado e copiado!`;
+      await safeCopyToClipboard(correctUrl, msg);
       
       setShowDialog(false);
       resetForm();
@@ -182,10 +175,7 @@ const TempLinkButton = ({ processId, clientName, clientEmail }) => {
     }
   };
 
-  const handleCopyLink = (url) => {
-    navigator.clipboard.writeText(url);
-    toast.success("Link copiado para a área de transferência!");
-  };
+  const handleCopyLink = (url) => safeCopyToClipboard(url);
 
   const toggleFileSelection = (filePath) => {
     setSelectedFiles(prev => {

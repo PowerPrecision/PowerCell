@@ -10,7 +10,7 @@
  * - Eliminar campos personalizados
  * - Repor configuração padrão
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   DndContext,
   closestCenter,
@@ -151,7 +151,7 @@ const SortableFieldItem = ({ id, field, updateField, handleDeleteCustomField }) 
           <Label className="text-xs text-muted-foreground">Obrigatório</Label>
           <Switch
             checked={field.is_required}
-            onCheckedChange={(v) => updateField(field._idx, "is_required", v)}
+            onCheckedChange={(v) => updateField(field.field_key, "is_required", v)}
             disabled={!field.is_visible}
           />
         </div>
@@ -159,7 +159,7 @@ const SortableFieldItem = ({ id, field, updateField, handleDeleteCustomField }) 
           <Label className="text-xs text-muted-foreground">Visível</Label>
           <Switch
             checked={field.is_visible}
-            onCheckedChange={(v) => updateField(field._idx, "is_visible", v)}
+            onCheckedChange={(v) => updateField(field.field_key, "is_visible", v)}
           />
         </div>
         {field.is_custom && (
@@ -254,42 +254,31 @@ const FormManagementPage = () => {
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
-  const updateField = (idx, key, value) => {
-    setFields(prev => {
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], [key]: value };
-      return updated;
-    });
+  const updateField = (fieldKey, key, value) => {
+    setFields(prev => prev.map(f => 
+      f.field_key === fieldKey ? { ...f, [key]: value } : f
+    ));
     setHasChanges(true);
   };
 
   // DnD: reordenar campos dentro de um passo
-  const handleDragEnd = useCallback((event, stepFields) => {
+  const handleDragEnd = useCallback((event) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    // Encontrar os índices globais dos fields envolvidos
-    const activeGlobalIdx = fields.findIndex(f => f.field_key === active.id);
-    const overGlobalIdx = fields.findIndex(f => f.field_key === over.id);
-    if (activeGlobalIdx === -1 || overGlobalIdx === -1) return;
+    setFields(prev => {
+      const activeIdx = prev.findIndex(f => f.field_key === active.id);
+      const overIdx = prev.findIndex(f => f.field_key === over.id);
+      if (activeIdx === -1 || overIdx === -1) return prev;
+      if (prev[activeIdx].step !== prev[overIdx].step) return prev;
 
-    // Garantir que são do mesmo passo
-    if (fields[activeGlobalIdx].step !== fields[overGlobalIdx].step) return;
-
-    const reordered = arrayMove([...fields], activeGlobalIdx, overGlobalIdx);
-
-    // Recalcular order_index para todos os campos do passo
-    const step = fields[activeGlobalIdx].step;
-    let order = 0;
-    reordered.forEach(f => {
-      if (f.step === step) {
-        f.order = order++;
-      }
+      const reordered = arrayMove(prev, activeIdx, overIdx);
+      
+      // Recalculate order_index for ALL fields globally (not just one step)
+      return reordered.map((f, i) => ({ ...f, order_index: i }));
     });
-
-    setFields(reordered);
     setHasChanges(true);
-  }, [fields]);
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -525,12 +514,17 @@ const FormManagementPage = () => {
     return acc;
   }, {}) || {};
 
-  const groupedByStep = fields.reduce((acc, field, idx) => {
-    const step = field.step || 1;
-    if (!acc[step]) acc[step] = [];
-    acc[step].push({ ...field, _idx: idx });
-    return acc;
-  }, {});
+  const groupedByStep = useMemo(() => {
+    return fields
+      .slice()
+      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+      .reduce((acc, field) => {
+        const step = field.step || 1;
+        if (!acc[step]) acc[step] = [];
+        acc[step].push(field);
+        return acc;
+      }, {});
+  }, [fields]);
 
   const needsOptions = ["select", "checkbox"].includes(newField.field_type);
 
@@ -625,13 +619,13 @@ const FormManagementPage = () => {
                     <DndContext
                       sensors={sensors}
                       collisionDetection={closestCenter}
-                      onDragEnd={(event) => handleDragEnd(event, stepFields)}
+                      onDragEnd={handleDragEnd}
                     >
                       <SortableContext
                         items={stepFields.map(f => f.field_key)}
                         strategy={verticalListSortingStrategy}
                       >
-                        {stepFields.sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0)).map((field) => (
+                        {stepFields.map((field) => (
                           <SortableFieldItem
                             key={field.field_key}
                             id={field.field_key}
