@@ -129,7 +129,7 @@ const FilesExplorerPage = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
 
-  const isAdmin = hasAnyRole(user, ["admin", "ceo"]);
+  const isAdmin = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo"]);
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [currentPath, setCurrentPath] = useState("");
@@ -557,7 +557,7 @@ const FilesExplorerPage = () => {
                     Acesso Restrito
                   </p>
                   <p className="text-sm text-amber-700 dark:text-amber-300">
-                    O Explorador de Ficheiros está disponível apenas para Administradores e Diretores.
+                    O Explorador de Ficheiros está disponível para Administradores, Diretores e Staff Administrativo.
                     Para gerir os ficheiros dos seus processos, aceda à página de detalhes do processo.
                   </p>
                   <Button

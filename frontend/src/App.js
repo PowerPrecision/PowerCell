@@ -283,15 +283,8 @@ function App() {
             }
           />
 
-          {/* Staff Extended Dashboard (com Kanban integrado) - via /staff-dashboard */}
-          <Route
-            path="/staff-dashboard"
-            element={
-              <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <StaffDashboard />
-              </ProtectedRoute>
-            }
-          />
+          {/* /staff-dashboard redirect → canonical /staff */}
+          <Route path="/staff-dashboard" element={<Navigate to="/staff" replace />} />
           
           {/* Admin Dashboard - Full access */}
           <Route

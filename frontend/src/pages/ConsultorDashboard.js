@@ -166,7 +166,7 @@ const ConsultorDashboard = () => {
               Gestão dos seus clientes e processos
             </p>
           </div>
-          <Button onClick={() => navigate('/staff-dashboard')} variant="outline" className="gap-2 self-start">
+          <Button onClick={() => navigate('/kanban')} variant="outline" className="gap-2 self-start">
             <TrendingUp className="h-4 w-4" />
             Quadro Geral
           </Button>
@@ -190,7 +190,7 @@ const ConsultorDashboard = () => {
           </Card>
           <Card
             className="bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => navigate('/processos?view_mode=historical')}
+            onClick={() => navigate('/processos-filtrados?filter=concluded')}
           >
             <CardContent className="pt-6">
               <div className="text-center">

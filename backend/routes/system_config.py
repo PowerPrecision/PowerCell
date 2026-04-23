@@ -837,6 +837,9 @@ async def test_service_connection(
 
             else:
                 return {"success": False, "message": "Email de Sistema não configurado. Preencha a 'Resend API Key' (recomendado) ou configure SMTP (legado)."}
+        except Exception as e:
+            logger.error(f"[Test System SMTP] Erro inesperado: {type(e).__name__}: {e}")
+            return {"success": False, "message": f"Erro ao testar email do sistema: {type(e).__name__}: {str(e)}"}
 
     elif service == "storage":
         storage = config.storage

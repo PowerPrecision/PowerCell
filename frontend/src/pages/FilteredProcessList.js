@@ -119,7 +119,7 @@ const FilteredProcessList = () => {
     try {
       setLoading(true);
       const [processesRes, statusesRes, deadlinesRes] = await Promise.all([
-        getProcesses(),
+        getProcesses({ view_mode: 'all', show_all: true, size: 100 }),
         getWorkflowStatuses(),
         getCalendarDeadlines()
       ]);
