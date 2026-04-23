@@ -203,14 +203,15 @@ async def user_rate_limit_middleware(request, call_next):
     """
     Middleware para rate limiting baseado no utilizador autenticado.
     
-    Limites por role:
-    - admin/ceo: 1000 req/min
-    - consultor/mediador: 200 req/min
-    - cliente: 100 req/min
+    Limites por role (ver middleware/user_rate_limit.py):
+    - admin/ceo: 2000 req/min
+    - diretor: 1500 req/min
+    - consultor/mediador/staff: 600 req/min
+    - cliente/parceiro: 400 req/min
+    - default (JWT fallback): 600 req/min
     """
-    # Nunca rate-limitar pedidos OPTIONS (CORS preflight)
-    # O CORSMiddleware trata estes pedidos e deve ser o único a respondê-los.
-    if request.method == "OPTIONS":
+    # Nunca rate-limitar pedidos OPTIONS/HEAD (CORS preflight + health checks)
+    if request.method in ("OPTIONS", "HEAD"):
         return await call_next(request)
     
     # Apenas aplicar a endpoints da API (não a estáticos, docs, etc.)

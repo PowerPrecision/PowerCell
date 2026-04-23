@@ -27,26 +27,26 @@ logger = logging.getLogger(__name__)
 # ====================================================================
 RATE_LIMITS_BY_ROLE = {
     # Administradores - limite alto
-    "admin": {"requests": 1000, "window": 60},  # 1000 req/min
-    "ceo": {"requests": 1000, "window": 60},
-    "diretor": {"requests": 800, "window": 60},
+    "admin": {"requests": 2000, "window": 60},  # 2000 req/min
+    "ceo": {"requests": 2000, "window": 60},
+    "diretor": {"requests": 1500, "window": 60},
     
-    # Staff operacional - limite médio
-    "consultor": {"requests": 200, "window": 60},  # 200 req/min
-    "mediador": {"requests": 200, "window": 60},
-    "intermediario": {"requests": 200, "window": 60},
-    "consultor_intermediario": {"requests": 200, "window": 60},
-    "administrativo": {"requests": 200, "window": 60},
-    "indexacao": {"requests": 200, "window": 60},
+    # Staff operacional - limite elevado (CRM faz muitos pedidos por página)
+    "consultor": {"requests": 600, "window": 60},  # 600 req/min
+    "mediador": {"requests": 600, "window": 60},
+    "intermediario": {"requests": 600, "window": 60},
+    "consultor_intermediario": {"requests": 600, "window": 60},
+    "administrativo": {"requests": 600, "window": 60},
+    "indexacao": {"requests": 600, "window": 60},
     
     # Parceiros - ghost users sem acesso à plataforma
-    "parceiro": {"requests": 100, "window": 60},
+    "parceiro": {"requests": 400, "window": 60},
     
-    # Clientes - limite baixo
-    "cliente": {"requests": 100, "window": 60},  # 100 req/min
+    # Clientes - limite médio
+    "cliente": {"requests": 400, "window": 60},  # 400 req/min
     
     # Default para roles desconhecidos
-    "default": {"requests": 100, "window": 60},  # Aumentado de 50 para 100
+    "default": {"requests": 600, "window": 60},  # 600 req/min (generoso para JWT fallback)
 }
 
 
