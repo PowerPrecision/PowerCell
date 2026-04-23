@@ -42,15 +42,15 @@ class TestRateLimitConfiguration:
     
     def test_specific_limits_match_requirements(self):
         """Limites específicos devem corresponder aos requisitos."""
-        # Admin: 1000 req/min
-        assert RATE_LIMITS_BY_ROLE["admin"]["requests"] == 1000
-        
-        # Consultor/Mediador: 200 req/min
-        assert RATE_LIMITS_BY_ROLE["consultor"]["requests"] == 200
-        assert RATE_LIMITS_BY_ROLE["mediador"]["requests"] == 200
-        
-        # Cliente: 100 req/min
-        assert RATE_LIMITS_BY_ROLE["cliente"]["requests"] == 100
+        # Admin: 2000 req/min
+        assert RATE_LIMITS_BY_ROLE["admin"]["requests"] == 2000
+
+        # Consultor/Mediador: 600 req/min
+        assert RATE_LIMITS_BY_ROLE["consultor"]["requests"] == 600
+        assert RATE_LIMITS_BY_ROLE["mediador"]["requests"] == 600
+
+        # Cliente: 400 req/min
+        assert RATE_LIMITS_BY_ROLE["cliente"]["requests"] == 400
     
         """Gestor documentos deve ter limite personalizado."""
 
