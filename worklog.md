@@ -951,3 +951,25 @@ Stage Summary:
 - 2 files changed, 448 insertions, 251 deletions
 - Full WYSIWYG parity between admin form manager and client-facing form
 
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Migrar Email de Sistema de SMTP para Resend API
+
+Work Log:
+- **Problema**: Testar ligação SMTP no Email de Sistema causava timeout genérico (sem logs de erro). Render bloqueia portas SMTP de saída (25/465/587).
+- **backend/models/system_config.py**: Adicionado campo `resend_api_key` ao `SystemSMTPConfig`. Mantidos campos SMTP legados para backward compatibility. Reordenado campos: Resend API → From email/name → SMTP legado.
+- **backend/services/email_service.py**: Criada função `_send_via_resend()` que envia emails via Resend HTTP API (porta 443). Suporta from_name, CC, BCC, anexos. Error handling com `resend.exceptions.AuthenticationError`, `RateLimitError`, e fallback genérico. Modificado `send_email()`: quando `system_smtp` tem `resend_api_key`, cria `EmailAccount` com `smtp_server="resend"` para sinalizar uso da API. No bloco de envio, verifica `smtp_server == "resend"` para rotear para `_send_via_resend()`.
+- **backend/routes/system_config.py**: Substituído teste SMTP por teste Resend API no endpoint `test-connection/system-smtp`. Novo fluxo: se `resend_api_key` configurada → envia email de teste via Resend para o próprio remetente. Erros específicos: AuthenticationError (key inválida), RateLimitError (limite), domínio não verificado, from inválido. Fallback para SMTP legado (com aviso sobre Render). Timeout do frontend aumentado de 15s para 30s.
+- **frontend/src/pages/SystemConfigPage.js**: Removidos campos SMTP Host, Port, Username, TLS do Bloco A. Adicionado campo "Resend API Key" (password input, placeholder re_xxxx). Badge "Configurado" agora verifica `resend_api_key` em vez de `smtp_host`. Adicionado info box sobre Resend API (porta 443, sem SMTP). Timeout do AbortController aumentado para 30s.
+- **frontend/src/pages/EmailAccountsPage.js**: Mesmas alterações no `SystemSmtpCard`: remoção de campos SMTP, adição de Resend API Key. Timeout 30s. Toasts atualizados para Resend.
+- **backend/routes/system_config.py**: Adicionado `resend_api_key` à lista `sensitive_fields` (2 ocorrências) para mascarar na resposta GET.
+
+Stage Summary:
+- 5 ficheiros alterados: models/system_config.py, services/email_service.py, routes/system_config.py, SystemConfigPage.js, EmailAccountsPage.js
+- Resend API (HTTPS porta 443) substitui SMTP como método principal de envio
+- SMTP legado mantido como fallback (contorna quebra de compatibilidade)
+- Error handling detalhado: AuthenticationError, RateLimitError, domínio não verificado, from inválido
+- Logs detalhados com logger.error para diagnóstico no Render
+- Timeout frontend aumentado para 30s

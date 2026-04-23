@@ -332,6 +332,95 @@ async def sync_emails_for_process(process_id: str, days: int = 30, user_email: s
         "method": "smart_threading"
     }
 
+def _send_via_resend(
+    api_key: str,
+    from_email: str,
+    from_name: str,
+    to_emails: List[str],
+    cc_emails: Optional[List[str]],
+    bcc_emails: Optional[List[str]],
+    subject: str,
+    body: str,
+    body_html: Optional[str],
+    attachments: Optional[List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    """
+    Enviar email via Resend HTTP API.
+
+    O Resend usa HTTPS (porta 443) para envio, o que contorna o bloqueio
+    de portas SMTP (25/465/587) em ambientes como o Render.
+
+    Returns:
+        dict com "id" do email enviado (Resend response).
+
+    Raises:
+        Exception: se o envio falhar (com mensagem detalhada para logging).
+    """
+    import resend
+
+    try:
+        resend.ApiKey = api_key
+
+        # Construir header From
+        if from_name:
+            from_header = f"{from_name} <{from_email}>"
+        else:
+            from_header = from_email
+
+        params: Dict[str, Any] = {
+            "from": from_header,
+            "to": to_emails,
+            "subject": subject,
+        }
+
+        # Corpo: HTML preferido, texto como fallback
+        if body_html:
+            params["html"] = body_html
+        if body:
+            params["text"] = body
+
+        # CC / BCC
+        if cc_emails:
+            params["cc"] = cc_emails
+        if bcc_emails:
+            params["bcc"] = bcc_emails
+
+        # Anexos
+        if attachments:
+            resend_attachments = []
+            for att in attachments:
+                filename = att.get("filename", "documento")
+                content_bytes = att.get("content_bytes")
+                content_type = att.get("content_type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+                if content_bytes:
+                    import base64
+                    resend_attachments.append({
+                        "filename": filename,
+                        "content": base64.b64encode(content_bytes).decode("utf-8"),
+                        "content_type": content_type,
+                    })
+            if resend_attachments:
+                params["attachments"] = resend_attachments
+
+        logger.info(f"[Resend] A enviar email via Resend API: from={from_header}, to={to_emails}")
+        result = resend.Emails.send(params)
+        logger.info(f"[Resend] Email enviado com sucesso: id={result.get('id', 'N/A')}")
+        return result
+
+    except resend.exceptions.AuthenticationError as e:
+        error_msg = f"Resend AuthenticationError: API key inválida ou expirada. Detalhe: {str(e)}"
+        logger.error(f"[Resend] {error_msg}")
+        raise Exception(error_msg)
+    except resend.exceptions.RateLimitError as e:
+        error_msg = f"Resend RateLimitError: Limite de envio atingido. Detalhe: {str(e)}"
+        logger.error(f"[Resend] {error_msg}")
+        raise Exception(error_msg)
+    except Exception as e:
+        error_msg = f"Resend API error: {type(e).__name__}: {str(e)}"
+        logger.error(f"[Resend] {error_msg}")
+        raise Exception(error_msg)
+
+
 async def send_email(
     account_name: str,
     to_emails: List[str],
@@ -429,7 +518,20 @@ async def send_email(
                 from services.system_config import get_system_config
                 sys_config = await get_system_config()
                 sys_smtp = sys_config.system_smtp
-                if sys_smtp.smtp_host and sys_smtp.smtp_username:
+                # Preferir Resend API; fallback para SMTP directo (legado)
+                if sys_smtp.resend_api_key:
+                    from_email = sys_smtp.smtp_from_email or ""
+                    account = EmailAccount(
+                        name="system_smtp",
+                        imap_server="resend",
+                        imap_port=0,
+                        smtp_server="resend",
+                        smtp_port=0,
+                        email=from_email,
+                        password=sys_smtp.resend_api_key,  # reuse password field for API key
+                    )
+                    logger.info(f"[Send Email] Usando System Resend API (Bloco A): from={from_email}")
+                elif sys_smtp.smtp_host and sys_smtp.smtp_username:
                     from_email = sys_smtp.smtp_from_email or sys_smtp.smtp_username
                     from_name = sys_smtp.smtp_from_name or ""
                     account = EmailAccount(
@@ -441,7 +543,7 @@ async def send_email(
                         email=from_email,
                         password=sys_smtp.smtp_password or "",
                     )
-                    logger.info(f"[Send Email] Usando System SMTP (Bloco A): from={from_email}, name={from_name or '(none)'}")
+                    logger.info(f"[Send Email] Usando System SMTP legado (Bloco A): from={from_email}, name={from_name or '(none)'}")
                 else:
                     available = [a.name for a in accounts]
                     return {
@@ -574,14 +676,30 @@ async def send_email(
         # === CRITICAL: Reply-To is NEVER set for any email ===
         # Policy: all emails (system and personal) do not include Reply-To.
         # This line intentionally does NOT exist: msg["Reply-To"] = ...
-        
-        # Enviar
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context, timeout=30) as server:
-            server.login(account.email, account.password)
-            
-            all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
-            server.sendmail(account.email, all_recipients, msg.as_string())
+
+        # === ENVIAR: Resend API vs SMTP ===
+        if account.smtp_server == "resend" and account.password:
+            # --- Resend API (HTTP) ---
+            _send_via_resend(
+                api_key=account.password,
+                from_email=account.email,
+                from_name=from_name,
+                to_emails=to_emails,
+                cc_emails=cc_emails,
+                bcc_emails=bcc_emails,
+                subject=subject,
+                body=body,
+                body_html=body_html,
+                attachments=attachments,
+            )
+        else:
+            # --- SMTP directo (legado) ---
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context, timeout=30) as server:
+                server.login(account.email, account.password)
+                
+                all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
+                server.sendmail(account.email, all_recipients, msg.as_string())
         
         logger.info(f"Email enviado via {account.name} para {to_emails} ({len(attachments or [])} anexos)")
         
