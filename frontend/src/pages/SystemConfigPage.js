@@ -560,6 +560,8 @@ const IntegrationsConfigSection = () => {
 
   const handleTestSmtp = async () => {
     setTesting("smtp");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await fetch(`${API_URL}/api/system-config/test-connection/system-smtp`, {
         method: "POST",
@@ -567,6 +569,7 @@ const IntegrationsConfigSection = () => {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
+        signal: controller.signal,
       });
       if (res.ok) {
         const data = await res.json();
@@ -579,9 +582,14 @@ const IntegrationsConfigSection = () => {
         const data = await res.json();
         toast.error(data.detail || "Falha na conexão SMTP");
       }
-    } catch {
-      toast.error("Erro no teste de conexão");
+    } catch (err) {
+      if (err.name === "AbortError") {
+        toast.error("Timeout: o teste demorou demasiado tempo");
+      } else {
+        toast.error("Erro no teste de conexão");
+      }
     } finally {
+      clearTimeout(timeoutId);
       setTesting(null);
     }
   };

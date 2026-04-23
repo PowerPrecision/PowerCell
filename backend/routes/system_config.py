@@ -757,6 +757,7 @@ async def test_service_connection(
         # Testar ligação SMTP do sistema (Bloco A — system_smtp)
         try:
             import smtplib
+            import socket
             import ssl
             sys_smtp = config.system_smtp
             if not sys_smtp.smtp_host:
@@ -770,6 +771,12 @@ async def test_service_connection(
             smtp_password = str(sys_smtp.smtp_password)
             smtp_port = int(sys_smtp.smtp_port or 587)
             
+            # Avisar sobre combinação TLS/porta invulgar
+            if sys_smtp.smtp_use_tls and smtp_port == 465:
+                return {"success": False, "message": "Atenção: Porta 465 requer SSL implícito (desative TLS para usar porta 465, ou mude para porta 587 com TLS activo)"}
+            if not sys_smtp.smtp_use_tls and smtp_port == 587:
+                return {"success": False, "message": "Atenção: Porta 587 requer STARTTLS (active TLS para usar porta 587, ou mude para porta 465 com TLS desactivado)"}
+            
             context = ssl.create_default_context()
             if sys_smtp.smtp_use_tls:
                 server = smtplib.SMTP(sys_smtp.smtp_host, smtp_port, timeout=10)
@@ -782,10 +789,19 @@ async def test_service_connection(
             return {"success": True, "message": f"Ligação SMTP do sistema bem sucedida ({sys_smtp.smtp_host})"}
         except smtplib.SMTPAuthenticationError:
             return {"success": False, "message": "Erro de autenticação: utilizador ou password do sistema incorrectos"}
+        except smtplib.SMTPServerDisconnected:
+            return {"success": False, "message": "Conexão encerrada pelo servidor — verifique o host, porta e configuração TLS (STARTTLS vs SSL implícito)"}
         except smtplib.SMTPConnectError:
-            return {"success": False, "message": "Não foi possível conectar ao servidor SMTP do sistema"}
-        except TimeoutError:
-            return {"success": False, "message": "Timeout: servidor SMTP do sistema não respondeu"}
+            return {"success": False, "message": "Não foi possível conectar ao servidor SMTP do sistema — verifique host e porta"}
+        except (TimeoutError, socket.timeout):
+            return {"success": False, "message": "Timeout: servidor SMTP do sistema não respondeu — verifique se o host está acessível e a porta está correcta"}
+        except socket.gaierror:
+            return {"success": False, "message": "Host SMTP não encontrado — verifique o nome do servidor SMTP"}
+        except smtplib.SMTPException as e:
+            error_msg = str(e)
+            if "starttls" in error_msg.lower():
+                return {"success": False, "message": "Erro STARTTLS — o servidor não suporta STARTTLS nesta porta. Tente desactivar TLS ou usar porta 465"}
+            return {"success": False, "message": f"Erro SMTP: {error_msg}"}
         except Exception as e:
             error_msg = str(e)
             if "ascii" in error_msg.lower() or "encode" in error_msg.lower():
