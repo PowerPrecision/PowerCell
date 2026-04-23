@@ -1152,14 +1152,14 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Número do documento de identificação válido.</FieldHint>
         </div>
         
-        <div className="space-y-2">
-          <RequiredLabel htmlFor="data_validade_cc">Data Validade CC</RequiredLabel>
+        <div className="space-y-2" style={getFieldStyle("data_validade_cc")}>
+          <RequiredLabel htmlFor="data_validade_cc" required={isFieldRequired("data_validade_cc", true)}>{getFieldLabel("data_validade_cc", "Data Validade CC")}</RequiredLabel>
           <Input
             id="data_validade_cc"
             type="date"
             value={formData.data_validade_cc}
             onChange={(e) => updateField("data_validade_cc", e.target.value)}
-            required
+            required={isFieldRequired("data_validade_cc", true)}
             data-testid="client-data-validade-cc"
             className={cn(fieldErrors.data_validade_cc && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
@@ -1237,7 +1237,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Se casado/a, indique o regime de bens do casamento.</FieldHint>
         </div>
         
-        <div className="space-y-3 md:col-span-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+        <div className="space-y-3 md:col-span-2 p-4 bg-amber-50 border border-amber-200 rounded-lg" style={getFieldStyle("menor_35_anos")}>
           <div className="flex items-start space-x-3">
             <Checkbox
               id="menor_35_anos"
@@ -1301,7 +1301,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {fieldErrors.titular2_name && <FieldError>{fieldErrors.titular2_name}</FieldError>}
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("titular2_email")}>
             <RequiredLabel htmlFor="titular2_email" required={isFieldRequired("titular2_email", false)}>{getFieldLabel("titular2_email", "Email (2º Titular)")}</RequiredLabel>
             <Input
               id="titular2_email"
@@ -1315,7 +1315,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {fieldErrors.titular2_email && <FieldError>{fieldErrors.titular2_email}</FieldError>}
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("titular2_phone")}>
             <RequiredLabel htmlFor="titular2_phone" required={isFieldRequired("titular2_phone", false)}>{getFieldLabel("titular2_phone", "Telefone (2º Titular)")}</RequiredLabel>
             <Input
               id="titular2_phone"
@@ -1329,7 +1329,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {fieldErrors.titular2_phone && <FieldError>{fieldErrors.titular2_phone}</FieldError>}
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("titular2_nif")}>
             <RequiredLabel htmlFor="titular2_nif" required={isFieldRequired("titular2_nif", false)}>{getFieldLabel("titular2_nif", "NIF (2º Titular)")}</RequiredLabel>
             <Input
               id="titular2_nif"
@@ -1345,7 +1345,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             <FieldHint>Número de Identificação Fiscal - 9 dígitos</FieldHint>
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("titular2_documento_id")}>
             <Label htmlFor="titular2_documento_id">{getFieldLabel("titular2_documento_id", "Documento ID (2º Titular)")}</Label>
             <Input
               id="titular2_documento_id"
@@ -1358,7 +1358,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {fieldErrors.titular2_documento_id && <FieldError>{fieldErrors.titular2_documento_id}</FieldError>}
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("titular2_naturalidade")}>
             <Label htmlFor="titular2_naturalidade">{getFieldLabel("titular2_naturalidade", "Naturalidade (2º Titular)")}</Label>
             <Input
               id="titular2_naturalidade"
@@ -1371,7 +1371,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {fieldErrors.titular2_naturalidade && <FieldError>{fieldErrors.titular2_naturalidade}</FieldError>}
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("titular2_nacionalidade")}>
             <Label htmlFor="titular2_nacionalidade">{getFieldLabel("titular2_nacionalidade", "Nacionalidade (2º Titular)")}</Label>
             <Input
               id="titular2_nacionalidade"
@@ -1384,7 +1384,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {fieldErrors.titular2_nacionalidade && <FieldError>{fieldErrors.titular2_nacionalidade}</FieldError>}
           </div>
           
-          <div className="space-y-2 md:col-span-2">
+          <div className="space-y-2 md:col-span-2" style={getFieldStyle("titular2_morada_fiscal")}>
             <Label htmlFor="titular2_morada_fiscal">{getFieldLabel("titular2_morada_fiscal", "Morada Fiscal (2º Titular)")}</Label>
             <Input
               id="titular2_morada_fiscal"
@@ -1397,7 +1397,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {fieldErrors.titular2_morada_fiscal && <FieldError>{fieldErrors.titular2_morada_fiscal}</FieldError>}
           </div>
           
-          <div className="space-y-2">
+          <div className="space-y-2" style={getFieldStyle("titular2_birth_date")}>
             <Label htmlFor="titular2_birth_date">{getFieldLabel("titular2_birth_date", "Data Nascimento (2º Titular)")}</Label>
             <Input
               id="titular2_birth_date"
@@ -1531,8 +1531,8 @@ const PublicClientForm = ({ previewMode = false }) => {
             </div>
             
             {(formData.caracteristicas || []).includes("outro") && (
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="outras_caracteristicas">Outras características</Label>
+              <div className="space-y-2 md:col-span-2" style={getFieldStyle("outras_caracteristicas")}>
+                <Label htmlFor="outras_caracteristicas">{getFieldLabel("outras_caracteristicas", "Outras características")}</Label>
                 <Input
                   id="outras_caracteristicas"
                   value={formData.outras_caracteristicas}
@@ -1544,7 +1544,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             )}
             
             {/* Novos campos: Área, Valor */}
-            <div className="space-y-2">
+            <div className="space-y-2" style={getFieldStyle("area_pretendida")}>
               <Label htmlFor="area_pretendida">{getFieldLabel("area_pretendida", "Área pretendida (m²)")}</Label>
               <Input
                 id="area_pretendida"
@@ -1557,7 +1557,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               <FieldHint>Valor aproximado/médio em metros quadrados</FieldHint>
             </div>
             
-            <div className="space-y-2">
+            <div className="space-y-2" style={getFieldStyle("valor_maximo_imovel")}>
               <Label htmlFor="valor_maximo_imovel">{getFieldLabel("valor_maximo_imovel", "Valor máximo do imóvel")}</Label>
               <Input
                 id="valor_maximo_imovel"
@@ -1569,7 +1569,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               />
             </div>
             
-            <div className="space-y-2 md:col-span-2">
+            <div className="space-y-2 md:col-span-2" style={getFieldStyle("ja_tem_casa_escolhida")}>
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="ja_tem_casa_escolhida"
@@ -1586,7 +1586,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {/* Campos condicionais se já tem casa escolhida */}
             {formData.ja_tem_casa_escolhida && (
               <>
-                <div className="space-y-2">
+                <div className="space-y-2" style={getFieldStyle("proprietario_nome")}>
                   <Label htmlFor="proprietario_nome">{getFieldLabel("proprietario_nome", "Nome do proprietário")}</Label>
                   <Input
                     id="proprietario_nome"
@@ -1597,7 +1597,7 @@ const PublicClientForm = ({ previewMode = false }) => {
                   />
                 </div>
                 
-                <div className="space-y-2">
+                <div className="space-y-2" style={getFieldStyle("proprietario_contacto")}>
                   <Label htmlFor="proprietario_contacto">{getFieldLabel("proprietario_contacto", "Contacto do proprietário")}</Label>
                   <Input
                     id="proprietario_contacto"
@@ -1608,8 +1608,8 @@ const PublicClientForm = ({ previewMode = false }) => {
                   />
                 </div>
                 
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="caracteristicas_imovel">Características básicas do imóvel escolhido</Label>
+                <div className="space-y-2 md:col-span-2" style={getFieldStyle("caracteristicas_imovel")}>
+                  <Label htmlFor="caracteristicas_imovel">{getFieldLabel("caracteristicas_imovel", "Características básicas do imóvel escolhido")}</Label>
                   <Textarea
                     id="caracteristicas_imovel"
                     value={formData.caracteristicas_imovel}
@@ -1627,8 +1627,8 @@ const PublicClientForm = ({ previewMode = false }) => {
         {/* Para refinanciamento, mostrar campos específicos */}
         {formData.finalidade === "refinanciamento" && (
           <>
-            <div className="space-y-2 md:col-span-2">
-              <RequiredLabel htmlFor="valor_transferencia">Valor a Transferir/Consolidar (€)</RequiredLabel>
+            <div className="space-y-2 md:col-span-2" style={getFieldStyle("valor_transferencia")}>
+              <RequiredLabel htmlFor="valor_transferencia" required={isFieldRequired("valor_transferencia", true)}>{getFieldLabel("valor_transferencia", "Valor a Transferir/Consolidar (€)")}</RequiredLabel>
               <Input
                 id="valor_transferencia"
                 type="number"
@@ -1640,8 +1640,8 @@ const PublicClientForm = ({ previewMode = false }) => {
               <FieldHint>Valor total dos créditos que pretende consolidar/transferir.</FieldHint>
             </div>
             
-            <div className="space-y-2">
-              <Label htmlFor="valor_extra">Valor Extra Necessário (€)</Label>
+            <div className="space-y-2" style={getFieldStyle("valor_extra")}>
+              <Label htmlFor="valor_extra">{getFieldLabel("valor_extra", "Valor Extra Necessário (€)")}</Label>
               <Input
                 id="valor_extra"
                 type="number"
@@ -1653,7 +1653,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               <FieldHint>Se precisa de capital adicional além do refinanciamento.</FieldHint>
             </div>
             
-            <div className="space-y-2">
+            <div className="space-y-2" style={getFieldStyle("prazo_pretendido")}>
               <RequiredLabel htmlFor="prazo_pretendido" required={isFieldRequired("prazo_pretendido", false)}>{getFieldLabel("prazo_pretendido", "Prazo pretendido (anos)")}</RequiredLabel>
               <Select value={formData.prazo_pretendido} onValueChange={(v) => updateField("prazo_pretendido", v)}>
                 <SelectTrigger data-testid="imovel-prazo">
@@ -1667,7 +1667,7 @@ const PublicClientForm = ({ previewMode = false }) => {
               </Select>
             </div>
             
-            <div className="space-y-2 md:col-span-2">
+            <div className="space-y-2 md:col-span-2" style={getFieldStyle("outras_informacoes")}>
               <Label htmlFor="outras_informacoes">{getFieldLabel("outras_informacoes", "Outras informações")}</Label>
               <Textarea
                 id="outras_informacoes"
@@ -1682,7 +1682,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         )}
         
         {formData.finalidade !== "refinanciamento" && (
-          <div className="space-y-2 md:col-span-2">
+          <div className="space-y-2 md:col-span-2" style={getFieldStyle("outras_informacoes")}>
             <Label htmlFor="outras_informacoes">{getFieldLabel("outras_informacoes", "Outras informações")}</Label>
             <Textarea
               id="outras_informacoes"
@@ -1708,8 +1708,8 @@ const PublicClientForm = ({ previewMode = false }) => {
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Tem acesso ao portal das finanças e segurança social direta?</Label>
+        <div className="space-y-2" style={getFieldStyle("acesso_portal_financas")}>
+          <Label>{getFieldLabel("acesso_portal_financas", "Tem acesso ao portal das finanças e segurança social direita?")}</Label>
           <Select value={formData.acesso_portal_financas} onValueChange={(v) => updateField("acesso_portal_financas", v)}>
             <SelectTrigger data-testid="fin-portal-financas">
               <SelectValue placeholder="Selecione" />
@@ -1738,7 +1738,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>A CMD facilita a assinatura digital de documentos. Pode ativar em autenticacao.gov.pt</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("renda_habitacao_atual")}>
           <Label htmlFor="renda_habitacao_atual">{getFieldLabel("renda_habitacao_atual", "Renda de habitação atual")}</Label>
           <Input
             id="renda_habitacao_atual"
@@ -1751,7 +1751,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Se vive em casa própria ou com familiares, deixe em branco ou coloque 0.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("precisa_vender_casa")}>
           <Label>{getFieldLabel("precisa_vender_casa", "Precisa de vender casa?")}</Label>
           <Select value={formData.precisa_vender_casa} onValueChange={(v) => updateField("precisa_vender_casa", v)}>
             <SelectTrigger data-testid="fin-vender-casa">
@@ -1812,7 +1812,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Indique a sua situação profissional atual.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("employment_duration")}>
           <Label htmlFor="employment_duration">{getFieldLabel("employment_duration", "Antiguidade no emprego")}</Label>
           <Input
             id="employment_duration"
@@ -1824,7 +1824,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>Quanto tempo trabalha na empresa atual ou como independente.</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("employer_name")}>
           <Label htmlFor="employer_name">{getFieldLabel("employer_name", "Nome da empresa")}</Label>
           <Input
             id="employer_name"
@@ -1835,7 +1835,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           />
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("employer_nif")}>
           <Label htmlFor="employer_nif">{getFieldLabel("employer_nif", "NIF da empresa")}</Label>
           <Input
             id="employer_nif"
@@ -1848,7 +1848,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           <FieldHint>O NIF da empresa onde trabalha (encontra-se no recibo de vencimento).</FieldHint>
         </div>
         
-        <div className="space-y-2">
+        <div className="space-y-2" style={getFieldStyle("fiador")}>
           <Label>{getFieldLabel("fiador", "Fiador?")}</Label>
           <Select value={formData.fiador} onValueChange={(v) => updateField("fiador", v)}>
             <SelectTrigger data-testid="fin-fiador">
@@ -2046,7 +2046,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         
         {/* Pergunta sobre tempo restante do crédito (apenas para refinanciamento) */}
         {formData.finalidade === "refinanciamento" && (
-          <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg" style={getFieldStyle("tempo_restante_credito")}>
             <RequiredLabel htmlFor="tempo_restante_credito" required={isFieldRequired("tempo_restante_credito", false)}>{getFieldLabel("tempo_restante_credito", "Tempo restante do crédito (meses)")}</RequiredLabel>
             <Select 
               value={formData.tempo_restante_credito} 
@@ -2187,7 +2187,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         )}
       </div>
 
-      <div className="space-y-4 pt-4 border-t">
+      <div className="space-y-4 pt-4 border-t" style={getFieldStyle("consent_data")}>
         <div className="flex items-start space-x-3">
           <Checkbox
             id="consent_data"
