@@ -131,9 +131,17 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     
+    // Injetar X-Active-Role para Context Isolation
+    // Utilizadores com múltiplos cargos podem alternar o contexto ativo
+    // via ContextSwitcher, e o backend filtra dados accordingly
+    const activeRole = sessionStorage.getItem("activeRole");
+    if (activeRole) {
+      config.headers["X-Active-Role"] = activeRole;
+    }
+    
     // Log de debug (apenas em desenvolvimento)
     if (process.env.NODE_ENV === "development") {
-      console.debug(`[API] ${config.method?.toUpperCase()} ${config.url}`);
+      console.debug(`[API] ${config.method?.toUpperCase()} ${config.url}`, config.headers["X-Active-Role"] ? `[${config.headers["X-Active-Role"]}]` : "");
     }
     
     return config;

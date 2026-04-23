@@ -21,7 +21,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import base64
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks, UploadFile, File, Form, Request
 from fastapi.responses import Response
 import re
 
@@ -32,7 +32,7 @@ from models.email import (
     LabelCreateRequest, LabelUpdateRequest,
     FolderCreateRequest, FolderUpdateRequest
 )
-from services.auth import get_current_user
+from services.auth import get_current_user, get_effective_role
 from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails, imap_mark_as_seen, imap_mark_as_unseen, imap_delete_message, _get_email_account_for_email
 from services.email_draft_service import (
     get_pending_drafts,
@@ -2117,6 +2117,7 @@ async def get_configured_accounts(
 
 @router.get("/webmail")
 async def webmail_list(
+    request: Request,
     folder: str = Query("inbox", description="Pasta: inbox, sent, drafts, starred, trash, custom"),
     page: int = Query(1, ge=1),
     limit: int = Query(30, le=100),
@@ -2150,11 +2151,12 @@ async def webmail_list(
     from models.auth import UserRole
     
     user_email = (current_user.get("email") or "").lower().strip()
-    user_role = current_user.get("role", "")
+    user_role = current_user.get("role", "")  # Used for permission checks (403)
     user_id = current_user.get("id", "")
-    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    effective_role = get_effective_role(request, current_user)  # Used for data filtering
+    can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     
-    print(f"DEBUG: User {current_user.get('email')} (id={user_id}, role={user_role}) querying box={box} folder={folder} account={account}")
+    print(f"DEBUG: User {current_user.get('email')} (id={user_id}, role={user_role}, effective_role={effective_role}) querying box={box} folder={folder} account={account}")
     
     # === BOX FILTER: permissões e isolamento por caixa ===
     if box == "general":
@@ -2689,6 +2691,7 @@ async def webmail_sync(
 
 @router.post("/webmail/sync-user")
 async def webmail_sync_user(
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -2700,7 +2703,7 @@ async def webmail_sync_user(
     from services.background_jobs import BackgroundJobService, JobType
     
     user_id = current_user["id"]
-    user_role = current_user.get("role", "")
+    user_role = get_effective_role(request, current_user)
     
     # === INDEXACAO / SUPORTE: usar conta partilhada do departamento ===
     if user_role in ("indexacao", "suporte"):

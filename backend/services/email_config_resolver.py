@@ -32,12 +32,64 @@ logger = logging.getLogger(__name__)
 FORCED_SHARED_ROLES = {"indexacao", "suporte"}
 
 
-async def resolve_email_config(user_id: str) -> Dict[str, Any]:
+def _is_nested_email_config(raw_config: Dict[str, Any]) -> bool:
+    """
+    Detect whether an email_config is nested (per-role) or flat (legacy).
+
+    A config is considered nested if its top-level values include dicts,
+    e.g. {"default": {...}, "consultor": {...}}.
+    A flat config has scalar values like email_address, imap_server, etc.
+    """
+    if not raw_config:
+        return False
+    # If it has a known role-key that maps to a dict, it's nested
+    if isinstance(raw_config.get("default"), dict):
+        return True
+    # If any top-level value is a dict and looks like a sub-config
+    if any(isinstance(v, dict) and v.get("email_address") for v in raw_config.values()):
+        return True
+    return False
+
+
+def _extract_role_email_config(
+    raw_config: Dict[str, Any], active_role: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Extract the correct per-role email config from a potentially nested structure.
+
+    - If nested: look for active_role, then fall back to "default".
+    - If flat (legacy): return as-is (backward compat).
+
+    Returns the flat config dict ready for downstream processing.
+    """
+    if not raw_config:
+        return {}
+    if not _is_nested_email_config(raw_config):
+        # Flat / legacy config — return as-is
+        return raw_config
+    # Nested — extract role-specific, fallback to default
+    if active_role and isinstance(raw_config.get(active_role), dict):
+        return raw_config[active_role]
+    if isinstance(raw_config.get("default"), dict):
+        return raw_config["default"]
+    # Fallback: return first dict value
+    for v in raw_config.values():
+        if isinstance(v, dict) and v.get("email_address"):
+            return v
+    return {}
+
+
+async def resolve_email_config(
+    user_id: str, active_role: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Resolve a configuração de email de um utilizador seguindo a herança.
 
     Args:
         user_id: ID do utilizador.
+        active_role: Optional role key for per-role email configs.
+                        If the user has a nested email_config, this selects
+                        the sub-config for the given role (falls back to "default").
 
     Returns:
         Dict com:
@@ -58,7 +110,10 @@ async def resolve_email_config(user_id: str) -> Dict[str, Any]:
 
     user_role = user.get("role", "")
     user_company = user.get("company", "")
-    user_email_config = user.get("email_config", {})
+    raw_email_config = user.get("email_config", {})
+
+    # Normalize: extract per-role config if nested, or use flat (legacy)
+    user_email_config = _extract_role_email_config(raw_email_config, active_role)
 
     # ==================================================================
     # REGRAS PARA ROLES COM FORÇA PARTILHADA (indexacao, suporte, etc.)
@@ -167,13 +222,15 @@ async def resolve_email_config(user_id: str) -> Dict[str, Any]:
     return _empty_response("none")
 
 
-async def resolve_email_config_for_sync(user_id: str) -> Optional[Dict[str, Any]]:
+async def resolve_email_config_for_sync(
+    user_id: str, active_role: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
     Resolve config completa para sincronização/envio (inclui credenciais).
 
     Returns None se não for possível resolver uma config funcional.
     """
-    resolved = await resolve_email_config(user_id)
+    resolved = await resolve_email_config(user_id, active_role=active_role)
     source = resolved.get("config_source", "none")
 
     if source == "none":

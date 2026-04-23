@@ -28,12 +28,29 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
 import api from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
 import { Mail, Save, RefreshCw, Loader2, Eye, EyeOff, Shield, AlertCircle, Unlink } from "lucide-react";
+
+const roleLabels = {
+  consultor: "Consultor",
+  mediador: "Mediador",
+  intermediario: "Intermediário",
+  consultor_intermediario: "Consultor/Intermediário",
+  indexacao: "Indexação",
+  administrativo: "Administrativo",
+  diretor: "Diretor",
+  ceo: "CEO",
+  admin: "Administrador",
+};
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onCancel }) => {
   const isSelf = mode === "self";
+  const { user, effectiveRole } = useAuth();
+
+  // Whether the user has multiple roles (and thus per-role email configs)
+  const hasMultipleRoles = isSelf && user?.additional_roles?.length > 0;
 
   // Build API URLs based on mode
   const getConfigUrl = () => {
@@ -282,6 +299,18 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
   return (
     <div className="space-y-6">
+      {/* Role Indicator — only shown when user has multiple roles */}
+      {hasMultipleRoles && (
+        <div className="bg-muted/50 rounded-lg p-3 mb-4">
+          <p className="text-sm text-muted-foreground">
+            A configurar email para o cargo: <strong className="text-foreground">{roleLabels[effectiveRole] || effectiveRole}</strong>
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Cada cargo pode ter uma conta de email separada.
+          </p>
+        </div>
+      )}
+
       {/* Admin Mode Header */}
       {!isSelf && targetUserName && (
         <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">

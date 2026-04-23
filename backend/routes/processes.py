@@ -29,7 +29,7 @@ from models.auth import UserRole
 from models.process import (
     ProcessType, ProcessCreate, ProcessUpdate, ProcessResponse
 )
-from services.auth import get_current_user, require_roles, require_staff
+from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles
 from fastapi import Request
 from services.notification_service import (
     send_notification_with_preference_check,
@@ -665,6 +665,7 @@ ARCHIVED_STATUSES = ["concluidos", "desistencias"]
 
 @router.get("")
 async def get_processes(
+    request: Request,
     page: int = Query(1, ge=1, description="Número da página"),
     size: int = Query(20, ge=1, le=100, description="Itens por página"),
     status: Optional[str] = Query(None, description="Filtrar por status"),
@@ -708,7 +709,7 @@ async def get_processes(
             "view_mode": "active_only"
         }
     """
-    role = user["role"]
+    role = get_effective_role(request, user)
     query = {}
     
     # ====================================================================
@@ -727,6 +728,32 @@ async def get_processes(
     # Se show_all=True (visão global), ignorar filtro por utilizador
     if show_all:
         pass  # Visão global absoluta — todos os processos para todos os roles
+    elif role == "__all_roles__":
+        # Context Isolation: modo "all" — combinar queries de TODOS os cargos do utilizador
+        all_roles = get_all_user_roles(user)
+        role_conditions = []
+        for r in all_roles:
+            if r == UserRole.CONSULTOR:
+                role_conditions.extend([
+                    {"assigned_consultor_ids": user["id"]},
+                    {"assigned_consultor_id": user["id"]}
+                ])
+            elif r in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+                role_conditions.extend([
+                    {"assigned_mediador_ids": user["id"]},
+                    {"assigned_mediador_id": user["id"]}
+                ])
+            elif r == UserRole.INDEXACAO:
+                role_conditions.extend([
+                    {"assigned_indexacao_id": user["id"]},
+                    {"created_by": user.get("email", "")}
+                ])
+            elif r in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+                # Cargos que vêem tudo — sem condição específica
+                role_conditions = []  # Reset — estes cargos não precisam de $or
+                break
+        if role_conditions:
+            query["$or"] = role_conditions
     elif role == UserRole.CLIENTE:
         query["client_id"] = user["id"]
     elif role == UserRole.INDEXACAO:
@@ -1283,6 +1310,7 @@ async def get_kanban_board(
 
 @router.get("/my-clients")
 async def get_my_clients(
+    request: Request,
     page: int = Query(1, ge=1, description="Número da página"),
     size: int = Query(50, ge=1, le=100, description="Itens por página"),
     user: dict = Depends(require_roles([
@@ -1312,7 +1340,7 @@ async def get_my_clients(
     """
     user_id = user["id"]
     user_email = user.get("email", "")
-    role = user["role"]
+    role = get_effective_role(request, user)
     
     # Construir query baseada no papel do utilizador
     if role == UserRole.CONSULTOR:
