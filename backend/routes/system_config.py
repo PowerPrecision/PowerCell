@@ -677,7 +677,9 @@ async def update_config(
     """
     Actualizar uma secção da configuração.
     """
-    if section not in CONFIG_FIELDS:
+    # Secções válidas: definidas em CONFIG_FIELDS + secções de integração
+    EXTRA_SECTIONS = {"system_smtp", "system_webmail"}
+    if section not in CONFIG_FIELDS and section not in EXTRA_SECTIONS:
         raise HTTPException(status_code=400, detail=f"Secção inválida: {section}")
     
     try:
@@ -705,7 +707,7 @@ async def test_service_connection(
     config = await get_system_config()
     
     if service == "email":
-        # Testar ligação SMTP
+        # Testar ligação SMTP principal
         try:
             import smtplib
             import ssl
@@ -750,7 +752,46 @@ async def test_service_connection(
             if "ascii" in error_msg.lower() or "encode" in error_msg.lower():
                 return {"success": False, "message": "Erro de codificação: a password contém caracteres especiais não suportados pelo servidor de email"}
             return {"success": False, "message": f"Erro: {error_msg}"}
-    
+
+    elif service == "system-smtp":
+        # Testar ligação SMTP do sistema (Bloco A — system_smtp)
+        try:
+            import smtplib
+            import ssl
+            sys_smtp = config.system_smtp
+            if not sys_smtp.smtp_host:
+                return {"success": False, "message": "Servidor SMTP do sistema não configurado"}
+            if not sys_smtp.smtp_username:
+                return {"success": False, "message": "Utilizador SMTP do sistema não configurado"}
+            if not sys_smtp.smtp_password:
+                return {"success": False, "message": "Password SMTP do sistema não configurada"}
+            
+            smtp_user = str(sys_smtp.smtp_username)
+            smtp_password = str(sys_smtp.smtp_password)
+            smtp_port = int(sys_smtp.smtp_port or 587)
+            
+            context = ssl.create_default_context()
+            if sys_smtp.smtp_use_tls:
+                server = smtplib.SMTP(sys_smtp.smtp_host, smtp_port, timeout=10)
+                server.starttls(context=context)
+            else:
+                server = smtplib.SMTP_SSL(sys_smtp.smtp_host, smtp_port, timeout=10, context=context)
+            
+            server.login(smtp_user, smtp_password)
+            server.quit()
+            return {"success": True, "message": f"Ligação SMTP do sistema bem sucedida ({sys_smtp.smtp_host})"}
+        except smtplib.SMTPAuthenticationError:
+            return {"success": False, "message": "Erro de autenticação: utilizador ou password do sistema incorrectos"}
+        except smtplib.SMTPConnectError:
+            return {"success": False, "message": "Não foi possível conectar ao servidor SMTP do sistema"}
+        except TimeoutError:
+            return {"success": False, "message": "Timeout: servidor SMTP do sistema não respondeu"}
+        except Exception as e:
+            error_msg = str(e)
+            if "ascii" in error_msg.lower() or "encode" in error_msg.lower():
+                return {"success": False, "message": "Erro de codificação: a password contém caracteres especiais não suportados"}
+            return {"success": False, "message": f"Erro: {error_msg}"}
+
     elif service == "storage":
         storage = config.storage
         # Converter para string para comparação segura (enum ou string)
