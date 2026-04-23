@@ -226,17 +226,30 @@ class AuditTrailConfig(BaseModel):
 
 
 class SystemSMTPConfig(BaseModel):
-    """Configuração SMTP transacional do sistema (Bloco A) - para emails de sistema.
-    
+    """Configuração de email transacional do sistema (Bloco A).
+
+    Suporta dois modos de envio:
+      1. Resend API (recomendado) — usa resend_api_key para enviar via HTTP.
+         Não requer host/porta/username. Funciona em ambientes como Render
+         que bloqueiam portas SMTP de saída.
+      2. SMTP directo (legado) — usa smtp_host/smtp_port/smtp_username/smtp_password.
+         Mantido para compatibilidade mas descontinuado.
+
     NOTA: Emails enviados via esta configuração são ESTRITAMENTE unidirecionais (one-way).
     Nenhum cabeçalho Reply-To é injetado — por política administrativa.
     """
+    # === Resend API (recomendado) ===
+    resend_api_key: Optional[str] = None
+
+    # === Campos de remetente (usados por ambos os modos) ===
+    smtp_from_email: Optional[str] = None
+    smtp_from_name: Optional[str] = None  # Nome do remetente (ex: Power Real Estate)
+
+    # === SMTP directo (legado — mantido para compatibilidade) ===
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = 587
     smtp_username: Optional[str] = None
     smtp_password: Optional[str] = None
-    smtp_from_email: Optional[str] = None
-    smtp_from_name: Optional[str] = None  # Nome do remetente (ex: Power Real Estate)
     smtp_use_tls: bool = True
 
 

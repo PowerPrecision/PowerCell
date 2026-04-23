@@ -62,13 +62,9 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const SystemSmtpCard = () => {
   const { token } = useAuth();
   const [systemSmtp, setSystemSmtp] = useState({
-    smtp_host: "",
-    smtp_port: "587",
-    smtp_username: "",
-    smtp_password: "",
+    resend_api_key: "",
     smtp_from_email: "",
     smtp_from_name: "",
-    smtp_use_tls: true,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -86,13 +82,9 @@ const SystemSmtpCard = () => {
           if (data.system_smtp) {
             setSystemSmtp((prev) => ({
               ...prev,
-              smtp_host: data.system_smtp.smtp_host || "",
-              smtp_port: String(data.system_smtp.smtp_port || 587),
-              smtp_username: data.system_smtp.smtp_username || "",
-              smtp_password: data.system_smtp.smtp_password || "",
+              resend_api_key: data.system_smtp.resend_api_key || "",
               smtp_from_email: data.system_smtp.smtp_from_email || "",
               smtp_from_name: data.system_smtp.smtp_from_name || "",
-              smtp_use_tls: data.system_smtp.smtp_use_tls !== false,
             }));
           }
         }
@@ -108,7 +100,7 @@ const SystemSmtpCard = () => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const payload = { ...systemSmtp, smtp_port: parseInt(systemSmtp.smtp_port) || 587 };
+      const payload = { ...systemSmtp };
       const res = await fetch(`${API_URL}/api/system-config/system_smtp`, {
         method: "PATCH",
         headers: {
@@ -118,13 +110,13 @@ const SystemSmtpCard = () => {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
-        toast.success("Configuração SMTP guardada com sucesso");
+        toast.success("Configuração guardada com sucesso");
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao guardar configuração SMTP");
+        toast.error(data.detail || "Erro ao guardar configuração");
       }
     } catch (error) {
-      toast.error("Erro ao guardar configuração SMTP");
+      toast.error("Erro ao guardar configuração");
     } finally {
       setSaving(false);
     }
@@ -133,7 +125,7 @@ const SystemSmtpCard = () => {
   const handleTestSmtp = async () => {
     setTesting("smtp");
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
       const res = await fetch(`${API_URL}/api/system-config/test-connection/system-smtp`, {
         method: "POST",
@@ -146,17 +138,17 @@ const SystemSmtpCard = () => {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          toast.success("✅ SMTP conectado com sucesso!");
+          toast.success("✅ Resend API conectado com sucesso!");
         } else {
-          toast.error(data.message || "Falha na conexão SMTP");
+          toast.error(data.message || "Falha na conexão");
         }
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Falha na conexão SMTP");
+        toast.error(data.detail || data.message || "Falha na conexão");
       }
     } catch (err) {
       if (err.name === "AbortError") {
-        toast.error("Timeout: o teste demorou demasiado tempo");
+        toast.error("Timeout: o teste demorou demasiado tempo (30s)");
       } else {
         toast.error("Erro no teste de conexão");
       }
@@ -187,11 +179,11 @@ const SystemSmtpCard = () => {
             <div>
               <CardTitle className="text-base">Email do Sistema (Transacional)</CardTitle>
               <CardDescription className="text-xs mt-0.5">
-                Envio de emails transacionais: links de documentação, convites, alertas automáticos e notificações do sistema. Sem Reply-To por política.
+                Envio via Resend API — emails transacionais: links de documentação, convites, alertas automáticos e notificações do sistema. Sem Reply-To por política.
               </CardDescription>
             </div>
           </div>
-          {systemSmtp.smtp_host && (
+          {systemSmtp.resend_api_key && (
             <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
               Configurado
             </Badge>
@@ -201,30 +193,16 @@ const SystemSmtpCard = () => {
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="sys_smtp_host">SMTP Host</Label>
-            <Input id="sys_smtp_host" placeholder="smtp.gmail.com" value={systemSmtp.smtp_host}
-              onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_host: e.target.value }))} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="sys_smtp_port">SMTP Port</Label>
-            <Input id="sys_smtp_port" type="number" placeholder="587" value={systemSmtp.smtp_port}
-              onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_port: e.target.value }))} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="sys_smtp_user">SMTP Username</Label>
-            <Input id="sys_smtp_user" placeholder="noreply@empresa.pt" value={systemSmtp.smtp_username}
-              onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_username: e.target.value }))} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="sys_smtp_pass">SMTP Password</Label>
-            <Input id="sys_smtp_pass" type="password" placeholder="••••••••" value={systemSmtp.smtp_password}
-              onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_password: e.target.value }))} />
+            <Label htmlFor="sys_resend_key">Resend API Key</Label>
+            <Input id="sys_resend_key" type="password" placeholder="re_xxxxxxxxxxxx" value={systemSmtp.resend_api_key}
+              onChange={(e) => setSystemSmtp((p) => ({ ...p, resend_api_key: e.target.value }))} />
+            <p className="text-xs text-muted-foreground">Chave de API do Resend (obter em <a href="https://resend.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline">resend.com/api-keys</a>)</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="sys_smtp_from">Email do Remetente (From)</Label>
             <Input id="sys_smtp_from" placeholder="no-reply@powerealestate.pt" value={systemSmtp.smtp_from_email}
               onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_email: e.target.value }))} />
-            <p className="text-xs text-muted-foreground">Endereço que aparecerá como remetente nos emails do sistema</p>
+            <p className="text-xs text-muted-foreground">Endereço que aparecerá como remetente. O domínio deve estar verificado no Resend.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="sys_smtp_from_name">Nome do Remetente</Label>
@@ -232,11 +210,18 @@ const SystemSmtpCard = () => {
               onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_name: e.target.value }))} />
             <p className="text-xs text-muted-foreground">Nome que aparecerá como remetente (ex: Power Real Estate)</p>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="sys_smtp_tls">TLS</Label>
-            <div className="flex items-center gap-2 mt-2">
-              <Switch checked={systemSmtp.smtp_use_tls} onCheckedChange={(v) => setSystemSmtp((p) => ({ ...p, smtp_use_tls: v }))} />
-              <span className="text-sm text-muted-foreground">{systemSmtp.smtp_use_tls ? "Ativado" : "Desativado"}</span>
+        </div>
+        {/* Resend API Info */}
+        <div className="rounded-md border border-teal-200 bg-teal-50 dark:border-teal-900/50 dark:bg-teal-950/20 p-3">
+          <div className="flex items-start gap-2">
+            <Zap className="w-4 h-4 text-teal-600 dark:text-teal-400 mt-0.5 shrink-0" />
+            <div className="text-xs text-teal-800 dark:text-teal-300">
+              <p className="font-medium">Envio via Resend API (HTTPS)</p>
+              <p className="mt-0.5">
+                O Resend usa a porta 443 (HTTPS) para envio de emails, o que elimina
+                problemas de bloqueio de portas SMTP (25/465/587) em ambientes como o Render.
+                Não é necessário configurar host, porta ou username — apenas a API Key.
+              </p>
             </div>
           </div>
         </div>
