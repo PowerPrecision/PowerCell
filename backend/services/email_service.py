@@ -431,6 +431,7 @@ async def send_email(
                 sys_smtp = sys_config.system_smtp
                 if sys_smtp.smtp_host and sys_smtp.smtp_username:
                     from_email = sys_smtp.smtp_from_email or sys_smtp.smtp_username
+                    from_name = sys_smtp.smtp_from_name or ""
                     account = EmailAccount(
                         name="system_smtp",
                         imap_server=sys_smtp.smtp_host,
