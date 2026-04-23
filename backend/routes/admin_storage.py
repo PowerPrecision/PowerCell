@@ -528,7 +528,7 @@ async def batch_update_process_s3_mappings(
 @router.get("/s3-folder-contents")
 async def get_s3_folder_contents(
     folder_path: str = Query("", description="Caminho da pasta S3 (vazio = raiz)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """Lista conteúdo de uma pasta S3. Se folder_path vazio, lista a raiz do bucket."""
     from services.s3_storage import s3_service

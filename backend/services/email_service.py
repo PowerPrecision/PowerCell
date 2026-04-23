@@ -343,6 +343,7 @@ def _send_via_resend(
     body: str,
     body_html: Optional[str],
     attachments: Optional[List[Dict[str, Any]]],
+    email_signature: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Enviar email via Resend HTTP API.
@@ -374,10 +375,21 @@ def _send_via_resend(
         }
 
         # Corpo: HTML preferido, texto como fallback
+        # Anexar assinatura de email se configurada
         if body_html:
-            params["html"] = body_html
+            html_content = body_html
+            if email_signature:
+                html_content = f"{body_html}<br/><hr/>{email_signature}"
+            params["html"] = html_content
         if body:
-            params["text"] = body
+            text_content = body
+            if email_signature:
+                # Strip HTML from signature for plain text version
+                import re
+                sig_text = re.sub(r'<[^>]+>', '', email_signature).strip()
+                if sig_text:
+                    text_content = f"{body}\n\n---\n{sig_text}"
+            params["text"] = text_content
 
         # CC / BCC
         if cc_emails:
@@ -518,6 +530,7 @@ async def send_email(
                 from services.system_config import get_system_config
                 sys_config = await get_system_config()
                 sys_smtp = sys_config.system_smtp
+                system_email_signature = sys_smtp.email_signature or None
                 # Preferir Resend API; fallback para SMTP directo (legado)
                 if sys_smtp.resend_api_key:
                     from_email = sys_smtp.smtp_from_email or ""
@@ -584,6 +597,7 @@ async def send_email(
     
     # Resolve from_name for system_smtp (Bloco A) — used in From header and footer
     from_name = ""
+    system_email_signature = None
     if account and account.name == "system_smtp":
         try:
             from services.system_config import get_system_config
@@ -691,6 +705,7 @@ async def send_email(
                 body=body,
                 body_html=body_html,
                 attachments=attachments,
+                email_signature=system_email_signature if account.name == "system_smtp" else None,
             )
         else:
             # --- SMTP directo (legado) ---
@@ -992,7 +1007,7 @@ async def sync_webmail_emails(
             all_emails.extend(inbox_result.get("emails", []))
             
             # Buscar da pasta de Enviados (tentar vários nomes)
-            for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados", "INBOX.Enviados"]:
+            for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados", "INBOX.Enviados", "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados"]:
                 try:
                     sent_result = await loop.run_in_executor(
                         _email_executor,
@@ -1001,6 +1016,23 @@ async def sync_webmail_emails(
                     sent_list = sent_result.get("emails", []) if sent_result else []
                     if sent_list:
                         all_emails.extend(sent_list)
+                        break
+                except Exception:
+                    continue
+            
+            # Buscar da pasta de Rascunhos (tentar vários nomes)
+            for drafts_folder in ["Drafts", "INBOX.Drafts", "Rascunhos", "INBOX.Rascunhos", "[Gmail]/Drafts", "[Gmail]/Rascunhos"]:
+                try:
+                    drafts_result = await loop.run_in_executor(
+                        _email_executor,
+                        lambda f=drafts_folder: _fetch_all_from_folder_sync(account, f, days, max_emails)
+                    )
+                    drafts_list = drafts_result.get("emails", []) if drafts_result else []
+                    if drafts_list:
+                        # Mark as drafts for proper categorization
+                        for em in drafts_list:
+                            em["direction"] = "sent"  # Drafts are treated as sent for display
+                        all_emails.extend(drafts_list)
                         break
                 except Exception:
                     continue
@@ -1210,7 +1242,7 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
         
         # Buscar da pasta de Enviados
         sent_emails = []
-        for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados"]:
+        for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados", "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados"]:
             try:
                 sent_result = await loop.run_in_executor(
                     _email_executor,
@@ -1223,7 +1255,24 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
             except Exception:
                 continue
         
-        all_emails = inbox_emails + sent_emails
+        # Buscar da pasta de Rascunhos
+        drafts_emails = []
+        for drafts_folder in ["Drafts", "INBOX.Drafts", "Rascunhos", "[Gmail]/Drafts", "[Gmail]/Rascunhos"]:
+            try:
+                drafts_result = await loop.run_in_executor(
+                    _email_executor,
+                    lambda f=drafts_folder: _fetch_all_from_folder_sync(account, f, days, max_emails)
+                )
+                drafts_list = drafts_result.get("emails", []) if drafts_result else []
+                if drafts_list:
+                    for em in drafts_list:
+                        em["direction"] = "sent"
+                    drafts_emails = drafts_list
+                    break
+            except Exception:
+                continue
+        
+        all_emails = inbox_emails + sent_emails + drafts_emails
         
         for em in all_emails:
             try:
@@ -1817,6 +1866,84 @@ async def imap_delete_message(
             expunge=True
         )
     )
+
+
+async def imap_move_to_trash(
+    email_account: EmailAccount,
+    message_id: str,
+    source_folder: str = "INBOX"
+) -> Dict[str, Any]:
+    """
+    Move an email to the Trash folder on the IMAP server (instead of permanent delete).
+    
+    Tries common Trash folder names: Trash, INBOX.Trash, [Gmail]/Trash, Lixo, INBOX.Lixo.
+    Falls back to marking as \\Deleted + EXPUNGE if COPY to Trash fails.
+    """
+    import imaplib
+    
+    loop = asyncio.get_event_loop()
+    
+    def _move_sync():
+        try:
+            mail = imaplib.IMAP4_SSL(email_account.imap_server, email_account.imap_port)
+            mail.login(email_account.email, email_account.password)
+            
+            # Select source folder
+            status, _ = mail.select(source_folder, readonly=False)
+            if status != "OK":
+                mail.logout()
+                return {"success": False, "error": f"Could not select folder {source_folder}"}
+            
+            # Find message by Message-ID
+            _, msg_nums = mail.search(None, f'(HEADER Message-ID "{message_id}")')
+            if not msg_nums[0] or not msg_nums[0].strip():
+                mail.logout()
+                return {"success": False, "error": "Message not found in source folder"}
+            
+            msg_num = msg_nums[0].strip().decode()
+            
+            # Try common Trash folder names
+            trash_folders = [
+                "Trash", "INBOX.Trash", "[Gmail]/Trash", "[Gmail]/Lixo",
+                "Lixo", "INBOX.Lixo", "Deleted Items", "INBOX.Deleted",
+                "&AMkAmQCX-",  # Some servers encode "Trash" differently
+            ]
+            
+            trash_found = None
+            for tf in trash_folders:
+                try:
+                    status, _ = mail.select(tf, readonly=False)
+                    if status == "OK":
+                        trash_found = tf
+                        break
+                except Exception:
+                    continue
+            
+            # Re-select source folder before COPY
+            mail.select(source_folder, readonly=False)
+            
+            if trash_found:
+                # COPY to Trash, then mark as deleted in source
+                copy_status, _ = mail.copy(msg_num, trash_found)
+                if copy_status == "OK":
+                    mail.store(msg_num, "+FLAGS", "\\Deleted")
+                    mail.expunge()
+                    mail.logout()
+                    return {"success": True, "trash_folder": trash_found}
+                else:
+                    logger.warning(f"[IMAP Move to Trash] COPY failed for msg {message_id[:30]}, falling back to delete")
+            
+            # Fallback: just mark as deleted + expunge (permanent delete)
+            mail.store(msg_num, "+FLAGS", "\\Deleted")
+            mail.expunge()
+            mail.logout()
+            return {"success": True, "trash_folder": None, "fallback": "expunge"}
+            
+        except Exception as e:
+            logger.error(f"[IMAP Move to Trash] Error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    return await loop.run_in_executor(_email_executor, _move_sync)
 
 
 async def _get_email_account_for_email(account_value: str, synced_for_user: str = None) -> Optional[EmailAccount]:

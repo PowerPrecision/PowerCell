@@ -252,6 +252,9 @@ class SystemSMTPConfig(BaseModel):
     smtp_password: Optional[str] = None
     smtp_use_tls: bool = True
 
+    # === Assinatura de Email ===
+    email_signature: Optional[str] = None  # HTML da assinatura (anexada automaticamente)
+
 
 class SystemWebmailConfig(BaseModel):
     """Configuração de conta global de indexação (Bloco C) - Webmail partilhado"""

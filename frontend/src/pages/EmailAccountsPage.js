@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { hasAnyRole } from "../utils/roleUtils";
+import RichTextEditor from "../components/ui/RichTextEditor";
 import { toast } from "sonner";
 import {
   Mail,
@@ -65,6 +66,7 @@ const SystemSmtpCard = () => {
     resend_api_key: "",
     smtp_from_email: "",
     smtp_from_name: "",
+    email_signature: "",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -85,6 +87,7 @@ const SystemSmtpCard = () => {
               resend_api_key: data.system_smtp.resend_api_key || "",
               smtp_from_email: data.system_smtp.smtp_from_email || "",
               smtp_from_name: data.system_smtp.smtp_from_name || "",
+              email_signature: data.system_smtp.email_signature || "",
             }));
           }
         }
@@ -238,6 +241,19 @@ const SystemSmtpCard = () => {
               </p>
             </div>
           </div>
+        </div>
+        {/* Email Signature */}
+        <div className="space-y-2">
+          <Label>Assinatura de Email</Label>
+          <RichTextEditor
+            value={systemSmtp.email_signature || ""}
+            onChange={(val) => setSystemSmtp((p) => ({ ...p, email_signature: val }))}
+            placeholder="Escreva a assinatura que será anexada automaticamente ao final de todos os emails enviados por esta conta..."
+            minHeight={120}
+          />
+          <p className="text-xs text-muted-foreground">
+            Esta assinatura será automaticamente anexada ao final de todos os emails transacionais enviados pelo sistema.
+          </p>
         </div>
         <div className="flex items-center gap-3 pt-2">
           <Button onClick={handleSave} disabled={saving}>

@@ -33,7 +33,7 @@ from models.email import (
     FolderCreateRequest, FolderUpdateRequest
 )
 from services.auth import get_current_user, get_effective_role
-from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails, imap_mark_as_seen, imap_mark_as_unseen, imap_delete_message, _get_email_account_for_email
+from services.email_service import sync_emails_for_process, send_email, test_email_connection, get_email_accounts, get_email_accounts_async, sync_webmail_emails, imap_mark_as_seen, imap_mark_as_unseen, imap_delete_message, imap_move_to_trash, _get_email_account_for_email
 from services.email_draft_service import (
     get_pending_drafts,
     get_draft_stats,
@@ -2572,9 +2572,14 @@ async def webmail_stats(
         sent_base["shared_role"] = "indexacao"
         drafts_base["shared_role"] = "indexacao"
     elif not can_see_all and user_email:
-        # Apply user isolation (default backward compat)
-        inbox_base["to_emails"] = {"$regex": re.escape(user_email), "$options": "i"}
-        sent_base["from_email"] = {"$regex": re.escape(user_email), "$options": "i"}
+        # Apply user isolation (same query as webmail list for consistency)
+        user_isolation_or = [
+            {"created_by": user_id},
+            {"synced_for_user": user_id},
+            {"synced_for_user": user_email},
+        ]
+        inbox_base["$or"] = user_isolation_or
+        sent_base["$or"] = user_isolation_or
         drafts_base["created_by"] = user_id
     
     # Unread count
@@ -3610,13 +3615,13 @@ async def delete_email(
     email_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Eliminar registo de email (MongoDB + IMAP server)."""
+    """Eliminar registo de email (MongoDB + mover para Trash no IMAP server)."""
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
     
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
     
-    # === IMAP BIDIRECTIONAL SYNC: Delete from IMAP server ===
+    # === IMAP BIDIRECTIONAL SYNC: Move to Trash on IMAP server (instead of permanent delete) ===
     message_id = email.get("message_id")
     if message_id:
         try:
@@ -3625,11 +3630,18 @@ async def delete_email(
             email_account = await _get_email_account_for_email(account_value, synced_for_user)
             if email_account:
                 folder = "INBOX" if email.get("direction") == "received" else "Sent"
-                imap_result = await imap_delete_message(email_account, message_id, folder)
-                if not imap_result.get("success"):
-                    logger.warning(f"[IMAP Sync] Falha ao apagar email IMAP para {email_id}: {imap_result.get('error')}")
+                imap_result = await imap_move_to_trash(email_account, message_id, folder)
+                if imap_result.get("success"):
+                    trash_folder = imap_result.get("trash_folder")
+                    fallback = imap_result.get("fallback")
+                    if trash_folder:
+                        logger.info(f"[IMAP Sync] Email {email_id} movido para '{trash_folder}' no IMAP")
+                    elif fallback:
+                        logger.warning(f"[IMAP Sync] Email {email_id} fallback expunge (Trash não encontrado)")
+                else:
+                    logger.warning(f"[IMAP Sync] Falha ao mover email para Trash: {imap_result.get('error')}")
         except Exception as imap_err:
-            logger.warning(f"[IMAP Sync] Erro ao apagar email IMAP para {email_id}: {imap_err}")
+            logger.warning(f"[IMAP Sync] Erro ao mover email para Trash: {imap_err}")
     
     await db.emails.delete_one({"id": email_id})
     logger.info(f"Email {email_id} eliminado por {current_user['name']}")

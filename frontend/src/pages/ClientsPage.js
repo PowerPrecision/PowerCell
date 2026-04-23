@@ -268,12 +268,15 @@ export default function ClientsPage() {
   }, [clients, sortField, sortOrder]);
 
   const toggleSort = (field) => {
-    if (sortField === field) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-    } else {
-      setSortField(field);
-      setSortOrder("asc");
-    }
+    const newOrder = sortField === field
+      ? (sortOrder === "asc" ? "desc" : "asc")
+      : "asc";
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set("sort", field);
+      next.set("order", newOrder);
+      return next;
+    }, { replace: true });
   };
 
   const SortIcon = ({ field }) => {
@@ -487,8 +490,13 @@ export default function ClientsPage() {
                   const lastIdx = v.lastIndexOf('_');
                   const field = v.substring(0, lastIdx);
                   const order = v.substring(lastIdx + 1);
-                  setSortField(field);
-                  setSortOrder(order);
+                  // Atualizar ambos os params numa única operação para evitar re-renders intermédios
+                  setSearchParams(prev => {
+                    const next = new URLSearchParams(prev);
+                    next.set("sort", field);
+                    next.set("order", order);
+                    return next;
+                  }, { replace: true });
                 }}>
                   <SelectTrigger className="w-full sm:w-[150px]" data-testid="sort-field">
                     <ArrowUpDown className="h-4 w-4 mr-2" />

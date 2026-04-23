@@ -973,3 +973,28 @@ Stage Summary:
 - Error handling detalhado: AuthenticationError, RateLimitError, domínio não verificado, from inválido
 - Logs detalhados com logger.error para diagnóstico no Render
 - Timeout frontend aumentado para 30s
+
+---
+Task ID: 8
+Agent: Main Agent
+Task: Multi-module bug fixes and improvements (10 files, 197 insertions, 38 deletions)
+
+Work Log:
+- **1a. Routes Duplicate (/staff vs /staff-dashboard)**: Changed `/staff-dashboard` route in App.js to redirect to canonical `/staff`. Updated ConsultorDashboard "Quadro Geral" button to navigate to `/kanban` instead of `/staff-dashboard`. Fixed "Concluídos" card onClick to use `/processos-filtrados?filter=concluded`.
+- **1b. Card Counters/Filters**: Fixed FilteredProcessList.js `getProcesses()` call — added `view_mode: 'all'` and `show_all: true` params so the API returns concluded/dropped processes (previously default `view_mode="active_only"` excluded them).
+- **1c. Webmail Unread Counter**: Fixed `webmail-stats` endpoint in emails.py — non-admin users now use same `$or` query as webmail list (created_by, synced_for_user) instead of simple `to_emails` regex, ensuring counter matches inbox listing.
+- **2a. IMAP Drafts Sync**: Added Drafts folder sync to `sync_webmail_emails()` and `sync_user_emails()` — tries "[Gmail]/Drafts", "[Gmail]/Rascunhos", "INBOX.Drafts", "Rascunhos", "Drafts". Also expanded Sent folder names to include Gmail variants.
+- **2b. Delete → Trash**: Created `imap_move_to_trash()` function in email_service.py — searches for Trash folder (Trash, INBOX.Trash, [Gmail]/Trash, Lixo, etc.), COPYs message there, then expunges from source. Falls back to permanent delete if Trash not found. Updated `delete_email` route to use this instead of `imap_delete_message()`.
+- **2c. Email Signature**: Added `email_signature` field to `SystemSMTPConfig` model. Added RichTextEditor WYSIWYG component to EmailAccountsPage SystemSmtpCard. Modified `_send_via_resend()` to accept and append signature (HTML with `<hr/>`, plain text with `---`). Modified `send_email()` to pass system signature to Resend.
+- **3. Client Sorting**: Fixed ClientsPage sort dropdown — consolidated `setSortField`+`setSortOrder` into single `setSearchParams` call, and same for `toggleSort`. Prevents intermediate re-renders where only one param updates.
+- **4. Files Access**: Extended `isAdmin` check in FilesExplorerPage to include `diretor` and `administrativo` roles. Updated backend `s3-folder-contents` endpoint role requirement from `[ADMIN]` to `[ADMIN, CEO, DIRETOR, ADMINISTRATIVO]`.
+
+Stage Summary:
+- 10 files changed across 2 frontend and 4 backend modules
+- Resend API integration maintained, SMTP legacy preserved as fallback
+- IMAP sync now covers INBOX + Sent + Drafts folders
+- Email deletion is now move-to-trash (recoverable) instead of permanent
+- Email signature auto-appended to system transactional emails
+- Webmail unread counter now consistent with inbox listing
+- FilteredProcessList correctly shows concluded/dropped processes
+- Files explorer accessible to Diretores and Administrativo
