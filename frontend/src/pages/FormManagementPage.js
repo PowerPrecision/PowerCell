@@ -1,32 +1,25 @@
 /**
  * FormManagementPage - Gestão do Formulário Público
- * 
+ *
  * ACESSO: Admin e CEO apenas
- * 
- * Funcionalidades:
- * - Listar todos os campos do formulário por passo
- * - Ativar/desativar campos, marcar como obrigatórios
- * - Criar campos personalizados (texto, dropdown, checkbox, etc.)
- * - Eliminar campos personalizados
- * - Repor configuração padrão
+ *
+ * Refactored with @hello-pangea/dnd for robust cross-container drag & drop.
+ *
+ * Layout: Two-column
+ *   Left  — "Campos Disponíveis" (hidden fields pool, drag source)
+ *   Right — "Estrutura do Formulário" (active fields by step, drop & sort target)
+ *
+ * Single Source of Truth: The `fields` state array is the only state.
+ *   - Derived views: availableFields, activeFieldsByStep (computed via useMemo)
+ *   - Every mutation (toggle, reorder, add, delete, cross-step move)
+ *     recalculates order_index globally
+ *   - Save sends the normalized array to PUT /admin/form-config/fields
+ *
+ * order_index normalization: Backend stores `order`; frontend normalizes
+ * to `order_index` on fetch and syncs both on save for backward compat.
  */
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -35,7 +28,6 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
-import { Textarea } from "../components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "../components/ui/dialog";
@@ -46,10 +38,12 @@ import { toast } from "sonner";
 import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
   Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark,
-  GripHorizontal
+  GripHorizontal, Inbox, ArrowRightLeft
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+
+// ─── Constants ──────────────────────────────────────────────────────
 
 const STEP_LABELS = {
   1: "Dados Pessoais",
@@ -78,74 +72,84 @@ const FIELD_TYPES = [
   { value: "radio", label: "Sim / Não" },
 ];
 
+// ─── Helpers ────────────────────────────────────────────────────────
+
 /**
- * Componente sortable para cada campo do formulário (Drag & Drop).
+ * Normalize raw fields from API: ensure order_index is always set.
+ * Backend uses `order`; frontend uses `order_index`.
  */
-const SortableFieldItem = ({ id, field, updateField, handleDeleteCustomField }) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
+const normalizeFields = (rawFields) =>
+  (rawFields || []).map((f, i) => ({
+    ...f,
+    order_index: f.order_index ?? f.order ?? i,
+  }));
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 50 : "auto",
-  };
+/**
+ * Prepare fields for save: sync both `order` and `order_index`.
+ */
+const prepareFieldsForSave = (fields) =>
+  fields.map((f, i) => ({
+    ...f,
+    order_index: f.order_index ?? i,
+    order: f.order_index ?? f.order ?? i,
+  }));
 
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
-        field.is_visible
-          ? field.is_custom
-            ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50 dark:border-emerald-800/30"
-            : "bg-card border-border"
-          : "bg-muted/30 border-transparent opacity-60"
-      } ${isDragging ? "shadow-lg ring-2 ring-primary/20" : ""}`}
-      data-testid={`form-field-${field.field_key}`}
+// ─── Field Card Component ───────────────────────────────────────────
+
+/**
+ * Visual card for a single field. Handles drag handle isolation
+ * so interactive controls (Switch, Button) don't trigger DnD.
+ */
+const FieldCard = ({ field, isDragging, dragHandleProps, compact, updateField, handleDeleteCustomField }) => (
+  <div
+    className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
+      field.is_visible
+        ? field.is_custom
+          ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50 dark:border-emerald-800/30"
+          : "bg-card border-border"
+        : "bg-muted/30 border-transparent opacity-60"
+    } ${isDragging ? "shadow-lg ring-2 ring-primary/20" : ""}`}
+    data-testid={`form-field-${field.field_key}`}
+  >
+    {/* Drag Handle — isolated so inner controls don't trigger drag */}
+    <button
+      type="button"
+      className="cursor-grab active:cursor-grabbing p-1 mr-1 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+      {...dragHandleProps}
+      title="Arrastar para reordenar"
     >
-      {/* Drag Handle */}
-      <button
-        type="button"
-        className="cursor-grab active:cursor-grabbing p-1 mr-1 text-muted-foreground hover:text-foreground transition-colors shrink-0"
-        {...attributes}
-        {...listeners}
-        title="Arrastar para reordenar"
-      >
-        <GripHorizontal className="h-4 w-4" />
-      </button>
-      <div className="flex items-center gap-3 min-w-0 flex-1">
-        {field.is_custom ? (
-          <PenLine className="h-4 w-4 text-emerald-600 shrink-0" />
-        ) : field.is_visible ? (
-          <Eye className="h-4 w-4 text-green-600 shrink-0" />
-        ) : (
-          <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
-        )}
-        <div className="min-w-0">
-          <p className="text-sm font-medium truncate">
-            {field.label}
-            {field.is_custom && (
-              <Badge className="ml-2 bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0">Personalizado</Badge>
-            )}
-          </p>
-          <div className="flex items-center gap-2 mt-0.5">
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-              {FIELD_TYPE_LABELS[field.field_type] || field.field_type}
-            </Badge>
-            {field.options && field.options.length > 0 && (
-              <span className="text-[10px] text-muted-foreground">{field.options.length} opções</span>
-            )}
-          </div>
+      <GripHorizontal className="h-4 w-4" />
+    </button>
+
+    {/* Field Info */}
+    <div className="flex items-center gap-3 min-w-0 flex-1">
+      {field.is_custom ? (
+        <PenLine className="h-4 w-4 text-emerald-600 shrink-0" />
+      ) : field.is_visible ? (
+        <Eye className="h-4 w-4 text-green-600 shrink-0" />
+      ) : (
+        <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
+      )}
+      <div className="min-w-0">
+        <p className="text-sm font-medium truncate">
+          {field.label}
+          {field.is_custom && (
+            <Badge className="ml-2 bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0">Personalizado</Badge>
+          )}
+        </p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+            {FIELD_TYPE_LABELS[field.field_type] || field.field_type}
+          </Badge>
+          {field.options && field.options.length > 0 && (
+            <span className="text-[10px] text-muted-foreground">{field.options.length} opções</span>
+          )}
         </div>
       </div>
+    </div>
+
+    {/* Controls — only rendered in non-compact (full) mode */}
+    {!compact && (
       <div className="flex items-center gap-4 shrink-0">
         <div className="flex items-center gap-2">
           <Label className="text-xs text-muted-foreground">Obrigatório</Label>
@@ -174,38 +178,31 @@ const SortableFieldItem = ({ id, field, updateField, handleDeleteCustomField }) 
           </Button>
         )}
       </div>
-    </div>
-  );
-};
+    )}
+  </div>
+);
+
+// ─── Main Component ────────────────────────────────────────────────
 
 const FormManagementPage = () => {
   const { token } = useAuth();
 
-  // DnD sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
+  // ── Core state (single source of truth) ──
   const [fields, setFields] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Dialog para criar campo personalizado
+  // Dialog: create custom field
   const [createDialog, setCreateDialog] = useState(false);
   const [newField, setNewField] = useState({
-    label: "",
-    step: "1",
-    field_type: "text",
-    is_required: false,
-    placeholder: "",
-    hint: "",
-    options: [],
+    label: "", step: "1", field_type: "text",
+    is_required: false, placeholder: "", hint: "", options: [],
   });
   const [newOption, setNewOption] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // Templates state
+  // Dialogs: templates
   const [templates, setTemplates] = useState([]);
   const [templateDialog, setTemplateDialog] = useState(false);
   const [saveTemplateDialog, setSaveTemplateDialog] = useState(false);
@@ -213,11 +210,12 @@ const FormManagementPage = () => {
   const [templateDesc, setTemplateDesc] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
 
-  // Preview state
+  // Dialog: preview
   const [previewDialog, setPreviewDialog] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // ── Data fetching ──
   const fetchConfig = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
@@ -225,7 +223,7 @@ const FormManagementPage = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        setFields(data.fields || []);
+        setFields(normalizeFields(data.fields));
         setHasChanges(false);
       }
     } catch (err) {
@@ -254,39 +252,118 @@ const FormManagementPage = () => {
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
-  const updateField = (fieldKey, key, value) => {
-    setFields(prev => prev.map(f => 
-      f.field_key === fieldKey ? { ...f, [key]: value } : f
-    ));
-    setHasChanges(true);
-  };
+  // ── Derived state ──
+  const availableFields = useMemo(() =>
+    fields
+      .filter(f => !f.is_visible)
+      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)),
+    [fields]
+  );
 
-  // DnD: reordenar campos dentro de um passo
-  const handleDragEnd = useCallback((event) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
+  const activeFieldsByStep = useMemo(() => {
+    const active = fields
+      .filter(f => f.is_visible)
+      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+    return active.reduce((acc, f) => {
+      const step = f.step || 1;
+      if (!acc[step]) acc[step] = [];
+      acc[step].push(f);
+      return acc;
+    }, {});
+  }, [fields]);
+
+  const allSteps = useMemo(() =>
+    [...new Set(fields.map(f => f.step || 1))].sort((a, b) => a - b),
+    [fields]
+  );
+
+  const needsOptions = ["select", "checkbox"].includes(newField.field_type);
+
+  // ── Field mutations ──
+  const updateField = useCallback((fieldKey, key, value) => {
+    setFields(prev =>
+      prev.map(f => f.field_key === fieldKey ? { ...f, [key]: value } : f)
+    );
+    setHasChanges(true);
+  }, []);
+
+  // ── DnD: onDragEnd ──
+  const onDragEnd = useCallback((result) => {
+    const { source, destination, draggableId } = result;
+
+    // Dropped outside any droppable
+    if (!destination) return;
+
+    // Same position — no-op
+    if (
+      source.droppableId === destination.droppableId &&
+      source.index === destination.index
+    ) return;
 
     setFields(prev => {
-      const activeIdx = prev.findIndex(f => f.field_key === active.id);
-      const overIdx = prev.findIndex(f => f.field_key === over.id);
-      if (activeIdx === -1 || overIdx === -1) return prev;
-      if (prev[activeIdx].step !== prev[overIdx].step) return prev;
+      const fieldIdx = prev.findIndex(f => f.field_key === draggableId);
+      if (fieldIdx === -1) return prev;
 
-      const reordered = arrayMove(prev, activeIdx, overIdx);
-      
-      // Recalculate order_index for ALL fields globally (not just one step)
-      return reordered.map((f, i) => ({ ...f, order_index: i }));
+      const field = { ...prev[fieldIdx] };
+      // Remove the dragged field from the array
+      const remaining = [...prev.slice(0, fieldIdx), ...prev.slice(fieldIdx + 1)];
+
+      const dstId = destination.droppableId;
+
+      if (dstId === "available") {
+        // ── Move to available pool (hide) ──
+        field.is_visible = false;
+        remaining.push(field);
+
+      } else if (dstId.startsWith("step-")) {
+        // ── Move to a step (activate / reorder) ──
+        const destStep = parseInt(dstId.replace("step-", ""), 10);
+        field.is_visible = true;
+        field.step = destStep;
+
+        // Compute visible field keys in the destination step (after removal)
+        const destStepKeys = remaining
+          .filter(f => f.is_visible && f.step === destStep)
+          .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+          .map(f => f.field_key);
+
+        let insertIdx;
+        if (destStepKeys.length === 0) {
+          // Empty step: find position after last visible field with step < destStep
+          insertIdx = remaining.length;
+          for (let i = remaining.length - 1; i >= 0; i--) {
+            if (remaining[i].is_visible && remaining[i].step < destStep) {
+              insertIdx = i + 1;
+              break;
+            }
+          }
+        } else if (destination.index >= destStepKeys.length) {
+          // Append after the last visible field in this step
+          const lastKey = destStepKeys[destStepKeys.length - 1];
+          insertIdx = remaining.findIndex(f => f.field_key === lastKey) + 1;
+        } else {
+          // Insert before the field at destination index
+          const targetKey = destStepKeys[destination.index];
+          insertIdx = remaining.findIndex(f => f.field_key === targetKey);
+        }
+
+        remaining.splice(insertIdx, 0, field);
+      }
+
+      // Recalculate order_index globally
+      return remaining.map((f, i) => ({ ...f, order_index: i }));
     });
     setHasChanges(true);
   }, []);
 
+  // ── Save / Reset ──
   const handleSave = async () => {
     setSaving(true);
     try {
       const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ fields }),
+        body: JSON.stringify({ fields: prepareFieldsForSave(fields) }),
       });
       if (res.ok) {
         toast.success("Configuração guardada com sucesso");
@@ -311,7 +388,7 @@ const FormManagementPage = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        setFields(data.fields || []);
+        setFields(normalizeFields(data.fields));
         setHasChanges(false);
         toast.success("Configuração reposta para valores padrão");
       }
@@ -322,6 +399,7 @@ const FormManagementPage = () => {
     }
   };
 
+  // ── Create custom field ──
   const addOption = () => {
     if (!newOption.trim()) return;
     setNewField(prev => ({ ...prev, options: [...prev.options, newOption.trim()] }));
@@ -396,16 +474,16 @@ const FormManagementPage = () => {
     }
   };
 
-  // Template actions
-  const handleActivateTemplate = async (templateId, templateName) => {
-    if (!window.confirm(`Ativar o template "${templateName}"? A configuração atual será substituída.`)) return;
+  // ── Template actions ──
+  const handleActivateTemplate = async (tplId, tplName) => {
+    if (!window.confirm(`Ativar o template "${tplName}"? A configuração atual será substituída.`)) return;
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${templateId}/activate`, {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${tplId}/activate`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        toast.success(`Template "${templateName}" ativado`);
+        toast.success(`Template "${tplName}" ativado`);
         setTemplateDialog(false);
         fetchConfig();
       } else {
@@ -417,9 +495,9 @@ const FormManagementPage = () => {
     }
   };
 
-  const handleDuplicateTemplate = async (templateId) => {
+  const handleDuplicateTemplate = async (tplId) => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${templateId}/duplicate`, {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${tplId}/duplicate`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -435,10 +513,10 @@ const FormManagementPage = () => {
     }
   };
 
-  const handleDeleteTemplate = async (templateId) => {
+  const handleDeleteTemplate = async (tplId) => {
     if (!window.confirm("Eliminar este template?")) return;
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${templateId}`, {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${tplId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -483,17 +561,17 @@ const FormManagementPage = () => {
     }
   };
 
-  // Preview handler
-  const handlePreviewTemplate = async (templateId) => {
+  // ── Preview ──
+  const handlePreviewTemplate = async (tplId) => {
     setPreviewLoading(true);
     setPreviewDialog(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${templateId}/preview`, {
+      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${tplId}/preview`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
-        setPreviewData({ ...data, _templateId: templateId });
+        setPreviewData({ ...data, _templateId: tplId });
       } else {
         toast.error("Erro ao carregar pré-visualização");
         setPreviewDialog(false);
@@ -506,84 +584,52 @@ const FormManagementPage = () => {
     }
   };
 
-  const previewGroupedByStep = previewData?.fields?.reduce((acc, field) => {
-    if (!field.is_visible) return acc;
-    const step = field.step || 1;
-    if (!acc[step]) acc[step] = [];
-    acc[step].push(field);
-    return acc;
-  }, {}) || {};
-
-  const groupedByStep = useMemo(() => {
-    return fields
-      .slice()
-      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
-      .reduce((acc, field) => {
-        const step = field.step || 1;
+  const previewGroupedByStep = useMemo(() => {
+    if (!previewData?.fields) return {};
+    return previewData.fields
+      .filter(f => f.is_visible)
+      .reduce((acc, f) => {
+        const step = f.step || 1;
         if (!acc[step]) acc[step] = [];
-        acc[step].push(field);
+        acc[step].push(f);
         return acc;
       }, {});
-  }, [fields]);
+  }, [previewData]);
 
-  const needsOptions = ["select", "checkbox"].includes(newField.field_type);
-
+  // ── Render ──
   return (
     <DashboardLayout>
       <div className="space-y-6" data-testid="form-management-page">
+
+        {/* ── Header ── */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <FileText className="h-6 w-6" />
               Gestão do Formulário
             </h1>
-            <p className="text-muted-foreground mt-1">Controlar campos do formulário público e criar campos personalizados</p>
+            <p className="text-muted-foreground mt-1">
+              Arraste campos entre as colunas para ativar, desativar ou reordenar
+            </p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <Button
-              variant="outline"
-              onClick={() => setTemplateDialog(true)}
-              data-testid="templates-btn"
-            >
-              <LayoutTemplate className="h-4 w-4 mr-2" />
-              Templates
+            <Button variant="outline" onClick={() => setTemplateDialog(true)} data-testid="templates-btn">
+              <LayoutTemplate className="h-4 w-4 mr-2" /> Templates
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => setSaveTemplateDialog(true)}
-              data-testid="save-as-template-btn"
-            >
-              <Bookmark className="h-4 w-4 mr-2" />
-              Guardar como Template
+            <Button variant="outline" onClick={() => setSaveTemplateDialog(true)} data-testid="save-as-template-btn">
+              <Bookmark className="h-4 w-4 mr-2" /> Guardar como Template
             </Button>
-            <Button
-              variant="outline"
-              onClick={handleReset}
-              disabled={saving}
-              data-testid="reset-form-config"
-            >
-              <RotateCcw className="h-4 w-4 mr-2" />
-              Repor Padrão
+            <Button variant="outline" onClick={handleReset} disabled={saving} data-testid="reset-form-config">
+              <RotateCcw className="h-4 w-4 mr-2" /> Repor Padrão
             </Button>
-            <Button
-              onClick={() => setCreateDialog(true)}
-              data-testid="create-custom-field"
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Novo Campo
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={saving || !hasChanges}
-              data-testid="save-form-config"
-            >
+            <Button onClick={handleSave} disabled={saving || !hasChanges} data-testid="save-form-config">
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
               Guardar {hasChanges && "*"}
             </Button>
           </div>
         </div>
 
+        {/* ── Unsaved changes warning ── */}
         {hasChanges && (
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
@@ -596,53 +642,159 @@ const FormManagementPage = () => {
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="space-y-6">
-            {Object.entries(groupedByStep)
-              .sort(([a], [b]) => Number(a) - Number(b))
-              .map(([step, stepFields]) => (
-                <Card key={step}>
+          <DragDropContext onDragEnd={onDragEnd}>
+            <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
+
+              {/* ════════════════════════════════════════════════════════
+                  LEFT COLUMN — Campos Disponíveis (hidden fields pool)
+                  ════════════════════════════════════════════════════════ */}
+              <div className="space-y-4">
+                <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <span className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary">{step}</span>
-                      {STEP_LABELS[Number(step)] || `Passo ${step}`}
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Inbox className="h-4 w-4 text-muted-foreground" />
+                      Campos Disponíveis
                     </CardTitle>
-                    <CardDescription>
-                      {stepFields.filter(f => f.is_visible).length} de {stepFields.length} campos visíveis
-                      {stepFields.some(f => f.is_custom) && (
-                        <span className="ml-2 text-emerald-600">
-                          ({stepFields.filter(f => f.is_custom).length} personalizado{stepFields.filter(f => f.is_custom).length !== 1 ? "s" : ""})
-                        </span>
-                      )}
+                    <CardDescription className="text-xs">
+                      {availableFields.length} campo{availableFields.length !== 1 ? "s" : ""} oculto{availableFields.length !== 1 ? "s" : ""} — arraste para a estrutura
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-2">
-                    <DndContext
-                      sensors={sensors}
-                      collisionDetection={closestCenter}
-                      onDragEnd={handleDragEnd}
+                  <CardContent>
+                    <Droppable droppableId="available">
+                      {(provided, snapshot) => (
+                        <div
+                          ref={provided.innerRef}
+                          {...provided.droppableProps}
+                          className={`min-h-[120px] rounded-lg border-2 border-dashed transition-colors p-2 space-y-2 ${
+                            snapshot.isDraggingOver
+                              ? "border-primary/50 bg-primary/5"
+                              : "border-muted-foreground/20 bg-muted/20"
+                          }`}
+                        >
+                          {availableFields.length === 0 && !snapshot.isDraggingOver ? (
+                            <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                              <Check className="h-5 w-5 mb-2 text-green-500" />
+                              <p className="text-xs text-center">Todos os campos estão ativos no formulário</p>
+                            </div>
+                          ) : (
+                            availableFields.map((field, index) => (
+                              <Draggable key={field.field_key} draggableId={field.field_key} index={index}>
+                                {(provided, snapshot) => (
+                                  <div
+                                    ref={provided.innerRef}
+                                    {...provided.draggableProps}
+                                    style={provided.draggableProps.style}
+                                  >
+                                    <FieldCard
+                                      field={field}
+                                      isDragging={snapshot.isDragging}
+                                      dragHandleProps={provided.dragHandleProps}
+                                      compact
+                                    />
+                                  </div>
+                                )}
+                              </Draggable>
+                            ))
+                          )}
+                          {provided.placeholder}
+                        </div>
+                      )}
+                    </Droppable>
+
+                    {/* New custom field button */}
+                    <Button
+                      onClick={() => setCreateDialog(true)}
+                      className="mt-4 w-full bg-emerald-600 hover:bg-emerald-700"
+                      data-testid="create-custom-field"
                     >
-                      <SortableContext
-                        items={stepFields.map(f => f.field_key)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        {stepFields.map((field) => (
-                          <SortableFieldItem
-                            key={field.field_key}
-                            id={field.field_key}
-                            field={field}
-                            updateField={updateField}
-                            handleDeleteCustomField={handleDeleteCustomField}
-                          />
-                        ))}
-                      </SortableContext>
-                    </DndContext>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Novo Campo
+                    </Button>
                   </CardContent>
                 </Card>
-              ))}
-          </div>
+              </div>
+
+              {/* ════════════════════════════════════════════════════════
+                  RIGHT COLUMN — Estrutura do Formulário (steps with DnD)
+                  ════════════════════════════════════════════════════════ */}
+              <div className="space-y-4">
+                {allSteps.map((step) => {
+                  const stepFields = activeFieldsByStep[step] || [];
+                  const totalInStep = fields.filter(f => (f.step || 1) === step).length;
+
+                  return (
+                    <Card key={step}>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <span className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary">{step}</span>
+                          {STEP_LABELS[step] || `Passo ${step}`}
+                        </CardTitle>
+                        <CardDescription>
+                          {stepFields.length} de {totalInStep} campos visíveis
+                          {stepFields.some(f => f.is_custom) && (
+                            <span className="ml-2 text-emerald-600">
+                              ({stepFields.filter(f => f.is_custom).length} personalizado{stepFields.filter(f => f.is_custom).length !== 1 ? "s" : ""})
+                            </span>
+                          )}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <Droppable droppableId={`step-${step}`}>
+                          {(provided, snapshot) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.droppableProps}
+                              className={`min-h-[60px] rounded-lg border-2 border-dashed transition-colors p-1 space-y-2 ${
+                                snapshot.isDraggingOver
+                                  ? "border-primary/50 bg-primary/5"
+                                  : stepFields.length === 0
+                                    ? "border-muted-foreground/20 bg-muted/20"
+                                    : "border-transparent bg-transparent"
+                              }`}
+                            >
+                              {stepFields.length === 0 && !snapshot.isDraggingOver ? (
+                                <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                                  <ArrowRightLeft className="h-4 w-4 mb-1.5 opacity-50" />
+                                  <p className="text-xs">Arraste campos aqui ou dos outros passos</p>
+                                </div>
+                              ) : (
+                                stepFields.map((field, index) => (
+                                  <Draggable key={field.field_key} draggableId={field.field_key} index={index}>
+                                    {(provided, snapshot) => (
+                                      <div
+                                        ref={provided.innerRef}
+                                        {...provided.draggableProps}
+                                        style={provided.draggableProps.style}
+                                      >
+                                        <FieldCard
+                                          field={field}
+                                          isDragging={snapshot.isDragging}
+                                          dragHandleProps={provided.dragHandleProps}
+                                          updateField={updateField}
+                                          handleDeleteCustomField={handleDeleteCustomField}
+                                        />
+                                      </div>
+                                    )}
+                                  </Draggable>
+                                ))
+                              )}
+                              {provided.placeholder}
+                            </div>
+                          )}
+                        </Droppable>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+
+            </div>
+          </DragDropContext>
         )}
 
-        {/* Create Custom Field Dialog */}
+        {/* ══════════════════════════════════════════════════════════════
+            DIALOG: Create Custom Field
+            ══════════════════════════════════════════════════════════════ */}
         <Dialog open={createDialog} onOpenChange={setCreateDialog}>
           <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -656,7 +808,6 @@ const FormManagementPage = () => {
             </DialogHeader>
 
             <div className="space-y-5 py-4">
-              {/* Label */}
               <div className="space-y-2">
                 <Label>Nome do campo <span className="text-red-500">*</span></Label>
                 <Input
@@ -667,14 +818,11 @@ const FormManagementPage = () => {
                 />
               </div>
 
-              {/* Type & Step */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Tipo de campo <span className="text-red-500">*</span></Label>
                   <Select value={newField.field_type} onValueChange={(v) => setNewField(prev => ({ ...prev, field_type: v, options: [] }))}>
-                    <SelectTrigger data-testid="new-field-type">
-                      <SelectValue />
-                    </SelectTrigger>
+                    <SelectTrigger data-testid="new-field-type"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {FIELD_TYPES.map(t => (
                         <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
@@ -685,9 +833,7 @@ const FormManagementPage = () => {
                 <div className="space-y-2">
                   <Label>Passo do formulário <span className="text-red-500">*</span></Label>
                   <Select value={newField.step} onValueChange={(v) => setNewField(prev => ({ ...prev, step: v }))}>
-                    <SelectTrigger data-testid="new-field-step">
-                      <SelectValue />
-                    </SelectTrigger>
+                    <SelectTrigger data-testid="new-field-step"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {Object.entries(STEP_LABELS).map(([k, v]) => (
                         <SelectItem key={k} value={k}>{k}. {v}</SelectItem>
@@ -697,7 +843,6 @@ const FormManagementPage = () => {
                 </div>
               </div>
 
-              {/* Placeholder & Hint */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Placeholder</Label>
@@ -717,7 +862,6 @@ const FormManagementPage = () => {
                 </div>
               </div>
 
-              {/* Required */}
               <div className="flex items-center gap-3">
                 <Switch
                   checked={newField.is_required}
@@ -727,26 +871,20 @@ const FormManagementPage = () => {
                 <Label>Campo obrigatório</Label>
               </div>
 
-              {/* Options editor (for select/checkbox) */}
               {needsOptions && (
                 <div className="space-y-3 pt-2 border-t">
                   <Label className="text-base font-semibold">
                     Opções {newField.field_type === "select" ? "do Dropdown" : "dos Checkboxes"}
                     <span className="text-red-500 ml-1">*</span>
                   </Label>
-                  
+
                   {newField.options.length > 0 && (
                     <div className="space-y-1.5">
                       {newField.options.map((opt, idx) => (
                         <div key={idx} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                           <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
                           <span className="text-sm flex-1">{opt}</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
-                            onClick={() => removeOption(idx)}
-                          >
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500 hover:text-red-700" onClick={() => removeOption(idx)}>
                             <X className="h-3 w-3" />
                           </Button>
                         </div>
@@ -762,12 +900,7 @@ const FormManagementPage = () => {
                       onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addOption())}
                       data-testid="new-option-input"
                     />
-                    <Button
-                      variant="outline"
-                      onClick={addOption}
-                      disabled={!newOption.trim()}
-                      data-testid="add-option-btn"
-                    >
+                    <Button variant="outline" onClick={addOption} disabled={!newOption.trim()} data-testid="add-option-btn">
                       <Plus className="h-4 w-4" />
                     </Button>
                   </div>
@@ -793,7 +926,9 @@ const FormManagementPage = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Templates Dialog */}
+        {/* ══════════════════════════════════════════════════════════════
+            DIALOG: Templates
+            ══════════════════════════════════════════════════════════════ */}
         <Dialog open={templateDialog} onOpenChange={setTemplateDialog}>
           <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
@@ -824,50 +959,23 @@ const FormManagementPage = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <p className="font-medium text-sm">{tpl.name}</p>
-                          {tpl.is_system && (
-                            <Badge className="bg-blue-100 text-blue-700 text-[10px]">Sistema</Badge>
-                          )}
+                          {tpl.is_system && <Badge className="bg-blue-100 text-blue-700 text-[10px]">Sistema</Badge>}
                         </div>
-                        {tpl.description && (
-                          <p className="text-xs text-muted-foreground mt-1">{tpl.description}</p>
-                        )}
+                        {tpl.description && <p className="text-xs text-muted-foreground mt-1">{tpl.description}</p>}
                         <p className="text-xs text-muted-foreground mt-1">{tpl.field_count} campos</p>
                       </div>
                       <div className="flex gap-1.5 shrink-0">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handlePreviewTemplate(tpl.id)}
-                          data-testid={`preview-${tpl.id}`}
-                          className="h-8"
-                        >
-                          <Eye className="h-3 w-3 mr-1" />
-                          Ver
+                        <Button size="sm" variant="outline" onClick={() => handlePreviewTemplate(tpl.id)} data-testid={`preview-${tpl.id}`} className="h-8">
+                          <Eye className="h-3 w-3 mr-1" /> Ver
                         </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => handleActivateTemplate(tpl.id, tpl.name)}
-                          data-testid={`activate-${tpl.id}`}
-                          className="h-8"
-                        >
-                          <Zap className="h-3 w-3 mr-1" />
-                          Ativar
+                        <Button size="sm" onClick={() => handleActivateTemplate(tpl.id, tpl.name)} data-testid={`activate-${tpl.id}`} className="h-8">
+                          <Zap className="h-3 w-3 mr-1" /> Ativar
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleDuplicateTemplate(tpl.id)}
-                          className="h-8"
-                        >
+                        <Button size="sm" variant="outline" onClick={() => handleDuplicateTemplate(tpl.id)} className="h-8">
                           <Copy className="h-3 w-3" />
                         </Button>
                         {!tpl.is_system && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 text-red-500 hover:text-red-700"
-                            onClick={() => handleDeleteTemplate(tpl.id)}
-                          >
+                          <Button size="sm" variant="ghost" className="h-8 text-red-500 hover:text-red-700" onClick={() => handleDeleteTemplate(tpl.id)}>
                             <Trash2 className="h-3 w-3" />
                           </Button>
                         )}
@@ -880,7 +988,9 @@ const FormManagementPage = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Save as Template Dialog */}
+        {/* ══════════════════════════════════════════════════════════════
+            DIALOG: Save as Template
+            ══════════════════════════════════════════════════════════════ */}
         <Dialog open={saveTemplateDialog} onOpenChange={setSaveTemplateDialog}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
@@ -925,7 +1035,9 @@ const FormManagementPage = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Template Preview Dialog */}
+        {/* ══════════════════════════════════════════════════════════════
+            DIALOG: Template Preview
+            ══════════════════════════════════════════════════════════════ */}
         <Dialog open={previewDialog} onOpenChange={(open) => { setPreviewDialog(open); if (!open) setPreviewData(null); }}>
           <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
             {previewLoading ? (
@@ -940,13 +1052,10 @@ const FormManagementPage = () => {
                     <Eye className="h-5 w-5" />
                     Pré-visualização: {previewData.name}
                   </DialogTitle>
-                  {previewData.description && (
-                    <DialogDescription>{previewData.description}</DialogDescription>
-                  )}
+                  {previewData.description && <DialogDescription>{previewData.description}</DialogDescription>}
                 </DialogHeader>
 
                 <div className="py-4 space-y-6" data-testid="template-preview-content">
-                  {/* Summary bar */}
                   <div className="flex items-center gap-4 text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
                     <span>{previewData.fields?.length || 0} campos totais</span>
                     <span>{previewData.fields?.filter(f => f.is_required).length || 0} obrigatórios</span>
@@ -954,45 +1063,27 @@ const FormManagementPage = () => {
                     {previewData.is_system && <Badge className="bg-blue-100 text-blue-700 text-xs">Sistema</Badge>}
                   </div>
 
-                  {/* Steps preview */}
                   {Object.entries(previewGroupedByStep)
                     .sort(([a], [b]) => Number(a) - Number(b))
                     .map(([step, stepFields]) => (
                       <div key={step} className="space-y-3">
                         <div className="flex items-center gap-2">
                           <span className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground">{step}</span>
-                          <h3 className="font-semibold text-sm">
-                            {STEP_LABELS[Number(step)] || `Passo ${step}`}
-                          </h3>
+                          <h3 className="font-semibold text-sm">{STEP_LABELS[Number(step)] || `Passo ${step}`}</h3>
                           <Badge variant="outline" className="text-[10px]">{stepFields.length} campos</Badge>
                         </div>
 
                         <div className="ml-9 space-y-2">
                           {stepFields.sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0)).map((field) => (
-                            <div
-                              key={field.field_key}
-                              className={`p-3 rounded-lg border ${
-                                field.is_custom
-                                  ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50"
-                                  : "bg-card border-border"
-                              }`}
-                            >
+                            <div key={field.field_key} className={`p-3 rounded-lg border ${field.is_custom ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50" : "bg-card border-border"}`}>
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm font-medium">{field.label}</span>
-                                  {field.is_required && (
-                                    <span className="text-red-600 text-xs font-semibold">* obrigatório</span>
-                                  )}
-                                  {field.is_custom && (
-                                    <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">Personalizado</Badge>
-                                  )}
+                                  {field.is_required && <span className="text-red-600 text-xs font-semibold">* obrigatório</span>}
+                                  {field.is_custom && <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">Personalizado</Badge>}
                                 </div>
-                                <Badge variant="outline" className="text-[10px]">
-                                  {FIELD_TYPE_LABELS[field.field_type] || field.field_type}
-                                </Badge>
+                                <Badge variant="outline" className="text-[10px]">{FIELD_TYPE_LABELS[field.field_type] || field.field_type}</Badge>
                               </div>
-
-                              {/* Mock field rendering */}
                               <div className="mt-2">
                                 {field.field_type === "text" && (
                                   <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center px-3">
@@ -1028,17 +1119,12 @@ const FormManagementPage = () => {
                                 {field.field_type === "checkbox" && field.options && (
                                   <div className="flex flex-wrap gap-1.5 mt-1">
                                     {field.options.map((opt) => (
-                                      <span key={opt} className="px-2.5 py-1 rounded-full text-xs border border-dashed border-muted-foreground/30 bg-muted/20 text-muted-foreground">
-                                        {opt}
-                                      </span>
+                                      <span key={opt} className="px-2.5 py-1 rounded-full text-xs border border-dashed border-muted-foreground/30 bg-muted/20 text-muted-foreground">{opt}</span>
                                     ))}
                                   </div>
                                 )}
                               </div>
-
-                              {field.hint && (
-                                <p className="text-[10px] text-muted-foreground mt-1">{field.hint}</p>
-                              )}
+                              {field.hint && <p className="text-[10px] text-muted-foreground mt-1">{field.hint}</p>}
                             </div>
                           ))}
                         </div>
@@ -1048,7 +1134,15 @@ const FormManagementPage = () => {
 
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setPreviewDialog(false)}>Fechar</Button>
-                  <Button onClick={() => { const tid = previewData._templateId; const tname = previewData.name; setPreviewDialog(false); handleActivateTemplate(tid, tname); }} data-testid="activate-from-preview">
+                  <Button
+                    onClick={() => {
+                      const tid = previewData._templateId;
+                      const tname = previewData.name;
+                      setPreviewDialog(false);
+                      handleActivateTemplate(tid, tname);
+                    }}
+                    data-testid="activate-from-preview"
+                  >
                     <Zap className="h-4 w-4 mr-2" />
                     Ativar este Template
                   </Button>
@@ -1057,6 +1151,7 @@ const FormManagementPage = () => {
             ) : null}
           </DialogContent>
         </Dialog>
+
       </div>
     </DashboardLayout>
   );
