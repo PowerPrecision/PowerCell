@@ -142,9 +142,10 @@ async def get_stats(user: dict = Depends(get_current_user)):
             db.users.count_documents({}),
             db.users.count_documents({"is_active": {"$ne": False}}),
             db.users.count_documents({"is_active": False}),
-            db.users.count_documents({"role": UserRole.CLIENTE}),
-            db.users.count_documents({"role": {"$in": [UserRole.CONSULTOR, UserRole.DIRETOR]}}),
-            db.users.count_documents({"role": {"$in": [UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR]}}),
+            from services.role_query import deep_role_filter, deep_role_in_filter
+            db.users.count_documents(deep_role_filter(UserRole.CLIENTE)),
+            db.users.count_documents(deep_role_in_filter([UserRole.CONSULTOR, UserRole.DIRETOR])),
+            db.users.count_documents(deep_role_in_filter([UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR])),
         )
         
         stats["total_users"] = total_users

@@ -42,9 +42,9 @@ import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
+import { hasRole, excludeRoles } from "../utils/roleUtils";
 
-// Utilizador parceiro: apenas visualização
-const isParceiro = (user) => user?.role === "parceiro";
+
 
 const TasksPanel = ({ 
   processId = null, 
@@ -157,27 +157,18 @@ const TasksPanel = ({
           if (proc.created_by) involvedUserIds.add(String(proc.created_by));
           
           // Filtrar utilizadores: apenas os envolvidos + excluir clientes
-          const involvedUsers = usersRes.data.filter(u => 
-            involvedUserIds.has(String(u.id)) && 
-            u.role !== "cliente"
-          );
+          const involvedUsers = excludeRoles(usersRes.data.filter(u => 
+            involvedUserIds.has(String(u.id))
+          ), ["cliente"]);
           setUsers(involvedUsers);
         } catch (err) {
           // Fallback: mostrar todos os elegíveis se o processo não carregar
           console.warn("Não foi possível carregar utilizadores do processo, a usar todos:", err);
-          setUsers(usersRes.data.filter(u => 
-            u.role !== "cliente" && 
-            u.role !== "admin" && 
-            u.role !== "ceo"
-          ));
+          setUsers(excludeRoles(usersRes.data, ["cliente", "admin", "ceo"]));
         }
       } else {
         // Sem processo: mostrar todos os utilizadores elegíveis
-        setUsers(usersRes.data.filter(u => 
-          u.role !== "cliente" && 
-          u.role !== "admin" && 
-          u.role !== "ceo"
-        ));
+        setUsers(excludeRoles(usersRes.data, ["cliente", "admin", "ceo"]));
       }
     } catch (error) {
       console.error("Erro ao carregar tarefas:", error);
@@ -440,7 +431,7 @@ const TasksPanel = ({
                 </CardDescription>
               )}
             </div>
-            {showCreateButton && !isParceiro(user) && (
+            {showCreateButton && !hasRole(user, "parceiro") && (
               <Button 
                 size="sm" 
                 onClick={openCreateDialog}
@@ -482,7 +473,7 @@ const TasksPanel = ({
           </div>
 
           {/* Parceiro: mensagem de apenas visualização */}
-          {isParceiro(user) && (
+          {hasRole(user, "parceiro") && (
             <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-700 dark:text-amber-400 text-xs sm:text-sm">
               Apenas visualização disponível para parceiros. Não é possível criar tarefas.
             </div>

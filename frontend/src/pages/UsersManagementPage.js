@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { getUsers, createUser, updateUser, deleteUser } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import EmailConfigForm from "../components/EmailConfigForm";
+import { hasRole } from "../utils/roleUtils";
 
 const roleLabels = {
   cliente: "Cliente",
@@ -107,7 +108,7 @@ const UsersManagementPage = () => {
     return users.filter(user => {
       const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            user.email.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesRole = roleFilter === "all" || user.role === roleFilter;
+      const matchesRole = roleFilter === "all" || hasRole(user, roleFilter);
       return matchesSearch && matchesRole;
     });
   }, [users, searchTerm, roleFilter]);

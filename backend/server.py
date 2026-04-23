@@ -519,7 +519,8 @@ async def send_stuck_job_email(stuck_jobs: list):
         admin_emails = config.get("admin_emails", [])
         if not admin_emails:
             # Buscar emails de admins
-            admins = await db.users.find({"role": "admin"}, {"email": 1}).to_list(10)
+            from services.role_query import deep_role_filter
+            admins = await db.users.find(deep_role_filter("admin"), {"email": 1}).to_list(10)
             admin_emails = [a["email"] for a in admins if a.get("email")]
         
         if not admin_emails:

@@ -180,9 +180,11 @@ async def broadcast_notification(
     count = 0
     
     # Obter utilizadores alvo
-    query = {"is_active": {"$ne": False}}
+    from services.role_query import deep_role_in_filter
     if roles:
-        query["role"] = {"$in": roles}
+        query = {"$and": [deep_role_in_filter(roles), {"is_active": {"$ne": False}}]}
+    else:
+        query = {"is_active": {"$ne": False}}
     
     users = await db.users.find(query, {"id": 1, "_id": 0}).to_list(1000)
     
@@ -249,9 +251,9 @@ async def notify_process_update(
     if process.get("mediador_id"):
         users_to_notify.add(process["mediador_id"])
     
-    # Também notificar admins e CEOs
+    from services.role_query import deep_role_in_filter
     admins = await db.users.find(
-        {"role": {"$in": ["admin", "ceo"]}, "is_active": {"$ne": False}},
+        {"$and": [deep_role_in_filter(["admin", "ceo"]), {"is_active": {"$ne": False}}]},
         {"id": 1, "_id": 0}
     ).to_list(100)
     
@@ -361,9 +363,9 @@ async def notify_process_status_change(
     if process.get("assigned_mediador_id"):
         users_to_notify.add(process["assigned_mediador_id"])
     
-    # Também notificar admins, CEOs e diretores
+    from services.role_query import deep_role_in_filter
     admins = await db.users.find(
-        {"role": {"$in": ["admin", "ceo", "diretor"]}, "is_active": {"$ne": False}},
+        {"$and": [deep_role_in_filter(["admin", "ceo", "diretor"]), {"is_active": {"$ne": False}}]},
         {"id": 1, "_id": 0}
     ).to_list(100)
     

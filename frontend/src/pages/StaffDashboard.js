@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft, getWebmailStats } from "../services/api";
 import SmartClientSearch from "../components/SmartClientSearch";
 import TeamMural from "../components/TeamMural";
+import { filterByAnyRole, filterByRole } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -132,10 +133,10 @@ const StaffDashboard = () => {
   const canManageUsers = isAdminOrCeo;
   const canSeeAllStats = isAdminOrCeo;
 
-  const consultors = useMemo(() => users.filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
-  const intermediarios = useMemo(() => users.filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
-  const indexacaoUsers = useMemo(() => users.filter(u => u.role === "indexacao"), [users]);
-  const parceiros = useMemo(() => users.filter(u => u.role === "parceiro"), [users]);
+  const consultors = useMemo(() => filterByAnyRole(users, ["consultor", "diretor"]), [users]);
+  const intermediarios = useMemo(() => filterByAnyRole(users, ["mediador", "intermediario", "diretor"]), [users]);
+  const indexacaoUsers = useMemo(() => filterByRole(users, "indexacao"), [users]);
+  const parceiros = useMemo(() => filterByRole(users, "parceiro"), [users]);
 
   useEffect(() => {
     fetchData();

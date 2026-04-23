@@ -2350,8 +2350,9 @@ async def get_expiring_documents_dashboard(
     # Obter lista de consultores para filtro (apenas para management)
     consultors_filter = []
     if is_management:
+        from services.role_query import deep_role_in_filter
         all_consultors = await db.users.find(
-            {"role": {"$in": ["consultor", "intermediario", "mediador"]}},
+            deep_role_in_filter(["consultor", "intermediario", "mediador"]),
             {"_id": 0, "id": 1, "name": 1}
         ).to_list(100)
         consultors_filter = [{"id": c["id"], "name": c.get("name", DEFAULT_CONSULTOR_NAME)} for c in all_consultors]

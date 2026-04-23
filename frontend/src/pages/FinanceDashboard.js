@@ -55,6 +55,7 @@ import {
 } from "../components/ui/dialog";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
+import { hasRole } from "../utils/roleUtils";
 import {
   getFinanceSummary,
   getFinanceMonthly,
@@ -893,8 +894,8 @@ const FinanceDashboard = () => {
                                 <td className="py-2 px-3 text-muted-foreground font-mono">{idx + 1}</td>
                                 <td className="py-2 px-3 font-medium">{c.name}</td>
                                 <td className="py-2 px-3">
-                                  <Badge variant={c.role === "consultor" ? "default" : "secondary"} className="text-xs">
-                                    {c.role === "consultor" ? "Consultor" : "Intermediário"}
+                                  <Badge variant={hasRole(c, "consultor") ? "default" : "secondary"} className="text-xs">
+                                    {hasRole(c, "consultor") ? "Consultor" : "Intermediário"}
                                   </Badge>
                                 </td>
                                 <td className="py-2 px-3 text-right">{c.num_processos}</td>

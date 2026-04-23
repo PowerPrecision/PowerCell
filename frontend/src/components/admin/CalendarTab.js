@@ -13,6 +13,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Calendar } from "../ui/calendar";
 import { Plus, Trash2, Eye, CalendarDays, Users } from "lucide-react";
+import { excludeRoles } from "../../utils/roleUtils";
 
 const priorityOrder = { high: 1, medium: 2, low: 3 };
 const priorityLabels = { high: "Alta", medium: "Média", low: "Baixa" };
@@ -42,11 +43,7 @@ const CalendarTab = ({
 
   // Lista de utilizadores para filtro (excluindo clientes, admin e ceo)
   const staffUsers = useMemo(() => {
-    return users?.filter(u => 
-      u.role !== "cliente" && 
-      u.role !== "admin" && 
-      u.role !== "ceo"
-    ) || [];
+    return excludeRoles(users, ["cliente", "admin", "ceo"]);
   }, [users]);
 
   // Ordenar e filtrar eventos do calendário

@@ -404,10 +404,9 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
         process: Dados do processo (pode ter 'client_name' ou 'nome')
         has_property: Se o cliente já tem imóvel (atribuir só intermediários)
     """
-    # Buscar administradores e CEO
+    from services.role_query import deep_role_in_filter
     admins = await db.users.find({
-        "role": {"$in": ["admin", "ceo"]},
-        "is_active": True
+        "$and": [deep_role_in_filter(["admin", "ceo"]), {"is_active": True}]
     }, {"_id": 0}).to_list(100)
     
     # Obter nome do cliente (compatível com ambos os formatos)
@@ -488,10 +487,9 @@ async def notify_cpcv_or_deed_document_check(process: dict, new_status: str):
     if process.get("intermediario_id"):
         user_ids.add(process["intermediario_id"])
     
-    # Adicionar CEO, Diretores e Administrativos
+    from services.role_query import deep_role_in_filter
     staff = await db.users.find({
-        "role": {"$in": ["ceo", "diretor", "admin"]},
-        "is_active": True
+        "$and": [deep_role_in_filter(["ceo", "diretor", "admin"]), {"is_active": True}]
     }, {"_id": 0, "id": 1, "email": 1, "name": 1}).to_list(100)
     
     for s in staff:
@@ -750,9 +748,9 @@ async def notify_valuation_alert(process: dict):
     
     # Sempre notificar admin/CEO para alertas críticos
     if alert.get("priority") in ["critical", "high"]:
+        from services.role_query import deep_role_in_filter
         staff = await db.users.find({
-            "role": {"$in": ["admin", "ceo", "diretor"]},
-            "is_active": True
+            "$and": [deep_role_in_filter(["admin", "ceo", "diretor"]), {"is_active": True}]
         }, {"_id": 0, "id": 1}).to_list(100)
         for s in staff:
             user_ids.add(s["id"])

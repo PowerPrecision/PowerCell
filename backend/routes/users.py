@@ -28,9 +28,10 @@ async def get_users(role: str = None, user: dict = Depends(require_staff())):
     Listar utilizadores do sistema.
     Filtro opcional por papel (role).
     """
+    from services.role_query import build_deep_role_query
     query = {}
     if role:
-        query["role"] = role
+        query = build_deep_role_query(query, role=role)
     
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(500)
     return users

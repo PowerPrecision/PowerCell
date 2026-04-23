@@ -14,6 +14,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { excludeRoles } from "../utils/roleUtils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -82,10 +83,9 @@ const TrelloIntegration = () => {
       if (usersResponse.ok) {
         const usersData = await usersResponse.json();
         // Filtrar: ativos, não admin, não ceo
-        setAppUsers(usersData.filter(u => 
-          u.is_active !== false && 
-          u.role !== "admin" && 
-          u.role !== "ceo"
+        setAppUsers(excludeRoles(
+          usersData.filter(u => u.is_active !== false), 
+          ["admin", "ceo"]
         ));
       }
     } catch (error) {

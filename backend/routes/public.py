@@ -314,8 +314,9 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         from services.push_notifications import send_push_notification, broadcast_push_notification
         
         # Notificar todos os admins, CEOs e directores via push
+        from services.role_query import deep_role_in_filter
         staff_for_push = await db.users.find(
-            {"role": {"$in": [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]}, "is_active": True}, 
+            {"$and": [deep_role_in_filter([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]), {"is_active": True}]},
             {"_id": 0, "id": 1}
         ).to_list(20)
         
@@ -340,8 +341,9 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     
     # Enviar email apenas para o PRIMEIRO admin/CEO (evitar spam)
     # Os outros são notificados via sistema de alertas interno
+    from services.role_query import deep_role_in_filter
     staff = await db.users.find(
-        {"role": {"$in": [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]}}, 
+        deep_role_in_filter([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]),
         {"_id": 0}
     ).to_list(100)
     

@@ -380,10 +380,9 @@ class ScheduledTasksService:
             logger.info("Nenhum cliente em espera há muito tempo")
             return 0
         
-        # Obter CEO e Diretores
+        from services.role_query import deep_role_in_filter
         managers = await self.db.users.find({
-            "role": {"$in": ["ceo", "diretor", "admin"]},
-            "is_active": {"$ne": False}
+            "$and": [deep_role_in_filter(["ceo", "diretor", "admin"]), {"is_active": {"$ne": False}}]
         }, {"_id": 0, "id": 1, "name": 1}).to_list(50)
         
         notifications_created = 0
@@ -1037,8 +1036,9 @@ class ScheduledTasksService:
         
         if recipients_type == "admins":
             # Apenas administradores e CEOs
+            from services.role_query import deep_role_in_filter
             users = await self.db.users.find(
-                {"role": {"$in": ["admin", "ceo"]}, "is_active": {"$ne": False}},
+                {"$and": [deep_role_in_filter(["admin", "ceo"]), {"is_active": {"$ne": False}}]},
                 {"_id": 0, "email": 1, "name": 1}
             ).to_list(50)
             recipient_emails = [u["email"] for u in users if u.get("email")]
@@ -1170,8 +1170,9 @@ class ScheduledTasksService:
             
             # Também notificar diretores para processos muito atrasados
             if days_since > 21:
+                from services.role_query import deep_role_in_filter
                 directors = await self.db.users.find(
-                    {"role": {"$in": ["diretor", "ceo"]}, "is_active": {"$ne": False}},
+                    {"$and": [deep_role_in_filter(["diretor", "ceo"]), {"is_active": {"$ne": False}}]},
                     {"_id": 0, "id": 1}
                 ).to_list(10)
                 for d in directors:
