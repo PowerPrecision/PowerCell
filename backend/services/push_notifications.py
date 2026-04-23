@@ -187,9 +187,11 @@ async def broadcast_push_notification(
     exclude_users = exclude_users or []
     
     # Obter utilizadores alvo
+    from services.role_query import deep_role_in_filter
+
     query = {"is_active": {"$ne": False}}
     if roles:
-        query["role"] = {"$in": roles}
+        query.update(deep_role_in_filter(roles))
     
     users = await db.users.find(query, {"id": 1, "_id": 0}).to_list(1000)
     user_ids = [u["id"] for u in users if u["id"] not in exclude_users]

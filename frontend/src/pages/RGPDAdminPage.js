@@ -29,6 +29,7 @@ import {
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { toast } from "sonner";
+import { hasAnyRole } from "../utils/roleUtils";
 import { getRGPDTemplate, updateRGPDTemplate } from "../services/api";
 import {
   FileText,
@@ -417,7 +418,7 @@ const RGPDTemplateTab = () => {
     updated_by: null,
   });
 
-  const isAdminOrCEO = user?.role === "admin" || user?.role === "ceo";
+  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
 
   useEffect(() => {
     fetchTemplate();

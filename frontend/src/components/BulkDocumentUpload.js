@@ -37,6 +37,7 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import { useUploadProgress } from "../contexts/UploadProgressContext";
+import { hasRole } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -79,7 +80,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
   const [currentFile, setCurrentFile] = useState(null);
 
   // Verificar se é admin (ou se tem forceClientId definido - qualquer user com acesso ao processo pode enviar)
-  const canUpload = user?.role === "admin" || forceClientId;
+  const canUpload = hasRole(user, "admin") || forceClientId;
   if (!canUpload) {
     return null;
   }

@@ -24,6 +24,7 @@ import { Switch } from "../components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Separator } from "../components/ui/separator";
 import { toast } from "sonner";
+import { hasAnyRole } from "../utils/roleUtils";
 import {
   User,
   Lock,
@@ -254,7 +255,7 @@ const SettingsPage = () => {
               <Bell className="h-4 w-4 mr-2" />
               Notificações
             </TabsTrigger>
-            {(user?.role === "admin" || user?.role === "ceo") && (
+            {hasAnyRole(user, ["admin", "ceo"]) && (
               <TabsTrigger value="sistema" className="data-[state=active]:bg-teal-600 data-[state=active]:text-white">
                 <Settings className="h-4 w-4 mr-2" />
                 Sistema
@@ -542,7 +543,7 @@ const SettingsPage = () => {
           </TabsContent>
 
           {/* Tab Sistema (Admin e CEO) */}
-          {(user?.role === "admin" || user?.role === "ceo") && (
+          {hasAnyRole(user, ["admin", "ceo"]) && (
             <TabsContent value="sistema">
               <div className="space-y-6">
                 {/* Análise de Documentos com IA */}

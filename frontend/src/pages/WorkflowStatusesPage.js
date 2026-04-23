@@ -8,6 +8,7 @@
  */
 
 import { useAuth } from "../contexts/AuthContext";
+import { hasAnyRole } from "../utils/roleUtils";
 import DashboardLayout from "../layouts/DashboardLayout";
 import WorkflowEditor from "../components/WorkflowEditor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -17,7 +18,7 @@ const WorkflowStatusesPage = () => {
   const { user } = useAuth();
 
   // Verificar permissões
-  if (!["admin", "ceo"].includes(user?.role)) {
+  if (!hasAnyRole(user, ["admin", "ceo"])) {
     return (
       <DashboardLayout title="Acesso Negado">
         <Card className="border-red-200 bg-red-50">

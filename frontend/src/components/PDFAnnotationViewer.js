@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import { hasAnyRole } from "../utils/roleUtils";
 
 // Configurar worker do pdfjs
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
@@ -765,7 +766,7 @@ const PDFAnnotationViewer = ({
     const ann = selectedAnnotation;
     const typeInfo = ANNOTATION_TYPES[ann.type] || ANNOTATION_TYPES.note;
     const isAuthor = ann.author_id === user?.id;
-    const isAdmin = user?.role === "admin" || user?.role === "CEO";
+    const isAdmin = hasAnyRole(user, ["admin", "CEO"]);
     const isEditing = editingAnnotation?.id === ann.id;
 
     // Posicionar popup próximo ao pin

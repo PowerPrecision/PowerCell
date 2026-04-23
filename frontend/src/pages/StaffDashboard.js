@@ -27,7 +27,7 @@ import { toast } from "sonner";
 import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft, getWebmailStats } from "../services/api";
 import SmartClientSearch from "../components/SmartClientSearch";
 import TeamMural from "../components/TeamMural";
-import { filterByAnyRole, filterByRole } from "../utils/roleUtils";
+import { hasRole, filterByAnyRole, filterByRole } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -127,8 +127,8 @@ const StaffDashboard = () => {
   });
   const [selectedClient, setSelectedClient] = useState(null);
 
-  const isAdmin = user?.role === "admin";
-  const isCeo = user?.role === "ceo";
+  const isAdmin = hasRole(user, "admin");
+  const isCeo = hasRole(user, "ceo");
   const isAdminOrCeo = isAdmin || isCeo;
   const canManageUsers = isAdminOrCeo;
   const canSeeAllStats = isAdminOrCeo;

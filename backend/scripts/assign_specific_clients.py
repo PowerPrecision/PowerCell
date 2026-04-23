@@ -41,9 +41,11 @@ logger = logging.getLogger(__name__)
 
 async def list_users():
     """Lista todos os utilizadores ativos."""
+    from services.role_query import deep_role_in_filter
+
     users = await db.users.find({
         "is_active": True,
-        "role": {"$in": ["admin", "ceo", "diretor", "consultor", "mediador", "indexacao"]}
+        **deep_role_in_filter(["admin", "ceo", "diretor", "consultor", "mediador", "indexacao"])
     }).to_list(100)
     
     print("\n" + "=" * 80)

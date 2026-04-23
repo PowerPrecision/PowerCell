@@ -43,6 +43,7 @@ import { Code2, Eye } from "lucide-react";
 import { Button } from "./button";
 import { useAuth } from "../../contexts/AuthContext";
 import RichTextEditor from "./RichTextEditor";
+import { hasRole } from "../../utils/roleUtils";
 
 const SmartRichEditor = ({
   value = "",
@@ -56,7 +57,7 @@ const SmartRichEditor = ({
   label,
 }) => {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = hasRole(user, "admin");
 
   // Only admins can toggle to HTML mode (unless readOnly or explicitly disabled)
   const showHtmlToggle = allowHtmlAdmin && isAdmin && !readOnly;

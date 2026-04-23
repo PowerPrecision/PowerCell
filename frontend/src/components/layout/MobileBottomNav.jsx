@@ -6,6 +6,7 @@ import { Link, useLocation } from "react-router-dom";
 import { LayoutGrid, Users, Calendar, User } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
+import { hasRole, hasAnyRole } from "../../utils/roleUtils";
 
 const MobileBottomNav = () => {
   const location = useLocation();
@@ -14,7 +15,7 @@ const MobileBottomNav = () => {
   // Determinar o dashboard correcto baseado no role
   const getDashboardPath = () => {
     if (!user) return "/staff";
-    if (user.role === "admin") {
+    if (hasRole(user, "admin")) {
       return "/admin";
     }
     return "/staff";
@@ -25,7 +26,7 @@ const MobileBottomNav = () => {
   // Admin e outros vão para a lista geral de clientes
   const getClientsPath = () => {
     if (!user) return "/clientes";
-    if (["consultor", "intermediario", "mediador"].includes(user.role)) {
+    if (hasAnyRole(user, ["consultor", "intermediario", "mediador"])) {
       return "/meus-clientes";
     }
     return "/clientes";

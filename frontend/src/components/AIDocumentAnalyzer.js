@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
+import { hasRole } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -453,7 +454,7 @@ const AIDocumentAnalyzer = ({ processId, clientName, onDataExtracted }) => {
     </Dialog>
     
     {/* Botão de Reset - só visível para admin */}
-    {user?.role === "admin" && (
+    {hasRole(user, "admin") && (
       <Button
         variant="ghost"
         size="sm"

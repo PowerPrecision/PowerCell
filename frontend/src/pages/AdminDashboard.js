@@ -62,6 +62,7 @@ import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
+import { hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -85,14 +86,10 @@ const AdminDashboard = () => {
   const [selectedDateForEvent, setSelectedDateForEvent] = useState(new Date());
 
   // Get staff users for assignment (excluindo admin e ceo)
-  const staffUsers = useMemo(() => (users || []).filter(u => 
-    u.role !== "cliente" && 
-    u.role !== "admin" && 
-    u.role !== "ceo"
-  ), [users]);
-  const consultors = useMemo(() => (users || []).filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
-  const intermediarios = useMemo(() => (users || []).filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
-  const indexacaoUsers = useMemo(() => (users || []).filter(u => u.role === "indexacao"), [users]);
+  const staffUsers = useMemo(() => excludeRoles(users || [], ["cliente", "admin", "ceo"]), [users]);
+  const consultors = useMemo(() => filterByAnyRole(users || [], ["consultor", "diretor"]), [users]);
+  const intermediarios = useMemo(() => filterByAnyRole(users || [], ["mediador", "intermediario", "diretor"]), [users]);
+  const indexacaoUsers = useMemo(() => filterByRole(users || [], "indexacao"), [users]);
 
   // Filter processes
   const filteredProcesses = useMemo(() => {

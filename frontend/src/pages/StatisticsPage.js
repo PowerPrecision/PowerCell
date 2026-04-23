@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { getStats, getProcesses, getUsers } from "../services/api";
 import { toast } from "sonner";
+import { hasAnyRole } from "../utils/roleUtils";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -43,7 +44,7 @@ const StatisticsPage = () => {
   const [leadsStats, setLeadsStats] = useState(null);
   const [conversionStats, setConversionStats] = useState(null);
 
-  const canViewAllStats = user?.role === "admin" || user?.role === "ceo";
+  const canViewAllStats = hasAnyRole(user, ["admin", "ceo"]);
 
   useEffect(() => {
     fetchData();

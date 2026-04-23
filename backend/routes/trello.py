@@ -438,7 +438,8 @@ async def reset_and_sync_from_trello(
         result["deleted"]["notifications"] = del_notifications.deleted_count
         
         # Apagar utilizadores não-admin
-        del_users = await db.users.delete_many({"role": {"$ne": "admin"}})
+        from services.role_query import deep_role_nin_filter
+        del_users = await db.users.delete_many(deep_role_nin_filter(["admin"]))
         result["deleted"]["users"] = del_users.deleted_count
         
         logger.info(f"Dados apagados: {result['deleted']}")

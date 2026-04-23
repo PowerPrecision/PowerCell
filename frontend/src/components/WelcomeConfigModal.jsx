@@ -24,6 +24,7 @@ import {
 } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Mail, ExternalLink, X } from "lucide-react";
+import { hasRole } from "../utils/roleUtils";
 
 const DISMISSED_KEY = "email_config_dismissed";
 
@@ -43,7 +44,7 @@ const WelcomeConfigModal = () => {
     // - Perfil de indexação (utilizam conta partilhada centralizada)
     if (isImpersonating) return;
     if (user.email_configured) return;
-    if (user.role === 'indexacao') return;
+    if (hasRole(user, 'indexacao')) return;
     if (sessionStorage.getItem(DISMISSED_KEY)) return;
 
     // Pequeno delay para não colidir com a transição de login → dashboard

@@ -40,6 +40,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { toast } from 'sonner';
+import { hasAnyRole } from '../utils/roleUtils';
 
 // React Query hooks
 import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';
@@ -90,7 +91,7 @@ const KanbanBoard = ({
   const [assigningProcess, setAssigningProcess] = useState(null);
   
   // Verificar se o utilizador pode criar clientes
-  const canCreateClient = user && ['intermediario', 'mediador'].includes(user.role);
+  const canCreateClient = hasAnyRole(user, ['intermediario', 'mediador']);
 
   // === REACT QUERY - DATA FETCHING ===
   const filters = { consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter };

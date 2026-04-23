@@ -39,6 +39,7 @@ import {
 } from "../components/ui/alert-dialog";
 import { toast } from "../hooks/use-toast";
 import { useAuth } from "../contexts/AuthContext";
+import { hasRole } from "../utils/roleUtils";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -701,7 +702,7 @@ const ProfilePage = () => {
         </Dialog>
 
         {/* Configuração de Webmail */}
-        {user?.role === "indexacao" ? (
+        {hasRole(user, "indexacao") ? (
           /* ── BLOQUEIO: Indexação — config gerida centralmente ── */
           <Card className="border-amber-200 bg-amber-50/50">
             <CardHeader>

@@ -28,6 +28,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import { Loader2, Send, Heart, Eye, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { hasRole } from "../utils/roleUtils";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 
@@ -185,7 +186,7 @@ const AnnouncementItem = React.memo(({ announcement, currentUser, onLike, onDele
         </div>
 
         {/* Botão eliminar (apenas autor ou admin) */}
-        {(isOwn || currentUser?.role === "admin") && (
+        {(isOwn || hasRole(currentUser, "admin")) && (
           <Button
             variant="ghost"
             size="icon"

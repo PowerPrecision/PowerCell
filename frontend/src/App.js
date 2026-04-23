@@ -9,6 +9,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
+import { hasRole, hasAnyRole } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";
@@ -173,7 +174,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   // Comparação case-insensitive para evitar problemas de formatação
-  if (allowedRoles && !allowedRoles.map(r => r.toLowerCase()).includes(user.role?.toLowerCase())) {
+  if (allowedRoles && !allowedRoles.some(r => hasRole(user, r))) {
     return <Navigate to="/staff" replace />;
   }
 
@@ -194,7 +195,7 @@ const DashboardRedirect = () => {
   if (!user) return <Navigate to="/login" replace />;
 
   // Admin vai para /admin, todos os outros staff vão para /staff (Dashboard)
-  if (user.role === "admin") {
+  if (hasRole(user, "admin")) {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/staff" replace />;
@@ -214,7 +215,7 @@ const RootRedirect = () => {
 
   // Se autenticado, redireciona para o dashboard adequado
   if (user) {
-    if (user.role === "admin") {
+    if (hasRole(user, "admin")) {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/staff" replace />;
