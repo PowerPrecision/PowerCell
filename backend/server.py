@@ -119,6 +119,20 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Sistema de Gestão de Processos")
 
+# ====================================================================
+# CORS MIDDLEWARE — MUST be the outermost middleware (first to process requests)
+# so that OPTIONS preflight requests are handled before any custom middleware.
+# ====================================================================
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else None,
+    allow_methods=CORS_ALLOW_METHODS,
+    allow_headers=CORS_ALLOW_HEADERS,
+    max_age=CORS_MAX_AGE,
+)
+
 # Background tasks storage to prevent garbage collection
 _background_tasks: set = set()
 
@@ -208,6 +222,11 @@ async def user_rate_limit_middleware(request, call_next):
     - consultor/mediador: 200 req/min
     - cliente: 100 req/min
     """
+    # Nunca rate-limitar pedidos OPTIONS (CORS preflight)
+    # O CORSMiddleware trata estes pedidos e deve ser o único a respondê-los.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    
     # Apenas aplicar a endpoints da API (não a estáticos, docs, etc.)
     if not request.url.path.startswith("/api/"):
         return await call_next(request)
@@ -628,16 +647,6 @@ async def background_job_monitor():
             
         except (IOError, OSError, ValueError, KeyError) as monitor_err:
             logger.error(f"Erro no background job monitor: {monitor_err}")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_origins=CORS_ORIGINS,
-    allow_origin_regex=CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else None,
-    allow_methods=CORS_ALLOW_METHODS,
-    allow_headers=CORS_ALLOW_HEADERS,
-    max_age=CORS_MAX_AGE,
-)
 
 @app.on_event("startup")
 async def startup():

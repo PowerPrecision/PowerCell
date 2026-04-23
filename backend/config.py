@@ -205,7 +205,7 @@ print(f"✅ CORS configurado (fail-secure): {', '.join(CORS_ORIGINS)}", file=sys
 # Configurações adicionais de CORS (com defaults seguros)
 CORS_ALLOW_CREDENTIALS = os.environ.get('CORS_ALLOW_CREDENTIALS', 'true').lower() == 'true'
 CORS_ALLOW_METHODS = os.environ.get('CORS_ALLOW_METHODS', 'GET,POST,PUT,DELETE,OPTIONS,PATCH').split(',')
-CORS_ALLOW_HEADERS = os.environ.get('CORS_ALLOW_HEADERS', 'Authorization,Content-Type,Accept,Origin,X-Requested-With').split(',')
+CORS_ALLOW_HEADERS = os.environ.get('CORS_ALLOW_HEADERS', 'Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role').split(',')
 CORS_MAX_AGE = int(os.environ.get('CORS_MAX_AGE', '600'))
 
 
