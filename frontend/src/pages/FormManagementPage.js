@@ -55,8 +55,8 @@ const STEP_LABELS = {
   2: "Segundo Titular",
   3: "Dados do Imóvel",
   4: "Situação Financeira",
-  5: "Histórico Bancário",
-  6: "Informações Adicionais",
+  5: "Créditos e Capital",
+  6: "Confirmação / Consentimentos",
 };
 
 const FIELD_TYPE_LABELS = {

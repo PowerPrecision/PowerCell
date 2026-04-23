@@ -41,6 +41,7 @@ from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, log_sanitization_rejection
 )
+from routes.form_config import DEFAULT_FORM_CONFIG
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -399,9 +400,31 @@ async def get_public_form_config(request: Request):
     """
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
     if not config:
-        return JSONResponse(status_code=200, content={"custom_fields": [], "all_fields": []})
+        # Sem config na DB — retornar defaults (all_fields para o frontend usar)
+        visible_defaults = [f for f in DEFAULT_FORM_CONFIG if f.get("is_visible")]
+        visible_defaults.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
+        return JSONResponse(status_code=200, content={"custom_fields": [], "all_fields": visible_defaults})
     
-    fields = config.get("fields", [])
+    saved_fields = config.get("fields", [])
+    
+    # Merge com DEFAULT para garantir campos novos aparecem
+    saved_map = {f["field_key"]: f for f in saved_fields}
+    merged = []
+    added_keys = set()
+    for default_field in DEFAULT_FORM_CONFIG:
+        key = default_field["field_key"]
+        if key in saved_map:
+            merged.append(saved_map[key])
+        else:
+            merged.append(default_field)
+        added_keys.add(key)
+    # Preservar campos customizados do admin
+    for saved_field in saved_fields:
+        if saved_field["field_key"] not in added_keys:
+            merged.append(saved_field)
+    merged.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
+    
+    fields = merged
     
     # Compatibilidade: custom_fields (só campos personalizados visíveis)
     custom_fields = [

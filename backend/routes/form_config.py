@@ -98,65 +98,126 @@ class TemplateSave(BaseModel):
 
 
 # Configuração padrão do formulário
+# Fonte de verdade: todos os campos devem existir aqui para aparecerem no Gestor de Formulários.
+# O frontend (PublicClientForm.js) usa getFieldStyle/getFieldLabel/isFieldRequired para
+# aplicar visibilidade, labels e obrigatoriedade a partir deste config.
 DEFAULT_FORM_CONFIG = [
-    # Step 1 - Dados Pessoais
+    # ── Step 1 — Dados Pessoais - Titular ──────────────────────────────
     {"field_key": "name", "label": "Nome completo", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 1, "is_custom": False},
-    {"field_key": "email", "label": "Email", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 2, "is_custom": False},
-    {"field_key": "phone", "label": "Telemóvel", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 3, "is_custom": False},
+    {"field_key": "email", "label": "Email", "step": 1, "is_visible": True, "is_required": True, "field_type": "email", "order": 2, "is_custom": False},
+    {"field_key": "phone", "label": "Telemóvel", "step": 1, "is_visible": True, "is_required": True, "field_type": "tel", "order": 3, "is_custom": False},
     {"field_key": "nif", "label": "NIF", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 4, "is_custom": False},
     {"field_key": "documento_id", "label": "Cartão de Cidadão/Passaporte", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 5, "is_custom": False},
-    {"field_key": "naturalidade", "label": "Naturalidade", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 6, "is_custom": False},
-    {"field_key": "nacionalidade", "label": "Nacionalidade", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 7, "is_custom": False},
-    {"field_key": "morada_fiscal", "label": "Morada Fiscal", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 8, "is_custom": False},
-    {"field_key": "birth_date", "label": "Data de Nascimento", "step": 1, "is_visible": True, "is_required": True, "field_type": "date", "order": 9, "is_custom": False},
-    {"field_key": "estado_civil", "label": "Estado Civil", "step": 1, "is_visible": True, "is_required": True, "field_type": "select", "order": 10, "is_custom": False},
-    {"field_key": "sexo", "label": "Sexo", "step": 1, "is_visible": True, "is_required": False, "field_type": "radio", "order": 11, "is_custom": False, "options": ["Masculino", "Feminino", "Outro"]},
-    {"field_key": "codigo_postal", "label": "Código Postal", "step": 1, "is_visible": True, "is_required": False, "field_type": "text", "order": 12, "is_custom": False},
-    {"field_key": "profissao", "label": "Profissão", "step": 1, "is_visible": True, "is_required": False, "field_type": "text", "order": 13, "is_custom": False},
-    {"field_key": "altura", "label": "Altura (m)", "step": 1, "is_visible": False, "is_required": False, "field_type": "number", "order": 14, "is_custom": False},
-    # Step 2 - Segundo Titular
-    {"field_key": "compra_com_outra_pessoa", "label": "Compra com outra pessoa?", "step": 2, "is_visible": True, "is_required": True, "field_type": "radio", "order": 1, "is_custom": False},
-    {"field_key": "titular2_name", "label": "Nome do 2º Titular", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 2, "is_custom": False},
-    {"field_key": "titular2_estado_civil", "label": "Estado Civil (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "select", "order": 3, "is_custom": False},
-    {"field_key": "titular2_rendimento", "label": "Rendimento Co-Titular (€)", "step": 2, "is_visible": True, "is_required": False, "field_type": "number", "order": 4, "is_custom": False},
-    # Step 3 - Dados do Imóvel
+    {"field_key": "data_validade_cc", "label": "Data Validade CC", "step": 1, "is_visible": True, "is_required": True, "field_type": "date", "order": 6, "is_custom": False},
+    {"field_key": "naturalidade", "label": "Naturalidade", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 7, "is_custom": False},
+    {"field_key": "nacionalidade", "label": "Nacionalidade", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 8, "is_custom": False},
+    {"field_key": "morada_fiscal", "label": "Morada Fiscal", "step": 1, "is_visible": True, "is_required": True, "field_type": "text", "order": 9, "is_custom": False},
+    {"field_key": "birth_date", "label": "Data de Nascimento", "step": 1, "is_visible": True, "is_required": True, "field_type": "date", "order": 10, "is_custom": False},
+    {"field_key": "estado_civil", "label": "Estado Civil", "step": 1, "is_visible": True, "is_required": True, "field_type": "select", "order": 11, "is_custom": False},
+    {"field_key": "menor_35_anos", "label": "Menor de 35 anos", "step": 1, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 12, "is_custom": False},
+    {"field_key": "compra_tipo", "label": "Tipo de compra", "step": 1, "is_visible": True, "is_required": False, "field_type": "select", "order": 13, "is_custom": False, "options": ["Individual", "Com outra pessoa"]},
+    {"field_key": "sexo", "label": "Sexo", "step": 1, "is_visible": True, "is_required": False, "field_type": "radio", "order": 14, "is_custom": False, "options": ["Masculino", "Feminino", "Outro"]},
+    {"field_key": "codigo_postal", "label": "Código Postal", "step": 1, "is_visible": True, "is_required": False, "field_type": "text", "order": 15, "is_custom": False},
+    {"field_key": "profissao", "label": "Profissão", "step": 1, "is_visible": True, "is_required": False, "field_type": "text", "order": 16, "is_custom": False},
+    {"field_key": "altura", "label": "Altura (m)", "step": 1, "is_visible": False, "is_required": False, "field_type": "number", "order": 17, "is_custom": False},
+
+    # ── Step 2 — Segundo Titular ──────────────────────────────────────
+    {"field_key": "titular2_name", "label": "Nome do 2º Titular", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 1, "is_custom": False},
+    {"field_key": "titular2_email", "label": "Email (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "email", "order": 2, "is_custom": False},
+    {"field_key": "titular2_phone", "label": "Telefone (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "tel", "order": 3, "is_custom": False},
+    {"field_key": "titular2_nif", "label": "NIF (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 4, "is_custom": False},
+    {"field_key": "titular2_documento_id", "label": "Documento ID (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 5, "is_custom": False},
+    {"field_key": "titular2_naturalidade", "label": "Naturalidade (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 6, "is_custom": False},
+    {"field_key": "titular2_nacionalidade", "label": "Nacionalidade (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 7, "is_custom": False},
+    {"field_key": "titular2_morada_fiscal", "label": "Morada Fiscal (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 8, "is_custom": False},
+    {"field_key": "titular2_birth_date", "label": "Data Nascimento (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "date", "order": 9, "is_custom": False},
+    {"field_key": "titular2_estado_civil", "label": "Estado Civil (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "select", "order": 10, "is_custom": False},
+
+    # ── Step 3 — Dados do Imóvel ──────────────────────────────────────
     {"field_key": "finalidade", "label": "Finalidade do pedido", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 1, "is_custom": False},
-    {"field_key": "tipo_imovel", "label": "O que procura?", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 2, "is_custom": False},
-    {"field_key": "tipo_compra", "label": "Tipo de Compra", "step": 3, "is_visible": True, "is_required": False, "field_type": "select", "order": 3, "is_custom": False, "options": ["Habitação Própria", "Investimento", "Segunda Habitação", "Construção"]},
-    {"field_key": "num_quartos", "label": "Número de quartos", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 4, "is_custom": False},
-    {"field_key": "localizacao", "label": "Localização/Zona preferida", "step": 3, "is_visible": True, "is_required": True, "field_type": "text", "order": 5, "is_custom": False},
-    {"field_key": "caracteristicas", "label": "Características Pretendidas", "step": 3, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 6, "is_custom": False},
-    {"field_key": "nome_vendedor", "label": "Nome do Vendedor", "step": 3, "is_visible": True, "is_required": False, "field_type": "text", "order": 7, "is_custom": False},
-    {"field_key": "contacto_vendedor", "label": "Contacto do Vendedor", "step": 3, "is_visible": True, "is_required": False, "field_type": "text", "order": 8, "is_custom": False},
-    # Step 4 - Situação Financeira
-    {"field_key": "chave_movel_digital", "label": "Chave Móvel Digital", "step": 4, "is_visible": True, "is_required": True, "field_type": "radio", "order": 1, "is_custom": False},
-    {"field_key": "employment_type", "label": "Tipo de Contrato de Trabalho", "step": 4, "is_visible": True, "is_required": True, "field_type": "select", "order": 2, "is_custom": False},
-    {"field_key": "efetivo", "label": "Efetivo?", "step": 4, "is_visible": True, "is_required": False, "field_type": "radio", "order": 3, "is_custom": False},
-    {"field_key": "trabalha_estrangeiro", "label": "Trabalha no estrangeiro?", "step": 4, "is_visible": True, "is_required": False, "field_type": "radio", "order": 4, "is_custom": False},
-    {"field_key": "salario_liquido", "label": "Salário mensal líquido", "step": 4, "is_visible": True, "is_required": True, "field_type": "number", "order": 5, "is_custom": False},
-    {"field_key": "rendimento_mensal", "label": "Rendimento Mensal (€)", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 6, "is_custom": False},
-    {"field_key": "rendimento_anual", "label": "Rendimento Anual (€)", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 7, "is_custom": False},
-    {"field_key": "empresa", "label": "Empresa", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 8, "is_custom": False},
-    {"field_key": "antiguidade_emprego", "label": "Antiguidade no Emprego", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 9, "is_custom": False},
-    {"field_key": "capital_proprio", "label": "Capital próprio disponível", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 10, "is_custom": False},
-    {"field_key": "valor_financiado", "label": "Valor a financiar", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 11, "is_custom": False},
-    {"field_key": "num_dependentes", "label": "Nº de Dependentes", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 12, "is_custom": False},
-    # Step 5 - Histórico Bancário
+    {"field_key": "tipo_imovel", "label": "Tipo de imóvel", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 2, "is_custom": False},
+    {"field_key": "num_quartos", "label": "Nº quartos", "step": 3, "is_visible": True, "is_required": True, "field_type": "select", "order": 3, "is_custom": False},
+    {"field_key": "localizacao", "label": "Localização/Zona preferida", "step": 3, "is_visible": True, "is_required": True, "field_type": "text", "order": 4, "is_custom": False},
+    {"field_key": "caracteristicas", "label": "Características Pretendidas", "step": 3, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 5, "is_custom": False},
+    {"field_key": "outras_caracteristicas", "label": "Outras características", "step": 3, "is_visible": True, "is_required": False, "field_type": "text", "order": 6, "is_custom": False},
+    {"field_key": "area_pretendida", "label": "Área pretendida (m²)", "step": 3, "is_visible": True, "is_required": False, "field_type": "number", "order": 7, "is_custom": False},
+    {"field_key": "valor_maximo_imovel", "label": "Valor máximo do imóvel", "step": 3, "is_visible": True, "is_required": False, "field_type": "number", "order": 8, "is_custom": False},
+    {"field_key": "ja_tem_casa_escolhida", "label": "Já tem casa escolhida", "step": 3, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 9, "is_custom": False},
+    {"field_key": "proprietario_nome", "label": "Nome do proprietário", "step": 3, "is_visible": True, "is_required": False, "field_type": "text", "order": 10, "is_custom": False},
+    {"field_key": "proprietario_contacto", "label": "Contacto do proprietário", "step": 3, "is_visible": True, "is_required": False, "field_type": "text", "order": 11, "is_custom": False},
+    {"field_key": "caracteristicas_imovel", "label": "Características do imóvel escolhido", "step": 3, "is_visible": True, "is_required": False, "field_type": "textarea", "order": 12, "is_custom": False},
+    {"field_key": "outras_informacoes", "label": "Outras informações", "step": 3, "is_visible": True, "is_required": False, "field_type": "textarea", "order": 13, "is_custom": False},
+    # Campos de refinanciamento (step 3, condicionais)
+    {"field_key": "valor_transferencia", "label": "Valor a Transferir/Consolidar (€)", "step": 3, "is_visible": True, "is_required": True, "field_type": "number", "order": 14, "is_custom": False},
+    {"field_key": "valor_extra", "label": "Valor Extra Necessário (€)", "step": 3, "is_visible": True, "is_required": False, "field_type": "number", "order": 15, "is_custom": False},
+    {"field_key": "prazo_pretendido", "label": "Prazo pretendido (anos)", "step": 3, "is_visible": True, "is_required": False, "field_type": "select", "order": 16, "is_custom": False, "options": ["5", "10", "15", "20", "25", "30", "35", "40"]},
+
+    # ── Step 4 — Situação Financeira ──────────────────────────────────
+    {"field_key": "acesso_portal_financas", "label": "Acesso ao portal das finanças", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 1, "is_custom": False, "options": ["Portal das Finanças", "Segurança Social Direta", "Ambos", "Nenhuma"]},
+    {"field_key": "chave_movel_digital", "label": "Chave Móvel Digital", "step": 4, "is_visible": True, "is_required": True, "field_type": "select", "order": 2, "is_custom": False, "options": ["Sim", "Não"]},
+    {"field_key": "renda_habitacao_atual", "label": "Renda de habitação atual", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 3, "is_custom": False},
+    {"field_key": "precisa_vender_casa", "label": "Precisa de vender casa?", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 4, "is_custom": False, "options": ["Sim", "Não"]},
+    {"field_key": "efetivo", "label": "Efetivo?", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 5, "is_custom": False, "options": ["Sim", "Não"]},
+    {"field_key": "trabalha_estrangeiro", "label": "Trabalha no estrangeiro?", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 6, "is_custom": False, "options": ["Sim", "Não"]},
+    {"field_key": "employment_type", "label": "Tipo de Contrato de Trabalho", "step": 4, "is_visible": True, "is_required": True, "field_type": "select", "order": 7, "is_custom": False},
+    {"field_key": "employment_duration", "label": "Antiguidade no emprego", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 8, "is_custom": False},
+    {"field_key": "employer_name", "label": "Nome da empresa", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 9, "is_custom": False},
+    {"field_key": "employer_nif", "label": "NIF da empresa", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 10, "is_custom": False},
+    {"field_key": "fiador", "label": "Fiador?", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 11, "is_custom": False, "options": ["Sim", "Não"]},
+    {"field_key": "salario_liquido", "label": "Salário mensal líquido", "step": 4, "is_visible": True, "is_required": True, "field_type": "number", "order": 12, "is_custom": False},
+
+    # ── Step 5 — Créditos e Capital ───────────────────────────────────
     {"field_key": "bancos_creditos", "label": "Bancos com créditos ativos", "step": 5, "is_visible": True, "is_required": True, "field_type": "checkbox", "order": 1, "is_custom": False},
     {"field_key": "tem_creditos_activos", "label": "Bancos com contas abertas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 2, "is_custom": False},
-    {"field_key": "prestacao_creditos", "label": "Prestação Créditos Mensal (€)", "step": 5, "is_visible": True, "is_required": False, "field_type": "number", "order": 3, "is_custom": False},
-    {"field_key": "rendimento_bruto", "label": "Rendimento Bruto (€)", "step": 5, "is_visible": True, "is_required": False, "field_type": "number", "order": 4, "is_custom": False},
-    {"field_key": "bancos_simulacoes", "label": "Simulações efetuadas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 5, "is_custom": False},
+    {"field_key": "bancos_simulacoes", "label": "Simulações efetuadas", "step": 5, "is_visible": True, "is_required": False, "field_type": "checkbox", "order": 3, "is_custom": False},
+    {"field_key": "tempo_restante_credito", "label": "Tempo restante do crédito (meses)", "step": 5, "is_visible": True, "is_required": False, "field_type": "select", "order": 4, "is_custom": False, "options": ["Menos de 1 ano", "1 a 5 anos", "5 a 10 anos", "10 a 15 anos", "15 a 20 anos", "Mais de 20 anos"]},
+    {"field_key": "capital_proprio", "label": "Capital próprio disponível", "step": 5, "is_visible": True, "is_required": True, "field_type": "number", "order": 5, "is_custom": False},
+    {"field_key": "valor_financiado", "label": "Valor a financiar", "step": 5, "is_visible": True, "is_required": True, "field_type": "number", "order": 6, "is_custom": False},
+
+    # ── Step 6 — Confirmação / Consentimentos ────────────────────────
+    {"field_key": "consent_data", "label": "Autorizo o tratamento dos meus dados (RGPD)", "step": 6, "is_visible": True, "is_required": True, "field_type": "checkbox", "order": 1, "is_custom": False},
+    {"field_key": "consent_contact", "label": "Aceito ser contactado pela equipa", "step": 6, "is_visible": True, "is_required": True, "field_type": "checkbox", "order": 2, "is_custom": False},
 ]
 
 
 @router.get("/fields")
 async def get_form_config(user: dict = Depends(require_management())):
-    """Obter configuração atual do formulário."""
+    """Obter configuração atual do formulário.
+
+    Se existir config na DB, faz merge com DEFAULT_FORM_CONFIG para garantir
+    que novos campos adicionados em actualizações aparecem automaticamente.
+    Campos customizados (is_custom=True) existentes na DB são preservados.
+    """
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
     if not config:
         return {"fields": DEFAULT_FORM_CONFIG}
-    return {"fields": config.get("fields", DEFAULT_FORM_CONFIG)}
+
+    saved_fields = config.get("fields", [])
+    # Construir mapa dos campos existentes (incluindo custom)
+    saved_map = {f["field_key"]: f for f in saved_fields}
+    merged = []
+
+    # Primeiro: adicionar todos os campos do DEFAULT (nativos)
+    added_keys = set()
+    for default_field in DEFAULT_FORM_CONFIG:
+        key = default_field["field_key"]
+        if key in saved_map:
+            # Campo existe — usar versão salva (com eventuais alterações do admin)
+            merged.append(saved_map[key])
+        else:
+            # Campo novo (adicionado em actualização) — usar default
+            merged.append(default_field)
+        added_keys.add(key)
+
+    # Depois: adicionar campos customizados que não existem no default
+    for saved_field in saved_fields:
+        key = saved_field["field_key"]
+        if key not in added_keys:
+            merged.append(saved_field)
+
+    # Ordenar por step + order
+    merged.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
+    return {"fields": merged}
 
 
 @router.put("/fields")
