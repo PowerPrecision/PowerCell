@@ -9,11 +9,11 @@ ao utilizador actual.
 import logging
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from database import db
 from models.auth import UserRole
-from services.auth import get_current_user, require_roles
+from services.auth import get_current_user, require_roles, get_effective_role
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/my-clients", tags=["My Clients"])
 
 
 @router.get("")
-async def get_my_clients(user: dict = Depends(require_roles([
+async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
     UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO,
     UserRole.DIRETOR, UserRole.ADMINISTRATIVO
@@ -42,7 +42,7 @@ async def get_my_clients(user: dict = Depends(require_roles([
     """
     user_id = user["id"]
     user_email = user.get("email", "")
-    role = user["role"]
+    role = get_effective_role(request, user)
     
     # Construir query baseada no papel do utilizador
     if role == UserRole.CONSULTOR:

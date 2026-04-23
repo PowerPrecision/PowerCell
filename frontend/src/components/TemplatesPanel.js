@@ -176,6 +176,9 @@ const TemplatesPanel = ({ processId, token }) => {
     window.open(WEBMAIL_URLS[webmail], '_blank');
   };
 
+  // Verificar se há processo selecionado para templates que precisam de dados
+  const hasProcess = !!processId;
+
   return (
     <>
       <Card>
@@ -242,6 +245,14 @@ const TemplatesPanel = ({ processId, token }) => {
           </div>
 
           {/* Lista de Templates */}
+          {!hasProcess && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
+              <p className="text-sm text-amber-700">
+                <AlertTriangle className="h-4 w-4 inline mr-1" />
+                Selecione um processo para gerar minutas preenchidas automaticamente.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">Minutas Disponíveis:</p>
             {templates.map((template) => {
@@ -263,8 +274,8 @@ const TemplatesPanel = ({ processId, token }) => {
                       variant="ghost"
                       size="sm"
                       onClick={() => handlePreview(template)}
-                      disabled={loading === template.id}
-                      title="Pré-visualizar"
+                      disabled={!hasProcess || loading === template.id}
+                      title={hasProcess ? "Pré-visualizar" : "Selecione um processo"}
                       data-testid={`preview-${template.id}-btn`}
                     >
                       {loading === template.id ? (
@@ -277,8 +288,8 @@ const TemplatesPanel = ({ processId, token }) => {
                       variant="ghost"
                       size="sm"
                       onClick={() => handleDownload(template)}
-                      disabled={loading === `download-${template.id}`}
-                      title="Descarregar"
+                      disabled={!hasProcess || loading === `download-${template.id}`}
+                      title={hasProcess ? "Descarregar" : "Selecione um processo"}
                       data-testid={`download-${template.id}-btn`}
                     >
                       {loading === `download-${template.id}` ? (

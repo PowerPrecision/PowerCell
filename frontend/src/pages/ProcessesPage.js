@@ -20,19 +20,51 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { 
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
-  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus
+  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
+import { useAuth } from "../contexts/AuthContext";
+
+const roleLabels = {
+  consultor: "Consultor",
+  mediador: "Mediador",
+  intermediario: "Intermediário",
+  consultor_intermediario: "Consultor/Intermediário",
+  indexacao: "Indexação",
+  administrativo: "Administrativo",
+  diretor: "Diretor",
+  ceo: "CEO",
+  admin: "Administrador",
+};
 
 const ProcessesPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user, effectiveRole } = useAuth();
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // Context Isolation: toggle para filtrar por cargo ativo
+  const [filterByRole, setFilterByRole] = useState(true);
+  const hasMultipleRoles = (user?.additional_roles?.length || 0) > 0;
+
+  // Sincronizar X-Active-Role com o toggle de filtragem por cargo
+  // Quando toggle ON: usa o effectiveRole do ContextSwitcher
+  // Quando toggle OFF: envia "all" para o backend devolver todos os processos
+  useEffect(() => {
+    if (!hasMultipleRoles) return;
+    if (filterByRole) {
+      // Restaurar o effectiveRole do ContextSwitcher
+      sessionStorage.setItem("activeRole", effectiveRole);
+    } else {
+      // Enviar "all" para desativar filtro por cargo
+      sessionStorage.setItem("activeRole", "all");
+    }
+  }, [filterByRole, effectiveRole, hasMultipleRoles]);
 
   // Determinar título baseado na rota
   // /lista-processos → "Todos os Processos" (Visão Global)
@@ -169,10 +201,10 @@ const ProcessesPage = () => {
     setSortedProcesses(processes);
   }, [processes]);
 
-  // Re-fetch when search, sort, or view mode changes (driven by URL param sync)
+  // Re-fetch when search, sort, view mode, or role filter changes
   useEffect(() => {
     fetchProcesses();
-  }, [pagination.page, pagination.size, showCompleted, searchTerm, sortField, sortOrder]);
+  }, [pagination.page, pagination.size, showCompleted, searchTerm, sortField, sortOrder, filterByRole]);
 
   // Funções de paginação
   const goToPage = useCallback((page) => {
@@ -340,6 +372,25 @@ const ProcessesPage = () => {
                   </Label>
                 </div>
               </div>
+
+              {/* Toggle de Context Isolation — filtrar por cargo ativo */}
+              {hasMultipleRoles && !isGlobalView && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg">
+                  <Shield className="h-4 w-4 text-primary" />
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="filter-by-role"
+                      checked={filterByRole}
+                      onCheckedChange={setFilterByRole}
+                    />
+                    <Label htmlFor="filter-by-role" className="text-sm cursor-pointer whitespace-nowrap">
+                      {filterByRole 
+                        ? `Filtrar: ${roleLabels[effectiveRole] || effectiveRole}`
+                        : "Todos os meus processos"}
+                    </Label>
+                  </div>
+                </div>
+              )}
             </div>
             
             {!showCompleted && (

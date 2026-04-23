@@ -170,12 +170,15 @@ async def google_login(
 
         # Guardar state na DB para verificação posterior
         # TTL de 10 minutos para o state
+        # Also persist active role for per-role OAuth
+        active_role = request.headers.get("X-Active-Role", "")
         await db.oauth_states.insert_one(
             {
                 "state": state_token,
                 "user_id": user["id"],
                 "redirect_uri": redirect_uri,
                 "email_address": email_address,
+                "active_role": active_role or None,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "expires_at": (
                     datetime.now(timezone.utc).isoformat()
@@ -344,22 +347,52 @@ async def google_callback(
 
         # Guardar tokens
         if user_id:
-            # Guardar no email_config do utilizador
+            # Determine which role sub-config to store OAuth tokens in
+            oauth_active_role = stored_state.get("active_role") if stored_state else None
+
+            # Get user's primary role for comparison
+            user_doc = await db.users.find_one(
+                {"id": user_id}, {"_id": 0, "role": 1}
+            )
+            user_primary_role = (user_doc or {}).get("role", "")
+
+            if oauth_active_role and oauth_active_role != user_primary_role:
+                storage_role = oauth_active_role
+            else:
+                storage_role = "default"
+
+            # Load and normalize existing email_config
+            from services.email_config_resolver import (
+                _is_nested_email_config, _extract_role_email_config,
+            )
             existing_user = await db.users.find_one(
                 {"id": user_id}, {"_id": 0, "email_config": 1}
             )
-            existing_config = (existing_user or {}).get("email_config", {})
+            raw_existing = (existing_user or {}).get("email_config", {})
 
-            email_addr = email_address or google_email or existing_config.get("email_address", "")
+            # Normalize: if flat, wrap as {"default": ...}
+            if raw_existing and not _is_nested_email_config(raw_existing):
+                nested_existing = {"default": raw_existing}
+            elif raw_existing:
+                nested_existing = raw_existing
+            else:
+                nested_existing = {}
 
-            # Preservar config IMAP existente (para fallback)
-            email_config = {
+            # Get existing config for this role
+            existing_role_config = _extract_role_email_config(
+                nested_existing, storage_role
+            )
+
+            email_addr = email_address or google_email or existing_role_config.get("email_address", "")
+
+            # Build role config preserving IMAP/SMTP settings
+            new_role_config = {
                 "email_address": email_addr,
-                "imap_server": existing_config.get("imap_server", ""),
-                "imap_port": existing_config.get("imap_port", 993),
-                "smtp_server": existing_config.get("smtp_server", ""),
-                "smtp_port": existing_config.get("smtp_port", 465),
-                "encrypted_password": existing_config.get("encrypted_password", ""),
+                "imap_server": existing_role_config.get("imap_server", ""),
+                "imap_port": existing_role_config.get("imap_port", 993),
+                "smtp_server": existing_role_config.get("smtp_server", ""),
+                "smtp_port": existing_role_config.get("smtp_port", 465),
+                "encrypted_password": existing_role_config.get("encrypted_password", ""),
                 "google_refresh_token": encrypted_refresh,
                 "google_access_token": encrypted_access,
                 "google_email": google_email or "",
@@ -369,9 +402,12 @@ async def google_callback(
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
+            # Store under the role key
+            nested_existing[storage_role] = new_role_config
+
             await db.users.update_one(
                 {"id": user_id},
-                {"$set": {"email_config": email_config}},
+                {"$set": {"email_config": nested_existing}},
             )
 
             logger.info(
@@ -467,14 +503,24 @@ async def google_callback(
 
 
 @router.get("/status")
-async def google_oauth_status(current_user: dict = Depends(get_current_user)):
+async def google_oauth_status(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """
     Verifica o estado da ligação Google OAuth do utilizador.
+
+    Suporta per-role configs: lê X-Active-Role header.
 
     Returns:
         Informações sobre se o refresh_token existe e se a ligação está ativa.
     """
+    from services.email_config_resolver import (
+        _is_nested_email_config, _extract_role_email_config,
+    )
+
     user_id = current_user["id"]
+    user_role = current_user.get("role", "")
     user = await db.users.find_one(
         {"id": user_id},
         {"_id": 0, "email_config": 1},
@@ -488,7 +534,12 @@ async def google_oauth_status(current_user: dict = Depends(get_current_user)):
             "has_refresh_token": False,
         }
 
-    config = user["email_config"]
+    # Determine active role and extract config
+    active_role_header = request.headers.get("X-Active-Role", "")
+    active_role = active_role_header if active_role_header and active_role_header != user_role else None
+    raw_config = user["email_config"]
+    config = _extract_role_email_config(raw_config, active_role)
+
     refresh_token_enc = config.get("google_refresh_token", "")
 
     return {
@@ -502,31 +553,77 @@ async def google_oauth_status(current_user: dict = Depends(get_current_user)):
 
 
 @router.delete("/disconnect")
-async def google_oauth_disconnect(current_user: dict = Depends(get_current_user)):
+async def google_oauth_disconnect(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """
     Remove os tokens Google OAuth do utilizador.
     Mantém a configuração IMAP/SMTP existente (para fallback).
+
+    Suporta per-role configs: limpa OAuth tokens apenas da sub-config do role ativo.
     """
     from datetime import datetime, timezone
+    from services.email_config_resolver import (
+        _is_nested_email_config, _extract_role_email_config,
+    )
 
     user_id = current_user["id"]
+    user_role = current_user.get("role", "")
 
-    # Limpar apenas os campos OAuth, preservar o resto
-    await db.users.update_one(
-        {"id": user_id},
-        {
-            "$set": {
-                "email_config.google_refresh_token": "",
-                "email_config.google_access_token": "",
-                "email_config.google_email": "",
-                "email_config.auth_method": (
-                    "$$REMOVE"  # MongoDB operator to remove field
-                ),
-                "email_config.oauth_connected_at": "",
-                "email_config.updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        },
+    # Determine active role
+    active_role_header = request.headers.get("X-Active-Role", "")
+    if active_role_header and active_role_header != user_role:
+        storage_role = active_role_header
+    else:
+        storage_role = "default"
+
+    # Load existing config
+    existing_user = await db.users.find_one(
+        {"id": user_id}, {"_id": 0, "email_config": 1}
     )
+    raw_config = (existing_user or {}).get("email_config", {})
+
+    if not raw_config:
+        raise HTTPException(status_code=400, detail="Sem configuração de email")
+
+    # Normalize
+    if _is_nested_email_config(raw_config):
+        nested_config = raw_config
+    else:
+        nested_config = {"default": raw_config}
+
+    # Clear OAuth fields from the role-specific sub-config
+    role_config = nested_config.get(storage_role)
+    if role_config and isinstance(role_config, dict):
+        role_config["google_refresh_token"] = ""
+        role_config["google_access_token"] = ""
+        role_config["google_email"] = ""
+        role_config["oauth_connected_at"] = ""
+        role_config["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # Remove auth_method if it was google_oauth
+        if role_config.get("auth_method", "").startswith("google_oauth"):
+            role_config["auth_method"] = role_config.get("auth_method", "").replace("google_oauth", "none") or "none"
+
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"email_config": nested_config}},
+        )
+    else:
+        # Fallback: use dot notation for flat config
+        await db.users.update_one(
+            {"id": user_id},
+            {
+                "$set": {
+                    "email_config.google_refresh_token": "",
+                    "email_config.google_access_token": "",
+                    "email_config.google_email": "",
+                    "email_config.auth_method": "none",
+                    "email_config.oauth_connected_at": "",
+                    "email_config.updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
 
     # Audit log
     await db.audit_logs.insert_one({

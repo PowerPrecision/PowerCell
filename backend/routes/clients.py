@@ -20,7 +20,7 @@ import re
 import unicodedata
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from database import db
 from models.client import (
@@ -28,7 +28,7 @@ from models.client import (
     ClientContact, ClientPersonalData, ClientFinancialData,
     find_or_create_client_key
 )
-from services.auth import get_current_user, require_roles
+from services.auth import get_current_user, require_roles, get_effective_role
 from models.auth import UserRole
 from services.encryption import (
     encryption_service,
@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("/me")
 async def get_my_assigned_clients(
+    request: Request,
     search: Optional[str] = Query(None, description="Pesquisar por nome ou email"),
     limit: int = Query(100, le=500),
     skip: int = Query(0),
@@ -69,7 +70,7 @@ async def get_my_assigned_clients(
     
     user_id = user.get("id", "")
     user_email = user.get("email", "")
-    user_role = user.get("role", "")
+    user_role = get_effective_role(request, user)
     
     # Construir query baseada no papel
     if user_role == UserRole.CONSULTOR:

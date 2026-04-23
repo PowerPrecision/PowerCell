@@ -30,11 +30,14 @@ DECISÕES ARQUITECTURAIS:
 """
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Tuple
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 import re
+import logging
 from passlib.context import CryptContext
+
+logger = logging.getLogger(__name__)
 
 from config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_HOURS
 from database import db
@@ -307,6 +310,71 @@ def require_roles(allowed_roles: List[str]):
             raise HTTPException(status_code=403, detail="Permissão negada")
         return user
     return role_checker
+
+
+def get_effective_role(request: Request, user: dict) -> str:
+    """
+    Extrai o cargo efetivo do pedido HTTP, considerando o Context Isolation.
+    
+    Prioridade:
+    1. Header X-Active-Role — se presente e válido para este utilizador
+    2. user["role"] — cargo primário do JWT (fallback)
+    
+    Validação: O X-Active-Role só é aceite se existir no role primário
+    OU na lista de additional_roles do utilizador. Isto impede que um
+    utilizador simule um cargo que não lhe pertence.
+    
+    Args:
+        request: Objeto FastAPI Request (para ler headers)
+        user: Dicionário do utilizador (do JWT)
+    
+    Returns:
+        str: O cargo efetivo a usar para filtragem de dados
+    """
+    active_role = request.headers.get("X-Active-Role")
+    
+    if not active_role:
+        return user.get("role", "")
+    
+    # Normalizar para lowercase
+    active_role = active_role.strip().lower()
+    
+    # Se for "all", retornar sentinel especial para processar multi-cargo
+    if active_role == "all":
+        return "__all_roles__"
+    
+    # Validar: o cargo deve ser o primário ou estar nos additional_roles
+    user_primary = user.get("role", "")
+    additional = user.get("additional_roles", []) or []
+    
+    if active_role == user_primary or active_role in additional:
+        return active_role
+    
+    # Cargo inválido — ignorar e usar o primário
+    logger.warning(
+        f"X-Active-Role inválido: '{active_role}' para user {user.get('id')} "
+        f"(primário: {user_primary}, adicionais: {additional}). "
+        f"A usar cargo primário."
+    )
+    return user_primary
+
+
+def get_all_user_roles(user: dict) -> list:
+    """
+    Retorna todos os cargos de um utilizador (primário + adicionais), sem duplicados.
+    
+    Args:
+        user: Dicionário do utilizador (do JWT)
+    
+    Returns:
+        list: Lista de cargos únicos
+    """
+    roles = [user.get("role", "")]
+    additional = user.get("additional_roles", []) or []
+    for r in additional:
+        if r and r not in roles:
+            roles.append(r)
+    return [r for r in roles if r]
 
 
 def require_admin():
