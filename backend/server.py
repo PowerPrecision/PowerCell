@@ -119,20 +119,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Sistema de Gestão de Processos")
 
-# ====================================================================
-# CORS MIDDLEWARE — MUST be the outermost middleware (first to process requests)
-# so that OPTIONS preflight requests are handled before any custom middleware.
-# ====================================================================
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_origins=CORS_ORIGINS,
-    allow_origin_regex=CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else None,
-    allow_methods=CORS_ALLOW_METHODS,
-    allow_headers=CORS_ALLOW_HEADERS,
-    max_age=CORS_MAX_AGE,
-)
-
 # Background tasks storage to prevent garbage collection
 _background_tasks: set = set()
 
@@ -647,6 +633,25 @@ async def background_job_monitor():
             
         except (IOError, OSError, ValueError, KeyError) as monitor_err:
             logger.error(f"Erro no background job monitor: {monitor_err}")
+
+# ====================================================================
+# CORS MIDDLEWARE — MUST be last middleware added so it is OUTERMOST.
+#
+# In Starlette, middleware executes in REVERSE order of addition.
+# @app.middleware decorators above are added in source order.
+# This add_middleware() call is LAST → it runs FIRST on every request,
+# ensuring OPTIONS preflight requests are handled before any custom
+# middleware can interfere.
+# ====================================================================
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else None,
+    allow_methods=CORS_ALLOW_METHODS,
+    allow_headers=CORS_ALLOW_HEADERS,
+    max_age=CORS_MAX_AGE,
+)
 
 @app.on_event("startup")
 async def startup():
