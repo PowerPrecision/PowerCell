@@ -208,6 +208,11 @@ async def user_rate_limit_middleware(request, call_next):
     - consultor/mediador: 200 req/min
     - cliente: 100 req/min
     """
+    # Nunca rate-limitar pedidos OPTIONS (CORS preflight)
+    # O CORSMiddleware trata estes pedidos e deve ser o único a respondê-los.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    
     # Apenas aplicar a endpoints da API (não a estáticos, docs, etc.)
     if not request.url.path.startswith("/api/"):
         return await call_next(request)
@@ -629,6 +634,15 @@ async def background_job_monitor():
         except (IOError, OSError, ValueError, KeyError) as monitor_err:
             logger.error(f"Erro no background job monitor: {monitor_err}")
 
+# ====================================================================
+# CORS MIDDLEWARE — MUST be last middleware added so it is OUTERMOST.
+#
+# In Starlette, middleware executes in REVERSE order of addition.
+# @app.middleware decorators above are added in source order.
+# This add_middleware() call is LAST → it runs FIRST on every request,
+# ensuring OPTIONS preflight requests are handled before any custom
+# middleware can interfere.
+# ====================================================================
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=CORS_ALLOW_CREDENTIALS,
