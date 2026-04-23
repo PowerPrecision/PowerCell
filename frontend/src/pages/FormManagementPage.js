@@ -1,13 +1,14 @@
 /**
- * FormManagementPage - Gestão do Formulário Público
+ * FormManagementPage - Gestão WYSIWYG do Formulário Público
  *
  * ACESSO: Admin e CEO apenas
  *
- * Refactored with @hello-pangea/dnd for robust cross-container drag & drop.
+ * Refactored with @hello-pangea/dnd for robust cross-container drag & drop
+ * and WYSIWYG inline editing for visual parity with the public form.
  *
  * Layout: Two-column
- *   Left  — "Campos Disponíveis" (hidden fields pool, drag source)
- *   Right — "Estrutura do Formulário" (active fields by step, drop & sort target)
+ *   Left  — "Campos Ocultos" (hidden fields pool, drag source)
+ *   Right — "Pré-visualização do Formulário" (WYSIWYG active fields by step)
  *
  * Single Source of Truth: The `fields` state array is the only state.
  *   - Derived views: availableFields, activeFieldsByStep (computed via useMemo)
@@ -15,8 +16,12 @@
  *     recalculates order_index globally
  *   - Save sends the normalized array to PUT /admin/form-config/fields
  *
- * order_index normalization: Backend stores `order`; frontend normalizes
- * to `order_index` on fetch and syncs both on save for backward compat.
+ * WYSIWYG Features:
+ *   - Each field renders as the actual input type the client sees
+ *   - Inline label editing (click pencil icon → edit in place)
+ *   - Eye icon toggle for visibility (hidden = opacity-40)
+ *   - Asterisk icon toggle for required (shows red star)
+ *   - Drag handle for reordering
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
@@ -38,7 +43,7 @@ import { toast } from "sonner";
 import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
   Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark,
-  GripHorizontal, Inbox, ArrowRightLeft
+  GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -61,6 +66,9 @@ const FIELD_TYPE_LABELS = {
   radio: "Opção Sim/Não",
   date: "Data",
   number: "Número",
+  textarea: "Texto Longo",
+  email: "Email",
+  tel: "Telefone",
 };
 
 const FIELD_TYPES = [
@@ -74,19 +82,12 @@ const FIELD_TYPES = [
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-/**
- * Normalize raw fields from API: ensure order_index is always set.
- * Backend uses `order`; frontend uses `order_index`.
- */
 const normalizeFields = (rawFields) =>
   (rawFields || []).map((f, i) => ({
     ...f,
     order_index: f.order_index ?? f.order ?? i,
   }));
 
-/**
- * Prepare fields for save: sync both `order` and `order_index`.
- */
 const prepareFieldsForSave = (fields) =>
   fields.map((f, i) => ({
     ...f,
@@ -94,91 +95,289 @@ const prepareFieldsForSave = (fields) =>
     order: f.order_index ?? f.order ?? i,
   }));
 
-// ─── Field Card Component ───────────────────────────────────────────
+// ─── WYSIWYG Field Preview ─────────────────────────────────────────
 
 /**
- * Visual card for a single field. Handles drag handle isolation
- * so interactive controls (Switch, Button) don't trigger DnD.
+ * Renders a disabled form input matching what the client sees.
+ * Used inside the admin WYSIWYG preview for visual parity.
  */
-const FieldCard = ({ field, isDragging, dragHandleProps, compact, updateField, handleDeleteCustomField }) => (
+const WysiwygFieldPreview = ({ field }) => {
+  const { field_type, options, placeholder, label } = field;
+
+  if (field_type === "select") {
+    return (
+      <Select disabled>
+        <SelectTrigger className="h-10">
+          <SelectValue placeholder={placeholder || `Selecionar ${label.toLowerCase()}...`} />
+        </SelectTrigger>
+        <SelectContent>
+          {(options || []).map((opt) => (
+            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  if (field_type === "checkbox" && options && options.length > 0) {
+    return (
+      <div className="space-y-2">
+        {options.slice(0, 6).map((opt) => (
+          <label key={opt} className="flex items-center gap-2 text-sm text-muted-foreground cursor-default">
+            <div className="h-4 w-4 rounded border border-muted-foreground/40 bg-muted/30" />
+            {opt}
+          </label>
+        ))}
+        {options.length > 6 && (
+          <span className="text-xs text-muted-foreground">+{options.length - 6} mais opções</span>
+        )}
+      </div>
+    );
+  }
+
+  if (field_type === "radio") {
+    return (
+      <div className="flex gap-4">
+        {["Sim", "Não"].map((opt) => (
+          <label key={opt} className="flex items-center gap-2 text-sm text-muted-foreground cursor-default">
+            <div className="h-4 w-4 rounded-full border border-muted-foreground/40 bg-muted/30" />
+            {opt}
+          </label>
+        ))}
+      </div>
+    );
+  }
+
+  if (field_type === "date") {
+    return (
+      <div className="h-10 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground flex items-center">
+        dd/mm/aaaa
+      </div>
+    );
+  }
+
+  if (field_type === "textarea") {
+    return (
+      <div className="h-20 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+        {placeholder || `Escreva aqui...`}
+      </div>
+    );
+  }
+
+  // text, number, email, tel
+  const inputType = field_type === "number" ? "number" : field_type === "email" ? "email" : field_type === "tel" ? "tel" : "text";
+  return (
+    <Input
+      type={inputType}
+      disabled
+      placeholder={placeholder || label}
+      className="bg-muted/30"
+    />
+  );
+};
+
+// ─── WYSIWYG Field Card ────────────────────────────────────────────
+
+/**
+ * WYSIWYG card: renders the field as the client sees it + inline controls.
+ * Controls are shown on hover/always for easy management.
+ */
+const WysiwygFieldCard = ({ field, isDragging, dragHandleProps, updateField, handleDeleteCustomField }) => {
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelValue, setLabelValue] = useState(field.label);
+  const labelInputRef = useRef(null);
+
+  useEffect(() => {
+    if (editingLabel && labelInputRef.current) {
+      labelInputRef.current.focus();
+      labelInputRef.current.select();
+    }
+  }, [editingLabel]);
+
+  const handleLabelSave = () => {
+    const trimmed = labelValue.trim();
+    if (trimmed && trimmed !== field.label) {
+      updateField(field.field_key, "label", trimmed);
+    } else {
+      setLabelValue(field.label);
+    }
+    setEditingLabel(false);
+  };
+
+  const handleLabelKeyDown = (e) => {
+    if (e.key === "Enter") handleLabelSave();
+    if (e.key === "Escape") {
+      setLabelValue(field.label);
+      setEditingLabel(false);
+    }
+  };
+
+  return (
+    <div
+      className={`group relative rounded-lg border p-4 transition-all ${
+        field.is_visible
+          ? field.is_custom
+            ? "bg-card border-emerald-200/60 dark:border-emerald-800/40"
+            : "bg-card border-border"
+          : "bg-muted/20 border-muted-foreground/20 opacity-40"
+      } ${isDragging ? "shadow-lg ring-2 ring-primary/30 scale-[1.01]" : ""}`}
+      data-testid={`form-field-${field.field_key}`}
+    >
+      {/* ── Top row: drag handle + label + inline controls ── */}
+      <div className="flex items-start gap-2">
+        {/* Drag Handle */}
+        <button
+          type="button"
+          className="cursor-grab active:cursor-grabbing mt-1 p-0.5 text-muted-foreground/50 hover:text-foreground transition-colors shrink-0"
+          {...dragHandleProps}
+          title="Arrastar para reordenar"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+
+        {/* Label + Input */}
+        <div className="flex-1 min-w-0 space-y-2">
+          {/* Label row with inline edit */}
+          <div className="flex items-center gap-1.5">
+            {editingLabel ? (
+              <div className="flex items-center gap-1 flex-1 min-w-0">
+                <Input
+                  ref={labelInputRef}
+                  value={labelValue}
+                  onChange={(e) => setLabelValue(e.target.value)}
+                  onBlur={handleLabelSave}
+                  onKeyDown={handleLabelKeyDown}
+                  className="h-7 text-sm font-medium"
+                  data-testid={`edit-label-${field.field_key}`}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 shrink-0 text-green-600 hover:text-green-700"
+                  onClick={handleLabelSave}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Label className="text-sm font-medium cursor-default select-none">
+                  {field.label}
+                  {field.is_required && field.is_visible && (
+                    <span className="text-red-500 ml-0.5">*</span>
+                  )}
+                </Label>
+                {field.is_custom && (
+                  <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0 shrink-0">Personalizado</Badge>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* WYSIWYG preview of the actual input */}
+          <WysiwygFieldPreview field={field} />
+
+          {/* Hint text */}
+          {field.hint && (
+            <p className="text-xs text-muted-foreground">{field.hint}</p>
+          )}
+        </div>
+
+        {/* ── Inline Controls (right side) ── */}
+        {!editingLabel && (
+          <div className="flex flex-col items-center gap-1 shrink-0 pt-0.5">
+            {/* Edit Label */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`h-7 w-7 p-0 ${editingLabel ? "bg-primary/10 text-primary" : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"}`}
+              onClick={() => { setLabelValue(field.label); setEditingLabel(true); }}
+              title="Editar label"
+              data-testid={`edit-label-btn-${field.field_key}`}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+
+            {/* Visibility Toggle */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`h-7 w-7 p-0 ${!field.is_visible ? "text-amber-500 bg-amber-50 dark:bg-amber-900/20" : "text-green-600 hover:text-green-700 hover:bg-green-50"}`}
+              onClick={() => updateField(field.field_key, "is_visible", !field.is_visible)}
+              title={field.is_visible ? "Ocultar campo" : "Mostrar campo"}
+              data-testid={`toggle-visibility-${field.field_key}`}
+            >
+              {field.is_visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </Button>
+
+            {/* Required Toggle */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`h-7 w-7 p-0 ${field.is_required ? "text-red-500 bg-red-50 dark:bg-red-900/20" : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"}`}
+              onClick={() => updateField(field.field_key, "is_required", !field.is_required)}
+              disabled={!field.is_visible}
+              title={field.is_required ? "Opcional" : "Obrigatório"}
+              data-testid={`toggle-required-${field.field_key}`}
+            >
+              <Star className={`h-3.5 w-3.5 ${field.is_required ? "fill-red-500" : ""}`} />
+            </Button>
+
+            {/* Delete (custom only) */}
+            {field.is_custom && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-muted-foreground/60 hover:text-red-600 hover:bg-red-50"
+                onClick={() => handleDeleteCustomField(field.field_key)}
+                title="Eliminar campo"
+                data-testid={`delete-field-${field.field_key}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Compact Field Card (for hidden pool) ───────────────────────────
+
+/**
+ * Compact card for the "available fields" pool.
+ * Shows field name, type badge, and drag handle.
+ */
+const CompactFieldCard = ({ field, isDragging, dragHandleProps }) => (
   <div
-    className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
-      field.is_visible
-        ? field.is_custom
-          ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50 dark:border-emerald-800/30"
-          : "bg-card border-border"
-        : "bg-muted/30 border-transparent opacity-60"
+    className={`flex items-center gap-2 p-2.5 rounded-lg border transition-all ${
+      field.is_custom
+        ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50 dark:border-emerald-800/30"
+        : "bg-muted/30 border-transparent"
     } ${isDragging ? "shadow-lg ring-2 ring-primary/20" : ""}`}
     data-testid={`form-field-${field.field_key}`}
   >
-    {/* Drag Handle — isolated so inner controls don't trigger drag */}
     <button
       type="button"
-      className="cursor-grab active:cursor-grabbing p-1 mr-1 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+      className="cursor-grab active:cursor-grabbing p-0.5 text-muted-foreground/60 hover:text-foreground shrink-0"
       {...dragHandleProps}
-      title="Arrastar para reordenar"
+      title="Arrastar para ativar"
     >
       <GripHorizontal className="h-4 w-4" />
     </button>
 
-    {/* Field Info */}
-    <div className="flex items-center gap-3 min-w-0 flex-1">
-      {field.is_custom ? (
-        <PenLine className="h-4 w-4 text-emerald-600 shrink-0" />
-      ) : field.is_visible ? (
-        <Eye className="h-4 w-4 text-green-600 shrink-0" />
-      ) : (
-        <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
+    <div className="flex items-center gap-2 min-w-0 flex-1">
+      <EyeOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <span className="text-sm truncate">{field.label}</span>
+      {field.is_custom && (
+        <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0 shrink-0">Personalizado</Badge>
       )}
-      <div className="min-w-0">
-        <p className="text-sm font-medium truncate">
-          {field.label}
-          {field.is_custom && (
-            <Badge className="ml-2 bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0">Personalizado</Badge>
-          )}
-        </p>
-        <div className="flex items-center gap-2 mt-0.5">
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-            {FIELD_TYPE_LABELS[field.field_type] || field.field_type}
-          </Badge>
-          {field.options && field.options.length > 0 && (
-            <span className="text-[10px] text-muted-foreground">{field.options.length} opções</span>
-          )}
-        </div>
-      </div>
     </div>
 
-    {/* Controls — only rendered in non-compact (full) mode */}
-    {!compact && (
-      <div className="flex items-center gap-4 shrink-0">
-        <div className="flex items-center gap-2">
-          <Label className="text-xs text-muted-foreground">Obrigatório</Label>
-          <Switch
-            checked={field.is_required}
-            onCheckedChange={(v) => updateField(field.field_key, "is_required", v)}
-            disabled={!field.is_visible}
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-xs text-muted-foreground">Visível</Label>
-          <Switch
-            checked={field.is_visible}
-            onCheckedChange={(v) => updateField(field.field_key, "is_visible", v)}
-          />
-        </div>
-        {field.is_custom && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 p-0"
-            onClick={() => handleDeleteCustomField(field.field_key)}
-            data-testid={`delete-field-${field.field_key}`}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
-    )}
+    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+      {FIELD_TYPE_LABELS[field.field_type] || field.field_type}
+    </Badge>
   </div>
 );
 
@@ -291,10 +490,8 @@ const FormManagementPage = () => {
   const onDragEnd = useCallback((result) => {
     const { source, destination, draggableId } = result;
 
-    // Dropped outside any droppable
     if (!destination) return;
 
-    // Same position — no-op
     if (
       source.droppableId === destination.droppableId &&
       source.index === destination.index
@@ -305,23 +502,19 @@ const FormManagementPage = () => {
       if (fieldIdx === -1) return prev;
 
       const field = { ...prev[fieldIdx] };
-      // Remove the dragged field from the array
       const remaining = [...prev.slice(0, fieldIdx), ...prev.slice(fieldIdx + 1)];
 
       const dstId = destination.droppableId;
 
       if (dstId === "available") {
-        // ── Move to available pool (hide) ──
         field.is_visible = false;
         remaining.push(field);
 
       } else if (dstId.startsWith("step-")) {
-        // ── Move to a step (activate / reorder) ──
         const destStep = parseInt(dstId.replace("step-", ""), 10);
         field.is_visible = true;
         field.step = destStep;
 
-        // Compute visible field keys in the destination step (after removal)
         const destStepKeys = remaining
           .filter(f => f.is_visible && f.step === destStep)
           .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
@@ -329,7 +522,6 @@ const FormManagementPage = () => {
 
         let insertIdx;
         if (destStepKeys.length === 0) {
-          // Empty step: find position after last visible field with step < destStep
           insertIdx = remaining.length;
           for (let i = remaining.length - 1; i >= 0; i--) {
             if (remaining[i].is_visible && remaining[i].step < destStep) {
@@ -338,11 +530,9 @@ const FormManagementPage = () => {
             }
           }
         } else if (destination.index >= destStepKeys.length) {
-          // Append after the last visible field in this step
           const lastKey = destStepKeys[destStepKeys.length - 1];
           insertIdx = remaining.findIndex(f => f.field_key === lastKey) + 1;
         } else {
-          // Insert before the field at destination index
           const targetKey = destStepKeys[destination.index];
           insertIdx = remaining.findIndex(f => f.field_key === targetKey);
         }
@@ -350,7 +540,6 @@ const FormManagementPage = () => {
         remaining.splice(insertIdx, 0, field);
       }
 
-      // Recalculate order_index globally
       return remaining.map((f, i) => ({ ...f, order_index: i }));
     });
     setHasChanges(true);
@@ -609,7 +798,7 @@ const FormManagementPage = () => {
               Gestão do Formulário
             </h1>
             <p className="text-muted-foreground mt-1">
-              Arraste campos entre as colunas para ativar, desativar ou reordenar
+              Edição visual WYSIWYG — arraste, edite labels e configure campos
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -643,20 +832,20 @@ const FormManagementPage = () => {
           </div>
         ) : (
           <DragDropContext onDragEnd={onDragEnd}>
-            <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
 
               {/* ════════════════════════════════════════════════════════
-                  LEFT COLUMN — Campos Disponíveis (hidden fields pool)
+                  LEFT COLUMN — Campos Ocultos (hidden fields pool)
                   ════════════════════════════════════════════════════════ */}
               <div className="space-y-4">
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
                       <Inbox className="h-4 w-4 text-muted-foreground" />
-                      Campos Disponíveis
+                      Campos Ocultos
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      {availableFields.length} campo{availableFields.length !== 1 ? "s" : ""} oculto{availableFields.length !== 1 ? "s" : ""} — arraste para a estrutura
+                      {availableFields.length} campo{availableFields.length !== 1 ? "s" : ""} oculto{availableFields.length !== 1 ? "s" : ""} — arraste para ativar
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -665,7 +854,7 @@ const FormManagementPage = () => {
                         <div
                           ref={provided.innerRef}
                           {...provided.droppableProps}
-                          className={`min-h-[120px] rounded-lg border-2 border-dashed transition-colors p-2 space-y-2 ${
+                          className={`min-h-[120px] rounded-lg border-2 border-dashed transition-colors p-2 space-y-1.5 max-h-[60vh] overflow-y-auto ${
                             snapshot.isDraggingOver
                               ? "border-primary/50 bg-primary/5"
                               : "border-muted-foreground/20 bg-muted/20"
@@ -673,8 +862,8 @@ const FormManagementPage = () => {
                         >
                           {availableFields.length === 0 && !snapshot.isDraggingOver ? (
                             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                              <Check className="h-5 w-5 mb-2 text-green-500" />
-                              <p className="text-xs text-center">Todos os campos estão ativos no formulário</p>
+                              <Eye className="h-5 w-5 mb-2 text-green-500" />
+                              <p className="text-xs text-center">Todos os campos estão ativos</p>
                             </div>
                           ) : (
                             availableFields.map((field, index) => (
@@ -685,11 +874,10 @@ const FormManagementPage = () => {
                                     {...provided.draggableProps}
                                     style={provided.draggableProps.style}
                                   >
-                                    <FieldCard
+                                    <CompactFieldCard
                                       field={field}
                                       isDragging={snapshot.isDragging}
                                       dragHandleProps={provided.dragHandleProps}
-                                      compact
                                     />
                                   </div>
                                 )}
@@ -712,50 +900,68 @@ const FormManagementPage = () => {
                     </Button>
                   </CardContent>
                 </Card>
+
+                {/* ── Legend ── */}
+                <Card className="bg-muted/30">
+                  <CardContent className="p-4 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Controles</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Pencil className="h-3.5 w-3.5 shrink-0" /> <span>Editar label</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Eye className="h-3.5 w-3.5 shrink-0 text-green-600" /> <span>Visível / Oculto</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Star className="h-3.5 w-3.5 shrink-0 text-red-500" /> <span>Obrigatório / Opcional</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <GripVertical className="h-3.5 w-3.5 shrink-0" /> <span>Arrastar para reordenar</span>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
 
               {/* ════════════════════════════════════════════════════════
-                  RIGHT COLUMN — Estrutura do Formulário (steps with DnD)
+                  RIGHT COLUMN — WYSIWYG Form Preview (steps with DnD)
                   ════════════════════════════════════════════════════════ */}
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {allSteps.map((step) => {
                   const stepFields = activeFieldsByStep[step] || [];
-                  const totalInStep = fields.filter(f => (f.step || 1) === step).length;
 
                   return (
-                    <Card key={step}>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <span className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary">{step}</span>
-                          {STEP_LABELS[step] || `Passo ${step}`}
-                        </CardTitle>
-                        <CardDescription>
-                          {stepFields.length} de {totalInStep} campos visíveis
-                          {stepFields.some(f => f.is_custom) && (
-                            <span className="ml-2 text-emerald-600">
-                              ({stepFields.filter(f => f.is_custom).length} personalizado{stepFields.filter(f => f.is_custom).length !== 1 ? "s" : ""})
-                            </span>
-                          )}
-                        </CardDescription>
+                    <Card key={step} className="overflow-hidden">
+                      <CardHeader className="pb-3 bg-muted/30 border-b">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground">{step}</span>
+                            <CardTitle className="text-lg">{STEP_LABELS[step] || `Passo ${step}`}</CardTitle>
+                          </div>
+                          <Badge variant="outline" className="text-xs">
+                            {stepFields.length} campo{stepFields.length !== 1 ? "s" : ""}
+                          </Badge>
+                        </div>
+                        {stepFields.some(f => f.is_custom) && (
+                          <CardDescription className="mt-1">
+                            Inclui {stepFields.filter(f => f.is_custom).length} campo{stepFields.filter(f => f.is_custom).length !== 1 ? "s" : ""} personalizado{stepFields.filter(f => f.is_custom).length !== 1 ? "s" : ""}
+                          </CardDescription>
+                        )}
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="p-4">
                         <Droppable droppableId={`step-${step}`}>
                           {(provided, snapshot) => (
                             <div
                               ref={provided.innerRef}
                               {...provided.droppableProps}
-                              className={`min-h-[60px] rounded-lg border-2 border-dashed transition-colors p-1 space-y-2 ${
+                              className={`min-h-[60px] rounded-lg transition-colors p-1 space-y-3 ${
                                 snapshot.isDraggingOver
-                                  ? "border-primary/50 bg-primary/5"
-                                  : stepFields.length === 0
-                                    ? "border-muted-foreground/20 bg-muted/20"
-                                    : "border-transparent bg-transparent"
+                                  ? "ring-2 ring-primary/30 ring-offset-2 bg-primary/[0.02]"
+                                  : ""
                               }`}
                             >
                               {stepFields.length === 0 && !snapshot.isDraggingOver ? (
-                                <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                                <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                                   <ArrowRightLeft className="h-4 w-4 mb-1.5 opacity-50" />
-                                  <p className="text-xs">Arraste campos aqui ou dos outros passos</p>
+                                  <p className="text-xs">Arraste campos aqui</p>
                                 </div>
                               ) : (
                                 stepFields.map((field, index) => (
@@ -766,7 +972,7 @@ const FormManagementPage = () => {
                                         {...provided.draggableProps}
                                         style={provided.draggableProps.style}
                                       >
-                                        <FieldCard
+                                        <WysiwygFieldCard
                                           field={field}
                                           isDragging={snapshot.isDragging}
                                           dragHandleProps={provided.dragHandleProps}
@@ -1073,58 +1279,16 @@ const FormManagementPage = () => {
                           <Badge variant="outline" className="text-[10px]">{stepFields.length} campos</Badge>
                         </div>
 
-                        <div className="ml-9 space-y-2">
+                        <div className="ml-9 space-y-3">
                           {stepFields.sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0)).map((field) => (
-                            <div key={field.field_key} className={`p-3 rounded-lg border ${field.is_custom ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50" : "bg-card border-border"}`}>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-medium">{field.label}</span>
-                                  {field.is_required && <span className="text-red-600 text-xs font-semibold">* obrigatório</span>}
-                                  {field.is_custom && <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">Personalizado</Badge>}
-                                </div>
-                                <Badge variant="outline" className="text-[10px]">{FIELD_TYPE_LABELS[field.field_type] || field.field_type}</Badge>
+                            <div key={field.field_key} className={`p-4 rounded-lg border ${field.is_custom ? "bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200/50" : "bg-card border-border"}`}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm font-medium">{field.label}</span>
+                                {field.is_required && <span className="text-red-600 text-xs font-semibold">* obrigatório</span>}
+                                {field.is_custom && <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">Personalizado</Badge>}
                               </div>
-                              <div className="mt-2">
-                                {field.field_type === "text" && (
-                                  <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center px-3">
-                                    <span className="text-xs text-muted-foreground">{field.placeholder || field.label}</span>
-                                  </div>
-                                )}
-                                {field.field_type === "number" && (
-                                  <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center px-3">
-                                    <span className="text-xs text-muted-foreground">0.00</span>
-                                  </div>
-                                )}
-                                {field.field_type === "date" && (
-                                  <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center px-3">
-                                    <span className="text-xs text-muted-foreground">dd/mm/aaaa</span>
-                                  </div>
-                                )}
-                                {field.field_type === "select" && (
-                                  <div className="h-9 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center justify-between px-3">
-                                    <span className="text-xs text-muted-foreground">Selecione...</span>
-                                    <span className="text-xs text-muted-foreground">&#9662;</span>
-                                  </div>
-                                )}
-                                {field.field_type === "radio" && (
-                                  <div className="flex gap-2 mt-1">
-                                    <div className="flex-1 h-8 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center justify-center">
-                                      <span className="text-xs text-muted-foreground">Sim</span>
-                                    </div>
-                                    <div className="flex-1 h-8 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 flex items-center justify-center">
-                                      <span className="text-xs text-muted-foreground">Não</span>
-                                    </div>
-                                  </div>
-                                )}
-                                {field.field_type === "checkbox" && field.options && (
-                                  <div className="flex flex-wrap gap-1.5 mt-1">
-                                    {field.options.map((opt) => (
-                                      <span key={opt} className="px-2.5 py-1 rounded-full text-xs border border-dashed border-muted-foreground/30 bg-muted/20 text-muted-foreground">{opt}</span>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                              {field.hint && <p className="text-[10px] text-muted-foreground mt-1">{field.hint}</p>}
+                              <WysiwygFieldPreview field={field} />
+                              {field.hint && <p className="text-[10px] text-muted-foreground mt-1.5">{field.hint}</p>}
                             </div>
                           ))}
                         </div>
