@@ -52,6 +52,7 @@ const SettingsPage = React.lazy(() => import("./pages/SettingsPage"));
 const FilteredProcessList = React.lazy(() => import("./pages/FilteredProcessList"));
 const PendingItemsList = React.lazy(() => import("./pages/PendingItemsList"));
 const SystemConfigPage = React.lazy(() => import("./pages/SystemConfigPage"));
+const EmailAccountsPage = React.lazy(() => import("./pages/EmailAccountsPage"));
 const AIConfigPage = React.lazy(() => import("./pages/AIConfigPage"));
 const AITrainingPage = React.lazy(() => import("./pages/AITrainingPage"));
 const BackgroundJobsPage = React.lazy(() => import("./pages/BackgroundJobsPage"));
@@ -501,6 +502,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <SystemConfigPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Email Accounts Management - Admin and CEO only */}
+          <Route
+            path="/contas-email"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <EmailAccountsPage />
               </ProtectedRoute>
             }
           />

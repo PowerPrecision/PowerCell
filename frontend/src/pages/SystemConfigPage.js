@@ -1616,7 +1616,7 @@ const SystemConfigPage = () => {
     );
   }
 
-  const sections = Object.keys(fields);
+  const sections = Object.keys(fields).filter(key => key !== "email");
 
   // Componente de Manutenção do Sistema
   const MaintenanceSection = () => {
@@ -2842,32 +2842,6 @@ const SystemConfigPage = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setActiveTab("company_email")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "company_email"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <Building2 className={`h-4 w-4 shrink-0 ${activeTab === "company_email" ? "text-primary" : ""}`} />
-                      <span className="truncate">Email por Empresa</span>
-                      {activeTab === "company_email" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("shared_email")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "shared_email"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <MailCheck className={`h-4 w-4 shrink-0 ${activeTab === "shared_email" ? "text-primary" : ""}`} />
-                      <span className="truncate">Email Partilhado</span>
-                      {activeTab === "shared_email" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => setActiveTab("integrations")}
                       className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
                         activeTab === "integrations"
@@ -2922,18 +2896,6 @@ const SystemConfigPage = () => {
                       RGPD
                     </span>
                   </SelectItem>
-                  <SelectItem value="company_email">
-                    <span className="flex items-center gap-2">
-                      <Building2 className="h-4 w-4" />
-                      Email por Empresa
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="shared_email">
-                    <span className="flex items-center gap-2">
-                      <MailCheck className="h-4 w-4" />
-                      Email Partilhado
-                    </span>
-                  </SelectItem>
                   <SelectItem value="integrations">
                     <span className="flex items-center gap-2">
                       <Plug className="h-4 w-4" />
@@ -2969,8 +2931,8 @@ const SystemConfigPage = () => {
                     </button>
                   );
                 })}
-                {["rgpd", "company_email", "shared_email", "integrations", "maintenance"].map((key) => {
-                  const Icon = key === "rgpd" ? FileSignature : key === "company_email" ? Building2 : key === "shared_email" ? MailCheck : key === "integrations" ? Plug : Wrench;
+                {["rgpd", "integrations", "maintenance"].map((key) => {
+                  const Icon = key === "rgpd" ? FileSignature : key === "integrations" ? Plug : Wrench;
                   const isActive = activeTab === key;
                   return (
                     <button
@@ -2984,7 +2946,7 @@ const SystemConfigPage = () => {
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      {key === "rgpd" ? "RGPD" : key === "company_email" ? "Email Empresa" : key === "shared_email" ? "Email Partilhado" : key === "integrations" ? "Integrações" : "Manutenção"}
+                      {key === "rgpd" ? "RGPD" : key === "integrations" ? "Integrações" : "Manutenção"}
                     </button>
                   );
                 })}
@@ -2995,10 +2957,8 @@ const SystemConfigPage = () => {
           {/* ─── Right: Content Area ─── */}
           <main className="min-w-0 flex-1">
             {activeTab === "document_recipients" && <DocumentRecipientsManager token={token} user={user} />}
-            {activeTab === "company_email" && <CompanyEmailConfigSection />}
-            {activeTab === "shared_email" && <SharedEmailConfigSection />}
             {activeTab === "integrations" && <IntegrationsConfigSection />}
-            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "company_email" && activeTab !== "shared_email" && activeTab !== "integrations" && (
+            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "integrations" && (
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}

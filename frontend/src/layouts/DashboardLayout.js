@@ -182,7 +182,7 @@ const DashboardLayout = ({ children, title }) => {
     // Rotas do grupo Gestão e Operações
     const gestaoRoutes = ["/templates", "/estatisticas", "/rascunhos", "/rgpd-admin"];
     // Rotas do grupo Configurações de Sistema
-    const configRoutes = ["/configuracoes", "/definicoes", "/automation", "/configuracoes/ia", "/admin/backups", "/admin/logs", "/validades", "/workflow-estados", "/configuracoes-perfis", "/admin/migracao-rgpd", "/diagnosticos", "/admin/processos-background"];
+    const configRoutes = ["/configuracoes", "/contas-email", "/definicoes", "/automation", "/configuracoes/ia", "/admin/backups", "/admin/logs", "/validades", "/workflow-estados", "/configuracoes-perfis", "/admin/migracao-rgpd", "/diagnosticos", "/admin/processos-background"];
     
     return {
       "meu-negocio": meuNegocioRoutes.some(r => path.startsWith(r)),
@@ -389,6 +389,11 @@ const DashboardLayout = ({ children, title }) => {
           label: "Utilizadores e Equipas",
           icon: Users,
           href: "/utilizadores",
+        },
+        {
+          label: "Contas de Email",
+          icon: Mail,
+          href: "/contas-email",
         },
         {
           label: "Integrações",
