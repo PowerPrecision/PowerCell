@@ -1446,11 +1446,10 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     """
     # Query: utilizadores com email_config.is_configured == True
     # Excluir roles com email partilhado (indexacao, suporte) — esses usam sync_shared_role_emails
+    from services.role_query import deep_role_nin_filter
+    nin_filter = deep_role_nin_filter(["indexacao", "suporte"])
     users_with_config = await db.users.find(
-        {
-            "email_config.is_configured": True,
-            "role": {"$nin": ["indexacao", "suporte"]},
-        },
+        {"$and": [{"email_config.is_configured": True}] + nin_filter["$and"]},
         {"_id": 0, "id": 1}
     ).to_list(200)
     

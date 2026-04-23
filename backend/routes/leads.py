@@ -167,8 +167,9 @@ async def get_consultores_for_filter(user: dict = Depends(get_current_user)):
     Obter lista de consultores para os filtros do Kanban.
     Retorna utilizadores com role consultor, diretor ou admin.
     """
+    from services.role_query import deep_role_in_filter
     consultores = await db.users.find(
-        {"role": {"$in": ["consultor", "diretor", "admin", "administrativo"]}},
+        deep_role_in_filter(["consultor", "diretor", "admin", "administrativo"]),
         {"_id": 0, "id": 1, "name": 1, "email": 1}
     ).to_list(length=100)
     

@@ -324,10 +324,11 @@ async def get_users_for_assignment(role_filter: Optional[str] = None) -> list:
     Returns:
         Lista de utilizadores
     """
+    from services.role_query import build_deep_role_query
     query = {"is_active": True}
     
     if role_filter:
-        query["role"] = role_filter
+        query = build_deep_role_query(query, role=role_filter)
     
     cursor = db.users.find(
         query,

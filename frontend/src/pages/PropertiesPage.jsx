@@ -27,6 +27,7 @@ import {
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
+import { hasAnyRole } from '../utils/roleUtils';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 const HCPRO_URL = "https://crmhcpro.pt/login";
@@ -746,7 +747,7 @@ const PropertiesPage = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setUsers(data.filter(u => u.role === 'CONSULTOR' || u.role === 'ADMIN' || u.role === 'CEO'));
+        setUsers(data.filter(u => hasAnyRole(u, ['CONSULTOR', 'ADMIN', 'CEO'])));
       }
     } catch (error) {
       console.error('Erro ao carregar utilizadores:', error);

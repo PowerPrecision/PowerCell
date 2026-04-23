@@ -17,6 +17,7 @@ import { Loader2, LayoutGrid, Plus } from "lucide-react";
 import { getUsers } from "../services/api";
 import { toast } from "sonner";
 import CreateProcessModal from "../components/CreateProcessModal";
+import { filterByAnyRole, filterByRole, hasRole } from "../utils/roleUtils";
 
 const KanbanPage = () => {
   const { token, user } = useAuth();
@@ -31,10 +32,10 @@ const KanbanPage = () => {
   const indexacaoFilter = searchParams.get("indexacao") || "all";
   const parceiroFilter = searchParams.get("parceiro") || "all";
 
-  const consultors = useMemo(() => users.filter(u => ["consultor", "diretor"].includes(u.role)), [users]);
-  const intermediarios = useMemo(() => users.filter(u => ["mediador", "intermediario", "diretor"].includes(u.role)), [users]);
-  const indexacaoUsers = useMemo(() => users.filter(u => u.role === "indexacao"), [users]);
-  const parceiros = useMemo(() => users.filter(u => u.role === "parceiro"), [users]);
+  const consultors = useMemo(() => filterByAnyRole(users, ["consultor", "diretor"]), [users]);
+  const intermediarios = useMemo(() => filterByAnyRole(users, ["mediador", "intermediario", "diretor"]), [users]);
+  const indexacaoUsers = useMemo(() => filterByRole(users, "indexacao"), [users]);
+  const parceiros = useMemo(() => filterByRole(users, "parceiro"), [users]);
 
   useEffect(() => {
     fetchUsers();
@@ -113,7 +114,7 @@ const KanbanPage = () => {
               Quadro Geral de Processos
             </CardTitle>
             <CardDescription className="text-xs sm:text-sm">
-              {user?.name?.split(' ')[0]} · {user?.role === "admin" ? "Administrador" : user?.role === "ceo" ? "CEO" : user?.role === "consultor" ? "Consultor" : user?.role === "mediador" || user?.role === "intermediario" ? "Intermediário" : user?.role === "indexacao" ? "Indexação" : user?.role === "diretor" ? "Diretor(a)" : user?.role === "administrativo" ? "Administrativo(a)" : user?.role}
+              {user?.name?.split(' ')[0]} · {hasRole(user, "admin") ? "Administrador" : hasRole(user, "ceo") ? "CEO" : hasRole(user, "consultor") ? "Consultor" : hasRole(user, "mediador") || hasRole(user, "intermediario") ? "Intermediário" : hasRole(user, "indexacao") ? "Indexação" : hasRole(user, "diretor") ? "Diretor(a)" : hasRole(user, "administrativo") ? "Administrativo(a)" : user?.role}
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0">

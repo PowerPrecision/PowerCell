@@ -231,8 +231,9 @@ async def execute_action(rule: dict, context: dict) -> bool:
             
             if config.get("target_role"):
                 # Notificar todos os utilizadores com esse role
+                from services.role_query import deep_role_filter
                 users = await db.users.find(
-                    {"role": config["target_role"], "is_active": {"$ne": False}},
+                    {"$and": [deep_role_filter(config["target_role"]), {"is_active": {"$ne": False}}]},
                     {"_id": 0, "id": 1}
                 ).to_list(20)
                 for user in users:

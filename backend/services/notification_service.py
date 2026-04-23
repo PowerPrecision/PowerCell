@@ -187,9 +187,10 @@ async def send_to_admins(
         int: Número de emails efetivamente enviados.
     """
     from models.auth import UserRole
+    from services.role_query import deep_role_in_filter
     
     admins = await db.users.find(
-        {"role": {"$in": [UserRole.ADMIN, UserRole.CEO]}},
+        deep_role_in_filter([UserRole.ADMIN, UserRole.CEO]),
         {"_id": 0, "email": 1}
     ).to_list(100)
     

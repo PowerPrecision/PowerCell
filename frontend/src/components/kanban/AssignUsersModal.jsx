@@ -32,6 +32,7 @@ import {
 } from '../ui/select';
 import { Loader2, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import { filterByAnyRole, excludeRoles } from '../../utils/roleUtils';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -69,11 +70,7 @@ const AssignUsersModal = memo(({
       });
       if (response.ok) {
         const users = await response.json();
-        setAppUsers(users.filter(u => 
-          u.is_active !== false && 
-          u.role !== 'admin' && 
-          u.role !== 'ceo'
-        ));
+        setAppUsers(excludeRoles(users.filter(u => u.is_active !== false), ['admin', 'ceo']));
       }
     } catch (error) {
       console.error('Erro ao buscar utilizadores:', error);
@@ -159,7 +156,7 @@ const AssignUsersModal = memo(({
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
                     {appUsers
-                      .filter(u => ['consultor', 'consultor_intermediario', 'diretor', 'admin', 'ceo'].includes(u.role))
+                      .filter(u => filterByAnyRole(u, ['consultor', 'consultor_intermediario', 'diretor', 'admin', 'ceo']))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})
@@ -182,7 +179,7 @@ const AssignUsersModal = memo(({
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
                     {appUsers
-                      .filter(u => ['mediador', 'intermediario', 'consultor_intermediario', 'intermediario_credito', 'diretor'].includes(u.role))
+                      .filter(u => filterByAnyRole(u, ['mediador', 'intermediario', 'consultor_intermediario', 'intermediario_credito', 'diretor']))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})

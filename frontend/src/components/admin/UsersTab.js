@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Users, UserPlus, CheckCircle, XCircle, Edit, Mail, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../contexts/AuthContext";
+import { filterByRole, filterByAnyRole, countByRole } from "../../utils/roleUtils";
 
 const roleLabels = { 
   admin: "Administrador", 
@@ -75,25 +76,25 @@ const UsersTab = ({ users, onImpersonate }) => {
             <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
               <p className="text-sm text-muted-foreground">Consultores</p>
               <p className="text-2xl font-bold text-blue-800">
-                {users.filter(u => u.role === 'consultor').length}
+                {countByRole(users, 'consultor')}
               </p>
             </div>
             <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
               <p className="text-sm text-muted-foreground">Intermediários</p>
               <p className="text-2xl font-bold text-emerald-800">
-                {users.filter(u => ['mediador', 'intermediario'].includes(u.role)).length}
+                {countByRole(users, 'mediador') + countByRole(users, 'intermediario')}
               </p>
             </div>
             <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
               <p className="text-sm text-muted-foreground">Diretores</p>
               <p className="text-2xl font-bold text-purple-800">
-                {users.filter(u => u.role === 'diretor').length}
+                {countByRole(users, 'diretor')}
               </p>
             </div>
             <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
               <p className="text-sm text-muted-foreground">Administrativos</p>
               <p className="text-2xl font-bold text-amber-800">
-                {users.filter(u => u.role === 'administrativo').length}
+                {countByRole(users, 'administrativo')}
               </p>
             </div>
           </div>
