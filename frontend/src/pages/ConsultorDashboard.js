@@ -190,7 +190,7 @@ const ConsultorDashboard = () => {
           </Card>
           <Card
             className="bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => navigate('/processos-filtrados?filter=concluded')
+            onClick={() => navigate('/processos-filtrados?filter=concluded')}
           >
             <CardContent className="pt-6">
               <div className="text-center">
