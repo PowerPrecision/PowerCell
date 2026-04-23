@@ -129,6 +129,8 @@ async def get_stats(user: dict = Depends(get_current_user)):
     
     # ── USER STATS (Admin/CEO): executar em paralelo com deadlines ──
     if role in [UserRole.ADMIN, UserRole.CEO]:
+        from services.role_query import deep_role_filter, deep_role_in_filter
+
         (
             pending_deadlines_count,
             total_users,
@@ -142,7 +144,6 @@ async def get_stats(user: dict = Depends(get_current_user)):
             db.users.count_documents({}),
             db.users.count_documents({"is_active": {"$ne": False}}),
             db.users.count_documents({"is_active": False}),
-            from services.role_query import deep_role_filter, deep_role_in_filter
             db.users.count_documents(deep_role_filter(UserRole.CLIENTE)),
             db.users.count_documents(deep_role_in_filter([UserRole.CONSULTOR, UserRole.DIRETOR])),
             db.users.count_documents(deep_role_in_filter([UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR])),
