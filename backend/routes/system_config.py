@@ -759,6 +759,7 @@ async def test_service_connection(
             import smtplib
             import socket
             import ssl
+            import os
             sys_smtp = config.system_smtp
             if not sys_smtp.smtp_host:
                 return {"success": False, "message": "Servidor SMTP do sistema não configurado"}
@@ -770,6 +771,9 @@ async def test_service_connection(
             smtp_user = str(sys_smtp.smtp_username)
             smtp_password = str(sys_smtp.smtp_password)
             smtp_port = int(sys_smtp.smtp_port or 587)
+            
+            # Detectar ambiente Render (bloqueia SMTP em planos gratuitos)
+            is_render = os.environ.get("RENDER", "") or "render.com" in os.environ.get("RENDER_SERVICE_NAME", "")
             
             # Avisar sobre combinação TLS/porta invulgar
             if sys_smtp.smtp_use_tls and smtp_port == 465:
@@ -786,15 +790,33 @@ async def test_service_connection(
             
             server.login(smtp_user, smtp_password)
             server.quit()
-            return {"success": True, "message": f"Ligação SMTP do sistema bem sucedida ({sys_smtp.smtp_host})"}
+            return {"success": True, "message": f"Ligação SMTP do sistema bem sucedida ({sys_smtp.smtp_host}:{smtp_port})"}
         except smtplib.SMTPAuthenticationError:
             return {"success": False, "message": "Erro de autenticação: utilizador ou password do sistema incorrectos"}
         except smtplib.SMTPServerDisconnected:
-            return {"success": False, "message": "Conexão encerrada pelo servidor — verifique o host, porta e configuração TLS (STARTTLS vs SSL implícito)"}
+            msg = "Conexão encerrada pelo servidor SMTP."
+            if is_render:
+                msg += " Nota: o Render pode bloquear portas SMTP (25/465/587) em planos gratuitos. Verifique se o seu plano permite ligações SMTP de saída."
+            else:
+                msg += " Verifique o host, porta e configuração TLS (STARTTLS vs SSL implícito)."
+            msg += " Tente: (1) trocar porta 587↔465 e ajustar TLS, (2) verificar se o host está correcto, (3) contactar o provedor de email."
+            return {"success": False, "message": msg}
         except smtplib.SMTPConnectError:
-            return {"success": False, "message": "Não foi possível conectar ao servidor SMTP do sistema — verifique host e porta"}
+            return {"success": False, "message": "Não foi possível conectar ao servidor SMTP — verifique host e porta"}
         except (TimeoutError, socket.timeout):
-            return {"success": False, "message": "Timeout: servidor SMTP do sistema não respondeu — verifique se o host está acessível e a porta está correcta"}
+            msg = "Timeout: o servidor SMTP não respondeu dentro de 10 segundos."
+            if is_render:
+                msg += " O Render pode bloquear portas SMTP (587/465) em planos gratuitos — considere usar um serviço de email externo (SendGrid, Mailgun, etc.) via API."
+            else:
+                msg += " Verifique se o host está acessível, a porta está correcta e sem firewall a bloquear."
+            return {"success": False, "message": msg}
+        except ConnectionResetError:
+            msg = "Conexão reiniciada pelo servidor SMTP (Connection Reset)."
+            if is_render:
+                msg += " Isto é típico quando o Render bloqueia portas SMTP. Considere usar um serviço de email API (SendGrid, Resend, etc.)."
+            else:
+                msg += " Possível firewall ou proxy a interromper a ligação. Tente porta alternativa (587↔465)."
+            return {"success": False, "message": msg}
         except socket.gaierror:
             return {"success": False, "message": "Host SMTP não encontrado — verifique o nome do servidor SMTP"}
         except smtplib.SMTPException as e:
@@ -802,10 +824,36 @@ async def test_service_connection(
             if "starttls" in error_msg.lower():
                 return {"success": False, "message": "Erro STARTTLS — o servidor não suporta STARTTLS nesta porta. Tente desactivar TLS ou usar porta 465"}
             return {"success": False, "message": f"Erro SMTP: {error_msg}"}
+        except OSError as e:
+            error_msg = str(e).lower()
+            if "timed out" in error_msg or "timeout" in error_msg:
+                msg = "Timeout de rede ao ligar ao servidor SMTP."
+                if is_render:
+                    msg += " O Render bloqueia ligações SMTP de saída em planos gratuitos. Use um serviço de email API (SendGrid, Resend, etc.) ou faça upgrade do plano."
+                else:
+                    msg += " Verifique firewall, VPN, ou se o servidor SMTP está acessível a partir deste IP."
+                return {"success": False, "message": msg}
+            if "connection refused" in error_msg:
+                return {"success": False, "message": "Conexão recusada — a porta SMTP está errada ou o servidor não aceita ligações deste IP"}
+            if "unexpectedly closed" in error_msg or "broken pipe" in error_msg:
+                msg = "Conexão SMTP encerrada inesperadamente."
+                if is_render:
+                    msg += " Provável bloqueio de SMTP pelo Render. Use um serviço de email API (SendGrid, Resend, Mailgun) como alternativa."
+                else:
+                    msg += " Tente trocar a porta (587↔465) e ajustar a configuração TLS em conformidade."
+                return {"success": False, "message": msg}
+            return {"success": False, "message": f"Erro de rede: {str(e)}"}
         except Exception as e:
             error_msg = str(e)
             if "ascii" in error_msg.lower() or "encode" in error_msg.lower():
                 return {"success": False, "message": "Erro de codificação: a password contém caracteres especiais não suportados"}
+            if "timed out" in error_msg.lower() or "unexpectedly closed" in error_msg.lower():
+                msg = "Ligação SMTP falhou: conexão encerrada ou timeout."
+                if is_render:
+                    msg += " O Render provavelmente está a bloquear a porta SMTP. Recomendação: use SendGrid, Resend ou Mailgun via API web em vez de SMTP directo."
+                else:
+                    msg += " Verifique host, porta, TLS e firewall."
+                return {"success": False, "message": msg}
             return {"success": False, "message": f"Erro: {error_msg}"}
 
     elif service == "storage":
