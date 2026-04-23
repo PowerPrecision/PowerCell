@@ -919,3 +919,35 @@ Stage Summary:
 - Additional performance improvement: memoized context values to prevent cascade re-renders
 - Commit pushed to origin/dev successfully
 
+---
+Task ID: 1
+Agent: Main
+Task: WYSIWYG Form Manager refactoring
+
+Work Log:
+- Analyzed existing FormManagementPage.js (list-based admin with @hello-pangea/dnd)
+- Analyzed PublicClientForm.js (6-step multi-step form with 53+ fields)
+- Analyzed backend routes/form_config.py (GET/PUT fields, templates, custom fields)
+- Rewrote FormManagementPage.js with WYSIWYG preview:
+  - WysiwygFieldCard renders actual input types matching client form
+  - Inline label editing via Pencil icon → Input → Enter/blur saves
+  - Eye icon toggle for visibility (hidden = opacity-40)
+  - Star icon toggle for required (filled red when active)
+  - GripVertical drag handle for DnD reordering
+  - CompactFieldCard for hidden fields pool
+  - Controls legend card in sidebar
+- Updated PublicClientForm.js:
+  - Added customLabelMap (field_key → admin-configured label)
+  - Added requiredOverrideMap (field_key → admin-configured is_required)
+  - Added getFieldLabel(fieldKey, fallback) helper
+  - Added isFieldRequired(fieldKey, fallback) helper
+  - Updated 53 fields across all 6 steps to use dynamic labels/required
+  - Updated RequiredLabel to accept optional required prop
+  - Updated renderCustomField to use dynamic config
+- Committed as 89afd62
+
+Stage Summary:
+- No backend changes needed (existing API already supports label/is_required/order)
+- 2 files changed, 448 insertions, 251 deletions
+- Full WYSIWYG parity between admin form manager and client-facing form
+

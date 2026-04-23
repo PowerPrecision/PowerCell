@@ -577,7 +577,7 @@ async def send_email(
         
         # Enviar
         context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context) as server:
+        with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context, timeout=30) as server:
             server.login(account.email, account.password)
             
             all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
@@ -664,7 +664,7 @@ async def test_email_connection(account_name: str = None) -> Dict[str, Any]:
         # Testar SMTP
         try:
             context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context) as server:
+            with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context, timeout=30) as server:
                 # SMTP.login aceita strings UTF-8 directamente
                 server.login(email, password)
             result["smtp"] = True
