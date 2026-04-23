@@ -70,6 +70,7 @@ const ProcessesPage = () => {
   // /lista-processos → "Todos os Processos" (Visão Global)
   // /processos → "Os Meus Processos" (O Meu Negócio)
   const pageTitle = location.pathname === "/lista-processos" ? "Todos os Processos" : "Os Meus Processos";
+  const isGlobalView = location.pathname === "/lista-processos";
   
   // Estado de paginação
   const [pagination, setPagination] = useState({
@@ -149,8 +150,6 @@ const ProcessesPage = () => {
       // Para "/processos" (Os Meus Processos): NÃO enviar show_all — o backend
       // filtra automaticamente por user_id. Para "/lista-processos": enviar show_all
       // para mostrar TODOS os processos da empresa (visão global).
-      const isGlobalView = location.pathname === "/lista-processos";
-
       const response = await getProcesses({
         page: pagination.page,
         size: pagination.size,
