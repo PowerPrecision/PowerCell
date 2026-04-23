@@ -43,13 +43,13 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
           persist-credentials: false
       
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -82,7 +82,7 @@ jobs:
           ls -la dist/
       
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         if: success()
         with:
           name: frontend-build
@@ -105,13 +105,13 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
           persist-credentials: false
       
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -134,12 +134,12 @@ jobs:
           TESTING: "true"
           SECRET_KEY: "test_secret_key_for_ci_pipeline"
           JWT_SECRET: "test_jwt_secret_for_ci_pipeline"
-          MONGO_URI: "mongodb://localhost:27017/test_db_ci"
-          MONGODB_URL: "mongodb://localhost:27017/test_db_ci"
+          MONGO_URL: "mongodb://localhost:27017/test_db_ci"
           DB_NAME: "test_db_ci"
           REDIS_URL: "none"
           OPENAI_API_KEY: "sk-test-dummy-key"
           SENTRY_DSN: ""
+          CORS_ORIGINS: "http://localhost:3000,http://localhost:8001"
 
   # ==================================================================
   # JOB 3: BACKEND CI — FULL (all tests + coverage + xdist)
@@ -169,13 +169,13 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
           persist-credentials: false
       
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -202,13 +202,13 @@ jobs:
           TESTING: "true"
           SECRET_KEY: "test_secret_key_for_ci_pipeline_do_not_use_in_production"
           JWT_SECRET: "test_jwt_secret_for_ci_pipeline_do_not_use_in_production"
-          MONGO_URI: "mongodb://localhost:27017/test_db_ci"
-          MONGODB_URL: "mongodb://localhost:27017/test_db_ci"
+          MONGO_URL: "mongodb://localhost:27017/test_db_ci"
           DB_NAME: "test_db_ci"
           REDIS_URL: "none"
           OPENAI_API_KEY: "sk-test-dummy-key"
           SENTRY_DSN: ""
           REACT_APP_BACKEND_URL: "http://localhost:8001"
+          CORS_ORIGINS: "http://localhost:3000,http://localhost:8001"
           SMTP_SERVER: "smtp.test.com"
           SMTP_PORT: "587"
           SMTP_USERNAME: "test@test.com"
@@ -223,7 +223,7 @@ jobs:
           S3_BUCKET: "test-bucket"
       
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: backend-coverage
