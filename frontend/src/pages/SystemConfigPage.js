@@ -471,11 +471,12 @@ const IntegrationsConfigSection = () => {
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/config`, {
+        const res = await fetch(`${API_URL}/api/system-config`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
-          const data = await res.json();
+          const response = await res.json();
+          const data = response.config || response;
           if (data.system_smtp) {
             setSystemSmtp((prev) => ({
               ...prev,
@@ -536,8 +537,8 @@ const IntegrationsConfigSection = () => {
         payload = { ...systemWebmail, imap_port: parseInt(systemWebmail.imap_port) || 993 };
       }
 
-      const res = await fetch(`${API_URL}/api/config/${sectionName}`, {
-        method: "PUT",
+      const res = await fetch(`${API_URL}/api/system-config/${sectionName}`, {
+        method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -560,16 +561,20 @@ const IntegrationsConfigSection = () => {
   const handleTestSmtp = async () => {
     setTesting("smtp");
     try {
-      const res = await fetch(`${API_URL}/api/config/system_smtp/test`, {
+      const res = await fetch(`${API_URL}/api/system-config/test-connection/system-smtp`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(systemSmtp),
       });
       if (res.ok) {
-        toast.success("✅ SMTP conectado com sucesso!");
+        const data = await res.json();
+        if (data.success) {
+          toast.success("✅ SMTP conectado com sucesso!");
+        } else {
+          toast.error(data.message || "Falha na conexão SMTP");
+        }
       } else {
         const data = await res.json();
         toast.error(data.detail || "Falha na conexão SMTP");
