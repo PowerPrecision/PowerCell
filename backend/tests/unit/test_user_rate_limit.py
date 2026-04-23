@@ -24,13 +24,13 @@ class TestRateLimitsConfig:
         assert admin_limit > client_limit
     
     def test_consultor_limit(self):
-        """Consultor deve ter limite de 200 req/min."""
-        assert RATE_LIMITS_BY_ROLE["consultor"]["requests"] == 200
+        """Consultor deve ter limite de 600 req/min."""
+        assert RATE_LIMITS_BY_ROLE["consultor"]["requests"] == 600
         assert RATE_LIMITS_BY_ROLE["consultor"]["window"] == 60
     
     def test_cliente_limit(self):
-        """Cliente deve ter limite de 100 req/min."""
-        assert RATE_LIMITS_BY_ROLE["cliente"]["requests"] == 100
+        """Cliente deve ter limite de 400 req/min."""
+        assert RATE_LIMITS_BY_ROLE["cliente"]["requests"] == 400
     
     def test_all_roles_have_limits(self):
         """Todos os roles devem ter limites definidos."""
@@ -85,14 +85,15 @@ class TestInMemoryRateLimiter:
     @pytest.mark.asyncio
     async def test_different_users_independent(self, limiter):
         """Utilizadores diferentes devem ter limites independentes."""
+        cliente_limit = RATE_LIMITS_BY_ROLE["cliente"]["requests"]
         # Esgotar limite do user1
-        for i in range(100):
+        for i in range(cliente_limit):
             await limiter.is_allowed("user1", "cliente")
         
         # user2 ainda deve poder fazer requests
         allowed, info = await limiter.is_allowed("user2", "cliente")
         assert allowed == True
-        assert info["remaining"] == 99  # 100 - 1
+        assert info["remaining"] == cliente_limit - 1
     
     @pytest.mark.asyncio
     async def test_stats(self, limiter):
