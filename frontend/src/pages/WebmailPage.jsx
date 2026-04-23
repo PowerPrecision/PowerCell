@@ -74,6 +74,7 @@ import { format, parseISO, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { sanitizeEmailHtml } from "../utils/sanitize";
+import { hasAnyRole, hasRole } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -219,17 +220,16 @@ const WebmailPage = () => {
   // ROLE-BASED TABS: Initialize activeBox
   // ============================================================
   useEffect(() => {
-    const role = user?.role;
-    if (role === 'consultor') setActiveBox('personal');
-    else if (role === 'indexacao') setActiveBox('shared_indexacao');
+    if (hasRole(user, 'consultor')) setActiveBox('personal');
+    else if (hasRole(user, 'indexacao')) setActiveBox('shared_indexacao');
     else setActiveBox('personal'); // admin/ceo/diretor/administrativo default to personal
   }, [user?.role]);
 
   // Derived UI state
-  const showTabs = ['admin', 'ceo', 'diretor', 'administrativo'].includes(user?.role);
+  const showTabs = hasAnyRole(user, ['admin', 'ceo', 'diretor', 'administrativo']);
   const showAccountSelector = showTabs && activeBox === 'personal';
   const pageSubtitle = !showTabs
-    ? (user?.role === 'indexacao' ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
+    ? (hasRole(user, 'indexacao') ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
     : null;
 
   // ============================================================
@@ -287,7 +287,7 @@ const WebmailPage = () => {
     const role = user?.role;
     if (!role) return;
 
-    if (['admin', 'ceo', 'diretor', 'administrativo'].includes(role)) {
+    if (hasAnyRole(user, ['admin', 'ceo', 'diretor', 'administrativo'])) {
       // Fetch both personal and general unread counts
       try {
         const [personalRes, generalRes] = await Promise.all([
@@ -300,7 +300,7 @@ const WebmailPage = () => {
       } catch {
         // Silently fail
       }
-    } else if (role === 'indexacao') {
+    } else if (hasRole(user, 'indexacao')) {
       try {
         const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=shared_indexacao`, { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) {
@@ -344,7 +344,7 @@ const WebmailPage = () => {
         params.append("custom_folder", customFolderId);
       }
       // Always enforce box=shared_indexacao for indexacao role
-      const effectiveBox = user?.role === 'indexacao' ? 'shared_indexacao' : activeBox;
+      const effectiveBox = hasRole(user, 'indexacao') ? 'shared_indexacao' : activeBox;
       if (effectiveBox) {
         params.append("box", effectiveBox);
       }

@@ -37,6 +37,7 @@
  */
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
+import { hasRole } from "../utils/roleUtils";
 
 const AuthContext = createContext(null);
 
@@ -298,7 +299,7 @@ export const AuthProvider = ({ children }) => {
       setOriginalAdminName(null);
       
       // Redirecionar para a página apropriada baseado no role
-      const redirectPage = userData.role === "admin" ? "/admin" : "/staff";
+      const redirectPage = hasRole(userData, "admin") ? "/admin" : "/staff";
       window.location.href = redirectPage;
       
       return userData;

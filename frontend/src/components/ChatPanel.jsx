@@ -64,6 +64,7 @@ import { toast } from "sonner";
 import { format, parseISO, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import EmojiPicker from "./EmojiPicker";
+import { hasRole } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -71,7 +72,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "✅", "👎"];
 
 // Utilizador parceiro: apenas visualização
-const isParceiro = (user) => user?.role === "parceiro";
+const isParceiro = (user) => hasRole(user, "parceiro");
 
 const ChatPanel = ({ open, onOpenChange }) => {
   const { token, user } = useAuth();

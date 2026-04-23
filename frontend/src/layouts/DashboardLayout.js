@@ -73,6 +73,7 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { hasRole } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -126,7 +127,7 @@ const DashboardLayout = ({ children, title }) => {
     try {
       const token = localStorage.getItem("token");
       if (!token) return;
-      if (user?.role === "parceiro") return;
+      if (hasRole(user, "parceiro")) return;
       const res = await fetch(`${API_URL}/api/chat/unread-count`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -743,7 +744,7 @@ const DashboardLayout = ({ children, title }) => {
                   variant="ghost" 
                   size="sm"
                   onClick={() => {
-                    const homePage = user?.role === "cliente" ? "/portal-cliente" : "/dashboard";
+                    const homePage = hasRole(user, "cliente") ? "/portal-cliente" : "/dashboard";
                     navigate(homePage);
                   }}
                   className="gap-2 hidden sm:flex h-8"
@@ -757,7 +758,7 @@ const DashboardLayout = ({ children, title }) => {
               <ContextSwitcher />
 
               {/* Notificações - só para utilizadores autenticados (não clientes/parceiros) */}
-              {user?.role !== "cliente" && user?.role !== "parceiro" && (
+              {!hasRole(user, "cliente") && !hasRole(user, "parceiro") && (
                 <>
                   <Button
                     variant="ghost"

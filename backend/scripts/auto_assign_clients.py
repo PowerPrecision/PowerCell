@@ -126,10 +126,12 @@ async def get_available_users(role: Optional[str] = None) -> List[Dict[str, Any]
         ]
     }
     
+    from services.role_query import deep_role_filter, deep_role_in_filter
+
     if role:
-        query["role"] = role
+        query.update(deep_role_filter(role))
     else:
-        query["role"] = {"$in": ELIGIBLE_ROLES}
+        query.update(deep_role_in_filter(ELIGIBLE_ROLES))
     
     users = await db.users.find(query).to_list(50)
     

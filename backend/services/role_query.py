@@ -1,7 +1,6 @@
 """
-====================================================================
 DEEP ROLE SEARCH — Pesquisa Profunda de Cargos
-====================================================================
+
 Helper para queries MongoDB que incluem tanto o role principal
 quanto o array additional_roles.
 
@@ -11,12 +10,12 @@ uma query por role="mediador" DEVE encontrar este utilizador.
 Uso:
     from services.role_query import deep_role_filter, deep_role_in_filter
 
-    # Filtro exacto: {"$or": [{"role": "mediador"}, {"additional_roles": "mediador"}]}
+    # Filtro exacto
     query.update(deep_role_filter("mediador"))
 
-    # Filtro $in: equivalent for $in lists
-    query["role"] = deep_role_in_filter(["consultor", "diretor"])
-====================================================================
+    # Filtro $in
+    query.update(deep_role_in_filter(["consultor", "diretor"]))
+"""
 from typing import Union, List, Optional, Dict
 
 

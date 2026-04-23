@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "../components/ui/button";
+import { hasRole } from "../utils/roleUtils";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -34,9 +35,9 @@ const LoginPage = () => {
       toast.success("Login efetuado com sucesso!");
       
       // Redirecionar baseado no role
-      if (user.role === "admin") {
+      if (hasRole(user, "admin")) {
         navigate("/admin");
-      } else if (user.role === "cliente") {
+      } else if (hasRole(user, "cliente")) {
         navigate("/cliente");
       } else {
         // CEO e outros staff vão para /processos

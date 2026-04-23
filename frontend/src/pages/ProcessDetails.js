@@ -146,6 +146,7 @@ import {
 import { toast } from "sonner";
 import { format, parseISO, isAfter } from "date-fns";
 import { pt } from "date-fns/locale";
+import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
 
 // eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -337,11 +338,7 @@ const ProcessDetails = () => {
       if (response.ok) {
         const users = await response.json();
         // Filtrar: ativos, não admin, não ceo
-        const activeUsers = users.filter(u => 
-          u.is_active !== false && 
-          u.role !== "admin" && 
-          u.role !== "ceo"
-        );
+        const activeUsers = excludeRoles(users.filter(u => u.is_active !== false), ["admin", "ceo"]);
         setAppUsers(activeUsers);
         return activeUsers;
       }
@@ -1004,7 +1001,7 @@ const ProcessDetails = () => {
 
       // Todos os roles com permissão de edição enviam dados pessoais
       // Indexação é a única exceção (só envia dados financeiros)
-      if (user.role !== "indexacao") {
+      if (!hasRole(user, "indexacao")) {
         updateData.personal_data = cleanedPersonalData;
         updateData.financial_data = cleanedFinancialData;
         updateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
@@ -1013,19 +1010,19 @@ const ProcessDetails = () => {
       }
 
       // Consultor e admin podem editar dados do imóvel
-      if (user.role === "consultor" || user.role === "admin") {
+      if (hasAnyRole(user, ["consultor", "admin"])) {
         updateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
       }
 
       // Mediador pode editar dados de crédito em fases avançadas
-      if (user.role === "mediador" || user.role === "admin") {
+      if (hasAnyRole(user, ["mediador", "admin"])) {
         const allowedStatuses = workflowStatuses.filter(s => s.order >= 3).map(s => s.name);
         if (allowedStatuses.includes(process.status) || process.status === "ch_aprovado" || process.status === "fase_bancaria") {
           updateData.credit_data = cleanCreditDataForSubmit(creditData);
         }
       }
 
-      if (user.role !== "cliente" && statusToSave !== process.status) {
+      if (!hasRole(user, "cliente") && statusToSave !== process.status) {
         updateData.status = statusToSave;
       }
 
@@ -4261,7 +4258,7 @@ const ProcessDetails = () => {
                                 <p className="text-[11px] mt-0.5 text-muted-foreground line-clamp-2">{activity.comment}</p>
                                 <p className="text-[10px] text-muted-foreground">{format(parseISO(activity.created_at), "dd/MM HH:mm", { locale: pt })}</p>
                               </div>
-                              {(activity.user_id === user.id || user.role === "admin") && (
+                              {(activity.user_id === user.id || hasRole(user, "admin")) && (
                                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleDeleteComment(activity.id)}>
                                   <Trash2 className="h-3 w-3 text-destructive" />
                                 </Button>
@@ -4507,8 +4504,7 @@ const ProcessDetails = () => {
               <div>
                 <Label className="text-sm font-medium mb-2 block">Consultores</Label>
                 <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {appUsers
-                    .filter(u => ["consultor", "diretor", "admin", "ceo", "administrativo"].includes(u.role))
+                  {filterByAnyRole(appUsers, ["consultor", "diretor", "admin", "ceo", "administrativo"])
                     .map(u => (
                       <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
                         <input
@@ -4528,7 +4524,7 @@ const ProcessDetails = () => {
                       </label>
                     ))
                   }
-                  {appUsers.filter(u => ["consultor", "diretor", "admin", "ceo", "administrativo"].includes(u.role)).length === 0 && (
+                  {filterByAnyRole(appUsers, ["consultor", "diretor", "admin", "ceo", "administrativo"]).length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-2">Nenhum consultor disponível</p>
                   )}
                 </div>
@@ -4556,8 +4552,7 @@ const ProcessDetails = () => {
               <div>
                 <Label className="text-sm font-medium mb-2 block">Intermediários / Mediadores</Label>
                 <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {appUsers
-                    .filter(u => ["mediador", "intermediario", "intermediario_credito", "diretor"].includes(u.role))
+                  {filterByAnyRole(appUsers, ["mediador", "intermediario", "intermediario_credito", "diretor"])
                     .map(u => (
                       <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
                         <input
@@ -4577,7 +4572,7 @@ const ProcessDetails = () => {
                       </label>
                     ))
                   }
-                  {appUsers.filter(u => ["mediador", "intermediario", "intermediario_credito", "diretor"].includes(u.role)).length === 0 && (
+                  {filterByAnyRole(appUsers, ["mediador", "intermediario", "intermediario_credito", "diretor"]).length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-2">Nenhum intermediário disponível</p>
                   )}
                 </div>
@@ -4610,8 +4605,7 @@ const ProcessDetails = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
-                    {appUsers
-                      .filter(u => ["indexacao", "administrativo", "admin", "ceo"].includes(u.role))
+                    {filterByAnyRole(appUsers, ["indexacao", "administrativo", "admin", "ceo"])
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})
@@ -4634,8 +4628,7 @@ const ProcessDetails = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
-                    {appUsers
-                      .filter(u => u.role === "parceiro")
+                    {filterByRole(appUsers, "parceiro")
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name}

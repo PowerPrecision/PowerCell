@@ -50,6 +50,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
+import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import { toast } from "sonner";
 import {
   Settings,
@@ -1566,7 +1567,7 @@ const SystemConfigPage = () => {
       </DashboardLayout>
     );
   }
-  if (!["admin", "ceo"].includes(user?.role)) {
+  if (!hasAnyRole(user, ["admin", "ceo"])) {
     return (
       <DashboardLayout>
         <div className="text-center py-12">
@@ -2258,7 +2259,7 @@ const SystemConfigPage = () => {
           </div>
 
           {/* ═══ Sincronização Produção → Desenvolvimento (RGPD) ═══ */}
-          {isDevEnvironment && user?.role === "admin" && (
+          {isDevEnvironment && hasRole(user, "admin") && (
             <div className="border rounded-lg p-4 border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/30">
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -2380,7 +2381,7 @@ const SystemConfigPage = () => {
     const [changelog, setChangelog] = useState("");
     const [showRgpdPreview, setShowRgpdPreview] = useState(false);
     
-    const isAdminOrCEO = user?.role === "admin" || user?.role === "ceo";
+    const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
 
     useEffect(() => {
       fetchTemplate();

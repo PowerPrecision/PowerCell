@@ -69,6 +69,7 @@ import {
 } from "../components/ui/select";
 import { TableSkeleton, StatsCardSkeleton } from "../components/ui/skeletons";
 import SmartClientSearch from "../components/SmartClientSearch";
+import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import CreateProcessModal from "../components/CreateProcessModal";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -156,14 +157,14 @@ export default function ClientsPage() {
 
   
   // Verificar se pode eliminar clientes (apenas admin, ceo, diretor, administrativo)
-  const canDeleteClients = ["admin", "ceo", "diretor", "administrativo"].includes(user?.role);
+  const canDeleteClients = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo"]);
   
   // Verificar se pode criar processos - baseado em permissões
   const userActions = user?.permissions?.actions || [];
-  const isAdminOrCEO = ["admin", "ceo"].includes(user?.role);
+  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
   const canCreateProcess = isAdminOrCEO || (userActions.length > 0
     ? userActions.includes("create_process")
-    : user?.role !== "indexacao");
+    : !hasRole(user, "indexacao"));
   
   // Verificar se pode criar clientes - baseado em permissões
   // Admin e CEO SEMPRE podem criar clientes, independentemente das permissões

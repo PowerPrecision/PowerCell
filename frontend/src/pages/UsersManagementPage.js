@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import { getUsers, createUser, updateUser, deleteUser } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import EmailConfigForm from "../components/EmailConfigForm";
-import { hasRole } from "../utils/roleUtils";
+import { hasRole, hasAnyRole } from "../utils/roleUtils";
 
 const roleLabels = {
   cliente: "Cliente",
@@ -286,7 +286,7 @@ const UsersManagementPage = () => {
               </div>
               <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                 {/* Esconder botão para roles sem permissão de criar utilizadores */}
-                {currentUser?.role !== "indexacao"  && (
+                {!hasRole(currentUser, "indexacao") && (
                 <DialogTrigger asChild>
                   <Button size="sm" className="shrink-0">
                     <UserPlus className="h-4 w-4 sm:mr-2" />
@@ -542,7 +542,7 @@ const UsersManagementPage = () => {
                         </div>
                       </div>
                       <div className="flex gap-1 justify-end">
-                        {(currentUser?.role === "admin" || currentUser?.role === "ceo") && u.id !== currentUser?.id && u.role !== "admin" && u.role !== "ceo" && (
+                        {hasAnyRole(currentUser, ["admin", "ceo"]) && u.id !== currentUser?.id && u.role !== "admin" && u.role !== "ceo" && (
                           <Button variant="ghost" size="icon" onClick={async () => { try { await impersonate(u.id); toast.success(`A ver como ${u.name}`); } catch { toast.error("Erro"); } }}>
                             <Eye className="h-4 w-4 text-blue-600" />
                           </Button>
@@ -550,12 +550,12 @@ const UsersManagementPage = () => {
                         <Button variant="ghost" size="icon" onClick={() => handleToggleUserStatus(u.id, u.is_active)}>
                           {u.is_active ? <UserX className="h-4 w-4 text-orange-600" /> : <UserCheck className="h-4 w-4 text-green-600" />}
                         </Button>
-                        {(currentUser?.role === "admin" || currentUser?.role === "ceo") && u.role !== "parceiro" && (
+                        {hasAnyRole(currentUser, ["admin", "ceo"]) && u.role !== "parceiro" && (
                               <Button variant="ghost" size="icon" onClick={() => setEmailConfigDialog({ open: true, user: u })} title="Configurar Email">
                                 <Mail className="h-4 w-4" />
                               </Button>
                             )}
-                        {currentUser?.role !== "indexacao"  && (
+                        {!hasRole(currentUser, "indexacao") && (
                           <>
                             <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}>
                               <Edit className="h-4 w-4" />
@@ -609,7 +609,7 @@ const UsersManagementPage = () => {
                         <TableCell className="font-mono text-sm">{user.onedrive_folder || "-"}</TableCell>
                         <TableCell className="text-right">
                           {/* Botão Impersonate - admin pode ver como qualquer utilizador (exceto outros admins) */}
-                          {currentUser?.role === "admin" && user.id !== currentUser?.id && user.role !== "admin" && (
+                          {hasRole(currentUser, "admin") && user.id !== currentUser?.id && user.role !== "admin" && (
                             <Button 
                               variant="ghost" 
                               size="icon" 
@@ -639,12 +639,12 @@ const UsersManagementPage = () => {
                               <UserCheck className="h-4 w-4 text-green-600" />
                             )}
                           </Button>
-                          {(currentUser?.role === "admin" || currentUser?.role === "ceo") && user.role !== "parceiro" && (
+                          {hasAnyRole(currentUser, ["admin", "ceo"]) && user.role !== "parceiro" && (
                             <Button variant="ghost" size="icon" onClick={() => setEmailConfigDialog({ open: true, user })} title="Configurar Email" className="text-teal-600 hover:text-teal-800 hover:bg-teal-50">
                               <Mail className="h-4 w-4" />
                             </Button>
                           )}
-                          {currentUser?.role !== "indexacao"  && (
+                          {!hasRole(currentUser, "indexacao") && (
                           <>
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(user)}>
                             <Edit className="h-4 w-4" />
@@ -810,12 +810,12 @@ const UsersManagementPage = () => {
               Configurar Webmail — {emailConfigDialog.user?.name}
             </DialogTitle>
             <DialogDescription>
-              {emailConfigDialog.user?.role !== "parceiro"
+              {!hasRole(emailConfigDialog.user, "parceiro")
                 ? "Configure as credenciais IMAP/SMTP para este utilizador. A password será encriptada."
                 : "Parceiros não podem ter configuração de email."}
             </DialogDescription>
           </DialogHeader>
-          {emailConfigDialog.user?.role !== "parceiro" ? (
+          {!hasRole(emailConfigDialog.user, "parceiro") ? (
             <EmailConfigForm
               mode="admin"
               userId={emailConfigDialog.user?.id}

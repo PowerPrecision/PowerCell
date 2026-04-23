@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Users, UserPlus, CheckCircle, XCircle, Edit, Mail, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../contexts/AuthContext";
-import { filterByRole, filterByAnyRole, countByRole } from "../../utils/roleUtils";
+import { hasRole, filterByRole, filterByAnyRole, countByRole } from "../../utils/roleUtils";
 
 const roleLabels = { 
   admin: "Administrador", 
@@ -151,7 +151,7 @@ const UsersTab = ({ users, onImpersonate }) => {
                           >
                             <Mail className="h-4 w-4" />
                           </Button>
-                          {currentUser?.role === 'admin' && u.id !== currentUser?.id && u.role !== 'admin' && (
+                          {hasRole(currentUser, "admin") && u.id !== currentUser?.id && !hasRole(u, "admin") && (
                             <Button
                               variant="ghost"
                               size="icon"

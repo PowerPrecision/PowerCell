@@ -20,6 +20,7 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
+import { hasAnyRole } from "../utils/roleUtils";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -128,7 +129,7 @@ const FilesExplorerPage = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
 
-  const isAdmin = ["admin", "ceo"].includes(user?.role?.toLowerCase());
+  const isAdmin = hasAnyRole(user, ["admin", "ceo"]);
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [currentPath, setCurrentPath] = useState("");

@@ -70,6 +70,7 @@ import {
 } from "./ui/select";
 import { toast } from "sonner";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
+import { hasRole } from "../utils/roleUtils";
 import {
   FileText,
   Upload,
@@ -257,10 +258,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   });
   
   // Verificar se o utilizador pode mapear S3 (apenas admin)
-  const canMapS3 = user?.role === "admin";
+  const canMapS3 = hasRole(user, "admin");
   
   // Verificar se o utilizador é de indexacao (precisa de NIF da empresa)
-  const isIndexacao = user?.role === "indexacao";
+  const isIndexacao = hasRole(user, "indexacao");
   
   // Função para ordenar ficheiros
   const sortFiles = (filesList) => {

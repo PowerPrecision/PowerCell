@@ -13,7 +13,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Calendar } from "../ui/calendar";
 import { Plus, Trash2, Eye, CalendarDays, Users } from "lucide-react";
-import { excludeRoles } from "../../utils/roleUtils";
+import { hasAnyRole, excludeRoles } from "../../utils/roleUtils";
 
 const priorityOrder = { high: 1, medium: 2, low: 3 };
 const priorityLabels = { high: "Alta", medium: "Média", low: "Baixa" };
@@ -39,7 +39,7 @@ const CalendarTab = ({
   const [consultorFilter, setConsultorFilter] = useState("all");
 
   // Verificar se é CEO ou Admin (pode ver todos os calendários)
-  const canViewAllCalendars = currentUser?.role === "ceo" || currentUser?.role === "admin";
+  const canViewAllCalendars = hasAnyRole(currentUser, ["ceo", "admin"]);
 
   // Lista de utilizadores para filtro (excluindo clientes, admin e ceo)
   const staffUsers = useMemo(() => {
