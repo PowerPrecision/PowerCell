@@ -74,10 +74,15 @@ const FieldError = ({ children }) => (
 );
 
 // Helper for required field labels
-const RequiredLabel = ({ htmlFor, children }) => (
+const RequiredLabel = ({ htmlFor, children, required: isRequired = true }) => (
   <Label htmlFor={htmlFor}>
-    {children} <span className="text-red-600 font-semibold">*</span>
-    <span className="text-red-600 text-[10px] ml-1 font-medium">(obrigatório)</span>
+    {children}
+    {isRequired && (
+      <>
+        {" "}<span className="text-red-600 font-semibold">*</span>
+        <span className="text-red-600 text-[10px] ml-1 font-medium">(obrigatório)</span>
+      </>
+    )}
   </Label>
 );
 
@@ -586,6 +591,24 @@ const PublicClientForm = ({ previewMode = false }) => {
     return set;
   }, [allFieldsConfig]);
 
+  // Mapa de labels personalizados: field_key -> custom label (do admin)
+  const customLabelMap = useMemo(() => {
+    const map = {};
+    allFieldsConfig.forEach((f) => {
+      if (f.label) map[f.field_key] = f.label;
+    });
+    return map;
+  }, [allFieldsConfig]);
+
+  // Mapa de obrigatoriedade dinâmica: field_key -> is_required (do admin)
+  const requiredOverrideMap = useMemo(() => {
+    const map = {};
+    allFieldsConfig.forEach((f) => {
+      if (f.is_required !== undefined) map[f.field_key] = f.is_required;
+    });
+    return map;
+  }, [allFieldsConfig]);
+
   // Helper: retorna style object com CSS order para campos do config
   const getFieldStyle = (fieldKey) => {
     if (!(fieldKey in fieldOrderMap)) return undefined;
@@ -595,6 +618,16 @@ const PublicClientForm = ({ previewMode = false }) => {
     };
   };
 
+  // Helper: retorna label personalizado ou fallback para label padrão
+  const getFieldLabel = (fieldKey, defaultLabel) => {
+    return customLabelMap[fieldKey] || defaultLabel;
+  };
+
+  // Helper: retorna is_required do admin config ou fallback para valor padrão
+  const isFieldRequired = (fieldKey, defaultRequired = false) => {
+    return fieldKey in requiredOverrideMap ? requiredOverrideMap[fieldKey] : defaultRequired;
+  };
+
   // Renderizar um campo personalizado dinâmico
   const renderCustomField = (field) => {
     const value = formData[field.field_key] || "";
@@ -602,10 +635,10 @@ const PublicClientForm = ({ previewMode = false }) => {
 
     return (
       <div key={field.field_key} className="space-y-2" data-testid={`custom-field-${field.field_key}`}>
-        {field.is_required ? (
-          <RequiredLabel htmlFor={field.field_key}>{field.label}</RequiredLabel>
+        {isFieldRequired(field.field_key, field.is_required) ? (
+          <RequiredLabel htmlFor={field.field_key} required={isFieldRequired(field.field_key, field.is_required)}>{getFieldLabel(field.field_key, field.label)}</RequiredLabel>
         ) : (
-          <Label htmlFor={field.field_key}>{field.label}</Label>
+          <Label htmlFor={field.field_key}>{getFieldLabel(field.field_key, field.label)}</Label>
         )}
 
         {field.field_type === "text" && (
@@ -1037,14 +1070,14 @@ const PublicClientForm = ({ previewMode = false }) => {
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2 md:col-span-2" style={getFieldStyle("name")}>
-          <RequiredLabel htmlFor="name">Nome completo</RequiredLabel>
+          <RequiredLabel htmlFor="name" required={isFieldRequired("name", true)}>{getFieldLabel("name", "Nome completo")}</RequiredLabel>
           <Input
             id="name"
             name="name"
             value={formData.name}
             onChange={(e) => updateField("name", e.target.value)}
             placeholder="Nome completo"
-            required
+            required={isFieldRequired("name", true)}
             data-testid="client-name"
             className={cn(fieldErrors.name && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
@@ -1052,7 +1085,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("email")}>
-          <RequiredLabel htmlFor="email">Email</RequiredLabel>
+          <RequiredLabel htmlFor="email" required={isFieldRequired("email", true)}>{getFieldLabel("email", "Email")}</RequiredLabel>
           <Input
             id="email"
             name="email"
@@ -1060,7 +1093,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             value={formData.email}
             onChange={(e) => updateField("email", e.target.value)}
             placeholder="email@exemplo.pt"
-            required
+            required={isFieldRequired("email", true)}
             data-testid="client-email"
             className={cn(fieldErrors.email && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
@@ -1069,7 +1102,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("phone")}>
-          <RequiredLabel htmlFor="phone">Telemóvel</RequiredLabel>
+          <RequiredLabel htmlFor="phone" required={isFieldRequired("phone", true)}>{getFieldLabel("phone", "Telemóvel")}</RequiredLabel>
           <Input
             id="phone"
             name="phone"
@@ -1077,7 +1110,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             value={formData.phone}
             onChange={(e) => updateField("phone", e.target.value)}
             placeholder="+351 912 345 678"
-            required
+            required={isFieldRequired("phone", true)}
             data-testid="client-phone"
             className={cn(fieldErrors.phone && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
@@ -1086,7 +1119,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("nif")}>
-          <RequiredLabel htmlFor="nif">NIF</RequiredLabel>
+          <RequiredLabel htmlFor="nif" required={isFieldRequired("nif", true)}>{getFieldLabel("nif", "NIF")}</RequiredLabel>
           <Input
             id="nif"
             name="nif"
@@ -1095,7 +1128,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             onChange={(e) => updateField("nif", e.target.value.replace(/\D/g, ""))}
             placeholder="123456789"
             maxLength={9}
-            required
+            required={isFieldRequired("nif", true)}
             data-testid="client-nif"
             className={cn(fieldErrors.nif && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
@@ -1104,14 +1137,14 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("documento_id")}>
-          <RequiredLabel htmlFor="documento_id">Cartão de Cidadão/Passaporte</RequiredLabel>
+          <RequiredLabel htmlFor="documento_id" required={isFieldRequired("documento_id", true)}>{getFieldLabel("documento_id", "Cartão de Cidadão/Passaporte")}</RequiredLabel>
           <Input
             id="documento_id"
             name="documento_id"
             value={formData.documento_id}
             onChange={(e) => updateField("documento_id", e.target.value)}
             placeholder="Número do documento"
-            required
+            required={isFieldRequired("documento_id", true)}
             data-testid="client-documento"
             className={cn(fieldErrors.documento_id && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
@@ -1135,14 +1168,14 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("naturalidade")}>
-          <RequiredLabel htmlFor="naturalidade">Naturalidade</RequiredLabel>
+          <RequiredLabel htmlFor="naturalidade" required={isFieldRequired("naturalidade", true)}>{getFieldLabel("naturalidade", "Naturalidade")}</RequiredLabel>
           <Input
             id="naturalidade"
             name="naturalidade"
             value={formData.naturalidade}
             onChange={(e) => updateField("naturalidade", e.target.value)}
             placeholder="Local de nascimento"
-            required
+            required={isFieldRequired("naturalidade", true)}
             data-testid="client-naturalidade"
             className={cn(fieldErrors.naturalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
           />
@@ -1151,46 +1184,46 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("nacionalidade")}>
-          <RequiredLabel htmlFor="nacionalidade">Nacionalidade</RequiredLabel>
+          <RequiredLabel htmlFor="nacionalidade" required={isFieldRequired("nacionalidade", true)}>{getFieldLabel("nacionalidade", "Nacionalidade")}</RequiredLabel>
           <Input
             id="nacionalidade"
             name="nacionalidade"
             value={formData.nacionalidade}
             onChange={(e) => updateField("nacionalidade", e.target.value)}
             placeholder="Portuguesa"
-            required
+            required={isFieldRequired("nacionalidade", true)}
             data-testid="client-nacionalidade"
           />
         </div>
         
         <div className="space-y-2 md:col-span-2" style={getFieldStyle("morada_fiscal")}>
-          <RequiredLabel htmlFor="morada_fiscal">Morada Fiscal</RequiredLabel>
+          <RequiredLabel htmlFor="morada_fiscal" required={isFieldRequired("morada_fiscal", true)}>{getFieldLabel("morada_fiscal", "Morada Fiscal")}</RequiredLabel>
           <Input
             id="morada_fiscal"
             value={formData.morada_fiscal}
             onChange={(e) => updateField("morada_fiscal", e.target.value)}
             placeholder="Rua, número, código postal, localidade"
-            required
+            required={isFieldRequired("morada_fiscal", true)}
             data-testid="client-morada"
           />
           <FieldHint>Morada completa conforme registada nas Finanças.</FieldHint>
         </div>
         
         <div className="space-y-2" style={getFieldStyle("birth_date")}>
-          <RequiredLabel htmlFor="birth_date">Data de Nascimento</RequiredLabel>
+          <RequiredLabel htmlFor="birth_date" required={isFieldRequired("birth_date", true)}>{getFieldLabel("birth_date", "Data de Nascimento")}</RequiredLabel>
           <Input
             id="birth_date"
             type="date"
             value={formData.birth_date}
             onChange={(e) => updateField("birth_date", e.target.value)}
             max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
-            required
+            required={isFieldRequired("birth_date", true)}
             data-testid="client-birth-date"
           />
         </div>
         
         <div className="space-y-2" style={getFieldStyle("estado_civil")}>
-          <RequiredLabel htmlFor="estado_civil">Estado Civil</RequiredLabel>
+          <RequiredLabel htmlFor="estado_civil" required={isFieldRequired("estado_civil", true)}>{getFieldLabel("estado_civil", "Estado Civil")}</RequiredLabel>
           <Select value={formData.estado_civil} onValueChange={(v) => updateField("estado_civil", v)}>
             <SelectTrigger data-testid="client-estado-civil">
               <SelectValue placeholder="Selecione" />
@@ -1214,7 +1247,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             />
             <div className="space-y-1">
               <Label htmlFor="menor_35_anos" className="text-sm font-medium cursor-pointer">
-                Tenho menos de 35 anos e pretendo usufruir do Apoio ao Estado
+                {getFieldLabel("menor_35_anos", "Menor de 35 anos")}
               </Label>
               <p className="text-xs text-amber-700">
                 Se tem menos de 35 anos, pode ser elegível para benefícios fiscais na compra da primeira habitação própria permanente (isenção/redução de IMT e Imposto de Selo).
@@ -1224,7 +1257,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2 md:col-span-2">
-          <RequiredLabel>Compra individualmente ou com outra pessoa?</RequiredLabel>
+          <RequiredLabel htmlFor="compra_tipo" required={isFieldRequired("compra_tipo", false)}>{getFieldLabel("compra_tipo", "Tipo de compra")}</RequiredLabel>
           <Select value={formData.compra_tipo} onValueChange={(v) => updateField("compra_tipo", v)}>
             <SelectTrigger data-testid="client-compra-tipo">
               <SelectValue placeholder="Selecione" />
@@ -1256,7 +1289,7 @@ const PublicClientForm = ({ previewMode = false }) => {
       {formData.compra_tipo === "outra_pessoa" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2 md:col-span-2" style={getFieldStyle("titular2_name")}>
-            <RequiredLabel htmlFor="titular2_name">Nome completo</RequiredLabel>
+            <RequiredLabel htmlFor="titular2_name" required={isFieldRequired("titular2_name", false)}>{getFieldLabel("titular2_name", "Nome do 2º Titular")}</RequiredLabel>
             <Input
               id="titular2_name"
               value={formData.titular2_name}
@@ -1269,7 +1302,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <RequiredLabel htmlFor="titular2_email">Email</RequiredLabel>
+            <RequiredLabel htmlFor="titular2_email" required={isFieldRequired("titular2_email", false)}>{getFieldLabel("titular2_email", "Email (2º Titular)")}</RequiredLabel>
             <Input
               id="titular2_email"
               type="email"
@@ -1283,7 +1316,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <RequiredLabel htmlFor="titular2_phone">Telemóvel</RequiredLabel>
+            <RequiredLabel htmlFor="titular2_phone" required={isFieldRequired("titular2_phone", false)}>{getFieldLabel("titular2_phone", "Telefone (2º Titular)")}</RequiredLabel>
             <Input
               id="titular2_phone"
               type="tel"
@@ -1297,7 +1330,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <RequiredLabel htmlFor="titular2_nif">NIF</RequiredLabel>
+            <RequiredLabel htmlFor="titular2_nif" required={isFieldRequired("titular2_nif", false)}>{getFieldLabel("titular2_nif", "NIF (2º Titular)")}</RequiredLabel>
             <Input
               id="titular2_nif"
               type="text"
@@ -1313,7 +1346,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="titular2_documento_id">Cartão de Cidadão/Passaporte</Label>
+            <Label htmlFor="titular2_documento_id">{getFieldLabel("titular2_documento_id", "Documento ID (2º Titular)")}</Label>
             <Input
               id="titular2_documento_id"
               value={formData.titular2_documento_id}
@@ -1326,7 +1359,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="titular2_naturalidade">Naturalidade</Label>
+            <Label htmlFor="titular2_naturalidade">{getFieldLabel("titular2_naturalidade", "Naturalidade (2º Titular)")}</Label>
             <Input
               id="titular2_naturalidade"
               value={formData.titular2_naturalidade}
@@ -1339,7 +1372,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="titular2_nacionalidade">Nacionalidade</Label>
+            <Label htmlFor="titular2_nacionalidade">{getFieldLabel("titular2_nacionalidade", "Nacionalidade (2º Titular)")}</Label>
             <Input
               id="titular2_nacionalidade"
               value={formData.titular2_nacionalidade}
@@ -1352,7 +1385,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="titular2_morada_fiscal">Morada Fiscal</Label>
+            <Label htmlFor="titular2_morada_fiscal">{getFieldLabel("titular2_morada_fiscal", "Morada Fiscal (2º Titular)")}</Label>
             <Input
               id="titular2_morada_fiscal"
               value={formData.titular2_morada_fiscal}
@@ -1365,7 +1398,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="titular2_birth_date">Data de Nascimento</Label>
+            <Label htmlFor="titular2_birth_date">{getFieldLabel("titular2_birth_date", "Data Nascimento (2º Titular)")}</Label>
             <Input
               id="titular2_birth_date"
               type="date"
@@ -1378,7 +1411,7 @@ const PublicClientForm = ({ previewMode = false }) => {
           </div>
           
           <div className="space-y-2" style={getFieldStyle("titular2_estado_civil")}>
-            <Label htmlFor="titular2_estado_civil">Estado Civil</Label>
+            <Label htmlFor="titular2_estado_civil">{getFieldLabel("titular2_estado_civil", "Estado Civil (2º Titular)")}</Label>
             <Select value={formData.titular2_estado_civil} onValueChange={(v) => updateField("titular2_estado_civil", v)}>
               <SelectTrigger 
                 data-testid="titular2-estado-civil"
@@ -1417,7 +1450,7 @@ const PublicClientForm = ({ previewMode = false }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* FINALIDADE PRIMEIRO */}
         <div className="space-y-2 md:col-span-2" style={getFieldStyle("finalidade")}>
-          <RequiredLabel>Finalidade do pedido</RequiredLabel>
+          <RequiredLabel htmlFor="finalidade" required={isFieldRequired("finalidade", true)}>{getFieldLabel("finalidade", "Finalidade do pedido")}</RequiredLabel>
           <Select value={formData.finalidade} onValueChange={(v) => updateField("finalidade", v)}>
             <SelectTrigger data-testid="imovel-finalidade">
               <SelectValue placeholder="Selecione a finalidade" />
@@ -1438,7 +1471,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         {formData.finalidade !== "refinanciamento" && (
           <>
             <div className="space-y-2" style={getFieldStyle("tipo_imovel")}>
-              <RequiredLabel>O que procura?</RequiredLabel>
+              <RequiredLabel htmlFor="tipo_imovel" required={isFieldRequired("tipo_imovel", true)}>{getFieldLabel("tipo_imovel", "Tipo de imóvel")}</RequiredLabel>
               <Select value={formData.tipo_imovel} onValueChange={(v) => updateField("tipo_imovel", v)}>
                 <SelectTrigger data-testid="imovel-tipo">
                   <SelectValue placeholder="Selecione" />
@@ -1452,7 +1485,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             </div>
             
             <div className="space-y-2" style={getFieldStyle("num_quartos")}>
-              <RequiredLabel>Número de quartos</RequiredLabel>
+              <RequiredLabel htmlFor="num_quartos" required={isFieldRequired("num_quartos", true)}>{getFieldLabel("num_quartos", "Nº quartos")}</RequiredLabel>
               <Select value={formData.num_quartos} onValueChange={(v) => updateField("num_quartos", v)}>
                 <SelectTrigger data-testid="imovel-quartos">
                   <SelectValue placeholder="Selecione" />
@@ -1467,20 +1500,20 @@ const PublicClientForm = ({ previewMode = false }) => {
             </div>
             
             <div className="space-y-2 md:col-span-2" style={getFieldStyle("localizacao")}>
-              <RequiredLabel htmlFor="localizacao">Localização/Zona(s) preferida(s)</RequiredLabel>
+              <RequiredLabel htmlFor="localizacao" required={isFieldRequired("localizacao", true)}>{getFieldLabel("localizacao", "Localização/Zona preferida")}</RequiredLabel>
               <Input
                 id="localizacao"
                 value={formData.localizacao}
                 onChange={(e) => updateField("localizacao", e.target.value)}
                 placeholder="Ex: Lisboa, Cascais, Sintra"
-                required
+                required={isFieldRequired("localizacao", true)}
                 data-testid="imovel-localizacao"
               />
               <FieldHint>Pode indicar várias zonas separadas por vírgula. Quanto mais específico, melhor podemos ajudar.</FieldHint>
             </div>
             
             <div className="space-y-3 md:col-span-2" style={getFieldStyle("caracteristicas")}>
-              <Label>Características obrigatórias (selecione apenas as imprescindíveis)</Label>
+              <Label>{getFieldLabel("caracteristicas", "Características Pretendidas")}</Label>
               <FieldHint>Selecione apenas características que são absolutamente essenciais. Menos seleções = mais opções de imóveis.</FieldHint>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {CARACTERISTICAS.map((c) => (
@@ -1512,7 +1545,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             
             {/* Novos campos: Área, Valor */}
             <div className="space-y-2">
-              <Label htmlFor="area_pretendida">Área pretendida (m²)</Label>
+              <Label htmlFor="area_pretendida">{getFieldLabel("area_pretendida", "Área pretendida (m²)")}</Label>
               <Input
                 id="area_pretendida"
                 type="number"
@@ -1525,7 +1558,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="valor_maximo_imovel">Valor máximo do imóvel (€)</Label>
+              <Label htmlFor="valor_maximo_imovel">{getFieldLabel("valor_maximo_imovel", "Valor máximo do imóvel")}</Label>
               <Input
                 id="valor_maximo_imovel"
                 type="number"
@@ -1545,7 +1578,7 @@ const PublicClientForm = ({ previewMode = false }) => {
                   data-testid="imovel-ja-tem-casa"
                 />
                 <Label htmlFor="ja_tem_casa_escolhida" className="cursor-pointer">
-                  Já tenho uma casa escolhida
+                  {getFieldLabel("ja_tem_casa_escolhida", "Já tem casa escolhida")}
                 </Label>
               </div>
             </div>
@@ -1554,7 +1587,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             {formData.ja_tem_casa_escolhida && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="proprietario_nome">Nome do proprietário</Label>
+                  <Label htmlFor="proprietario_nome">{getFieldLabel("proprietario_nome", "Nome do proprietário")}</Label>
                   <Input
                     id="proprietario_nome"
                     value={formData.proprietario_nome}
@@ -1565,7 +1598,7 @@ const PublicClientForm = ({ previewMode = false }) => {
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="proprietario_contacto">Contacto do proprietário</Label>
+                  <Label htmlFor="proprietario_contacto">{getFieldLabel("proprietario_contacto", "Contacto do proprietário")}</Label>
                   <Input
                     id="proprietario_contacto"
                     value={formData.proprietario_contacto}
@@ -1621,7 +1654,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             </div>
             
             <div className="space-y-2">
-              <RequiredLabel htmlFor="prazo_pretendido">Prazo Pretendido (anos)</RequiredLabel>
+              <RequiredLabel htmlFor="prazo_pretendido" required={isFieldRequired("prazo_pretendido", false)}>{getFieldLabel("prazo_pretendido", "Prazo pretendido (anos)")}</RequiredLabel>
               <Select value={formData.prazo_pretendido} onValueChange={(v) => updateField("prazo_pretendido", v)}>
                 <SelectTrigger data-testid="imovel-prazo">
                   <SelectValue placeholder="Selecione" />
@@ -1635,7 +1668,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             </div>
             
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="outras_informacoes">Informações sobre o crédito actual</Label>
+              <Label htmlFor="outras_informacoes">{getFieldLabel("outras_informacoes", "Outras informações")}</Label>
               <Textarea
                 id="outras_informacoes"
                 value={formData.outras_informacoes}
@@ -1650,7 +1683,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         
         {formData.finalidade !== "refinanciamento" && (
           <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="outras_informacoes">Outras informações</Label>
+            <Label htmlFor="outras_informacoes">{getFieldLabel("outras_informacoes", "Outras informações")}</Label>
             <Textarea
               id="outras_informacoes"
               value={formData.outras_informacoes}
@@ -1692,7 +1725,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("chave_movel_digital")}>
-          <RequiredLabel>Chave Móvel Digital?</RequiredLabel>
+          <RequiredLabel htmlFor="chave_movel_digital" required={isFieldRequired("chave_movel_digital", true)}>{getFieldLabel("chave_movel_digital", "Chave Móvel Digital")}</RequiredLabel>
           <Select value={formData.chave_movel_digital} onValueChange={(v) => updateField("chave_movel_digital", v)}>
             <SelectTrigger data-testid="fin-chave-movel">
               <SelectValue placeholder="Selecione" />
@@ -1706,7 +1739,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="renda_habitacao_atual">Renda da habitação atual (€)</Label>
+          <Label htmlFor="renda_habitacao_atual">{getFieldLabel("renda_habitacao_atual", "Renda de habitação atual")}</Label>
           <Input
             id="renda_habitacao_atual"
             type="number"
@@ -1719,7 +1752,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2">
-          <Label>Precisa vender a casa atual?</Label>
+          <Label>{getFieldLabel("precisa_vender_casa", "Precisa de vender casa?")}</Label>
           <Select value={formData.precisa_vender_casa} onValueChange={(v) => updateField("precisa_vender_casa", v)}>
             <SelectTrigger data-testid="fin-vender-casa">
               <SelectValue placeholder="Selecione" />
@@ -1733,7 +1766,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("efetivo")}>
-          <Label>Efetivo?</Label>
+          <Label htmlFor="efetivo">{getFieldLabel("efetivo", "Efetivo?")}</Label>
           <Select value={formData.efetivo} onValueChange={(v) => updateField("efetivo", v)}>
             <SelectTrigger data-testid="fin-efetivo">
               <SelectValue placeholder="Selecione" />
@@ -1747,7 +1780,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("trabalha_estrangeiro")}>
-          <Label>Trabalha no estrangeiro?</Label>
+          <Label htmlFor="trabalha_estrangeiro">{getFieldLabel("trabalha_estrangeiro", "Trabalha no estrangeiro?")}</Label>
           <Select value={formData.trabalha_estrangeiro} onValueChange={(v) => updateField("trabalha_estrangeiro", v)}>
             <SelectTrigger data-testid="fin-trabalha-estrangeiro">
               <SelectValue placeholder="Selecione" />
@@ -1761,7 +1794,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2" style={getFieldStyle("employment_type")}>
-          <RequiredLabel>Tipo de Contrato de Trabalho</RequiredLabel>
+          <RequiredLabel htmlFor="employment_type" required={isFieldRequired("employment_type", true)}>{getFieldLabel("employment_type", "Tipo de Contrato de Trabalho")}</RequiredLabel>
           <Select value={formData.employment_type} onValueChange={(v) => updateField("employment_type", v)}>
             <SelectTrigger data-testid="fin-employment-type">
               <SelectValue placeholder="Selecione" />
@@ -1780,7 +1813,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="employment_duration">Tempo no Emprego Atual</Label>
+          <Label htmlFor="employment_duration">{getFieldLabel("employment_duration", "Antiguidade no emprego")}</Label>
           <Input
             id="employment_duration"
             value={formData.employment_duration}
@@ -1792,7 +1825,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="employer_name">Entidade Empregadora</Label>
+          <Label htmlFor="employer_name">{getFieldLabel("employer_name", "Nome da empresa")}</Label>
           <Input
             id="employer_name"
             value={formData.employer_name}
@@ -1803,7 +1836,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2">
-          <Label htmlFor="employer_nif">NIF da Entidade Empregadora</Label>
+          <Label htmlFor="employer_nif">{getFieldLabel("employer_nif", "NIF da empresa")}</Label>
           <Input
             id="employer_nif"
             value={formData.employer_nif}
@@ -1816,7 +1849,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2">
-          <Label>Fiador (caso seja necessário)?</Label>
+          <Label>{getFieldLabel("fiador", "Fiador?")}</Label>
           <Select value={formData.fiador} onValueChange={(v) => updateField("fiador", v)}>
             <SelectTrigger data-testid="fin-fiador">
               <SelectValue placeholder="Selecione" />
@@ -1830,14 +1863,14 @@ const PublicClientForm = ({ previewMode = false }) => {
         </div>
         
         <div className="space-y-2 md:col-span-2" style={getFieldStyle("salario_liquido")}>
-          <RequiredLabel htmlFor="salario_liquido">Salário mensal líquido (já com descontos) (€)</RequiredLabel>
+          <RequiredLabel htmlFor="salario_liquido" required={isFieldRequired("salario_liquido", true)}>{getFieldLabel("salario_liquido", "Salário mensal líquido")}</RequiredLabel>
           <Input
             id="salario_liquido"
             type="number"
             value={formData.salario_liquido}
             onChange={(e) => updateField("salario_liquido", e.target.value)}
             placeholder="0.00"
-            required
+            required={isFieldRequired("salario_liquido", true)}
             data-testid="fin-salario"
           />
         </div>
@@ -1856,7 +1889,7 @@ const PublicClientForm = ({ previewMode = false }) => {
       
       <div className="space-y-6 flex flex-col">
         <div className="space-y-3" style={getFieldStyle("bancos_creditos")}>
-          <RequiredLabel>Bancos onde tem créditos ativos</RequiredLabel>
+          <RequiredLabel htmlFor="bancos_creditos" required={isFieldRequired("bancos_creditos", true)}>{getFieldLabel("bancos_creditos", "Bancos com créditos ativos")}</RequiredLabel>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -1931,7 +1964,7 @@ const PublicClientForm = ({ previewMode = false }) => {
 
         {/* Contas abertas nos Créditos e Capital */}
         <div className="space-y-3" style={getFieldStyle("tem_creditos_activos")}>
-          <RequiredLabel>Bancos com contas de crédito abertas</RequiredLabel>
+          <RequiredLabel htmlFor="tem_creditos_activos" required={isFieldRequired("tem_creditos_activos", false)}>{getFieldLabel("tem_creditos_activos", "Bancos com contas abertas")}</RequiredLabel>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -1972,7 +2005,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         
         {/* Pergunta sobre simulações de crédito */}
         <div className="space-y-3" style={getFieldStyle("bancos_simulacoes")}>
-          <Label>Efetuou alguma simulação de crédito, adesão etc junto de algum banco? Quais?</Label>
+          <Label htmlFor="bancos_simulacoes">{getFieldLabel("bancos_simulacoes", "Simulações efetuadas")}</Label>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -2014,7 +2047,7 @@ const PublicClientForm = ({ previewMode = false }) => {
         {/* Pergunta sobre tempo restante do crédito (apenas para refinanciamento) */}
         {formData.finalidade === "refinanciamento" && (
           <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <RequiredLabel htmlFor="tempo_restante_credito">Quanto tempo falta para acabar de pagar o crédito atual?</RequiredLabel>
+            <RequiredLabel htmlFor="tempo_restante_credito" required={isFieldRequired("tempo_restante_credito", false)}>{getFieldLabel("tempo_restante_credito", "Tempo restante do crédito (meses)")}</RequiredLabel>
             <Select 
               value={formData.tempo_restante_credito} 
               onValueChange={(v) => updateField("tempo_restante_credito", v)}
@@ -2037,27 +2070,27 @@ const PublicClientForm = ({ previewMode = false }) => {
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2" style={getFieldStyle("capital_proprio")}>
-            <RequiredLabel htmlFor="capital_proprio">Capital próprio disponível (€)</RequiredLabel>
+            <RequiredLabel htmlFor="capital_proprio" required={isFieldRequired("capital_proprio", false)}>{getFieldLabel("capital_proprio", "Capital próprio disponível")}</RequiredLabel>
             <Input
               id="capital_proprio"
               type="number"
               value={formData.capital_proprio}
               onChange={(e) => updateField("capital_proprio", e.target.value)}
               placeholder="0.00"
-              required
+              required={isFieldRequired("capital_proprio", false)}
               data-testid="fin-capital-proprio"
             />
             <FieldHint>Dinheiro que tem disponível para entrada + despesas (escritura, IMT, seguros).</FieldHint>
           </div>
           
           <div className="space-y-2" style={getFieldStyle("valor_financiado")}>
-            <RequiredLabel htmlFor="valor_financiado">Valor a financiar (€)</RequiredLabel>
+            <RequiredLabel htmlFor="valor_financiado" required={isFieldRequired("valor_financiado", false)}>{getFieldLabel("valor_financiado", "Valor a financiar")}</RequiredLabel>
             <Input
               id="valor_financiado"
               value={formData.valor_financiado}
               onChange={(e) => updateField("valor_financiado", e.target.value)}
               placeholder="Ex: 200.000€ ou 80% do valor"
-              required
+              required={isFieldRequired("valor_financiado", false)}
               data-testid="fin-valor-financiado"
             />
             <FieldHint>Pode indicar um valor fixo ou percentagem (ex: "90% do valor do imóvel").</FieldHint>
@@ -2163,7 +2196,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             data-testid="consent-data"
           />
           <Label htmlFor="consent_data" className="text-sm leading-relaxed cursor-pointer">
-            Autorizo o tratamento dos meus dados pessoais para análise do meu pedido de crédito/imobiliário, nos termos do RGPD. *
+            {getFieldLabel("consent_data", "Autorizo o tratamento dos meus dados pessoais para análise do meu pedido de crédito/imobiliário, nos termos do RGPD. *")}
           </Label>
         </div>
         <div className="flex items-start space-x-3">
@@ -2174,7 +2207,7 @@ const PublicClientForm = ({ previewMode = false }) => {
             data-testid="consent-contact"
           />
           <Label htmlFor="consent_contact" className="text-sm leading-relaxed cursor-pointer">
-            Aceito ser contactado pela equipa para dar seguimento ao meu processo. *
+            {getFieldLabel("consent_contact", "Aceito ser contactado pela equipa para dar seguimento ao meu processo. *")}
           </Label>
         </div>
       </div>
