@@ -23,7 +23,7 @@
  *   - Asterisk icon toggle for required (shows red star)
  *   - Drag handle for reordering
  */
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -42,8 +42,8 @@ import {
 import { toast } from "sonner";
 import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
-  Plus, Trash2, GripVertical, X, LayoutTemplate, Copy, Zap, Bookmark,
-  GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil
+  Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark,
+  GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -194,6 +194,7 @@ const WysiwygFieldPreview = ({ field }) => {
  * Controls are shown on hover/always for easy management.
  */
 const WysiwygFieldCard = ({ field, isDragging, dragHandleProps, updateField, onEditField, handleRemoveField }) => {
+
   return (
     <div
       className={`group relative rounded-lg border p-4 transition-all ${
@@ -243,55 +244,55 @@ const WysiwygFieldCard = ({ field, isDragging, dragHandleProps, updateField, onE
 
         {/* ── Inline Controls (right side) ── */}
         <div className="flex flex-col items-center gap-1 shrink-0 pt-0.5">
-          {/* Edit Field (opens dialog) */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-muted-foreground/60 hover:text-foreground hover:bg-muted"
-            onClick={() => onEditField(field)}
-            title="Editar campo"
-            data-testid={`edit-field-btn-${field.field_key}`}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
+            {/* Edit Field (full dialog) */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-muted-foreground/60 hover:text-foreground hover:bg-muted"
+              onClick={() => onEditField(field)}
+              title="Editar campo"
+              data-testid={`edit-field-btn-${field.field_key}`}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
 
-          {/* Visibility Toggle */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`h-7 w-7 p-0 ${!field.is_visible ? "text-amber-500 bg-amber-50 dark:bg-amber-900/20" : "text-green-600 hover:text-green-700 hover:bg-green-50"}`}
-            onClick={() => updateField(field.field_key, "is_visible", !field.is_visible)}
-            title={field.is_visible ? "Ocultar campo" : "Mostrar campo"}
-            data-testid={`toggle-visibility-${field.field_key}`}
-          >
-            {field.is_visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-          </Button>
+            {/* Visibility Toggle */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`h-7 w-7 p-0 ${!field.is_visible ? "text-amber-500 bg-amber-50 dark:bg-amber-900/20" : "text-green-600 hover:text-green-700 hover:bg-green-50"}`}
+              onClick={() => updateField(field.field_key, "is_visible", !field.is_visible)}
+              title={field.is_visible ? "Ocultar campo" : "Mostrar campo"}
+              data-testid={`toggle-visibility-${field.field_key}`}
+            >
+              {field.is_visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </Button>
 
-          {/* Required Toggle */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`h-7 w-7 p-0 ${field.is_required ? "text-red-500 bg-red-50 dark:bg-red-900/20" : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"}`}
-            onClick={() => updateField(field.field_key, "is_required", !field.is_required)}
-            disabled={!field.is_visible}
-            title={field.is_required ? "Opcional" : "Obrigatório"}
-            data-testid={`toggle-required-${field.field_key}`}
-          >
-            <Star className={`h-3.5 w-3.5 ${field.is_required ? "fill-red-500" : ""}`} />
-          </Button>
+            {/* Required Toggle */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`h-7 w-7 p-0 ${field.is_required ? "text-red-500 bg-red-50 dark:bg-red-900/20" : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"}`}
+              onClick={() => updateField(field.field_key, "is_required", !field.is_required)}
+              disabled={!field.is_visible}
+              title={field.is_required ? "Opcional" : "Obrigatório"}
+              data-testid={`toggle-required-${field.field_key}`}
+            >
+              <Star className={`h-3.5 w-3.5 ${field.is_required ? "fill-red-500" : ""}`} />
+            </Button>
 
-          {/* Delete / Hide (all fields) */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-muted-foreground/60 hover:text-red-600 hover:bg-red-50"
-            onClick={() => handleRemoveField(field)}
-            title={field.is_custom ? "Eliminar campo" : "Ocultar campo"}
-            data-testid={`delete-field-${field.field_key}`}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+            {/* Delete field (all fields) */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-muted-foreground/60 hover:text-red-600 hover:bg-red-50"
+              onClick={() => handleRemoveField(field)}
+              title={field.is_custom ? "Eliminar campo" : "Ocultar campo"}
+              data-testid={`delete-field-${field.field_key}`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
       </div>
     </div>
   );
@@ -644,10 +645,7 @@ const FormManagementPage = () => {
   };
 
   const removeEditOption = (idx) => {
-    setEditFormData(prev => ({
-      ...prev,
-      options: prev.options.filter((_, i) => i !== idx),
-    }));
+    setEditFormData(prev => ({ ...prev, options: prev.options.filter((_, i) => i !== idx) }));
   };
 
   const handleEditField = () => {
@@ -656,7 +654,7 @@ const FormManagementPage = () => {
       toast.error("O nome do campo é obrigatório");
       return;
     }
-    if (["select", "checkbox"].includes(editFormData.field_type) && editFormData.options.length === 0) {
+    if (["select", "checkbox"].includes(editFormData.field_type) && (editFormData.options || []).length === 0) {
       toast.error("Adicione pelo menos uma opção para este tipo de campo");
       return;
     }
@@ -664,13 +662,11 @@ const FormManagementPage = () => {
     const key = editingField.field_key;
     const currentField = fields.find(f => f.field_key === key) || editingField;
 
-    // Apply each changed property
     if (editFormData.label.trim() !== (currentField.label || "")) {
       updateField(key, "label", editFormData.label.trim());
     }
     if (editFormData.field_type !== (currentField.field_type || "text")) {
       updateField(key, "field_type", editFormData.field_type);
-      // Clear options when switching away from select/checkbox
       if (!["select", "checkbox"].includes(editFormData.field_type)) {
         updateField(key, "options", null);
       }
@@ -694,18 +690,18 @@ const FormManagementPage = () => {
       }
     }
 
-    toast.success("Campo atualizado");
     setEditingField(null);
     setEditFormData({});
     setEditOption("");
+    toast.success("Campo atualizado com sucesso");
   };
 
-  // ── Remove / hide field ──
   const handleRemoveField = (field) => {
     if (field.is_custom) {
       handleDeleteCustomField(field.field_key);
     } else {
       updateField(field.field_key, "is_visible", false);
+      toast.success(`Campo "${field.label}" ocultado`);
     }
   };
 
@@ -963,7 +959,7 @@ const FormManagementPage = () => {
                       <Star className="h-3.5 w-3.5 shrink-0 text-red-500" /> <span>Obrigatório / Opcional</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Trash2 className="h-3.5 w-3.5 shrink-0" /> <span>Eliminar campo</span>
+                      <Trash2 className="h-3.5 w-3.5 shrink-0 text-red-500" /> <span>Eliminar / Ocultar campo</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <GripVertical className="h-3.5 w-3.5 shrink-0" /> <span>Arrastar para reordenar</span>
@@ -1206,7 +1202,6 @@ const FormManagementPage = () => {
                   placeholder="Ex: País de residência fiscal"
                   value={editFormData.label || ""}
                   onChange={(e) => setEditFormData(prev => ({ ...prev, label: e.target.value }))}
-                  data-testid="edit-field-label"
                 />
               </div>
 
@@ -1214,7 +1209,7 @@ const FormManagementPage = () => {
                 <div className="space-y-2">
                   <Label>Tipo de campo</Label>
                   <Select value={editFormData.field_type || "text"} onValueChange={(v) => setEditFormData(prev => ({ ...prev, field_type: v, options: [] }))}>
-                    <SelectTrigger data-testid="edit-field-type"><SelectValue /></SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {FIELD_TYPES.map(t => (
                         <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
@@ -1225,7 +1220,7 @@ const FormManagementPage = () => {
                 <div className="space-y-2">
                   <Label>Passo do formulário</Label>
                   <Select value={editFormData.step || "1"} onValueChange={(v) => setEditFormData(prev => ({ ...prev, step: v }))}>
-                    <SelectTrigger data-testid="edit-field-step"><SelectValue /></SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {Object.entries(STEP_LABELS).map(([k, v]) => (
                         <SelectItem key={k} value={k}>{k}. {v}</SelectItem>
@@ -1258,7 +1253,6 @@ const FormManagementPage = () => {
                 <Switch
                   checked={editFormData.is_required || false}
                   onCheckedChange={(v) => setEditFormData(prev => ({ ...prev, is_required: v }))}
-                  data-testid="edit-field-required"
                 />
                 <Label>Campo obrigatório</Label>
               </div>
@@ -1274,7 +1268,6 @@ const FormManagementPage = () => {
                     <div className="space-y-1.5">
                       {(editFormData.options || []).map((opt, idx) => (
                         <div key={idx} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                          <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
                           <span className="text-sm flex-1">{opt}</span>
                           <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500 hover:text-red-700" onClick={() => removeEditOption(idx)}>
                             <X className="h-3 w-3" />
@@ -1290,9 +1283,8 @@ const FormManagementPage = () => {
                       value={editOption}
                       onChange={(e) => setEditOption(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addEditOption())}
-                      data-testid="edit-option-input"
                     />
-                    <Button variant="outline" onClick={addEditOption} disabled={!editOption.trim()} data-testid="edit-add-option-btn">
+                    <Button variant="outline" onClick={addEditOption} disabled={!editOption.trim()}>
                       <Plus className="h-4 w-4" />
                     </Button>
                   </div>
@@ -1308,7 +1300,6 @@ const FormManagementPage = () => {
               <Button
                 onClick={handleEditField}
                 disabled={!editFormData.label?.trim() || (editNeedsOptions && (editFormData.options || []).length === 0)}
-                data-testid="confirm-edit-field"
                 className="bg-emerald-600 hover:bg-emerald-700"
               >
                 <Save className="h-4 w-4 mr-2" />
