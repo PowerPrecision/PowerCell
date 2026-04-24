@@ -245,11 +245,7 @@ const BANCO_COLORS = {
   "Outro":            { bg: "#6B7280", text: "#fff" },
 };
 
-// Campos obrigatórios para calcular progresso
-const REQUIRED_FIELDS = [
-  "name", "email", "nif", "phone", "birth_date", "estado_civil",
-  "tipo_imovel", "localizacao", "profissao", "tipo_contrato"
-];
+// REQUIRED_FIELDS is now derived dynamically from allFieldsConfig (see dynamicRequiredFields memo below)
 
 // Dados de simulação para testar o formulário
 const MOCK_DATA = {
@@ -425,6 +421,9 @@ const PublicClientForm = ({ previewMode = false }) => {
       estado_civil: "",
       compra_tipo: "individual",
       menor_35_anos: false,
+      sexo: "",
+      profissao: "",
+      codigo_postal: "",
       
       // Dados do 2º Titular
       titular2_name: "",
@@ -511,16 +510,28 @@ const PublicClientForm = ({ previewMode = false }) => {
     return defaults;
   });
 
+  // Dynamic required fields derived from allFieldsConfig
+  const dynamicRequiredFields = useMemo(() => {
+    if (allFieldsConfig.length === 0) {
+      // Fallback while config loads – use well-known required fields
+      return ["name", "email", "nif", "phone", "birth_date", "estado_civil"];
+    }
+    return allFieldsConfig
+      .filter(f => f.is_required)
+      .map(f => f.field_key);
+  }, [allFieldsConfig]);
+
   // Calcular campos preenchidos para progresso
   const calculateProgress = useCallback(() => {
     let filled = 0;
-    REQUIRED_FIELDS.forEach(field => {
-      if (formData[field] && formData[field] !== "") {
+    dynamicRequiredFields.forEach(field => {
+      const val = formData[field];
+      if (val && val !== "" && !(Array.isArray(val) && val.length === 0)) {
         filled++;
       }
     });
-    return { completed: filled, total: REQUIRED_FIELDS.length };
-  }, [formData]);
+    return { completed: filled, total: dynamicRequiredFields.length };
+  }, [formData, dynamicRequiredFields]);
 
   const progress = calculateProgress();
 
@@ -776,6 +787,639 @@ const PublicClientForm = ({ previewMode = false }) => {
       .filter(f => f.step === stepNum)
       .sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0));
   };
+
+  // ─── Dynamic field rendering helpers ───────────────────────────────────────
+
+  // Known fields that should span both grid columns (md:col-span-2)
+  const FULL_WIDTH_FIELD_KEYS = new Set([
+    "name", "morada_fiscal", "compra_tipo", "menor_35_anos",
+    "finalidade", "caracteristicas", "outras_caracteristicas",
+    "ja_tem_casa_escolhida", "caracteristicas_imovel",
+    "outras_informacoes", "valor_transferencia", "salario_liquido",
+    "titular2_name", "titular2_morada_fiscal", "localizacao",
+    "bancos_creditos", "tem_creditos_activos", "bancos_simulacoes",
+    "tempo_restante_credito",
+  ]);
+
+  // Fields that render as simple sim/nao selects
+  const SIM_NAO_SELECT_FIELDS = new Set([
+    "chave_movel_digital", "precisa_vender_casa", "efetivo",
+    "trabalha_estrangeiro", "fiador",
+  ]);
+
+  // Fields that use the NIF pattern (digit-only, maxLength=9)
+  const NIF_PATTERN_FIELDS = new Set(["nif", "titular2_nif", "employer_nif"]);
+
+  // Fields that use ESTADOS_CIVIS options
+  const ESTADO_CIVIL_FIELDS = new Set(["estado_civil", "titular2_estado_civil"]);
+
+  // Fallback hints for well-known fields (used when config has no hint)
+  const FIELD_HINT_FALLBACKS = {
+    email: "Utilizaremos este email para comunicar consigo sobre o seu processo.",
+    phone: "Número de contacto direto para agendar visitas e reuniões.",
+    nif: "Número de Identificação Fiscal - 9 dígitos, encontra-se no Cartão de Cidadão.",
+    titular2_nif: "Número de Identificação Fiscal - 9 dígitos",
+    documento_id: "Número do documento de identificação válido.",
+    titular2_documento_id: "Número do documento de identificação válido.",
+    data_validade_cc: "Data de validade do Cartão de Cidadão.",
+    naturalidade: "Freguesia/concelho onde nasceu.",
+    titular2_naturalidade: "Freguesia/concelho onde nasceu.",
+    morada_fiscal: "Morada completa conforme registada nas Finanças.",
+    titular2_morada_fiscal: "Morada completa conforme registada nas Finanças.",
+    estado_civil: "Se casado/a, indique o regime de bens do casamento.",
+    titular2_estado_civil: "Regime de bens do casamento.",
+    compra_tipo: "Se comprar com outra pessoa (cônjuge, familiar, etc.), selecione \"Com outra pessoa\" para preencher os dados do 2º titular no próximo passo.",
+    access_portal_financas: "Indique a que portais oficiais tem acesso. As credenciais serão solicitadas posteriormente se necessário.",
+    chave_movel_digital: "A CMD facilita a assinatura digital de documentos. Pode ativar em autenticacao.gov.pt",
+    renda_habitacao_atual: "Se vive em casa própria ou com familiares, deixe em branco ou coloque 0.",
+    precisa_vender_casa: "Se precisa vender para ter capital de entrada ou liquidar crédito existente.",
+    efetivo: "Se tem contrato de trabalho sem termo (efetivo) ou está em período experimental.",
+    trabalha_estrangeiro: "Indique se trabalha fora de Portugal. Pode influenciar as condições do crédito.",
+    employment_type: "Indique a sua situação profissional atual.",
+    employment_duration: "Quanto tempo trabalha na empresa atual ou como independente.",
+    employer_nif: "O NIF da empresa onde trabalha (encontra-se no recibo de vencimento).",
+    fiador: "Ter um fiador disponível pode ajudar na aprovação do crédito.",
+    area_pretendida: "Valor aproximado/médio em metros quadrados",
+    bancos_creditos: "Inclui crédito habitação, automóvel, pessoal, ou cartões de crédito com saldo em dívida.",
+    tem_creditos_activos: "Selecione os bancos onde tem contas de crédito abertas (habitação, automóvel, pessoal, cartões).",
+    bancos_simulacoes: "Indique os bancos onde já efetuou simulações ou pedidos de crédito habitação.",
+    capital_proprio: "Dinheiro que tem disponível para entrada + despesas (escritura, IMT, seguros).",
+    valor_financiado: "Pode indicar um valor fixo ou percentagem (ex: \"90% do valor do imóvel\").",
+    valor_transferencia: "Valor total dos créditos que pretende consolidar/transferir.",
+    valor_extra: "Se precisa de capital adicional além do refinanciamento.",
+  };
+
+  // Get visible fields for a given step, sorted by order, filtered by depends_on
+  const getFieldsForStep = useCallback((stepNum) => {
+    return allFieldsConfig
+      .filter(f => f.step === stepNum && f.is_visible !== false && checkDependsOn(f.depends_on))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [allFieldsConfig, checkDependsOn]);
+
+  // Render a single field dynamically based on its config
+  // Special fields use their existing specialized rendering; others use DynamicFormField
+  const renderDynamicField = useCallback((field) => {
+    const key = field.field_key;
+    const label = getFieldLabel(key, field.label) || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const required = isFieldRequired(key, field.is_required);
+    const error = fieldErrors[key] || null;
+    const value = formData[key];
+    const fw = FULL_WIDTH_FIELD_KEYS.has(key);
+    const cls = fw ? "md:col-span-2" : "";
+    const style = getFieldStyle(key);
+    const hint = field.hint || FIELD_HINT_FALLBACKS[key] || null;
+    const errCls = error ? "border-red-500 focus-visible:ring-red-500 bg-red-50" : "";
+
+    // ── NIF pattern fields (digit-only, maxLength=9) ──────────────────────
+    if (NIF_PATTERN_FIELDS.has(key)) {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Input
+            id={key} name={key} type="text"
+            value={value || ""}
+            onChange={(e) => updateField(key, e.target.value.replace(/\D/g, ""))}
+            placeholder="123456789" maxLength={9}
+            className={errCls}
+          />
+          {error && <FieldError>{error}</FieldError>}
+          {hint && <FieldHint>{hint}</FieldHint>}
+        </div>
+      );
+    }
+
+    // ── birth_date (date with max 18 years ago) ──────────────────────────
+    if (key === "birth_date" || key === "titular2_birth_date") {
+      const maxDate = key === "birth_date"
+        ? new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        : undefined;
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Input
+            id={key} name={key} type="date"
+            value={value || ""}
+            onChange={(e) => updateField(key, e.target.value)}
+            max={maxDate}
+            className={errCls}
+          />
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── estado_civil / titular2_estado_civil (select with ESTADOS_CIVIS) ─
+    if (ESTADO_CIVIL_FIELDS.has(key)) {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger className={errCls}>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              {ESTADOS_CIVIS.map((ec) => (
+                <SelectItem key={ec.value} value={ec.value}>{ec.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {error && <FieldError>{error}</FieldError>}
+          {hint && <FieldHint>{hint}</FieldHint>}
+        </div>
+      );
+    }
+
+    // ── tipo_imovel (select with TIPOS_IMOVEL) ───────────────────────────
+    if (key === "tipo_imovel") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger className={errCls}>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              {TIPOS_IMOVEL.map((ti) => (
+                <SelectItem key={ti.value} value={ti.value}>{ti.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── num_quartos (select with QUARTOS) ────────────────────────────────
+    if (key === "num_quartos") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger className={errCls}>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              {QUARTOS.map((q) => (
+                <SelectItem key={q.value} value={q.value}>{q.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <FieldHint>T0 = Estúdio/Loft, T1 = 1 quarto, T2 = 2 quartos, etc.</FieldHint>
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── finalidade (select with dynamic hint) ────────────────────────────
+    if (key === "finalidade") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione a finalidade" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="compra_imovel">Compra de Imóvel</SelectItem>
+              <SelectItem value="refinanciamento">Refinanciamento / Transferência de Crédito</SelectItem>
+            </SelectContent>
+          </Select>
+          <FieldHint>
+            {value === "refinanciamento"
+              ? "Seleccionou refinanciamento - não será necessário preencher dados do imóvel."
+              : "Seleccionou compra - preencha os dados do imóvel pretendido abaixo."}
+          </FieldHint>
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── compra_tipo (select individual/outra_pessoa) ─────────────────────
+    if (key === "compra_tipo") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Select value={value || "individual"} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="individual">Individual</SelectItem>
+              <SelectItem value="outra_pessoa">Com outra pessoa</SelectItem>
+            </SelectContent>
+          </Select>
+          {hint && <FieldHint>{hint}</FieldHint>}
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── menor_35_anos (amber callout checkbox) ───────────────────────────
+    if (key === "menor_35_anos") {
+      return (
+        <div className="space-y-3 md:col-span-2 p-4 bg-amber-50 border border-amber-200 rounded-lg" key={key} style={style}>
+          <div className="flex items-start space-x-3">
+            <Checkbox
+              id={key}
+              checked={!!value}
+              onCheckedChange={(checked) => updateField(key, checked)}
+            />
+            <div className="space-y-1">
+              <Label htmlFor={key} className="text-sm font-medium cursor-pointer">
+                {label}
+              </Label>
+              <p className="text-xs text-amber-700">
+                Se tem menos de 35 anos, pode ser elegível para benefícios fiscais na compra da primeira habitação própria permanente (isenção/redução de IMT e Imposto de Selo).
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── caracteristicas (checkbox group with CARACTERISTICAS) ────────────
+    if (key === "caracteristicas") {
+      return (
+        <div className={cn("space-y-3", cls)} key={key} style={style}>
+          <Label>{label}</Label>
+          <FieldHint>Selecione apenas características que são absolutamente essenciais. Menos seleções = mais opções de imóveis.</FieldHint>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {CARACTERISTICAS.map((c) => (
+              <div key={c.value} className="flex items-center space-x-2">
+                <Checkbox
+                  id={c.value}
+                  checked={(value || []).includes(c.value)}
+                  onCheckedChange={() => toggleCaracteristica(c.value)}
+                />
+                <Label htmlFor={c.value} className="text-sm cursor-pointer">{c.label}</Label>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── ja_tem_casa_escolhida (boolean checkbox) ─────────────────────────
+    if (key === "ja_tem_casa_escolhida") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id={key}
+              checked={!!value}
+              onCheckedChange={(checked) => updateField(key, checked)}
+            />
+            <Label htmlFor={key} className="cursor-pointer">{label}</Label>
+          </div>
+        </div>
+      );
+    }
+
+    // ── prazo_pretendido (select with year range) ────────────────────────
+    if (key === "prazo_pretendido") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              {[5, 10, 15, 20, 25, 30, 35, 40].map((anos) => (
+                <SelectItem key={anos} value={anos.toString()}>{anos} anos</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── tempo_restante_credito (select with time ranges) ─────────────────
+    if (key === "tempo_restante_credito") {
+      return (
+        <div className={cn("space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione o tempo restante" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="menos_1_ano">Menos de 1 ano</SelectItem>
+              <SelectItem value="1_5_anos">1 a 5 anos</SelectItem>
+              <SelectItem value="5_10_anos">5 a 10 anos</SelectItem>
+              <SelectItem value="10_15_anos">10 a 15 anos</SelectItem>
+              <SelectItem value="15_20_anos">15 a 20 anos</SelectItem>
+              <SelectItem value="mais_20_anos">Mais de 20 anos</SelectItem>
+            </SelectContent>
+          </Select>
+          {hint && <FieldHint>{hint}</FieldHint>}
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── acesso_portal_financas (select with custom options) ──────────────
+    if (key === "acesso_portal_financas") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <Label>{label}</Label>
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="portal_financas">Portal das Finanças</SelectItem>
+              <SelectItem value="seguranca_social">Segurança Social Direta</SelectItem>
+              <SelectItem value="ambos">Ambos</SelectItem>
+              <SelectItem value="nenhuma">Nenhuma</SelectItem>
+            </SelectContent>
+          </Select>
+          {hint && <FieldHint>{hint}</FieldHint>}
+        </div>
+      );
+    }
+
+    // ── employment_type (select with custom options) ─────────────────────
+    if (key === "employment_type") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="efetivo">Contrato Efetivo (Sem Termo)</SelectItem>
+              <SelectItem value="termo_certo">Contrato a Termo Certo</SelectItem>
+              <SelectItem value="termo_incerto">Contrato a Termo Incerto</SelectItem>
+              <SelectItem value="independente">Trabalhador Independente</SelectItem>
+              <SelectItem value="empresario">Empresário em Nome Individual</SelectItem>
+              <SelectItem value="reformado">Reformado/Pensionista</SelectItem>
+              <SelectItem value="desempregado">Desempregado</SelectItem>
+            </SelectContent>
+          </Select>
+          {hint && <FieldHint>{hint}</FieldHint>}
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── sim/nao selects ──────────────────────────────────────────────────
+    if (SIM_NAO_SELECT_FIELDS.has(key)) {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          {required ? (
+            <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          ) : (
+            <Label>{label}</Label>
+          )}
+          <Select value={value || ""} onValueChange={(v) => updateField(key, v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sim">Sim</SelectItem>
+              <SelectItem value="nao">Não</SelectItem>
+            </SelectContent>
+          </Select>
+          {hint && <FieldHint>{hint}</FieldHint>}
+          {error && <FieldError>{error}</FieldError>}
+        </div>
+      );
+    }
+
+    // ── bancos_creditos (bank pills with value inputs) ──────────────────
+    if (key === "bancos_creditos") {
+      return (
+        <div className={cn("space-y-3", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData(prev => ({ ...prev, bancos_creditos: [] }))}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                (value || []).length === 0
+                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700'
+                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+              }`}
+            >
+              {(value || []).length === 0 && <span className="mr-1">✓</span>}
+              Nenhuma
+            </button>
+            {BANCOS.map((banco) => {
+              const item = (value || []).find(i => typeof i === 'object' ? i.banco === banco : i === banco);
+              const selected = !!item;
+              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+              return (
+                <button
+                  key={banco}
+                  type="button"
+                  onClick={() => toggleBanco(banco)}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
+                  style={selected
+                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
+                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
+                  }
+                >
+                  {selected && <span className="mr-1">✓</span>}
+                  {banco}
+                </button>
+              );
+            })}
+          </div>
+          {(value || []).length > 0 && (
+            <div className="space-y-2 mt-2">
+              {(value || []).map((item) => {
+                const banco = typeof item === 'object' ? item.banco : item;
+                const valor = typeof item === 'object' ? (item.valor || '') : '';
+                const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+                return (
+                  <div key={banco} className="flex items-center gap-3">
+                    <span
+                      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium min-w-[100px] justify-center"
+                      style={{ backgroundColor: colors.bg, color: colors.text }}
+                    >
+                      {banco}
+                    </span>
+                    <div className="flex-1 relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">€</span>
+                      <Input
+                        type="number" step="0.01" min="0"
+                        placeholder="Valor do crédito (ex: 150000)"
+                        value={valor}
+                        onChange={(e) => updateBancoValor(banco, e.target.value)}
+                        className="pl-7 h-9"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {hint && <FieldHint>{hint}</FieldHint>}
+        </div>
+      );
+    }
+
+    // ── tem_creditos_activos (bank toggle pills) ─────────────────────────
+    if (key === "tem_creditos_activos") {
+      return (
+        <div className={cn("space-y-3", cls)} key={key} style={style}>
+          <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData(prev => ({ ...prev, tem_creditos_activos: [] }))}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                (value || []).length === 0
+                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700'
+                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+              }`}
+            >
+              {(value || []).length === 0 && <span className="mr-1">✓</span>}
+              Nenhuma
+            </button>
+            {BANCOS.map((banco) => {
+              const selected = (value || []).includes(banco);
+              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+              return (
+                <button
+                  key={`contas-${banco}`}
+                  type="button"
+                  onClick={() => toggleContasAbertas(banco)}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
+                  style={selected
+                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
+                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
+                  }
+                >
+                  {selected && <span className="mr-1">✓</span>}
+                  {banco}
+                </button>
+              );
+            })}
+          </div>
+          {hint && <FieldHint>{hint}</FieldHint>}
+        </div>
+      );
+    }
+
+    // ── bancos_simulacoes (bank toggle pills) ───────────────────────────
+    if (key === "bancos_simulacoes") {
+      return (
+        <div className={cn("space-y-3", cls)} key={key} style={style}>
+          <Label htmlFor={key}>{label}</Label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFormData(prev => ({ ...prev, bancos_simulacoes: [] }))}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
+                (value || []).length === 0
+                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700'
+                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
+              }`}
+            >
+              {(value || []).length === 0 && <span className="mr-1">✓</span>}
+              Nenhuma
+            </button>
+            {BANCOS.map((banco) => {
+              const selected = (value || []).includes(banco);
+              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
+              return (
+                <button
+                  key={`sim-${banco}`}
+                  type="button"
+                  onClick={() => toggleBancoSimulacoes(banco)}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
+                  style={selected
+                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
+                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
+                  }
+                >
+                  {selected && <span className="mr-1">✓</span>}
+                  {banco}
+                </button>
+              );
+            })}
+          </div>
+          {hint && <FieldHint>{hint}</FieldHint>}
+        </div>
+      );
+    }
+
+    // ── consent_data / consent_contact (styled consent checkboxes) ───────
+    if (key === "consent_data" || key === "consent_contact") {
+      const consentLabel = key === "consent_data"
+        ? "Autorizo o tratamento dos meus dados pessoais para análise do meu pedido de crédito/imobiliário, nos termos do RGPD. *"
+        : "Aceito ser contactado pela equipa para dar seguimento ao meu processo. *";
+      return (
+        <div className="flex items-start space-x-3" key={key} style={style}>
+          <Checkbox
+            id={key}
+            checked={!!value}
+            onCheckedChange={(checked) => updateField(key, checked)}
+          />
+          <Label htmlFor={key} className="text-sm leading-relaxed cursor-pointer">
+            {label !== key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+              ? label
+              : consentLabel}
+          </Label>
+        </div>
+      );
+    }
+
+    // ── outras_caracteristicas (conditional text, rendered when visible) ─
+    if (key === "outras_caracteristicas") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <Label htmlFor={key}>{label}</Label>
+          <Input
+            id={key} name={key}
+            value={value || ""}
+            onChange={(e) => updateField(key, e.target.value)}
+            placeholder="Especifique outras características"
+          />
+        </div>
+      );
+    }
+
+    // ── Textarea fields ─────────────────────────────────────────────────
+    if (key === "caracteristicas_imovel" || key === "outras_informacoes") {
+      return (
+        <div className={cn("space-y-2", cls)} key={key} style={style}>
+          <Label htmlFor={key}>{label}</Label>
+          <Textarea
+            id={key} name={key}
+            value={value || ""}
+            onChange={(e) => updateField(key, e.target.value)}
+            placeholder={hint || ""}
+            rows={key === "outras_informacoes" ? 3 : 2}
+          />
+        </div>
+      );
+    }
+
+    // ── DEFAULT: Generic rendering via DynamicFormField ──────────────────
+    // This handles text, email, tel, number, date, select, checkbox, radio, textarea
+    // for all fields NOT matched above (including sexo, profissao, codigo_postal,
+    // titular2_* fields, and any custom fields from the admin config)
+    return (
+      <div style={style} key={key} className={cn(cls)}>
+        <DynamicFormField
+          field={{
+            ...field,
+            label,
+            hint,
+          }}
+          value={value}
+          onChange={updateField}
+          error={error}
+          className={cls || undefined}
+        />
+      </div>
+    );
+  }, [formData, fieldErrors, updateField, setFormData, toggleCaracteristica, toggleBanco, updateBancoValor, toggleContasAbertas, toggleBancoSimulacoes, checkDependsOn, allFieldsConfig]);
 
   // Validação de NIF português
   const validateNIF = (nif) => {
@@ -1101,1046 +1745,112 @@ const PublicClientForm = ({ previewMode = false }) => {
     </div>
   );
 
-  // Step 1: Dados Pessoais - Titular
-  const renderStep1 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <User className="h-10 w-10 mx-auto mb-2 text-primary" />
-        <h2 className="text-xl font-semibold mb-2 text-foreground">Dados Pessoais - Titular</h2>
-        <p className="text-muted-foreground">Informações do titular principal</p>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2 md:col-span-2" style={getFieldStyle("name")}>
-          <RequiredLabel htmlFor="name" required={isFieldRequired("name", true)}>{getFieldLabel("name", "Nome completo")}</RequiredLabel>
-          <Input
-            id="name"
-            name="name"
-            value={formData.name}
-            onChange={(e) => updateField("name", e.target.value)}
-            placeholder="Nome completo"
-            required={isFieldRequired("name", true)}
-            data-testid="client-name"
-            className={cn(fieldErrors.name && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-          />
-          {fieldErrors.name && <FieldError>{fieldErrors.name}</FieldError>}
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("email")}>
-          <RequiredLabel htmlFor="email" required={isFieldRequired("email", true)}>{getFieldLabel("email", "Email")}</RequiredLabel>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            value={formData.email}
-            onChange={(e) => updateField("email", e.target.value)}
-            placeholder="email@exemplo.pt"
-            required={isFieldRequired("email", true)}
-            data-testid="client-email"
-            className={cn(fieldErrors.email && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-          />
-          {fieldErrors.email && <FieldError>{fieldErrors.email}</FieldError>}
-          <FieldHint>Utilizaremos este email para comunicar consigo sobre o seu processo.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("phone")}>
-          <RequiredLabel htmlFor="phone" required={isFieldRequired("phone", true)}>{getFieldLabel("phone", "Telemóvel")}</RequiredLabel>
-          <Input
-            id="phone"
-            name="phone"
-            type="tel"
-            value={formData.phone}
-            onChange={(e) => updateField("phone", e.target.value)}
-            placeholder="+351 912 345 678"
-            required={isFieldRequired("phone", true)}
-            data-testid="client-phone"
-            className={cn(fieldErrors.phone && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-          />
-          {fieldErrors.phone && <FieldError>{fieldErrors.phone}</FieldError>}
-          <FieldHint>Número de contacto direto para agendar visitas e reuniões.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("nif")}>
-          <RequiredLabel htmlFor="nif" required={isFieldRequired("nif", true)}>{getFieldLabel("nif", "NIF")}</RequiredLabel>
-          <Input
-            id="nif"
-            name="nif"
-            type="text"
-            value={formData.nif}
-            onChange={(e) => updateField("nif", e.target.value.replace(/\D/g, ""))}
-            placeholder="123456789"
-            maxLength={9}
-            required={isFieldRequired("nif", true)}
-            data-testid="client-nif"
-            className={cn(fieldErrors.nif && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-          />
-          {fieldErrors.nif && <FieldError>{fieldErrors.nif}</FieldError>}
-          <FieldHint>Número de Identificação Fiscal - 9 dígitos, encontra-se no Cartão de Cidadão.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("documento_id")}>
-          <RequiredLabel htmlFor="documento_id" required={isFieldRequired("documento_id", true)}>{getFieldLabel("documento_id", "Cartão de Cidadão/Passaporte")}</RequiredLabel>
-          <Input
-            id="documento_id"
-            name="documento_id"
-            value={formData.documento_id}
-            onChange={(e) => updateField("documento_id", e.target.value)}
-            placeholder="Número do documento"
-            required={isFieldRequired("documento_id", true)}
-            data-testid="client-documento"
-            className={cn(fieldErrors.documento_id && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-          />
-          {fieldErrors.documento_id && <FieldError>{fieldErrors.documento_id}</FieldError>}
-          <FieldHint>Número do documento de identificação válido.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("data_validade_cc")}>
-          <RequiredLabel htmlFor="data_validade_cc" required={isFieldRequired("data_validade_cc", true)}>{getFieldLabel("data_validade_cc", "Data Validade CC")}</RequiredLabel>
-          <Input
-            id="data_validade_cc"
-            type="date"
-            value={formData.data_validade_cc}
-            onChange={(e) => updateField("data_validade_cc", e.target.value)}
-            required={isFieldRequired("data_validade_cc", true)}
-            data-testid="client-data-validade-cc"
-            className={cn(fieldErrors.data_validade_cc && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-          />
-          {fieldErrors.data_validade_cc && <FieldError>{fieldErrors.data_validade_cc}</FieldError>}
-          <FieldHint>Data de validade do Cartão de Cidadão.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("naturalidade")}>
-          <RequiredLabel htmlFor="naturalidade" required={isFieldRequired("naturalidade", true)}>{getFieldLabel("naturalidade", "Naturalidade")}</RequiredLabel>
-          <Input
-            id="naturalidade"
-            name="naturalidade"
-            value={formData.naturalidade}
-            onChange={(e) => updateField("naturalidade", e.target.value)}
-            placeholder="Local de nascimento"
-            required={isFieldRequired("naturalidade", true)}
-            data-testid="client-naturalidade"
-            className={cn(fieldErrors.naturalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-          />
-          {fieldErrors.naturalidade && <FieldError>{fieldErrors.naturalidade}</FieldError>}
-          <FieldHint>Freguesia/concelho onde nasceu.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("nacionalidade")}>
-          <RequiredLabel htmlFor="nacionalidade" required={isFieldRequired("nacionalidade", true)}>{getFieldLabel("nacionalidade", "Nacionalidade")}</RequiredLabel>
-          <Input
-            id="nacionalidade"
-            name="nacionalidade"
-            value={formData.nacionalidade}
-            onChange={(e) => updateField("nacionalidade", e.target.value)}
-            placeholder="Portuguesa"
-            required={isFieldRequired("nacionalidade", true)}
-            data-testid="client-nacionalidade"
-          />
-        </div>
-        
-        <div className="space-y-2 md:col-span-2" style={getFieldStyle("morada_fiscal")}>
-          <RequiredLabel htmlFor="morada_fiscal" required={isFieldRequired("morada_fiscal", true)}>{getFieldLabel("morada_fiscal", "Morada Fiscal")}</RequiredLabel>
-          <Input
-            id="morada_fiscal"
-            value={formData.morada_fiscal}
-            onChange={(e) => updateField("morada_fiscal", e.target.value)}
-            placeholder="Rua, número, código postal, localidade"
-            required={isFieldRequired("morada_fiscal", true)}
-            data-testid="client-morada"
-          />
-          <FieldHint>Morada completa conforme registada nas Finanças.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("birth_date")}>
-          <RequiredLabel htmlFor="birth_date" required={isFieldRequired("birth_date", true)}>{getFieldLabel("birth_date", "Data de Nascimento")}</RequiredLabel>
-          <Input
-            id="birth_date"
-            type="date"
-            value={formData.birth_date}
-            onChange={(e) => updateField("birth_date", e.target.value)}
-            max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
-            required={isFieldRequired("birth_date", true)}
-            data-testid="client-birth-date"
-          />
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("estado_civil")}>
-          <RequiredLabel htmlFor="estado_civil" required={isFieldRequired("estado_civil", true)}>{getFieldLabel("estado_civil", "Estado Civil")}</RequiredLabel>
-          <Select value={formData.estado_civil} onValueChange={(v) => updateField("estado_civil", v)}>
-            <SelectTrigger data-testid="client-estado-civil">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              {ESTADOS_CIVIS.map((ec) => (
-                <SelectItem key={ec.value} value={ec.value}>{ec.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FieldHint>Se casado/a, indique o regime de bens do casamento.</FieldHint>
-        </div>
-        
-        <div className="space-y-3 md:col-span-2 p-4 bg-amber-50 border border-amber-200 rounded-lg" style={getFieldStyle("menor_35_anos")}>
-          <div className="flex items-start space-x-3">
-            <Checkbox
-              id="menor_35_anos"
-              checked={formData.menor_35_anos}
-              onCheckedChange={(checked) => updateField("menor_35_anos", checked)}
-              data-testid="client-menor-35"
-            />
-            <div className="space-y-1">
-              <Label htmlFor="menor_35_anos" className="text-sm font-medium cursor-pointer">
-                {getFieldLabel("menor_35_anos", "Menor de 35 anos")}
-              </Label>
-              <p className="text-xs text-amber-700">
-                Se tem menos de 35 anos, pode ser elegível para benefícios fiscais na compra da primeira habitação própria permanente (isenção/redução de IMT e Imposto de Selo).
-              </p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="space-y-2 md:col-span-2">
-          <RequiredLabel htmlFor="compra_tipo" required={isFieldRequired("compra_tipo", false)}>{getFieldLabel("compra_tipo", "Tipo de compra")}</RequiredLabel>
-          <Select value={formData.compra_tipo} onValueChange={(v) => updateField("compra_tipo", v)}>
-            <SelectTrigger data-testid="client-compra-tipo">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="individual">Individual</SelectItem>
-              <SelectItem value="outra_pessoa">Com outra pessoa</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>Se comprar com outra pessoa (cônjuge, familiar, etc.), selecione "Com outra pessoa" para preencher os dados do 2º titular no próximo passo.</FieldHint>
-        </div>
-      </div>
-    </div>
-  );
+  // Step 1: Dados Pessoais - Titular (dynamic from allFieldsConfig)
+  const renderStep1 = () => {
+    const stepFields = getFieldsForStep(1);
 
-  // Step 2: Dados do 2º Titular (se aplicável)
-  const renderStep2 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <Users className="h-10 w-10 mx-auto mb-2 text-primary" />
-        <h2 className="text-xl font-semibold mb-2">Dados do 2º Titular</h2>
-        <p className="text-muted-foreground">
-          {formData.compra_tipo === "outra_pessoa" 
-            ? "Preencha os dados do segundo titular" 
-            : "Não aplicável - compra individual"}
-        </p>
-      </div>
-      
-      {formData.compra_tipo === "outra_pessoa" ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2 md:col-span-2" style={getFieldStyle("titular2_name")}>
-            <RequiredLabel htmlFor="titular2_name" required={isFieldRequired("titular2_name", false)}>{getFieldLabel("titular2_name", "Nome do 2º Titular")}</RequiredLabel>
-            <Input
-              id="titular2_name"
-              value={formData.titular2_name}
-              onChange={(e) => updateField("titular2_name", e.target.value)}
-              placeholder="Nome completo"
-              data-testid="titular2-name"
-              className={cn(fieldErrors.titular2_name && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_name && <FieldError>{fieldErrors.titular2_name}</FieldError>}
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("titular2_email")}>
-            <RequiredLabel htmlFor="titular2_email" required={isFieldRequired("titular2_email", false)}>{getFieldLabel("titular2_email", "Email (2º Titular)")}</RequiredLabel>
-            <Input
-              id="titular2_email"
-              type="email"
-              value={formData.titular2_email}
-              onChange={(e) => updateField("titular2_email", e.target.value)}
-              placeholder="email@exemplo.pt"
-              data-testid="titular2-email"
-              className={cn(fieldErrors.titular2_email && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_email && <FieldError>{fieldErrors.titular2_email}</FieldError>}
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("titular2_phone")}>
-            <RequiredLabel htmlFor="titular2_phone" required={isFieldRequired("titular2_phone", false)}>{getFieldLabel("titular2_phone", "Telefone (2º Titular)")}</RequiredLabel>
-            <Input
-              id="titular2_phone"
-              type="tel"
-              value={formData.titular2_phone}
-              onChange={(e) => updateField("titular2_phone", e.target.value)}
-              placeholder="+351 912 345 678"
-              data-testid="titular2-phone"
-              className={cn(fieldErrors.titular2_phone && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_phone && <FieldError>{fieldErrors.titular2_phone}</FieldError>}
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("titular2_nif")}>
-            <RequiredLabel htmlFor="titular2_nif" required={isFieldRequired("titular2_nif", false)}>{getFieldLabel("titular2_nif", "NIF (2º Titular)")}</RequiredLabel>
-            <Input
-              id="titular2_nif"
-              type="text"
-              value={formData.titular2_nif}
-              onChange={(e) => updateField("titular2_nif", e.target.value.replace(/\D/g, ""))}
-              placeholder="123456789"
-              maxLength={9}
-              data-testid="titular2-nif"
-              className={cn(fieldErrors.titular2_nif && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_nif && <FieldError>{fieldErrors.titular2_nif}</FieldError>}
-            <FieldHint>Número de Identificação Fiscal - 9 dígitos</FieldHint>
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("titular2_documento_id")}>
-            <Label htmlFor="titular2_documento_id">{getFieldLabel("titular2_documento_id", "Documento ID (2º Titular)")}</Label>
-            <Input
-              id="titular2_documento_id"
-              value={formData.titular2_documento_id}
-              onChange={(e) => updateField("titular2_documento_id", e.target.value)}
-              placeholder="Número do documento"
-              data-testid="titular2-documento"
-              className={cn(fieldErrors.titular2_documento_id && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_documento_id && <FieldError>{fieldErrors.titular2_documento_id}</FieldError>}
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("titular2_naturalidade")}>
-            <Label htmlFor="titular2_naturalidade">{getFieldLabel("titular2_naturalidade", "Naturalidade (2º Titular)")}</Label>
-            <Input
-              id="titular2_naturalidade"
-              value={formData.titular2_naturalidade}
-              onChange={(e) => updateField("titular2_naturalidade", e.target.value)}
-              placeholder="Local de nascimento"
-              data-testid="titular2-naturalidade"
-              className={cn(fieldErrors.titular2_naturalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_naturalidade && <FieldError>{fieldErrors.titular2_naturalidade}</FieldError>}
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("titular2_nacionalidade")}>
-            <Label htmlFor="titular2_nacionalidade">{getFieldLabel("titular2_nacionalidade", "Nacionalidade (2º Titular)")}</Label>
-            <Input
-              id="titular2_nacionalidade"
-              value={formData.titular2_nacionalidade}
-              onChange={(e) => updateField("titular2_nacionalidade", e.target.value)}
-              placeholder="Portuguesa"
-              data-testid="titular2-nacionalidade"
-              className={cn(fieldErrors.titular2_nacionalidade && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_nacionalidade && <FieldError>{fieldErrors.titular2_nacionalidade}</FieldError>}
-          </div>
-          
-          <div className="space-y-2 md:col-span-2" style={getFieldStyle("titular2_morada_fiscal")}>
-            <Label htmlFor="titular2_morada_fiscal">{getFieldLabel("titular2_morada_fiscal", "Morada Fiscal (2º Titular)")}</Label>
-            <Input
-              id="titular2_morada_fiscal"
-              value={formData.titular2_morada_fiscal}
-              onChange={(e) => updateField("titular2_morada_fiscal", e.target.value)}
-              placeholder="Rua, número, código postal, localidade"
-              data-testid="titular2-morada"
-              className={cn(fieldErrors.titular2_morada_fiscal && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_morada_fiscal && <FieldError>{fieldErrors.titular2_morada_fiscal}</FieldError>}
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("titular2_birth_date")}>
-            <Label htmlFor="titular2_birth_date">{getFieldLabel("titular2_birth_date", "Data Nascimento (2º Titular)")}</Label>
-            <Input
-              id="titular2_birth_date"
-              type="date"
-              value={formData.titular2_birth_date}
-              onChange={(e) => updateField("titular2_birth_date", e.target.value)}
-              data-testid="titular2-birth-date"
-              className={cn(fieldErrors.titular2_birth_date && "border-red-500 focus-visible:ring-red-500 bg-red-50")}
-            />
-            {fieldErrors.titular2_birth_date && <FieldError>{fieldErrors.titular2_birth_date}</FieldError>}
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("titular2_estado_civil")}>
-            <Label htmlFor="titular2_estado_civil">{getFieldLabel("titular2_estado_civil", "Estado Civil (2º Titular)")}</Label>
-            <Select value={formData.titular2_estado_civil} onValueChange={(v) => updateField("titular2_estado_civil", v)}>
-              <SelectTrigger 
-                data-testid="titular2-estado-civil"
-                className={cn(fieldErrors.titular2_estado_civil && "border-red-500 focus:ring-red-500 bg-red-50")}
-              >
-                <SelectValue placeholder="Selecione" />
-              </SelectTrigger>
-              <SelectContent>
-                {ESTADOS_CIVIS.map((ec) => (
-                  <SelectItem key={ec.value} value={ec.value}>{ec.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {fieldErrors.titular2_estado_civil && <FieldError>{fieldErrors.titular2_estado_civil}</FieldError>}
-          </div>
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-6">
+          <User className="h-10 w-10 mx-auto mb-2 text-primary" />
+          <h2 className="text-xl font-semibold mb-2 text-foreground">Dados Pessoais - Titular</h2>
+          <p className="text-muted-foreground">Informações do titular principal</p>
         </div>
-      ) : (
-        <div className="text-center py-8 bg-muted/50 rounded-lg">
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {stepFields.map(field => renderDynamicField(field))}
+        </div>
+      </div>
+    );
+  };
+
+  // Step 2: Dados do 2º Titular (dynamic from allFieldsConfig, conditional on compra_tipo)
+  const renderStep2 = () => {
+    const stepFields = getFieldsForStep(2);
+
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-6">
+          <Users className="h-10 w-10 mx-auto mb-2 text-primary" />
+          <h2 className="text-xl font-semibold mb-2">Dados do 2º Titular</h2>
           <p className="text-muted-foreground">
-            Selecione "Com outra pessoa" no passo anterior para preencher os dados do 2º titular.
+            {stepFields.length > 0
+              ? "Preencha os dados do segundo titular"
+              : "Não aplicável - compra individual"}
           </p>
         </div>
-      )}
-    </div>
-  );
 
-  // Step 3: Imóvel Pretendido
-  const renderStep3 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <Home className="h-10 w-10 mx-auto mb-2 text-primary" />
-        <h2 className="text-xl font-semibold mb-2">Tipo de Pedido</h2>
-        <p className="text-muted-foreground">Indique a finalidade do seu pedido</p>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* FINALIDADE PRIMEIRO */}
-        <div className="space-y-2 md:col-span-2" style={getFieldStyle("finalidade")}>
-          <RequiredLabel htmlFor="finalidade" required={isFieldRequired("finalidade", true)}>{getFieldLabel("finalidade", "Finalidade do pedido")}</RequiredLabel>
-          <Select value={formData.finalidade} onValueChange={(v) => updateField("finalidade", v)}>
-            <SelectTrigger data-testid="imovel-finalidade">
-              <SelectValue placeholder="Selecione a finalidade" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="compra_imovel">Compra de Imóvel</SelectItem>
-              <SelectItem value="refinanciamento">Refinanciamento / Transferência de Crédito</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>
-            {formData.finalidade === "refinanciamento" 
-              ? "Seleccionou refinanciamento - não será necessário preencher dados do imóvel." 
-              : "Seleccionou compra - preencha os dados do imóvel pretendido abaixo."}
-          </FieldHint>
-        </div>
-        
-        {/* CAMPOS DE IMÓVEL - SÓ SE NÃO FOR REFINANCIAMENTO */}
-        {formData.finalidade !== "refinanciamento" && (
-          <>
-            <div className="space-y-2" style={getFieldStyle("tipo_imovel")}>
-              <RequiredLabel htmlFor="tipo_imovel" required={isFieldRequired("tipo_imovel", true)}>{getFieldLabel("tipo_imovel", "Tipo de imóvel")}</RequiredLabel>
-              <Select value={formData.tipo_imovel} onValueChange={(v) => updateField("tipo_imovel", v)}>
-                <SelectTrigger data-testid="imovel-tipo">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIPOS_IMOVEL.map((ti) => (
-                    <SelectItem key={ti.value} value={ti.value}>{ti.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2" style={getFieldStyle("num_quartos")}>
-              <RequiredLabel htmlFor="num_quartos" required={isFieldRequired("num_quartos", true)}>{getFieldLabel("num_quartos", "Nº quartos")}</RequiredLabel>
-              <Select value={formData.num_quartos} onValueChange={(v) => updateField("num_quartos", v)}>
-                <SelectTrigger data-testid="imovel-quartos">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {QUARTOS.map((q) => (
-                    <SelectItem key={q.value} value={q.value}>{q.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FieldHint>T0 = Estúdio/Loft, T1 = 1 quarto, T2 = 2 quartos, etc.</FieldHint>
-            </div>
-            
-            <div className="space-y-2 md:col-span-2" style={getFieldStyle("localizacao")}>
-              <RequiredLabel htmlFor="localizacao" required={isFieldRequired("localizacao", true)}>{getFieldLabel("localizacao", "Localização/Zona preferida")}</RequiredLabel>
-              <Input
-                id="localizacao"
-                value={formData.localizacao}
-                onChange={(e) => updateField("localizacao", e.target.value)}
-                placeholder="Ex: Lisboa, Cascais, Sintra"
-                required={isFieldRequired("localizacao", true)}
-                data-testid="imovel-localizacao"
-              />
-              <FieldHint>Pode indicar várias zonas separadas por vírgula. Quanto mais específico, melhor podemos ajudar.</FieldHint>
-            </div>
-            
-            <div className="space-y-3 md:col-span-2" style={getFieldStyle("caracteristicas")}>
-              <Label>{getFieldLabel("caracteristicas", "Características Pretendidas")}</Label>
-              <FieldHint>Selecione apenas características que são absolutamente essenciais. Menos seleções = mais opções de imóveis.</FieldHint>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {CARACTERISTICAS.map((c) => (
-                  <div key={c.value} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={c.value}
-                      checked={(formData.caracteristicas || []).includes(c.value)}
-                      onCheckedChange={() => toggleCaracteristica(c.value)}
-                      data-testid={`caracteristica-${c.value}`}
-                    />
-                    <Label htmlFor={c.value} className="text-sm cursor-pointer">{c.label}</Label>
-                  </div>
-                ))}
-              </div>
-            </div>
-            
-            {(formData.caracteristicas || []).includes("outro") && (
-              <div className="space-y-2 md:col-span-2" style={getFieldStyle("outras_caracteristicas")}>
-                <Label htmlFor="outras_caracteristicas">{getFieldLabel("outras_caracteristicas", "Outras características")}</Label>
-                <Input
-                  id="outras_caracteristicas"
-                  value={formData.outras_caracteristicas}
-                  onChange={(e) => updateField("outras_caracteristicas", e.target.value)}
-                  placeholder="Especifique outras características"
-                  data-testid="imovel-outras-caracteristicas"
-                />
-              </div>
-            )}
-            
-            {/* Novos campos: Área, Valor */}
-            <div className="space-y-2" style={getFieldStyle("area_pretendida")}>
-              <Label htmlFor="area_pretendida">{getFieldLabel("area_pretendida", "Área pretendida (m²)")}</Label>
-              <Input
-                id="area_pretendida"
-                type="number"
-                value={formData.area_pretendida}
-                onChange={(e) => updateField("area_pretendida", e.target.value)}
-                placeholder="Ex: 100"
-                data-testid="imovel-area-pretendida"
-              />
-              <FieldHint>Valor aproximado/médio em metros quadrados</FieldHint>
-            </div>
-            
-            <div className="space-y-2" style={getFieldStyle("valor_maximo_imovel")}>
-              <Label htmlFor="valor_maximo_imovel">{getFieldLabel("valor_maximo_imovel", "Valor máximo do imóvel")}</Label>
-              <Input
-                id="valor_maximo_imovel"
-                type="number"
-                value={formData.valor_maximo_imovel}
-                onChange={(e) => updateField("valor_maximo_imovel", e.target.value)}
-                placeholder="Ex: 300000"
-                data-testid="imovel-valor-maximo"
-              />
-            </div>
-            
-            <div className="space-y-2 md:col-span-2" style={getFieldStyle("ja_tem_casa_escolhida")}>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="ja_tem_casa_escolhida"
-                  checked={formData.ja_tem_casa_escolhida}
-                  onCheckedChange={(checked) => updateField("ja_tem_casa_escolhida", checked)}
-                  data-testid="imovel-ja-tem-casa"
-                />
-                <Label htmlFor="ja_tem_casa_escolhida" className="cursor-pointer">
-                  {getFieldLabel("ja_tem_casa_escolhida", "Já tem casa escolhida")}
-                </Label>
-              </div>
-            </div>
-            
-            {/* Campos condicionais se já tem casa escolhida */}
-            {formData.ja_tem_casa_escolhida && (
-              <>
-                <div className="space-y-2" style={getFieldStyle("proprietario_nome")}>
-                  <Label htmlFor="proprietario_nome">{getFieldLabel("proprietario_nome", "Nome do proprietário")}</Label>
-                  <Input
-                    id="proprietario_nome"
-                    value={formData.proprietario_nome}
-                    onChange={(e) => updateField("proprietario_nome", e.target.value)}
-                    placeholder="Nome completo do proprietário"
-                    data-testid="imovel-proprietario-nome"
-                  />
-                </div>
-                
-                <div className="space-y-2" style={getFieldStyle("proprietario_contacto")}>
-                  <Label htmlFor="proprietario_contacto">{getFieldLabel("proprietario_contacto", "Contacto do proprietário")}</Label>
-                  <Input
-                    id="proprietario_contacto"
-                    value={formData.proprietario_contacto}
-                    onChange={(e) => updateField("proprietario_contacto", e.target.value)}
-                    placeholder="Telefone ou email"
-                    data-testid="imovel-proprietario-contacto"
-                  />
-                </div>
-                
-                <div className="space-y-2 md:col-span-2" style={getFieldStyle("caracteristicas_imovel")}>
-                  <Label htmlFor="caracteristicas_imovel">{getFieldLabel("caracteristicas_imovel", "Características básicas do imóvel escolhido")}</Label>
-                  <Textarea
-                    id="caracteristicas_imovel"
-                    value={formData.caracteristicas_imovel}
-                    onChange={(e) => updateField("caracteristicas_imovel", e.target.value)}
-                    placeholder="Ex: T3, 120m², rés-do-chão, garagem, jardim..."
-                    rows={2}
-                    data-testid="imovel-caracteristicas"
-                  />
-                </div>
-              </>
-            )}
-          </>
-        )}
-        
-        {/* Para refinanciamento, mostrar campos específicos */}
-        {formData.finalidade === "refinanciamento" && (
-          <>
-            <div className="space-y-2 md:col-span-2" style={getFieldStyle("valor_transferencia")}>
-              <RequiredLabel htmlFor="valor_transferencia" required={isFieldRequired("valor_transferencia", true)}>{getFieldLabel("valor_transferencia", "Valor a Transferir/Consolidar (€)")}</RequiredLabel>
-              <Input
-                id="valor_transferencia"
-                type="number"
-                value={formData.valor_transferencia}
-                onChange={(e) => updateField("valor_transferencia", e.target.value)}
-                placeholder="Ex: 150000"
-                data-testid="imovel-valor-transferencia"
-              />
-              <FieldHint>Valor total dos créditos que pretende consolidar/transferir.</FieldHint>
-            </div>
-            
-            <div className="space-y-2" style={getFieldStyle("valor_extra")}>
-              <Label htmlFor="valor_extra">{getFieldLabel("valor_extra", "Valor Extra Necessário (€)")}</Label>
-              <Input
-                id="valor_extra"
-                type="number"
-                value={formData.valor_extra}
-                onChange={(e) => updateField("valor_extra", e.target.value)}
-                placeholder="Ex: 30000"
-                data-testid="imovel-valor-extra"
-              />
-              <FieldHint>Se precisa de capital adicional além do refinanciamento.</FieldHint>
-            </div>
-            
-            <div className="space-y-2" style={getFieldStyle("prazo_pretendido")}>
-              <RequiredLabel htmlFor="prazo_pretendido" required={isFieldRequired("prazo_pretendido", false)}>{getFieldLabel("prazo_pretendido", "Prazo pretendido (anos)")}</RequiredLabel>
-              <Select value={formData.prazo_pretendido} onValueChange={(v) => updateField("prazo_pretendido", v)}>
-                <SelectTrigger data-testid="imovel-prazo">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {[5, 10, 15, 20, 25, 30, 35, 40].map((anos) => (
-                    <SelectItem key={anos} value={anos.toString()}>{anos} anos</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2 md:col-span-2" style={getFieldStyle("outras_informacoes")}>
-              <Label htmlFor="outras_informacoes">{getFieldLabel("outras_informacoes", "Outras informações")}</Label>
-              <Textarea
-                id="outras_informacoes"
-                value={formData.outras_informacoes}
-                onChange={(e) => updateField("outras_informacoes", e.target.value)}
-                placeholder="Indique o banco actual, valor em dívida, spread actual, etc..."
-                rows={3}
-                data-testid="imovel-outras-info"
-              />
-            </div>
-          </>
-        )}
-        
-        {formData.finalidade !== "refinanciamento" && (
-          <div className="space-y-2 md:col-span-2" style={getFieldStyle("outras_informacoes")}>
-            <Label htmlFor="outras_informacoes">{getFieldLabel("outras_informacoes", "Outras informações")}</Label>
-            <Textarea
-              id="outras_informacoes"
-              value={formData.outras_informacoes}
-              onChange={(e) => updateField("outras_informacoes", e.target.value)}
-              placeholder="Informações adicionais sobre o que procura..."
-              rows={3}
-              data-testid="imovel-outras-info"
-            />
+        {stepFields.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {stepFields.map(field => renderDynamicField(field))}
+          </div>
+        ) : (
+          <div className="text-center py-8 bg-muted/50 rounded-lg">
+            <p className="text-muted-foreground">
+              Selecione "Com outra pessoa" no passo anterior para preencher os dados do 2º titular.
+            </p>
           </div>
         )}
       </div>
-    </div>
-  );
+    );
+  };
 
-  // Step 4: Situação Financeira
-  const renderStep4 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <Briefcase className="h-10 w-10 mx-auto mb-2 text-amber-500" />
-        <h2 className="text-xl font-semibold mb-2 text-blue-950">Situação Financeira</h2>
-        <p className="text-muted-foreground">Informações sobre a sua situação financeira</p>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2" style={getFieldStyle("acesso_portal_financas")}>
-          <Label>{getFieldLabel("acesso_portal_financas", "Tem acesso ao portal das finanças e segurança social direita?")}</Label>
-          <Select value={formData.acesso_portal_financas} onValueChange={(v) => updateField("acesso_portal_financas", v)}>
-            <SelectTrigger data-testid="fin-portal-financas">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="portal_financas">Portal das Finanças</SelectItem>
-              <SelectItem value="seguranca_social">Segurança Social Direta</SelectItem>
-              <SelectItem value="ambos">Ambos</SelectItem>
-              <SelectItem value="nenhuma">Nenhuma</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>Indique a que portais oficiais tem acesso. As credenciais serão solicitadas posteriormente se necessário.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("chave_movel_digital")}>
-          <RequiredLabel htmlFor="chave_movel_digital" required={isFieldRequired("chave_movel_digital", true)}>{getFieldLabel("chave_movel_digital", "Chave Móvel Digital")}</RequiredLabel>
-          <Select value={formData.chave_movel_digital} onValueChange={(v) => updateField("chave_movel_digital", v)}>
-            <SelectTrigger data-testid="fin-chave-movel">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="sim">Sim</SelectItem>
-              <SelectItem value="nao">Não</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>A CMD facilita a assinatura digital de documentos. Pode ativar em autenticacao.gov.pt</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("renda_habitacao_atual")}>
-          <Label htmlFor="renda_habitacao_atual">{getFieldLabel("renda_habitacao_atual", "Renda de habitação atual")}</Label>
-          <Input
-            id="renda_habitacao_atual"
-            type="number"
-            value={formData.renda_habitacao_atual}
-            onChange={(e) => updateField("renda_habitacao_atual", e.target.value)}
-            placeholder="0.00"
-            data-testid="fin-renda-atual"
-          />
-          <FieldHint>Se vive em casa própria ou com familiares, deixe em branco ou coloque 0.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("precisa_vender_casa")}>
-          <Label>{getFieldLabel("precisa_vender_casa", "Precisa de vender casa?")}</Label>
-          <Select value={formData.precisa_vender_casa} onValueChange={(v) => updateField("precisa_vender_casa", v)}>
-            <SelectTrigger data-testid="fin-vender-casa">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="sim">Sim</SelectItem>
-              <SelectItem value="nao">Não</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>Se precisa vender para ter capital de entrada ou liquidar crédito existente.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("efetivo")}>
-          <Label htmlFor="efetivo">{getFieldLabel("efetivo", "Efetivo?")}</Label>
-          <Select value={formData.efetivo} onValueChange={(v) => updateField("efetivo", v)}>
-            <SelectTrigger data-testid="fin-efetivo">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="sim">Sim</SelectItem>
-              <SelectItem value="nao">Não</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>Se tem contrato de trabalho sem termo (efetivo) ou está em período experimental.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("trabalha_estrangeiro")}>
-          <Label htmlFor="trabalha_estrangeiro">{getFieldLabel("trabalha_estrangeiro", "Trabalha no estrangeiro?")}</Label>
-          <Select value={formData.trabalha_estrangeiro} onValueChange={(v) => updateField("trabalha_estrangeiro", v)}>
-            <SelectTrigger data-testid="fin-trabalha-estrangeiro">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="sim">Sim</SelectItem>
-              <SelectItem value="nao">Não</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>Indique se trabalha fora de Portugal. Pode influenciar as condições do crédito.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("employment_type")}>
-          <RequiredLabel htmlFor="employment_type" required={isFieldRequired("employment_type", true)}>{getFieldLabel("employment_type", "Tipo de Contrato de Trabalho")}</RequiredLabel>
-          <Select value={formData.employment_type} onValueChange={(v) => updateField("employment_type", v)}>
-            <SelectTrigger data-testid="fin-employment-type">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="efetivo">Contrato Efetivo (Sem Termo)</SelectItem>
-              <SelectItem value="termo_certo">Contrato a Termo Certo</SelectItem>
-              <SelectItem value="termo_incerto">Contrato a Termo Incerto</SelectItem>
-              <SelectItem value="independente">Trabalhador Independente</SelectItem>
-              <SelectItem value="empresario">Empresário em Nome Individual</SelectItem>
-              <SelectItem value="reformado">Reformado/Pensionista</SelectItem>
-              <SelectItem value="desempregado">Desempregado</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>Indique a sua situação profissional atual.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("employment_duration")}>
-          <Label htmlFor="employment_duration">{getFieldLabel("employment_duration", "Antiguidade no emprego")}</Label>
-          <Input
-            id="employment_duration"
-            value={formData.employment_duration}
-            onChange={(e) => updateField("employment_duration", e.target.value)}
-            placeholder="Ex: 2 anos e 3 meses"
-            data-testid="fin-employment-duration"
-          />
-          <FieldHint>Quanto tempo trabalha na empresa atual ou como independente.</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("employer_name")}>
-          <Label htmlFor="employer_name">{getFieldLabel("employer_name", "Nome da empresa")}</Label>
-          <Input
-            id="employer_name"
-            value={formData.employer_name}
-            onChange={(e) => updateField("employer_name", e.target.value)}
-            placeholder="Nome da empresa"
-            data-testid="fin-employer-name"
-          />
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("employer_nif")}>
-          <Label htmlFor="employer_nif">{getFieldLabel("employer_nif", "NIF da empresa")}</Label>
-          <Input
-            id="employer_nif"
-            value={formData.employer_nif}
-            onChange={(e) => updateField("employer_nif", e.target.value.replace(/\D/g, ""))}
-            placeholder="123456789"
-            maxLength={9}
-            data-testid="fin-employer-nif"
-          />
-          <FieldHint>O NIF da empresa onde trabalha (encontra-se no recibo de vencimento).</FieldHint>
-        </div>
-        
-        <div className="space-y-2" style={getFieldStyle("fiador")}>
-          <Label>{getFieldLabel("fiador", "Fiador?")}</Label>
-          <Select value={formData.fiador} onValueChange={(v) => updateField("fiador", v)}>
-            <SelectTrigger data-testid="fin-fiador">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="sim">Sim</SelectItem>
-              <SelectItem value="nao">Não</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldHint>Ter um fiador disponível pode ajudar na aprovação do crédito.</FieldHint>
-        </div>
-        
-        <div className="space-y-2 md:col-span-2" style={getFieldStyle("salario_liquido")}>
-          <RequiredLabel htmlFor="salario_liquido" required={isFieldRequired("salario_liquido", true)}>{getFieldLabel("salario_liquido", "Salário mensal líquido")}</RequiredLabel>
-          <Input
-            id="salario_liquido"
-            type="number"
-            value={formData.salario_liquido}
-            onChange={(e) => updateField("salario_liquido", e.target.value)}
-            placeholder="0.00"
-            required={isFieldRequired("salario_liquido", true)}
-            data-testid="fin-salario"
-          />
-        </div>
-      </div>
-    </div>
-  );
+  // Step 3: Imóvel Pretendido (dynamic from allFieldsConfig)
+  const renderStep3 = () => {
+    const stepFields = getFieldsForStep(3);
 
-  // Step 5: Bancos e Capital
-  const renderStep5 = () => (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <CreditCard className="h-10 w-10 mx-auto mb-2 text-primary" />
-        <h2 className="text-xl font-semibold mb-2">Créditos e Capital</h2>
-        <p className="text-muted-foreground">Informações sobre créditos e capital disponível</p>
-      </div>
-      
-      <div className="space-y-6 flex flex-col">
-        <div className="space-y-3" style={getFieldStyle("bancos_creditos")}>
-          <RequiredLabel htmlFor="bancos_creditos" required={isFieldRequired("bancos_creditos", true)}>{getFieldLabel("bancos_creditos", "Bancos com créditos ativos")}</RequiredLabel>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setFormData(prev => ({ ...prev, bancos_creditos: [] }))}
-              data-testid="banco-nenhuma"
-              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
-                (formData.bancos_creditos || []).length === 0 
-                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700' 
-                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
-              }`}
-            >
-              {(formData.bancos_creditos || []).length === 0 && <span className="mr-1">✓</span>}
-              Nenhuma
-            </button>
-            {BANCOS.map((banco) => {
-              const item = (formData.bancos_creditos || []).find(i => typeof i === 'object' ? i.banco === banco : i === banco);
-              const selected = !!item;
-              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
-              return (
-                <button
-                  key={banco}
-                  type="button"
-                  onClick={() => toggleBanco(banco)}
-                  data-testid={`banco-${banco.toLowerCase().replace(/\s+/g, '-')}`}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
-                  style={selected
-                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
-                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
-                  }
-                >
-                  {selected && <span className="mr-1">✓</span>}
-                  {banco}
-                </button>
-              );
-            })}
-          </div>
-          {/* Valor por banco — aparece apenas para bancos selecionados */}
-          {(formData.bancos_creditos || []).length > 0 && (
-            <div className="space-y-2 mt-2">
-              {(formData.bancos_creditos || []).map((item) => {
-                const banco = typeof item === 'object' ? item.banco : item;
-                const valor = typeof item === 'object' ? (item.valor || '') : '';
-                const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
-                return (
-                  <div key={banco} className="flex items-center gap-3">
-                    <span
-                      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium min-w-[100px] justify-center"
-                      style={{ backgroundColor: colors.bg, color: colors.text }}
-                    >
-                      {banco}
-                    </span>
-                    <div className="flex-1 relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">€</span>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="Valor do crédito (ex: 150000)"
-                        value={valor}
-                        onChange={(e) => updateBancoValor(banco, e.target.value)}
-                        className="pl-7 h-9"
-                        data-testid={`banco-valor-${banco.toLowerCase().replace(/\s+/g, '-')}`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <FieldHint>Inclui crédito habitação, automóvel, pessoal, ou cartões de crédito com saldo em dívida.</FieldHint>
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-6">
+          <Home className="h-10 w-10 mx-auto mb-2 text-primary" />
+          <h2 className="text-xl font-semibold mb-2">Tipo de Pedido</h2>
+          <p className="text-muted-foreground">Indique a finalidade do seu pedido</p>
         </div>
 
-        {/* Contas abertas nos Créditos e Capital */}
-        <div className="space-y-3" style={getFieldStyle("tem_creditos_activos")}>
-          <RequiredLabel htmlFor="tem_creditos_activos" required={isFieldRequired("tem_creditos_activos", false)}>{getFieldLabel("tem_creditos_activos", "Bancos com contas abertas")}</RequiredLabel>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setFormData(prev => ({ ...prev, tem_creditos_activos: [] }))}
-              data-testid="contas-nenhuma"
-              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
-                (formData.tem_creditos_activos || []).length === 0
-                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700'
-                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
-              }`}
-            >
-              {(formData.tem_creditos_activos || []).length === 0 && <span className="mr-1">✓</span>}
-              Nenhuma
-            </button>
-            {BANCOS.map((banco) => {
-              const selected = (formData.tem_creditos_activos || []).includes(banco);
-              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
-              return (
-                <button
-                  key={`contas-${banco}`}
-                  type="button"
-                  onClick={() => toggleContasAbertas(banco)}
-                  data-testid={`contas-${banco.toLowerCase().replace(/\s+/g, '-')}`}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
-                  style={selected
-                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
-                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
-                  }
-                >
-                  {selected && <span className="mr-1">✓</span>}
-                  {banco}
-                </button>
-              );
-            })}
-          </div>
-          <FieldHint>Selecione os bancos onde tem contas de crédito abertas (habitação, automóvel, pessoal, cartões).</FieldHint>
-        </div>
-        
-        {/* Pergunta sobre simulações de crédito */}
-        <div className="space-y-3" style={getFieldStyle("bancos_simulacoes")}>
-          <Label htmlFor="bancos_simulacoes">{getFieldLabel("bancos_simulacoes", "Simulações efetuadas")}</Label>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setFormData(prev => ({ ...prev, bancos_simulacoes: [] }))}
-              data-testid="banco-sim-nenhuma"
-              className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
-                (formData.bancos_simulacoes || []).length === 0 
-                  ? 'ring-2 ring-offset-1 ring-primary scale-105 bg-slate-700 text-white border-slate-700' 
-                  : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
-              }`}
-            >
-              {(formData.bancos_simulacoes || []).length === 0 && <span className="mr-1">✓</span>}
-              Nenhuma
-            </button>
-            {BANCOS.map((banco) => {
-              const selected = (formData.bancos_simulacoes || []).includes(banco);
-              const colors = BANCO_COLORS[banco] || { bg: "#6B7280", text: "#fff" };
-              return (
-                <button
-                  key={`sim-${banco}`}
-                  type="button"
-                  onClick={() => toggleBancoSimulacoes(banco)}
-                  data-testid={`banco-sim-${banco.toLowerCase().replace(/\s+/g, '-')}`}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-primary scale-105' : 'opacity-50 hover:opacity-80'}`}
-                  style={selected
-                    ? { backgroundColor: colors.bg, color: colors.text, borderColor: colors.bg }
-                    : { backgroundColor: 'transparent', color: colors.bg, borderColor: colors.bg }
-                  }
-                >
-                  {selected && <span className="mr-1">✓</span>}
-                  {banco}
-                </button>
-              );
-            })}
-          </div>
-          <FieldHint>Indique os bancos onde já efetuou simulações ou pedidos de crédito habitação.</FieldHint>
-        </div>
-        
-        {/* Pergunta sobre tempo restante do crédito (apenas para refinanciamento) */}
-        {formData.finalidade === "refinanciamento" && (
-          <div className="space-y-2 p-4 bg-amber-50 border border-amber-200 rounded-lg" style={getFieldStyle("tempo_restante_credito")}>
-            <RequiredLabel htmlFor="tempo_restante_credito" required={isFieldRequired("tempo_restante_credito", false)}>{getFieldLabel("tempo_restante_credito", "Tempo restante do crédito (meses)")}</RequiredLabel>
-            <Select 
-              value={formData.tempo_restante_credito} 
-              onValueChange={(v) => updateField("tempo_restante_credito", v)}
-            >
-              <SelectTrigger data-testid="tempo-restante-credito">
-                <SelectValue placeholder="Selecione o tempo restante" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="menos_1_ano">Menos de 1 ano</SelectItem>
-                <SelectItem value="1_5_anos">1 a 5 anos</SelectItem>
-                <SelectItem value="5_10_anos">5 a 10 anos</SelectItem>
-                <SelectItem value="10_15_anos">10 a 15 anos</SelectItem>
-                <SelectItem value="15_20_anos">15 a 20 anos</SelectItem>
-                <SelectItem value="mais_20_anos">Mais de 20 anos</SelectItem>
-              </SelectContent>
-            </Select>
-            <FieldHint>Esta informação ajuda a determinar as condições do refinanciamento.</FieldHint>
-          </div>
-        )}
-        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2" style={getFieldStyle("capital_proprio")}>
-            <RequiredLabel htmlFor="capital_proprio" required={isFieldRequired("capital_proprio", false)}>{getFieldLabel("capital_proprio", "Capital próprio disponível")}</RequiredLabel>
-            <Input
-              id="capital_proprio"
-              type="number"
-              value={formData.capital_proprio}
-              onChange={(e) => updateField("capital_proprio", e.target.value)}
-              placeholder="0.00"
-              required={isFieldRequired("capital_proprio", false)}
-              data-testid="fin-capital-proprio"
-            />
-            <FieldHint>Dinheiro que tem disponível para entrada + despesas (escritura, IMT, seguros).</FieldHint>
-          </div>
-          
-          <div className="space-y-2" style={getFieldStyle("valor_financiado")}>
-            <RequiredLabel htmlFor="valor_financiado" required={isFieldRequired("valor_financiado", false)}>{getFieldLabel("valor_financiado", "Valor a financiar")}</RequiredLabel>
-            <Input
-              id="valor_financiado"
-              value={formData.valor_financiado}
-              onChange={(e) => updateField("valor_financiado", e.target.value)}
-              placeholder="Ex: 200.000€ ou 80% do valor"
-              required={isFieldRequired("valor_financiado", false)}
-              data-testid="fin-valor-financiado"
-            />
-            <FieldHint>Pode indicar um valor fixo ou percentagem (ex: "90% do valor do imóvel").</FieldHint>
-          </div>
+          {stepFields.map(field => renderDynamicField(field))}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  // Step 4: Situação Financeira (dynamic from allFieldsConfig)
+  const renderStep4 = () => {
+    const stepFields = getFieldsForStep(4);
+
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-6">
+          <Briefcase className="h-10 w-10 mx-auto mb-2 text-amber-500" />
+          <h2 className="text-xl font-semibold mb-2 text-blue-950">Situação Financeira</h2>
+          <p className="text-muted-foreground">Informações sobre a sua situação financeira</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {stepFields.map(field => renderDynamicField(field))}
+        </div>
+      </div>
+    );
+  };
+
+  // Step 5: Bancos e Capital (dynamic from allFieldsConfig)
+  const renderStep5 = () => {
+    const stepFields = getFieldsForStep(5);
+
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-6">
+          <CreditCard className="h-10 w-10 mx-auto mb-2 text-primary" />
+          <h2 className="text-xl font-semibold mb-2">Créditos e Capital</h2>
+          <p className="text-muted-foreground">Informações sobre créditos e capital disponível</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {stepFields.map(field => renderDynamicField(field))}
+        </div>
+      </div>
+    );
+  };
 
   // Step 6: Confirmação
   const renderStep6 = () => (
@@ -2633,14 +2343,6 @@ const PublicClientForm = ({ previewMode = false }) => {
             {step === 4 && renderStep4()}
             {step === 5 && renderStep5()}
             {step === 6 && renderStep6()}
-
-            {/* Campos personalizados para o passo atual */}
-            {getCustomFieldsForStep(step).length > 0 && (
-              <div className="mt-6 pt-4 border-t border-dashed border-emerald-300 space-y-4">
-                <p className="text-xs text-emerald-600 font-medium uppercase tracking-wide">Campos adicionais</p>
-                {getCustomFieldsForStep(step).map(renderCustomField)}
-              </div>
-            )}
 
             <div className="flex justify-between mt-8 pt-6 border-t border-border">
               <Button
