@@ -453,7 +453,7 @@ export const useDashboardData = () => {
     try {
       setLoading(true);
       const [processesRes, statsRes, expiriesRes, statusesRes] = await Promise.all([
-        getProcesses({ view_mode: "all", size: 999 }),
+        getProcesses({ view_mode: "all", size: 100 }),
         getStats(),
         getUpcomingExpiries(60).catch(() => ({ data: [] })),
         getWorkflowStatuses()
