@@ -28,9 +28,10 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
+import SmartRichEditor from "../components/ui/SmartRichEditor";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
-import { getRGPDTemplate, updateRGPDTemplate } from "../services/api";
+import { getRGPDTemplate, updateRGPDTemplate, getMinutaTemplate, updateMinutaTemplate } from "../services/api";
 import {
   FileText,
   Loader2,
@@ -561,13 +562,12 @@ const RGPDTemplateTab = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Textarea
+            <SmartRichEditor
               value={templateContent}
-              onChange={(e) => setTemplateContent(e.target.value)}
-              rows={20}
-              className="font-mono text-sm leading-relaxed"
+              onChange={(html) => setTemplateContent(html)}
               placeholder="Introduza o texto do template RGPD..."
-              disabled={!isAdminOrCEO}
+              minHeight={400}
+              readOnly={!isAdminOrCEO}
             />
 
             {/* Variáveis disponíveis */}
@@ -610,12 +610,9 @@ const RGPDTemplateTab = () => {
                 className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed"
                 dangerouslySetInnerHTML={{
                   __html: (() => {
-                    // 1. Escape HTML entities first to prevent template text from breaking formatting
-                    let safe = templateContent
-                      .replace(/&/g, '&amp;')
-                      .replace(/</g, '&lt;')
-                      .replace(/>/g, '&gt;');
-                    // 2. Replace RGPD variables with highlighted example spans
+                    // Content is HTML from SmartRichEditor, no need to escape
+                    let safe = templateContent;
+                    // Replace RGPD variables with highlighted example spans
                     safe = safe
                       .replace(/\{\{NOME\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
                       .replace(/\{\{CONTRIBUINTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">123456789</span>')
@@ -627,10 +624,8 @@ const RGPDTemplateTab = () => {
                       .replace(/\{\{DATA_ASSINATURA\}\}/g, '<span class="bg-green-100 dark:bg-green-900/60 px-1.5 py-0.5 rounded font-medium text-green-800 dark:text-green-200">15/01/2025</span>')
                       .replace(/\{\{NOME_CLIENTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
                       .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate, Lda.</span>');
-                    // 3. Convert newlines to <br> and blank lines to paragraph spacing
-                    safe = safe.replace(/\n/g, '<br/>');
-                    // 4. Wrap numbered sections and headings for better formatting
-                    safe = safe.replace(/^(\d+\.\s[A-ZÀ-Ú][^\n]*)/gm, '<span class="font-semibold text-foreground">$1</span>');
+                    // Wrap numbered sections for better formatting
+                    safe = safe.replace(/^(\d+\.\s[A-ZÀ-Ú][^<]*)/gm, '<span class="font-semibold text-foreground">$1</span>');
                     return safe;
                   })()
                 }}
@@ -972,6 +967,280 @@ const RGPDPedidosTab = () => {
   );
 };
 
+// ============ ABA: MINUTA DE EXCLUSIVIDADE ============
+
+const MinutaTemplateTab = () => {
+  const { token, user } = useAuth();
+  const [templateContent, setTemplateContent] = useState("");
+  const [originalContent, setOriginalContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [templateMeta, setTemplateMeta] = useState({
+    is_default: true,
+    updated_at: null,
+    updated_by: null,
+  });
+
+  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
+
+  useEffect(() => {
+    fetchTemplate();
+  }, [token]);
+
+  const fetchTemplate = async () => {
+    setLoading(true);
+    try {
+      const response = await getMinutaTemplate();
+
+      if (response.status === 200) {
+        const data = response.data;
+        setTemplateContent(data.content);
+        setOriginalContent(data.content);
+        setTemplateMeta({
+          is_default: data.is_default,
+          updated_at: data.updated_at,
+          updated_by: data.updated_by,
+        });
+      } else if (response.status === 403) {
+        setTemplateContent("Não tem permissão para visualizar a minuta de exclusividade.");
+      } else {
+        toast.error("Erro ao carregar a minuta de exclusividade");
+      }
+    } catch (error) {
+      console.error("Erro:", error);
+      toast.error("Erro ao carregar a minuta de exclusividade");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!templateContent.trim()) {
+      toast.error("A minuta não pode estar vazia");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await updateMinutaTemplate(templateContent);
+
+      if (response.status === 200 || response.status === 201) {
+        const data = response.data;
+        toast.success("Minuta de Exclusividade guardada com sucesso");
+        setOriginalContent(templateContent);
+        setTemplateMeta({
+          is_default: false,
+          updated_at: data.updated_at,
+          updated_by: user?.name || "Utilizador",
+        });
+      }
+    } catch (error) {
+      if (error.response?.status === 403) {
+        toast.error("Apenas Admin ou CEO podem editar a minuta");
+      } else {
+        toast.error("Erro ao guardar a minuta de exclusividade");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      const response = await updateMinutaTemplate("");
+
+      if (response.status === 200 || response.status === 201) {
+        const getResponse = await getMinutaTemplate();
+        if (getResponse.status === 200) {
+          const data = getResponse.data;
+          setTemplateContent(data.content);
+          setOriginalContent(data.content);
+          setTemplateMeta({
+            is_default: data.is_default,
+            updated_at: data.updated_at,
+            updated_by: data.updated_by,
+          });
+        }
+        toast.success("Minuta restaurada para o valor padrão");
+      }
+    } catch (error) {
+      toast.error("Erro ao restaurar a minuta padrão");
+    }
+  };
+
+  const hasChanges = templateContent !== originalContent;
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-12">
+          <LoadingState />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Info Bar */}
+      <Card>
+        <CardContent className="py-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              <Info className="h-4 w-4 text-blue-500" />
+              <span className="text-sm text-muted-foreground">
+                {templateMeta.is_default
+                  ? "A utilizar a minuta padrão. Edite para personalizar o texto legal da minuta de exclusividade."
+                  : `Última atualização: ${
+                      templateMeta.updated_at
+                        ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
+                        : "N/A"
+                    } ${templateMeta.updated_by ? `por ${templateMeta.updated_by}` : ""}`}
+              </span>
+            </div>
+            {templateMeta.is_default && (
+              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                Minuta Padrão
+              </Badge>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Editor + Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Editor */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileEdit className="h-5 w-5" />
+              Texto da Minuta de Exclusividade
+            </CardTitle>
+            <CardDescription>
+              Edite o texto legal da minuta de exclusividade.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <SmartRichEditor
+              value={templateContent}
+              onChange={(html) => setTemplateContent(html)}
+              placeholder="Introduza o texto da minuta de exclusividade..."
+              minHeight={400}
+              readOnly={!isAdminOrCEO}
+            />
+
+            {/* Variáveis disponíveis */}
+            <div className="bg-muted/50 rounded-lg p-3">
+              <p className="text-sm font-medium mb-2">Variáveis disponíveis:</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  "{{NOME}}",
+                  "{{CONTRIBUINTE}}",
+                  "{{MORADA}}",
+                  "{{CODIGO_POSTAL}}",
+                  "{{TIPO_DOCUMENTO}}",
+                  "{{NUMERO_DOCUMENTO}}",
+                  "{{VALIDADE_DOCUMENTO}}",
+                  "{{DATA_ASSINATURA}}",
+                  "{{NOME_EMPRESA}}",
+                ].map((variable) => (
+                  <Badge key={variable} variant="secondary" className="font-mono text-xs">
+                    {variable}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Preview */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Preview da Minuta
+            </CardTitle>
+            <CardDescription>
+              Como o cliente vai visualizar a minuta de exclusividade.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="bg-white dark:bg-gray-900 border rounded-lg p-6 min-h-[400px] overflow-auto">
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed"
+                dangerouslySetInnerHTML={{
+                  __html: (() => {
+                    // Content is HTML from SmartRichEditor, no need to escape
+                    let safe = templateContent;
+                    // Replace Minuta variables with highlighted example spans
+                    safe = safe
+                      .replace(/\{\{NOME\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
+                      .replace(/\{\{CONTRIBUINTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">123456789</span>')
+                      .replace(/\{\{MORADA\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Rua das Flores, 123</span>')
+                      .replace(/\{\{CODIGO_POSTAL\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">1000-001</span>')
+                      .replace(/\{\{TIPO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Cartão de Cidadão</span>')
+                      .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">12345678</span>')
+                      .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">31/12/2030</span>')
+                      .replace(/\{\{DATA_ASSINATURA\}\}/g, '<span class="bg-green-100 dark:bg-green-900/60 px-1.5 py-0.5 rounded font-medium text-green-800 dark:text-green-200">15/01/2025</span>')
+                      .replace(/\{\{NOME_CLIENTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
+                      .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate, Lda.</span>');
+                    // Wrap numbered sections for better formatting
+                    safe = safe.replace(/^(\d+\.\s[A-ZÀ-Ú][^<]*)/gm, '<span class="font-semibold text-foreground">$1</span>');
+                    return safe;
+                  })()
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Os valores destacados em <span className="bg-blue-100 dark:bg-blue-900 px-1 rounded text-blue-800 dark:text-blue-200">azul</span> são exemplos de como os dados do cliente aparecerão.{" "}
+              <span className="bg-amber-100 dark:bg-amber-900 px-1 rounded text-amber-800 dark:text-amber-200">Amarelo</span> representa dados da empresa.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Actions */}
+      {isAdminOrCEO && (
+        <Card>
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                onClick={handleReset}
+                disabled={saving || templateMeta.is_default}
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Restaurar Padrão
+              </Button>
+              <div className="flex items-center gap-2">
+                {hasChanges && (
+                  <span className="text-sm text-amber-600 font-medium">
+                    Alterações por guardar
+                  </span>
+                )}
+                <Button onClick={handleSave} disabled={saving || !hasChanges}>
+                  {saving ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  Guardar Minuta
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      {!isAdminOrCEO && (
+        <p className="text-sm text-muted-foreground text-center py-4">
+          Apenas utilizadores Admin ou CEO podem editar a minuta de exclusividade.
+        </p>
+      )}
+    </div>
+  );
+};
+
 // ============ PÁGINA PRINCIPAL ============
 
 const RGPDAdminPage = () => {
@@ -1005,6 +1274,10 @@ const RGPDAdminPage = () => {
               <FileEdit className="h-4 w-4" />
               Template RGPD
             </TabsTrigger>
+            <TabsTrigger value="minuta" className="flex items-center gap-2">
+              <FileSignature className="h-4 w-4" />
+              Minuta de Exclusividade
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="pedidos">
@@ -1013,6 +1286,10 @@ const RGPDAdminPage = () => {
 
           <TabsContent value="template">
             <RGPDTemplateTab />
+          </TabsContent>
+
+          <TabsContent value="minuta">
+            <MinutaTemplateTab />
           </TabsContent>
         </Tabs>
       </div>
