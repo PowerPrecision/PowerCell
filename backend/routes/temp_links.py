@@ -275,14 +275,18 @@ async def upload_via_temp_link(
     Aceita múltiplos ficheiros.
     """
     # Validar link
-    validation = await temp_link_service.validate_link(token)
+    try:
+        validation = await temp_link_service.validate_link(token)
+    except Exception as e:
+        logger.error(f"Erro ao validar link temp: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail="Serviço temporariamente indisponível. Tente novamente.")
     
     if not validation["valid"]:
         raise HTTPException(status_code=400, detail=validation.get("error"))
     
     link = validation["link"]
     
-    if link["link_type"] != TempLinkType.UPLOAD.value:
+    if link.get("link_type") != TempLinkType.UPLOAD.value:
         raise HTTPException(
             status_code=400,
             detail="Este link é para download, não para upload."
@@ -292,13 +296,21 @@ async def upload_via_temp_link(
         raise HTTPException(status_code=400, detail="Nenhum ficheiro enviado")
     
     # Importar serviço S3
-    from services.s3_storage import s3_service
+    try:
+        from services.s3_storage import s3_service
+    except ImportError as e:
+        logger.error(f"S3 service indisponível: {e}")
+        raise HTTPException(status_code=503, detail="Serviço de armazenamento indisponível.")
     
-    process_id = link["process_id"]
-    client_name = link["client_name"]
+    process_id = link.get("process_id")
+    client_name = link.get("client_name", "Cliente")
     
     # Obter dados do processo para segundo titular
-    process = await db.processes.find_one({"id": process_id})
+    try:
+        process = await db.processes.find_one({"id": process_id})
+    except Exception as e:
+        logger.error(f"DB error fetching process {process_id}: {e}", exc_info=True)
+        process = None
     second_client_name = None
     s3_folder = None
     if process:
@@ -409,30 +421,36 @@ async def upload_via_temp_link(
     # Aqui: pelo menos 1 ficheiro com sucesso (ou mixed).
     
     # Marcar link como usado (apenas ficheiros com sucesso)
-    await temp_link_service.use_link(token, success_files)
+    try:
+        await temp_link_service.use_link(token, success_files)
+    except Exception as e:
+        logger.error(f"Erro ao marcar link como usado: {e}", exc_info=True)
     
-    # Adicionar atividade ao processo
-    activity = {
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "type": "document_upload",
-        "comment": f"Cliente carregou {len(success_files)} documento(s) via link temporário",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "created_by": None,  # Sistema
-        "metadata": {
-            "files": [f["original_name"] for f in success_files],
-            "via_temp_link": True,
-            "failed_files": [f["filename"] for f in failed_files] if failed_files else []
+    # Adicionar atividade ao processo (non-critical)
+    try:
+        activity = {
+            "id": str(uuid.uuid4()),
+            "process_id": process_id,
+            "type": "document_upload",
+            "comment": f"Cliente carregou {len(success_files)} documento(s) via link temporário",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": None,  # Sistema
+            "metadata": {
+                "files": [f["original_name"] for f in success_files],
+                "via_temp_link": True,
+                "failed_files": [f["filename"] for f in failed_files] if failed_files else []
+            }
         }
-    }
-    await db.activities.insert_one(activity)
+        await db.activities.insert_one(activity)
+    except Exception as e:
+        logger.error(f"Erro ao registar atividade: {e}", exc_info=True)
     
-    # Notificar consultor/mediador atribuído
-    if process:
-        from services.notification_service import notification_service
-        assigned_consultor_id = process.get("assigned_consultor_id")
-        if assigned_consultor_id:
-            try:
+    # Notificar consultor/mediador atribuído (non-critical)
+    try:
+        if process:
+            from services.notification_service import notification_service
+            assigned_consultor_id = process.get("assigned_consultor_id")
+            if assigned_consultor_id:
                 await notification_service.create_notification(
                     user_id=assigned_consultor_id,
                     title="📤 Documentos Carregados",
@@ -440,8 +458,8 @@ async def upload_via_temp_link(
                     type="document_upload",
                     link=f"/processo/{process_id}"
                 )
-            except Exception as e:
-                logger.warning(f"Erro ao notificar consultor: {e}")
+    except Exception as e:
+        logger.warning(f"Erro ao notificar consultor: {e}")
     
     result = {
         "success": len(failed_files) == 0,
