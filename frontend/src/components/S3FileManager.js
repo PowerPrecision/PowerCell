@@ -173,6 +173,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [activeTab, setActiveTab] = useState("all"); // "all" para mostrar todos, ou categoria específica
   const [deleteDialog, setDeleteDialog] = useState({ open: false, file: null });
   const [deleting, setDeleting] = useState(false);
+  const [bulkDeleteDialog, setBulkDeleteDialog] = useState({ open: false });
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const fileInputRef = useRef(null);
 
@@ -850,6 +852,52 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     } finally {
       setDeleting(false);
       setDeleteDialog({ open: false, file: null });
+    }
+  };
+
+  // Eliminar ficheiros selecionados em massa
+  const handleBulkDelete = async () => {
+    if (selectedFilesForAI.length === 0) return;
+
+    setBulkDeleting(true);
+    try {
+      const response = await fetch(
+        `${API_URL}/api/documents/client/${processId}/bulk-delete`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            file_paths: selectedFilesForAI.map((f) => f.path),
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const deleted = data.deleted_count || 0;
+        const failed = data.failed_count || 0;
+        if (failed > 0) {
+          toast.warning(
+            `${deleted} ficheiro(s) eliminado(s), ${failed} falhou(aram)`
+          );
+        } else {
+          toast.success(`${deleted} ficheiro(s) eliminado(s) com sucesso`);
+        }
+        setSelectedFilesForAI([]);
+        setBulkDeleteDialog({ open: false });
+        fetchFiles();
+      } else {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.detail || "Erro ao eliminar ficheiros");
+      }
+    } catch (error) {
+      console.error("Erro ao eliminar ficheiros em massa:", error);
+      toast.error("Erro ao eliminar ficheiros");
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -2311,10 +2359,54 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                         )}
                         Analisar
                       </Button>
+                      {/* Botão Eliminar Selecionados */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-5 text-[10px] bg-red-50 hover:bg-red-100 border-red-200 text-red-700 hover:text-red-800 px-2"
+                        onClick={() => setBulkDeleteDialog({ open: true })}
+                        disabled={bulkDeleting}
+                      >
+                        <Trash2 className="h-3 w-3 mr-1" />
+                        Eliminar
+                      </Button>
                     </div>
                   </div>
                 )}
               </div>
+
+              {/* Diálogo de confirmação para eliminar selecionados */}
+              <AlertDialog open={bulkDeleteDialog.open} onOpenChange={(open) => setBulkDeleteDialog({ open })}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Eliminar {selectedFilesForAI.length} ficheiro(s)</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Tem a certeza que pretende eliminar {selectedFilesForAI.length} ficheiro(s) selecionado(s)? 
+                      Esta ação não pode ser revertida. Os ficheiros serão removidos permanentemente do armazenamento.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={bulkDeleting}>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleBulkDelete}
+                      disabled={bulkDeleting}
+                      className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-300"
+                    >
+                      {bulkDeleting ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                          A eliminar...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Eliminar {selectedFilesForAI.length} ficheiro(s)
+                        </>
+                      )}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
 
               {/* Painel de Preview Lateral */}
               {previewFile && (
