@@ -963,17 +963,24 @@ async def get_download_url(
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
     # Verificar se o ficheiro pertence ao cliente (segurança)
-    client_name = process.get("client_name", "")
-    safe_name = sanitize_folder_name(client_name) if client_name else ""
-    clean_name = client_name.strip() if client_name else ""
-    
-    valid_prefixes = [
-        f"Documentação Clientes/{clean_name}",  # Com espaços
-        f"Documentação Clientes/{safe_name}",   # Com underscores
-    ]
-    
-    if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
-        raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+    # PRIORIDADE: se o processo tem s3_folder, usar APENAS esse prefixo
+    s3_folder = process.get("s3_folder")
+    if s3_folder:
+        s3_prefix = s3_folder.rstrip('/')
+        if not file_path.startswith(f"{s3_prefix}/"):
+            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+    else:
+        client_name = process.get("client_name", "")
+        safe_name = sanitize_folder_name(client_name) if client_name else ""
+        clean_name = client_name.strip() if client_name else ""
+        
+        valid_prefixes = [
+            f"Documentação Clientes/{clean_name}",  # Com espaços
+            f"Documentação Clientes/{safe_name}",   # Com underscores
+        ]
+        
+        if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
+            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
     
     url = s3_service.get_presigned_url(file_path)
     if not url:
@@ -1203,17 +1210,24 @@ async def delete_file_s3(
         )
     
     # Verificar se o ficheiro pertence ao cliente (segurança)
-    client_name = process.get("client_name", "")
-    safe_name = sanitize_folder_name(client_name) if client_name else ""
-    clean_name = client_name.strip() if client_name else ""
-    
-    valid_prefixes = [
-        f"Documentação Clientes/{clean_name}",  # Com espaços
-        f"Documentação Clientes/{safe_name}",   # Com underscores
-    ]
-    
-    if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
-        raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+    # PRIORIDADE: se o processo tem s3_folder, usar APENAS esse prefixo
+    s3_folder = process.get("s3_folder")
+    if s3_folder:
+        s3_prefix = s3_folder.rstrip('/')
+        if not file_path.startswith(f"{s3_prefix}/"):
+            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+    else:
+        client_name = process.get("client_name", "")
+        safe_name = sanitize_folder_name(client_name) if client_name else ""
+        clean_name = client_name.strip() if client_name else ""
+        
+        valid_prefixes = [
+            f"Documentação Clientes/{clean_name}",  # Com espaços
+            f"Documentação Clientes/{safe_name}",   # Com underscores
+        ]
+        
+        if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
+            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
     
     # Guardar nome do ficheiro antes de eliminar
     filename = file_path.split('/')[-1] if '/' in file_path else file_path
@@ -1260,14 +1274,20 @@ async def bulk_delete_files(
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
     # Verificar se os ficheiros pertencem ao cliente (segurança)
-    client_name = process.get("client_name", "")
-    safe_name = sanitize_folder_name(client_name) if client_name else ""
-    clean_name = client_name.strip() if client_name else ""
-    
-    valid_prefixes = [
-        f"Documentação Clientes/{clean_name}",
-        f"Documentação Clientes/{safe_name}",
-    ]
+    # PRIORIDADE: se o processo tem s3_folder, usar APENAS esse prefixo
+    s3_folder = process.get("s3_folder")
+    if s3_folder:
+        s3_prefix = s3_folder.rstrip('/')
+        valid_prefixes = [f"{s3_prefix}/"]
+    else:
+        client_name = process.get("client_name", "")
+        safe_name = sanitize_folder_name(client_name) if client_name else ""
+        clean_name = client_name.strip() if client_name else ""
+        
+        valid_prefixes = [
+            f"Documentação Clientes/{clean_name}",
+            f"Documentação Clientes/{safe_name}",
+        ]
     
     deleted_count = 0
     failed_files = []
