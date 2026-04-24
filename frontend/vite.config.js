@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, './src'),
       },
-      dedupe: ['react', 'react-dom', 'react-router-dom'],
+      dedupe: ['react', 'react-dom', 'react-router-dom', 'react-is'],
     },
 
     // Tratar ficheiros .js como JSX (compatibilidade CRA)
@@ -80,8 +80,26 @@ export default defineConfig(({ mode }) => {
           // end up in separate chunks, const exports from one chunk may be
           // referenced before initialization in another chunk.
           manualChunks(id) {
-            if (id.includes('node_modules/@radix-ui/')) {
+            // CRITICAL: Group ALL packages that share @radix-ui/* internal
+            // circular deps into a SINGLE chunk. This prevents TDZ errors
+            // caused by Rollup splitting these across multiple chunks with
+            // conflicting initialization order.
+            //
+            // cmdk depends on: @radix-ui/react-compose-refs, react-dialog,
+            //   react-id, react-primitive
+            // vaul depends on: @radix-ui/react-dialog
+            // @radix-ui/* has circular deps between react-context, react-slot,
+            //   react-primitive, react-compose-refs, etc.
+            if (
+              id.includes('node_modules/@radix-ui/') ||
+              id.includes('node_modules/cmdk/') ||
+              id.includes('node_modules/vaul/')
+            ) {
               return 'vendor-radix'
+            }
+            // Group recharts separately (bundles Redux + victory-vendor)
+            if (id.includes('node_modules/recharts/') || id.includes('node_modules/victory-vendor/')) {
+              return 'vendor-recharts'
             }
           },
         },
