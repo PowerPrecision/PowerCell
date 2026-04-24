@@ -216,7 +216,7 @@ async def get_form_config(user: dict = Depends(require_management())):
             merged.append(saved_field)
 
     # Ordenar por step + order
-    merged.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
+    merged.sort(key=lambda f: (f.get("step", 0), f.get("order_index", f.get("order", 0))))
     return {"fields": merged}
 
 
@@ -294,6 +294,7 @@ async def create_custom_field(
         "field_type": data.field_type,
         "options": safe_options,
         "order": max_order + 1,
+        "order_index": max_order + 1,
         "is_custom": True,
         "placeholder": safe_placeholder,
         "hint": safe_hint,
