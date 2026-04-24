@@ -164,7 +164,7 @@ const AdminDashboard = () => {
       const [statsRes, usersRes, processesRes, statusesRes, storageRes, expiriesRes] = await Promise.all([
         getStats(),
         getUsers(),
-        getProcesses(),
+        getProcesses({ view_mode: "all", size: 999 }),
         getWorkflowStatuses(),
         fetch(`${process.env.REACT_APP_BACKEND_URL}/api/storage/status`, {
           headers: { Authorization: `Bearer ${token}` }
