@@ -28,11 +28,18 @@ class RGPDStatusEnum(str, Enum):
     CANCELLED = "cancelled"       # Cancelado pelo utilizador
 
 
+class ConsentOptionEnum(str, Enum):
+    """Opções de consentimento RGPD."""
+    AUTORIZO = "autorizo"
+    NAO_AUTORIZO = "nao_autorizo"
+
+
 class RGPDConsentData(BaseModel):
     """
     Dados preenchidos pelo cliente no formulário RGPD.
     
     Estes dados são recolhidos quando o cliente assina o RGPD.
+    Inclui 4 opções de consentimento obrigatórias (A, B, C, D).
     """
     nome: str = Field(..., min_length=2, max_length=200, description="Nome completo")
     contribuinte: str = Field(..., min_length=9, max_length=9, description="NIF - 9 dígitos")
@@ -40,10 +47,16 @@ class RGPDConsentData(BaseModel):
     numero_documento: str = Field(..., min_length=1, max_length=30, description="Número do documento")
     validade_documento: Optional[str] = Field(None, max_length=20, description="Validade do documento")
     morada: str = Field(..., min_length=5, max_length=500, description="Morada completa")
+    localidade: str = Field(..., min_length=2, max_length=100, description="Localidade/Cidade")
     concelho: Optional[str] = Field(None, max_length=100, description="Concelho")
     codigo_postal: Optional[str] = Field(None, max_length=8, description="Código postal")
     assinatura: Optional[str] = Field(None, description="Assinatura em base64")
     data_assinatura: Optional[str] = Field(None, description="Data da assinatura")
+    # 4 opções de consentimento obrigatórias
+    consent_a: ConsentOptionEnum = Field(..., description="Consentimento A: Transmissão de dados à entidade vinculada")
+    consent_b: ConsentOptionEnum = Field(..., description="Consentimento B: Divulgação de produtos/serviços")
+    consent_c: ConsentOptionEnum = Field(..., description="Consentimento C: Consulta Central de Responsabilidades de Crédito")
+    consent_d: ConsentOptionEnum = Field(..., description="Consentimento D: Transmissão para propostas de financiamento")
     
     @field_validator('contribuinte', mode='before')
     @classmethod

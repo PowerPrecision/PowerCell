@@ -665,6 +665,16 @@ export const updateFinanceConfig = (config) => api.put("/finance/config", config
 export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
 export const updateRGPDTemplate = (content) => api.put("/rgpd/admin/template", { content });
 
+// ===== MINUTA TEMPLATE =====
+export const getMinutaTemplate = () => api.get("/rgpd/admin/minuta-template");
+export const updateMinutaTemplate = (content) => api.put("/rgpd/admin/minuta-template", { content });
+export const getMinutaTemplateVersions = () => api.get("/rgpd/admin/minuta-template/versions");
+export const getMinutaTemplateVersion = (versionId) => api.get(`/rgpd/admin/minuta-template/versions/${versionId}`);
+
+// ===== RGPD TEMPLATE VERSIONS =====
+export const getRGPDTemplateVersions = () => api.get("/rgpd/admin/template/versions");
+export const getRGPDTemplateVersion = (versionId) => api.get(`/rgpd/admin/template/versions/${versionId}`);
+
 // ===== MAGIC LINK (Client Portal) =====
 export const generateMagicLink = (processId) => api.post(`/processes/${processId}/generate-magic-link`);
 export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/generate-magic-link/send`);
