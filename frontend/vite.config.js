@@ -15,6 +15,35 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, './src'),
       },
+      // Dedupe: força o Rollup a usar apenas uma cópia de cada pacote.
+      // Isto previne TDZ errors causados por versões duplicadas do mesmo
+      // pacote Radix em nested node_modules (ex: react-slot 1.2.3 vs 1.2.4).
+      dedupe: [
+        'react', 'react-dom', 'react-router-dom',
+        '@radix-ui/react-slot',
+        '@radix-ui/react-primitive',
+        '@radix-ui/react-context',
+        '@radix-ui/react-visually-hidden',
+        '@radix-ui/react-compose-refs',
+        '@radix-ui/react-use-callback-ref',
+        '@radix-ui/react-use-controllable-state',
+        '@radix-ui/react-use-escape-keydown',
+        '@radix-ui/react-use-layout-effect',
+        '@radix-ui/react-use-previous',
+        '@radix-ui/react-use-size',
+        '@radix-ui/react-popper',
+        '@radix-ui/react-portal',
+        '@radix-ui/react-presence',
+        '@radix-ui/react-dismissable-layer',
+        '@radix-ui/react-focus-scope',
+        '@radix-ui/react-focus-guards',
+        '@radix-ui/react-roving-focus',
+        '@radix-ui/react-id',
+        '@radix-ui/react-direction',
+        '@radix-ui/react-collection',
+        '@radix-ui/react-arrow',
+        '@radix-ui/react-number',
+      ],
     },
     
     // Tratar ficheiros .js como JSX (compatibilidade CRA)
@@ -67,18 +96,6 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: mode !== 'production',
-      rollupOptions: {
-        output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-            'vendor-charts': ['recharts'],
-          },
-          // NOTA: vendor-radix removido para evitar TDZ errors.
-          // Separar apenas 5 pacotes Radix causava problemas de ordem de
-          // inicialização com os outros 20+ pacotes Radix no chunk principal.
-          // O Rollup agora decide a divisão automaticamente.
-        },
-      },
       chunkSizeWarningLimit: 1000,
     },
     
@@ -111,3 +128,4 @@ export default defineConfig(({ mode }) => {
     clearScreen: false,
   }
 })
+
