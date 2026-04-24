@@ -157,7 +157,7 @@ const WebmailPage = () => {
   const [account, setAccount] = useState(defaultAccount);
 
   // Tab-based mailbox state
-  const [activeBox, setActiveBox] = useState(null); // "personal", "general", or "shared_indexacao"
+  const [activeBox, setActiveBox] = useState("personal"); // "personal", "general", or "shared_indexacao"
   const [unreadByBox, setUnreadByBox] = useState({ personal: 0, general: 0 });
 
   // Composer state
@@ -705,7 +705,7 @@ const WebmailPage = () => {
   );
 
   const handleLinkProcess = useCallback(
-    async (processId) => {
+    async (processId, clientName) => {
       if (!selectedEmail || !processId) return;
       setLinkSaving(true);
       try {
@@ -725,11 +725,11 @@ const WebmailPage = () => {
         setLinkDialogOpen(false);
         // Atualizar email detalhe e lista
         setEmailDetail((prev) =>
-          prev ? { ...prev, process_id: processId } : prev
+          prev ? { ...prev, process_id: processId, client_name: clientName || prev.client_name } : prev
         );
         setEmails((prev) =>
           prev.map((e) =>
-            e.id === selectedEmail.id ? { ...e, process_id: processId } : e
+            e.id === selectedEmail.id ? { ...e, process_id: processId, client_name: clientName || e.client_name } : e
           )
         );
       } catch {
@@ -1717,7 +1717,7 @@ const WebmailPage = () => {
                         onClick={() => navigate(`/processo/${emailDetail.process_id}`)}
                       >
                         <Link2 className="h-3.5 w-3.5" />
-                        {emailDetail.process_id} Associado
+                        {emailDetail.client_name || emailDetail.process_id} Associado
                       </Badge>
                     ) : (
                       <Tooltip>
@@ -2154,7 +2154,7 @@ const WebmailPage = () => {
                   {linkSearchResults.map((client) => (
                     <button
                       key={client.id}
-                      onClick={() => handleLinkProcess(client.id)}
+                      onClick={() => handleLinkProcess(client.id, client.name)}
                       disabled={linkSaving}
                       className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-accent transition-colors disabled:opacity-50"
                     >
