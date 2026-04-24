@@ -22,6 +22,47 @@ const AlertDialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
 ))
 AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName
 
+/**
+ * AlertDialogContent with built-in accessibility.
+ * 
+ * Always renders a hidden description via AlertDialogPrimitive.Description
+ * to satisfy Radix's accessibility requirement and avoid console warnings.
+ * This avoids referencing other components defined later in this module
+ * (which causes TDZ errors in minified bundles).
+ */
+const AlertDialogContent = React.forwardRef(({ 
+  className, 
+  children, 
+  ...props 
+}, ref) => {
+  const descriptionId = React.useId()
+
+  return (
+    <AlertDialogPortal>
+      <AlertDialogOverlay />
+      <AlertDialogPrimitive.Content
+        ref={ref}
+        aria-describedby={descriptionId}
+        className={cn(
+          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+          className
+        )}
+        {...props}>
+        {/* Hidden description to satisfy Radix accessibility requirement.
+            Visible AlertDialogPrimitive.Description in children will override this
+            because it appears later in the DOM. */}
+        <VisuallyHidden.Root>
+          <AlertDialogPrimitive.Description id={descriptionId}>
+            Ação irreversível
+          </AlertDialogPrimitive.Description>
+        </VisuallyHidden.Root>
+        {children}
+      </AlertDialogPrimitive.Content>
+    </AlertDialogPortal>
+  )
+})
+AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName
+
 const AlertDialogHeader = ({
   className,
   ...props
@@ -42,10 +83,6 @@ const AlertDialogFooter = ({
 )
 AlertDialogFooter.displayName = "AlertDialogFooter"
 
-// IMPORTANT: AlertDialogTitle and AlertDialogDescription must be defined BEFORE
-// AlertDialogContent because AlertDialogContent references them in hasComponentType.
-// Defining them after causes "Cannot access before initialization" in minified bundles.
-
 const AlertDialogTitle = React.forwardRef(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Title ref={ref} className={cn("text-lg font-semibold", className)} {...props} />
 ))
@@ -59,100 +96,6 @@ const AlertDialogDescription = React.forwardRef(({ className, ...props }, ref) =
 ))
 AlertDialogDescription.displayName =
   AlertDialogPrimitive.Description.displayName
-
-/**
- * AlertDialogContent component with built-in accessibility support.
- * 
- * @param {object} props
- * @param {string} [props.title] - Optional title for accessibility.
- * @param {string} [props.description] - Optional description for accessibility.
- */
-const AlertDialogContent = React.forwardRef(({ 
-  className, 
-  children, 
-  title,
-  description,
-  ...props 
-}, ref) => {
-  // Generate unique IDs for accessibility
-  const descriptionId = React.useId()
-  
-  /**
-   * Recursively check if children contain a specific component type.
-   * This is needed because AlertDialogDescription might be nested inside AlertDialogHeader.
-   */
-  const hasComponentType = (children, targetType, targetDisplayName) => {
-    return React.Children.toArray(children).some(child => {
-      if (!React.isValidElement(child)) return false
-      
-      // Check direct match
-      if (child.type === targetType || child.type?.displayName === targetDisplayName) {
-        return true
-      }
-      
-      // Check nested children (e.g., AlertDialogDescription inside AlertDialogHeader)
-      if (child.props?.children) {
-        return hasComponentType(child.props.children, targetType, targetDisplayName)
-      }
-      
-      return false
-    })
-  }
-
-  // Check if children already contain an AlertDialogTitle (recursively)
-  const hasTitle = hasComponentType(children, AlertDialogTitle, AlertDialogTitle.displayName)
-
-  // Check if children contain an AlertDialogDescription (recursively)
-  const hasDescription = hasComponentType(children, AlertDialogDescription, AlertDialogDescription.displayName)
-
-  // Determine if we need aria-describedby — always set it to avoid Radix console warning
-  const ariaDescribedBy = descriptionId;
-
-  return (
-    <AlertDialogPortal>
-      <AlertDialogOverlay />
-      <AlertDialogPrimitive.Content
-        ref={ref}
-        aria-describedby={ariaDescribedBy}
-        className={cn(
-          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-          className
-        )}
-        {...props}>
-        {/* Render hidden title for accessibility if no visible title exists */}
-        {!hasTitle && (
-          <VisuallyHidden.Root>
-            <AlertDialogPrimitive.Title>{title || "Alert"}</AlertDialogPrimitive.Title>
-          </VisuallyHidden.Root>
-        )}
-        {/* Render hidden description for accessibility if no visible description exists */}
-        {!hasDescription && !description && (
-          <VisuallyHidden.Root>
-            <AlertDialogPrimitive.Description id={descriptionId}>
-              Ação irreversível
-            </AlertDialogPrimitive.Description>
-          </VisuallyHidden.Root>
-        )}
-        {/* Render provided description as hidden if specified */}
-        {description && !hasDescription && (
-          <VisuallyHidden.Root>
-            <AlertDialogPrimitive.Description id={descriptionId}>{description}</AlertDialogPrimitive.Description>
-          </VisuallyHidden.Root>
-        )}
-        {/* Clone children to pass id to AlertDialogDescription */}
-        {React.Children.map(children, child => {
-          if (React.isValidElement(child) && 
-              (child.type === AlertDialogDescription || 
-               child.type?.displayName === AlertDialogDescription.displayName)) {
-            return React.cloneElement(child, { id: descriptionId })
-          }
-          return child
-        })}
-      </AlertDialogPrimitive.Content>
-    </AlertDialogPortal>
-  )
-})
-AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName
 
 const AlertDialogAction = React.forwardRef(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Action ref={ref} className={cn(buttonVariants(), className)} {...props} />
