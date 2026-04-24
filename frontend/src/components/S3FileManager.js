@@ -2376,7 +2376,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
               </div>
 
               {/* Diálogo de confirmação para eliminar selecionados */}
-              <AlertDialog open={bulkDeleteDialog.open} onOpenChange={(open) => setBulkDeleteDialog({ open })}>
+              <AlertDialog open={bulkDeleteDialog.open} onOpenChange={(open) => { if (!bulkDeleting) setBulkDeleteDialog({ open }); }}>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Eliminar {selectedFilesForAI.length} ficheiro(s)</AlertDialogTitle>
@@ -2388,7 +2388,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   <AlertDialogFooter>
                     <AlertDialogCancel disabled={bulkDeleting}>Cancelar</AlertDialogCancel>
                     <AlertDialogAction
-                      onClick={handleBulkDelete}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleBulkDelete();
+                      }}
                       disabled={bulkDeleting}
                       className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-300"
                     >
