@@ -1238,6 +1238,83 @@ async def delete_file_s3(
     )
 
 
+@router.post("/client/{client_id}/bulk-delete", responses={400: HTTP_400_RESPONSE, 403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@limiter.limit("30/minute")
+async def bulk_delete_files(
+    client_id: str,
+    request: Request,
+    data: dict = Body(...),
+    user: dict = Depends(get_current_user)
+):
+    """Elimina múltiplos ficheiros do S3 de uma só vez."""
+    file_paths = data.get("file_paths", [])
+    
+    if not file_paths or not isinstance(file_paths, list) or len(file_paths) == 0:
+        raise HTTPException(
+            status_code=400, 
+            detail="Lista de ficheiros vazia ou inválida"
+        )
+    
+    process = await db.processes.find_one({"id": client_id})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
+    
+    # Verificar se os ficheiros pertencem ao cliente (segurança)
+    client_name = process.get("client_name", "")
+    safe_name = sanitize_folder_name(client_name) if client_name else ""
+    clean_name = client_name.strip() if client_name else ""
+    
+    valid_prefixes = [
+        f"Documentação Clientes/{clean_name}",
+        f"Documentação Clientes/{safe_name}",
+    ]
+    
+    deleted_count = 0
+    failed_files = []
+    
+    for file_path in file_paths:
+        # Ignorar pastas (paths que terminam com /)
+        if file_path.endswith('/'):
+            continue
+        
+        # Verificar se o ficheiro pertence ao cliente
+        if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
+            failed_files.append(file_path)
+            continue
+        
+        try:
+            success = s3_service.delete_file(file_path)
+            if success:
+                deleted_count += 1
+            else:
+                failed_files.append(file_path)
+        except Exception as e:
+            logger.warning(f"Erro ao eliminar ficheiro {file_path}: {e}")
+            failed_files.append(file_path)
+    
+    # Registar no histórico
+    if deleted_count > 0:
+        await log_history(
+            process_id=client_id,
+            user=user,
+            action="Eliminou documentos em massa",
+            field="documento",
+            old_value=f"{deleted_count} ficheiro(s)"
+        )
+    
+    result = {
+        "success": True,
+        "deleted_count": deleted_count,
+        "total_requested": len(file_paths),
+    }
+    
+    if failed_files:
+        result["failed_count"] = len(failed_files)
+        result["failed_files"] = failed_files
+    
+    return JSONResponse(status_code=200, content=result)
+
+
 @router.post("/check-move-conflict", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE})
 async def check_move_conflict(
     data: dict,
