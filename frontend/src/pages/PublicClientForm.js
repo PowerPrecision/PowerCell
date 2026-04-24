@@ -43,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
+import DynamicFormField from "../components/DynamicFormField";
 import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
 import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye, FlaskConical, Play } from "lucide-react";
@@ -628,6 +629,40 @@ const PublicClientForm = ({ previewMode = false }) => {
     return fieldKey in requiredOverrideMap ? requiredOverrideMap[fieldKey] : defaultRequired;
   };
 
+  // Helper: check if a field's depends_on condition is satisfied
+  // depends_on can be:
+  //   {"field": X, "value": V}     → visible when formData[X] == V
+  //   {"field": X, "not_value": V} → visible when formData[X] != V
+  //   {"field": X, "contains": V}  → visible when formData[X] (array) contains V
+  const checkDependsOn = useCallback((dependsOn) => {
+    if (!dependsOn) return true;
+    const { field, value, not_value, contains } = dependsOn;
+    const fieldValue = formData[field];
+
+    if (value !== undefined) {
+      // For boolean values, compare strictly
+      if (value === true) return fieldValue === true;
+      if (value === false) return fieldValue === false;
+      return fieldValue === value;
+    }
+    if (not_value !== undefined) {
+      return fieldValue !== not_value;
+    }
+    if (contains !== undefined) {
+      return Array.isArray(fieldValue) && fieldValue.includes(contains);
+    }
+    return true;
+  }, [formData]);
+
+  // Build map of field configs by key (includes ALL fields from config, not just custom)
+  const fieldConfigMap = useMemo(() => {
+    const map = {};
+    allFieldsConfig.forEach((f) => {
+      map[f.field_key] = f;
+    });
+    return map;
+  }, [allFieldsConfig]);
+
   // Renderizar um campo personalizado dinâmico
   const renderCustomField = (field) => {
     const value = formData[field.field_key] || "";
@@ -863,6 +898,9 @@ const PublicClientForm = ({ previewMode = false }) => {
           estado_civil: formData.estado_civil,
           compra_tipo: formData.compra_tipo,
           menor_35_anos: formData.menor_35_anos,
+          sexo: formData.sexo || null,
+          profissao: formData.profissao || null,
+          codigo_postal: formData.codigo_postal || null,
         },
         titular2_data: formData.compra_tipo === "outra_pessoa" ? {
           name: formData.titular2_name,
@@ -891,6 +929,10 @@ const PublicClientForm = ({ previewMode = false }) => {
           proprietario_nome: formData.proprietario_nome || null,
           proprietario_contacto: formData.proprietario_contacto || null,
           caracteristicas_imovel: formData.caracteristicas_imovel || null,
+          // Campos de refinanciamento
+          valor_transferencia: formData.valor_transferencia || null,
+          valor_extra: formData.valor_extra || null,
+          prazo_pretendido: formData.prazo_pretendido || null,
         },
         financial_data: {
           acesso_portal_financas: formData.acesso_portal_financas,

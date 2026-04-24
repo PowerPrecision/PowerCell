@@ -438,7 +438,7 @@ async def get_public_form_config(request: Request):
         f for f in fields
         if f.get("is_visible")
     ]
-    all_fields.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
+    all_fields.sort(key=lambda f: (f.get("step", 0), f.get("order_index", f.get("order", 0))))
     
     return JSONResponse(status_code=200, content={
         "custom_fields": custom_fields,

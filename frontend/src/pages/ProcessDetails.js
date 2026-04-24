@@ -242,6 +242,156 @@ const validateNIF = (nif) => {
   return { valid: true, error: null };
 };
 
+// ── Dynamic Form Fields Tab Component ───────────────────────────
+// Fetches form config from /api/admin/form-config/fields and displays
+// all fields that have a corresponding value in the process data.
+// Custom fields created in Form Manager appear here automatically.
+const DynamicFormFieldsTab = ({ processId, token, personalData, titular2Data, realEstateData, financialData }) => {
+  const [formFields, setFormFields] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setFormFields(data.fields || []);
+        }
+      } catch (err) {
+        console.error("Error fetching form config for dynamic fields:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchConfig();
+  }, [token]);
+
+  // Build a flat map of all data sources for easy value lookup
+  const allData = useMemo(() => {
+    const map = {};
+    // Root-level fields from the process
+    if (personalData) Object.entries(personalData).forEach(([k, v]) => { if (v != null && v !== '') map[k] = v; });
+    if (titular2Data) Object.entries(titular2Data).forEach(([k, v]) => { if (v != null && v !== '') map[`titular2_${k}`] = v; });
+    if (realEstateData) Object.entries(realEstateData).forEach(([k, v]) => { if (v != null && v !== '') map[k] = v; });
+    if (financialData) Object.entries(financialData).forEach(([k, v]) => { if (v != null && v !== '') map[k] = v; });
+    return map;
+  }, [personalData, titular2Data, realEstateData, financialData]);
+
+  // Group fields by step and find fields with values
+  const fieldsByStep = useMemo(() => {
+    const steps = {};
+    formFields.forEach((field) => {
+      if (!field.step) return;
+      const step = field.step;
+      if (!steps[step]) steps[step] = [];
+      steps[step].push(field);
+    });
+    return steps;
+  }, [formFields]);
+
+  // Format a value for display
+  const formatValue = (val) => {
+    if (val === null || val === undefined) return null;
+    if (typeof val === "boolean") return val ? "Sim" : "Não";
+    if (Array.isArray(val)) {
+      if (val.length === 0) return null;
+      // If array items are objects with .banco, show bank names
+      if (val.some((v) => typeof v === "object" && v.banco)) {
+        return val.map((v) => v.banco).join(", ");
+      }
+      return val.join(", ");
+    }
+    return String(val);
+  };
+
+  const stepLabels = {
+    1: "Dados Pessoais — Titular",
+    2: "Dados do 2º Titular",
+    3: "Dados do Imóvel / Pedido",
+    4: "Situação Financeira",
+    5: "Créditos e Capital",
+    6: "Consentimentos",
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-sm text-muted-foreground">A carregar configuração do formulário...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-emerald-100 dark:bg-emerald-900/40 rounded-lg">
+            <Database className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-emerald-800 dark:text-emerald-200">Campos do Formulário</h3>
+            <p className="text-sm text-emerald-600 dark:text-emerald-400">
+              Todos os campos preenchidos no formulário de registo (incluindo campos personalizados)
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {Object.entries(fieldsByStep)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([stepNum, fields]) => {
+          // Filter to fields that have data
+          const fieldsWithData = fields.filter((f) => {
+            const val = allData[f.field_key];
+            return val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0);
+          });
+
+          if (fieldsWithData.length === 0) return null;
+
+          return (
+            <Card key={stepNum} className="border-l-4 border-l-emerald-500">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Passo {stepNum}: {stepLabels[stepNum] || `Passo ${stepNum}`}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {fieldsWithData.map((field) => {
+                    const displayVal = formatValue(allData[field.field_key]);
+                    return (
+                      <div key={field.field_key} className="space-y-1">
+                        <p className="text-xs text-muted-foreground font-medium">
+                          {field.label}
+                          {field.is_custom && (
+                            <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0">Custom</Badge>
+                          )}
+                        </p>
+                        <p className="text-sm font-medium break-words">
+                          {displayVal || <span className="text-muted-foreground italic">—</span>}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+
+      {Object.keys(fieldsByStep).length > 0 && (
+        <p className="text-xs text-muted-foreground text-center">
+          Campos configurados no Gestor de Formulários aparecem automaticamente aqui.
+        </p>
+      )}
+    </div>
+  );
+};
+
 const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -1925,7 +2075,7 @@ const ProcessDetails = () => {
               </CardHeader>
               <CardContent>
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 gap-1 h-auto p-1">
+                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-7 gap-1 h-auto p-1">
                     <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
                       <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Pessoais</span>
@@ -1941,6 +2091,10 @@ const ProcessDetails = () => {
                     <TabsTrigger value="credit" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
                       <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Crédito</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="formfields" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
+                      <Database className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Formulário</span>
                     </TabsTrigger>
                     <TabsTrigger value="documents" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
                       <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -4088,6 +4242,18 @@ const ProcessDetails = () => {
                         </CardContent>
                       </Card>
                     </div>
+                  </TabsContent>
+
+                  {/* Form Fields Tab — Dynamic fields from form config */}
+                  <TabsContent value="formfields" className="mt-4">
+                    <DynamicFormFieldsTab
+                      processId={id}
+                      token={token}
+                      personalData={personalData}
+                      titular2Data={titular2Data}
+                      realEstateData={realEstateData}
+                      financialData={financialData}
+                    />
                   </TabsContent>
                 </Tabs>
 

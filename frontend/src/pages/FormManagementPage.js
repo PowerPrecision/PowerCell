@@ -88,12 +88,23 @@ const normalizeFields = (rawFields) =>
     order_index: f.order_index ?? f.order ?? i,
   }));
 
-const prepareFieldsForSave = (fields) =>
-  fields.map((f, i) => ({
+const prepareFieldsForSave = (fields) => {
+  // Convert global order_index to per-step order values.
+  // Backend sorts by (step, order) so order must be 1-based per-step.
+  const sortedByIndex = [...fields].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+  const perStepOrder = {};
+  const stepCounters = {};
+  for (const f of sortedByIndex) {
+    const step = f.step || 1;
+    stepCounters[step] = (stepCounters[step] || 0) + 1;
+    perStepOrder[f.field_key] = stepCounters[step];
+  }
+  return fields.map((f) => ({
     ...f,
-    order_index: f.order_index ?? i,
-    order: f.order_index ?? f.order ?? i,
+    order_index: f.order_index ?? 0,
+    order: perStepOrder[f.field_key] ?? f.order ?? 0,
   }));
+};
 
 // ─── WYSIWYG Field Preview ─────────────────────────────────────────
 
