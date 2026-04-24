@@ -409,15 +409,17 @@ class S3Service:
         if not self.is_configured():
             return {"error": "S3 não configurado", "files": {}}
 
-        # Se temos um s3_folder configurado, usar como primeira opção
+        # CRÍTICO: Se temos um s3_folder configurado, usar APENAS esse path.
+        # NÃO adicionar fallbacks — isso poderia listar ficheiros de outro cliente
+        # com nome similar após a pasta ficar vazia (ex: após eliminação).
         possible_paths = []
         if s3_folder:
             # Remover trailing slash se existir
             s3_folder = s3_folder.rstrip('/')
             possible_paths.append(s3_folder)
-        
-        # Adicionar paths automáticos como fallback
-        possible_paths.extend(self._get_possible_client_paths(client_id, client_name, second_client_name))
+        else:
+            # Apenas usar paths automáticos como fallback se NÃO houver s3_folder
+            possible_paths.extend(self._get_possible_client_paths(client_id, client_name, second_client_name))
         
         files_by_category = {cat: [] for cat in DEFAULT_CATEGORIES}
         found_path = None
