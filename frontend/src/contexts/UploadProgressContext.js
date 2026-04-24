@@ -37,7 +37,7 @@ export const useUploadProgress = () => {
   return context;
 };
 
-export const UploadProgressProvider = ({ children }) => {
+export function UploadProgressProvider({ children }) {
   // Estado de uploads activos: { jobId: { status, total, processed, errors, clientName, startedAt } }
   const [activeUploads, setActiveUploads] = useState({});
   
@@ -130,6 +130,6 @@ export const UploadProgressProvider = ({ children }) => {
       {children}
     </UploadProgressContext.Provider>
   );
-};
+}
 
 export default UploadProgressContext;

@@ -34,7 +34,7 @@ const ThemeContext = createContext({
 
 export const useTheme = () => useContext(ThemeContext);
 
-export const ThemeProvider = ({ children }) => {
+export function ThemeProvider({ children }) {
   const [theme, setThemeState] = useState(() => {
     // Verificar localStorage primeiro
     const stored = localStorage.getItem("theme");
@@ -98,6 +98,6 @@ export const ThemeProvider = ({ children }) => {
       {children}
     </ThemeContext.Provider>
   );
-};
+}
 
 export default ThemeContext;

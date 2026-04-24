@@ -24,7 +24,7 @@ import { toast } from "sonner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-const TempLinkDownloadPage = () => {
+export default function TempLinkDownloadPage() {
   const { token } = useParams();
 
   const [loading, setLoading] = useState(true);
@@ -300,6 +300,4 @@ const TempLinkDownloadPage = () => {
       </div>
     </div>
   );
-};
-
-export default TempLinkDownloadPage;
+}

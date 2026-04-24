@@ -21,7 +21,7 @@ import {
   FileText
 } from "lucide-react";
 
-const GlobalUploadProgress = () => {
+export default function GlobalUploadProgress() {
   const { uploadList, hasActiveUploads, dismissUpload } = useUploadProgress();
   const [expanded, setExpanded] = useState(true);
   const [minimized, setMinimized] = useState(false);
@@ -204,6 +204,4 @@ const GlobalUploadProgress = () => {
       )}
     </div>
   );
-};
-
-export default GlobalUploadProgress;
+}

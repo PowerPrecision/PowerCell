@@ -203,7 +203,7 @@ const formatDate = (value) => {
 // ====================================================================
 // SIGNATURE PAD COMPONENT
 // ====================================================================
-const SignaturePad = ({ onSignatureChange, signature }) => {
+function SignaturePad({ onSignatureChange, signature }) {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
@@ -328,12 +328,13 @@ const SignaturePad = ({ onSignatureChange, signature }) => {
       </div>
     </div>
   );
-};
+}
 
 // ====================================================================
 // STEP INDICATOR COMPONENT
 // ====================================================================
-const StepIndicator = ({ currentStep }) => (
+function StepIndicator({ currentStep }) {
+  return (
   <div className="flex items-center justify-center gap-4 mb-6">
     <div
       className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
@@ -361,12 +362,13 @@ const StepIndicator = ({ currentStep }) => (
       Assinatura
     </div>
   </div>
-);
+  );
+}
 
 // ====================================================================
 // MAIN PAGE COMPONENT
 // ====================================================================
-const RGPDPage = () => {
+export default function RGPDPage() {
   const { token } = useParams();
 
   // ------------------------------------------------------------------
@@ -1209,6 +1211,5 @@ const RGPDPage = () => {
       </div>
     </div>
   );
-};
+}
 
-export default RGPDPage;

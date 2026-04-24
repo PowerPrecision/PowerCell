@@ -59,23 +59,28 @@ const DRAFT_STORAGE_KEY = "public_client_form_draft";
 const DRAFT_TIMESTAMP_KEY = "public_client_form_draft_timestamp";
 
 // Helper component for field hints
-const FieldHint = ({ children }) => (
+function FieldHint({ children }) {
+  return (
   <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1">
     <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
     <span>{children}</span>
   </p>
-);
+  );
+}
 
 // Helper component for field errors
-const FieldError = ({ children }) => (
+function FieldError({ children }) {
+  return (
   <p className="text-xs text-red-600 mt-1 flex items-start gap-1 font-medium">
     <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
     <span>{children}</span>
   </p>
-);
+  );
+}
 
 // Helper for required field labels
-const RequiredLabel = ({ htmlFor, children, required: isRequired = true }) => (
+function RequiredLabel({ htmlFor, children, required: isRequired = true }) {
+  return (
   <Label htmlFor={htmlFor}>
     {children}
     {isRequired && (
@@ -85,15 +90,17 @@ const RequiredLabel = ({ htmlFor, children, required: isRequired = true }) => (
       </>
     )}
   </Label>
-);
+  );
+}
 
 // Validated Input Component - com forwardRef para suportar refs
-const ValidatedInput = forwardRef(({ 
+const ValidatedInput = forwardRef(function ValidatedInput({ 
   error, 
   required,
   className,
   ...props 
-}, ref) => (
+}, ref) {
+  return (
   <div className="space-y-1">
     <Input
       ref={ref}
@@ -105,16 +112,18 @@ const ValidatedInput = forwardRef(({
     />
     {error && <FieldError>{error}</FieldError>}
   </div>
-));
+  );
+});
 ValidatedInput.displayName = 'ValidatedInput';
 
 // Validated Select Wrapper
-const ValidatedSelect = ({ 
+function ValidatedSelect({ 
   error, 
   children,
   triggerClassName,
   ...props 
-}) => (
+}) {
+  return (
   <div className="space-y-1">
     <Select {...props}>
       <SelectTrigger className={cn(
@@ -126,10 +135,11 @@ const ValidatedSelect = ({
     </Select>
     {error && <FieldError>{error}</FieldError>}
   </div>
-);
+  );
+}
 
 // Progress Bar Component com percentagem
-const FormProgressBar = ({ currentStep, totalSteps, completedFields, totalFields }) => {
+function FormProgressBar({ currentStep, totalSteps, completedFields, totalFields }) {
   const stepProgress = ((currentStep - 1) / totalSteps) * 100;
   const fieldProgress = totalFields > 0 ? (completedFields / totalFields) * 100 : 0;
   
@@ -162,10 +172,10 @@ const FormProgressBar = ({ currentStep, totalSteps, completedFields, totalFields
       </div>
     </div>
   );
-};
+}
 
 // Auto-save indicator
-const AutoSaveIndicator = ({ lastSaved, isSaving }) => {
+function AutoSaveIndicator({ lastSaved, isSaving }) {
   if (isSaving) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -185,7 +195,7 @@ const AutoSaveIndicator = ({ lastSaved, isSaving }) => {
   }
   
   return null;
-};
+}
 
 const ESTADOS_CIVIS = [
   { value: "solteiro", label: "Solteiro/a" },
@@ -315,7 +325,7 @@ const MOCK_DATA = {
   consent_contact: true,
 };
 
-const PublicClientForm = ({ previewMode = false }) => {
+export default function PublicClientForm({ previewMode = false }) {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -2405,6 +2415,6 @@ const PublicClientForm = ({ previewMode = false }) => {
       </main>
     </div>
   );
-};
+}
 
-export default PublicClientForm;
+
