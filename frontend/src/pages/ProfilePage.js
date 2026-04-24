@@ -44,6 +44,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import DashboardLayout from "../layouts/DashboardLayout";
 import EmailConfigForm from "../components/EmailConfigForm";
+import RichTextEditor from "../components/ui/RichTextEditor";
 import {
   User,
   Lock,
@@ -62,6 +63,7 @@ import {
   Loader2,
   AlertTriangle,
   Info,
+  PenLine,
 } from "lucide-react";
 
 // ====================================================================
@@ -78,6 +80,8 @@ const ProfilePage = () => {
     phone: "",
     email: "",
   });
+  const [emailSignature, setEmailSignature] = useState("");
+  const [savingSignature, setSavingSignature] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -112,6 +116,7 @@ const ProfilePage = () => {
         phone: user.phone || "",
         email: user.email || "",
       });
+      setEmailSignature(user.email_signature || "");
       setLoading(false);
     }
   }, [user]);
@@ -178,6 +183,28 @@ const ProfilePage = () => {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Guardar assinatura de email (separadamente para não sobrecarregar o perfil)
+  const handleSaveSignature = async () => {
+    setSavingSignature(true);
+    try {
+      const response = await api.put("/auth/profile", {
+        email_signature: emailSignature,
+      });
+      toast({
+        title: "Assinatura guardada",
+        description: "A sua assinatura de email foi atualizada.",
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao guardar",
+        description: error.response?.data?.detail || "Não foi possível guardar a assinatura.",
+      });
+    } finally {
+      setSavingSignature(false);
     }
   };
 
@@ -447,6 +474,50 @@ const ProfilePage = () => {
               </div>
               <Button variant="outline" onClick={() => setPasswordDialog(true)}>
                 Alterar Password
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Assinatura de Email */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <PenLine className="h-5 w-5" />
+              Assinatura de Email
+            </CardTitle>
+            <CardDescription>
+              Configure a sua assinatura pessoal. Será adicionada automaticamente no final de todos os emails que enviar.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <RichTextEditor
+              value={emailSignature}
+              onChange={setEmailSignature}
+              placeholder="Escreva ou cole a sua assinatura de email aqui..."
+              advanced
+              minHeight="120px"
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Suporta formatação de texto, cores, links e imagens.
+              </p>
+              <Button
+                onClick={handleSaveSignature}
+                disabled={savingSignature}
+                size="sm"
+              >
+                {savingSignature ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                    A guardar...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-1" />
+                    Guardar Assinatura
+                  </>
+                )}
               </Button>
             </div>
           </CardContent>
