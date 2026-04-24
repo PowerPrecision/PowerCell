@@ -150,7 +150,7 @@ const StaffDashboard = () => {
         getUsers().catch(() => ({ data: [] })),
         getUpcomingExpiries(60).catch(() => ({ data: [] })),
         getCalendarDeadlines().catch(() => ({ data: [] })),
-        getWebmailStats().catch(() => ({ data: { unread_count: 0, sent_today_count: 0, drafts_count: 0 } })),
+        getWebmailStats("personal").catch(() => ({ data: { unread_count: 0, sent_today_count: 0, drafts_count: 0 } })),
       ]);
       setStats(statsRes.data);
       setUsers(usersRes.data);
