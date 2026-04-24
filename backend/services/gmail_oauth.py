@@ -884,6 +884,25 @@ async def test_imap_connection(email_config: dict) -> Dict[str, Any]:
             "error": "Falha ao desencriptar a password",
         }
 
+    def _parse_error(raw_err: str, protocol: str) -> str:
+        """Convert raw IMAP/SMTP error strings to user-friendly Portuguese messages."""
+        err_lower = raw_err.lower()
+        if "authenticationfailed" in err_lower or "incorrect authentication" in err_lower or "auth" in err_lower and "fail" in err_lower:
+            return f"{protocol}: Credenciais inválidas. Verifique o email e a password da conta de email."
+        if "connection refused" in err_lower:
+            return f"{protocol}: Servidor não acessível. Verifique o endereço do servidor."
+        if "connection timed out" in err_lower or "timeout" in err_lower:
+            return f"{protocol}: Tempo de conexão esgotado. Verifique a rede e as portas ({'IMAP: 993' if protocol == 'IMAP' else 'SMTP: 465'})."
+        if "ssl" in err_lower or "certificate" in err_lower:
+            return f"{protocol}: Erro de certificado SSL/TLS. Verifique a configuração de segurança."
+        if "too many" in err_lower or "rate limit" in err_lower:
+            return f"{protocol}: Limite de tentativas excedido. Aguarde alguns minutos e tente novamente."
+        if "not found" in err_lower or "name resolution" in err_lower:
+            return f"{protocol}: Servidor não encontrado. Verifique o endereço do servidor."
+        if "network is unreachable" in err_lower or "unreachable" in err_lower:
+            return f"{protocol}: Rede inacessível. Verifique a ligação à internet."
+        return f"{protocol}: Não foi possível conectar. Verifique as configurações e tente novamente."
+
     def _test():
         imap_ok = False
         smtp_ok = False
@@ -902,7 +921,7 @@ async def test_imap_connection(email_config: dict) -> Dict[str, Any]:
             mail.logout()
             imap_ok = True
         except Exception as e:
-            error = f"IMAP: {str(e)}"
+            error = _parse_error(str(e), "IMAP")
 
         # Test SMTP
         try:
@@ -917,10 +936,8 @@ async def test_imap_connection(email_config: dict) -> Dict[str, Any]:
             smtp_server.quit()
             smtp_ok = True
         except Exception as e:
-            if error:
-                error += f"; SMTP: {str(e)}"
-            else:
-                error = f"SMTP: {str(e)}"
+            smtp_err = _parse_error(str(e), "SMTP")
+            error = f"{error}. {smtp_err}" if error else smtp_err
 
         return {
             "success": imap_ok and smtp_ok,

@@ -54,7 +54,7 @@ const WelcomeConfigModal = () => {
 
   const handleGoToProfile = () => {
     setOpen(false);
-    navigate("/meu-perfil");
+    navigate("/perfil");
   };
 
   const handleDismiss = () => {
