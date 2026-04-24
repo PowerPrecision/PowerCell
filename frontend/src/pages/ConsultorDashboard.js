@@ -222,7 +222,7 @@ const ConsultorDashboard = () => {
             bgColor="bg-blue-100 dark:bg-teal-600/30"
             value={processes.length}
             label="Meus Clientes"
-            onClick={() => navigate('/clientes')}
+            onClick={() => navigate('/meus-clientes')}
           />
           <StatCard
             icon={AlertTriangle}
