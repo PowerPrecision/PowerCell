@@ -1,3 +1,5 @@
+import { toast } from "sonner";
+
 /**
  * Kanban Constants
  * 
@@ -28,7 +30,6 @@ export const statusHeaderColors = {
  */
 export const openEmailClient = (email, clientName) => {
   if (!email) {
-    const { toast } = require("sonner");
     toast.error("Cliente não tem email registado");
     return;
   }

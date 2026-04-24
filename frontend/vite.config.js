@@ -71,15 +71,12 @@ export default defineConfig(({ mode }) => {
         output: {
           manualChunks: {
             'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-            'vendor-radix': [
-              '@radix-ui/react-dialog',
-              '@radix-ui/react-dropdown-menu',
-              '@radix-ui/react-tabs',
-              '@radix-ui/react-select',
-              '@radix-ui/react-popover',
-            ],
             'vendor-charts': ['recharts'],
           },
+          // NOTA: vendor-radix removido para evitar TDZ errors.
+          // Separar apenas 5 pacotes Radix causava problemas de ordem de
+          // inicialização com os outros 20+ pacotes Radix no chunk principal.
+          // O Rollup agora decide a divisão automaticamente.
         },
       },
       chunkSizeWarningLimit: 1000,
