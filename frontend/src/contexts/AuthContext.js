@@ -47,7 +47,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 const TOKEN_REFRESH_THRESHOLD = 2 * 60 * 1000; // 2 minutos antes de expirar
 const TOKEN_CHECK_INTERVAL = 60 * 1000; // Verificar a cada 60 segundos
 
-export const AuthProvider = ({ children }) => {
+export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [refreshToken, setRefreshToken] = useState(localStorage.getItem("refreshToken"));
@@ -343,7 +343,7 @@ export const AuthProvider = ({ children }) => {
       {children}
     </AuthContext.Provider>
   );
-};
+}
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

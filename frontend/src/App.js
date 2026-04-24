@@ -86,11 +86,13 @@ const FilesExplorerPage = React.lazy(() => import("./pages/FilesExplorerPage"));
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
 // ====================================================================
-const PageLoadingSkeleton = () => (
-  <div className="min-h-[400px] flex items-center justify-center bg-background p-6">
-    <FullPageSkeleton />
-  </div>
-);
+function PageLoadingSkeleton() {
+  return (
+    <div className="min-h-[400px] flex items-center justify-center bg-background p-6">
+      <FullPageSkeleton />
+    </div>
+  );
+}
 
 // ====================================================================
 // ERROR BOUNDARY PARA ERROS DE CHUNK (Lazy Loading)
@@ -159,7 +161,7 @@ const STAFF_ROLES = ["consultor", "mediador", "intermediario", "consultor_interm
 // Admin roles for automation and system config
 const ADMIN_ROLES = ["admin", "ceo"];
 
-const ProtectedRoute = ({ children, allowedRoles }) => {
+function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -180,9 +182,9 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   return children;
-};
+}
 
-const DashboardRedirect = () => {
+function DashboardRedirect() {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -200,10 +202,10 @@ const DashboardRedirect = () => {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/staff" replace />;
-};
+}
 
 // Componente para redirecionar a rota raiz baseado no estado de autenticação
-const RootRedirect = () => {
+function RootRedirect() {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -224,7 +226,7 @@ const RootRedirect = () => {
 
   // Se não autenticado, mostra o formulário público
   return <PublicClientForm />;
-};
+}
 
 function App() {
   return (

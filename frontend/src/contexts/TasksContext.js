@@ -100,7 +100,7 @@ export const TaskTypeLabels = {
  * Inclui circuit breaker para parar polling quando o endpoint
  * retorna erros persistentes (404, 500, etc.), evitando spam de console.
  */
-export const TasksProvider = ({ children }) => {
+export function TasksProvider({ children }) {
   const { user } = useAuth();
 
   // Estado das tarefas
@@ -362,7 +362,7 @@ export const TasksProvider = ({ children }) => {
       {children}
     </TasksContext.Provider>
   );
-};
+}
 
 export const useTasks = () => {
   const context = useContext(TasksContext);

@@ -36,21 +36,26 @@ import { Info, AlertCircle } from "lucide-react";
 import { cn } from "../lib/utils";
 
 // Reuse the same helper components as PublicClientForm
-const FieldHint = ({ children }) => (
+function FieldHint({ children }) {
+  return (
   <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1">
     <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
     <span>{children}</span>
   </p>
-);
+  );
+}
 
-const FieldError = ({ children }) => (
+function FieldError({ children }) {
+  return (
   <p className="text-xs text-red-600 mt-1 flex items-start gap-1 font-medium">
     <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
     <span>{children}</span>
   </p>
-);
+  );
+}
 
-const RequiredLabel = ({ htmlFor, children, required: isRequired = true }) => (
+function RequiredLabel({ htmlFor, children, required: isRequired = true }) {
+  return (
   <Label htmlFor={htmlFor}>
     {children}
     {isRequired && (
@@ -60,7 +65,8 @@ const RequiredLabel = ({ htmlFor, children, required: isRequired = true }) => (
       </>
     )}
   </Label>
-);
+  );
+}
 
 export default function DynamicFormField({
   field,

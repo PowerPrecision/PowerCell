@@ -12,7 +12,7 @@ import { Button } from "./ui/button";
 import { Eye, X } from "lucide-react";
 import { toast } from "sonner";
 
-const ImpersonateBanner = () => {
+export default function ImpersonateBanner() {
   const { user, isImpersonating, originalAdminName, stopImpersonating } = useAuth();
 
   if (!isImpersonating) {
@@ -62,6 +62,4 @@ const ImpersonateBanner = () => {
       <div className="h-12 w-full flex-shrink-0" />
     </>
   );
-};
-
-export default ImpersonateBanner;
+}
