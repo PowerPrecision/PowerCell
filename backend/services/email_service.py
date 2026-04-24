@@ -694,6 +694,21 @@ async def send_email(
         # === ENVIAR: Resend API vs SMTP ===
         if account.smtp_server == "resend" and account.password:
             # --- Resend API (HTTP) ---
+            # Determinar assinatura de email a usar
+            email_sig = None
+            if account.name == "system_smtp":
+                email_sig = system_email_signature
+            elif created_by:
+                # Buscar assinatura pessoal do utilizador que envia o email
+                try:
+                    sender_user = await db.users.find_one(
+                        {"id": created_by},
+                        {"email_signature": 1, "_id": 0}
+                    )
+                    email_sig = sender_user.get("email_signature") if sender_user else None
+                except Exception:
+                    pass
+
             _send_via_resend(
                 api_key=account.password,
                 from_email=account.email,
@@ -705,7 +720,7 @@ async def send_email(
                 body=body,
                 body_html=body_html,
                 attachments=attachments,
-                email_signature=system_email_signature if account.name == "system_smtp" else None,
+                email_signature=email_sig,
             )
         else:
             # --- SMTP directo (legado) ---

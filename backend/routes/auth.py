@@ -158,6 +158,7 @@ async def get_me(user: dict = Depends(get_current_user)):
         "additional_roles": user.get("additional_roles", []),
         # Indica se o utilizador tem email configurado para sincronização
         "email_configured": user.get("email_config", {}).get("is_configured", False),
+        "email_signature": user.get("email_signature", ""),
     }
     
     # Incluir informação de impersonate se presente
@@ -248,13 +249,17 @@ async def update_profile(
     user_id = user["id"]
     
     # Campos permitidos para actualização pelo próprio utilizador
-    allowed_fields = ["name", "phone"]
+    allowed_fields = ["name", "phone", "email_signature"]
     update_data = {}
     
     for field in allowed_fields:
         if field in data and data[field] is not None:
-            # Aceitar qualquer valor — sem validação de formato
-            update_data[field] = str(data[field]).strip()
+            if field == "email_signature":
+                # Assinatura de email: guardar HTML tal como está (sem strip)
+                update_data[field] = data[field]
+            else:
+                # Aceitar qualquer valor — sem validação de formato
+                update_data[field] = str(data[field]).strip()
     
     if not update_data:
         raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
