@@ -28,7 +28,7 @@ import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText, 
   Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown
 } from "lucide-react";
-import { CreateClientModal } from "../components/kanban";
+import CreateClientModal from "../components/kanban/CreateClientModal";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";

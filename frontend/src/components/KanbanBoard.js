@@ -48,15 +48,13 @@ import { useKanbanRealtime } from '../hooks/queries/useKanbanRealtime';
 import { useMoveProcessMutation } from '../hooks/mutations/useProcessMutations';
 
 // Importar componentes refatorados
-import {
-  KanbanColumn,
-  KanbanHeader,
-  KanbanSkeleton,
-  SearchResultsList,
-  ProcessDetailsModal,
-  CreateClientModal,
-  AssignUsersModal,
-} from './kanban';
+import KanbanColumn from './kanban/KanbanColumn';
+import KanbanHeader from './kanban/KanbanHeader';
+import KanbanSkeleton from './kanban/KanbanSkeleton';
+import SearchResultsList from './kanban/SearchResultsList';
+import ProcessDetailsModal from './kanban/ProcessDetailsModal';
+import CreateClientModal from './kanban/CreateClientModal';
+import AssignUsersModal from './kanban/AssignUsersModal';
 
 const KanbanBoard = ({ 
   token, 

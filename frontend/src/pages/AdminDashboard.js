@@ -54,10 +54,12 @@ import {
 } from "recharts";
 import KanbanBoard from "../components/KanbanBoard";
 import LeadsKanban from "../components/LeadsKanban";
-import { 
-  CalendarTab, DocumentsTab, UsersTab, ClientSearchTab, 
-  CreateEventDialog, AIAnalysisTab 
-} from "../components/admin";
+import CalendarTab from "../components/admin/CalendarTab";
+import DocumentsTab from "../components/admin/DocumentsTab";
+import UsersTab from "../components/admin/UsersTab";
+import ClientSearchTab from "../components/admin/ClientSearchTab";
+import CreateEventDialog from "../components/admin/CreateEventDialog";
+import AIAnalysisTab from "../components/admin/AIAnalysisTab";
 import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
