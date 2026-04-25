@@ -404,8 +404,33 @@ export default function PublicClientForm({ previewMode = false }) {
   }, []);
 
   // Simular preenchimento completo do formulário (apenas para testes)
+  // Preenche MOCK_DATA (campos hardcoded) + gera dados mock para campos dinâmicos
   const simulateFill = useCallback(() => {
-    setFormData(prev => ({ ...prev, ...MOCK_DATA }));
+    // Gerar dados mock para campos dinâmicos do backend
+    const dynamicMock = {};
+    allFieldsConfig.forEach(field => {
+      // Só preencher campos que ainda não estão em MOCK_DATA
+      if (field.field_key in MOCK_DATA) return;
+      const key = field.field_key;
+      const type = field.field_type;
+      if (type === 'text' || type === 'email' || type === 'tel') {
+        dynamicMock[key] = `Mock ${field.label || key}`;
+      } else if (type === 'number') {
+        dynamicMock[key] = '100';
+      } else if (type === 'date') {
+        dynamicMock[key] = '2000-01-15';
+      } else if (type === 'select' && field.options?.length > 0) {
+        dynamicMock[key] = field.options[0];
+      } else if (type === 'checkbox' && field.options?.length > 0) {
+        dynamicMock[key] = [field.options[0]];
+      } else if (type === 'radio') {
+        dynamicMock[key] = 'sim';
+      } else if (type === 'textarea') {
+        dynamicMock[key] = 'Texto de teste para ' + (field.label || key);
+      }
+    });
+
+    setFormData(prev => ({ ...prev, ...MOCK_DATA, ...dynamicMock }));
     setStep(1);
     setFieldErrors({});
     clearDraft();
@@ -413,7 +438,7 @@ export default function PublicClientForm({ previewMode = false }) {
       duration: 4000,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [clearDraft]);
+  }, [clearDraft, allFieldsConfig]);
 
   const [formData, setFormData] = useState(() => {
     const defaults = {
@@ -537,6 +562,43 @@ export default function PublicClientForm({ previewMode = false }) {
     };
     fetchFormConfig();
   }, []);
+
+  // ─── Conditional Step Logic ────────────────────────────────────────────
+  // Step 2 (2º Titular) só é visível se:
+  //   - formData.compra_tipo === 'outra_pessoa', OU
+  //   - existem campos no step 2 SEM depends_on (admin configurou para sempre mostrar)
+  const hasStep2Fields = useMemo(() => {
+    const step2Fields = allFieldsConfig.filter(f => f.step === 2);
+    if (step2Fields.length === 0) return false;
+    // Se algum campo não tem depends_on, o step é sempre visível
+    const alwaysVisible = step2Fields.some(f => !f.depends_on);
+    if (alwaysVisible) return true;
+    // Caso contrário, depende do depends_on resolver (ex: compra_tipo)
+    return formData.compra_tipo === 'outra_pessoa';
+  }, [allFieldsConfig, formData.compra_tipo]);
+
+  // Total de steps efetivos (5 ou 6 dependendo do step 2)
+  const totalSteps = useMemo(() => hasStep2Fields ? 6 : 5, [hasStep2Fields]);
+
+  // Map logical step (1..totalSteps) → real step number (1..6)
+  const logicalToRealStep = useCallback((logicalStep) => {
+    if (!hasStep2Fields && logicalStep >= 2) return logicalStep + 1;
+    return logicalStep;
+  }, [hasStep2Fields]);
+
+  // Map real step (1..6) → logical step (1..totalSteps)
+  const realToLogicalStep = useCallback((realStep) => {
+    if (!hasStep2Fields && realStep >= 3) return realStep - 1;
+    return realStep;
+  }, [hasStep2Fields]);
+
+  // Override: when compra_tipo changes, adjust current step if needed
+  useEffect(() => {
+    if (!hasStep2Fields && step === 2) {
+      // Step 2 was hidden — jump to step 3 (logical step 2)
+      setStep(3);
+    }
+  }, [hasStep2Fields, step]);
 
   // Dynamic required fields derived from allFieldsConfig
   const dynamicRequiredFields = useMemo(() => {
@@ -2197,8 +2259,15 @@ export default function PublicClientForm({ previewMode = false }) {
   };
 
   const handleNextStep = () => {
+    const maxRealStep = 6;
     if (previewMode) {
-      setStep(Math.min(6, step + 1));
+      // Advance to next real step, skipping hidden step 2
+      let next = step + 1;
+      while (next <= maxRealStep) {
+        if (next === 2 && !hasStep2Fields) { next++; continue; }
+        break;
+      }
+      setStep(Math.min(maxRealStep, next));
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -2225,7 +2294,13 @@ export default function PublicClientForm({ previewMode = false }) {
     
     // Limpar erros se passou na validação
     setFieldErrors({});
-    setStep(Math.min(6, step + 1));
+    // Advance to next real step, skipping hidden step 2
+    let next = step + 1;
+    while (next <= maxRealStep) {
+      if (next === 2 && !hasStep2Fields) { next++; continue; }
+      break;
+    }
+    setStep(Math.min(maxRealStep, next));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -2329,8 +2404,8 @@ export default function PublicClientForm({ previewMode = false }) {
           <CardContent className="pt-6" ref={formContainerRef}>
             {/* Progress Bar com percentagem */}
             <FormProgressBar 
-              currentStep={step} 
-              totalSteps={6} 
+              currentStep={realToLogicalStep(step)} 
+              totalSteps={totalSteps} 
               completedFields={progress.completed}
               totalFields={progress.total}
             />
@@ -2364,14 +2439,22 @@ export default function PublicClientForm({ previewMode = false }) {
             <div className="flex justify-between mt-8 pt-6 border-t border-border">
               <Button
                 variant="outline"
-                onClick={() => setStep(Math.max(1, step - 1))}
+                onClick={() => {
+                  // Go to previous real step, skipping hidden step 2
+                  let prev = step - 1;
+                  while (prev >= 1) {
+                    if (prev === 2 && !hasStep2Fields) { prev--; continue; }
+                    break;
+                  }
+                  setStep(Math.max(1, prev));
+                }}
                 disabled={step === 1}
               >
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Voltar
               </Button>
               
-              {step < 6 ? (
+              {step < 6 && !(step === 5 && !hasStep2Fields) ? (
                 <Button
                   onClick={handleNextStep}
                   disabled={!canProceed()}
