@@ -520,6 +520,24 @@ export default function PublicClientForm({ previewMode = false }) {
     return defaults;
   });
 
+  // Carregar campos personalizados do backend
+  // ⚠️ MOVED HERE: Must be declared BEFORE dynamicRequiredFields useMemo
+  // to avoid TDZ (Temporal Dead Zone) error — const is hoisted but not initialized.
+  const [customFields, setCustomFields] = useState([]);
+  const [allFieldsConfig, setAllFieldsConfig] = useState([]);
+  useEffect(() => {
+    const fetchFormConfig = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/public/form-config`);
+        setCustomFields(res.data.custom_fields || []);
+        setAllFieldsConfig(res.data.all_fields || []);
+      } catch {
+        // Endpoint pode não existir em deployments mais antigos
+      }
+    };
+    fetchFormConfig();
+  }, []);
+
   // Dynamic required fields derived from allFieldsConfig
   const dynamicRequiredFields = useMemo(() => {
     if (allFieldsConfig.length === 0) {
@@ -577,22 +595,6 @@ export default function PublicClientForm({ previewMode = false }) {
       }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Carregar campos personalizados do backend
-  const [customFields, setCustomFields] = useState([]);
-  const [allFieldsConfig, setAllFieldsConfig] = useState([]);
-  useEffect(() => {
-    const fetchFormConfig = async () => {
-      try {
-        const res = await axios.get(`${API_URL}/public/form-config`);
-        setCustomFields(res.data.custom_fields || []);
-        setAllFieldsConfig(res.data.all_fields || []);
-      } catch {
-        // Endpoint pode não existir em deployments mais antigos
-      }
-    };
-    fetchFormConfig();
-  }, []);
 
   // Mapa de ordem dos campos: field_key -> order (do config do admin)
   // Usado para aplicar CSS order nos campos hardcoded de cada step

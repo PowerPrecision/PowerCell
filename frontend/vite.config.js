@@ -67,8 +67,8 @@ export default defineConfig(({ mode }) => {
     // Build configuration
     build: {
       outDir: 'dist',
-      sourcemap: true, // DEBUG: sourcemaps ON para ver variáveis reais no TDZ
-      minify: false,   // DEBUG: sem minificação para ver nomes reais no stack trace
+      sourcemap: mode !== 'production',
+      minify: 'esbuild',
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
