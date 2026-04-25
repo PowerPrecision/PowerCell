@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { sentryVitePlugin } from '@sentry/vite-plugin'
 import path from 'path'
 
 // https://vitejs.dev/config/
@@ -7,8 +8,27 @@ export default defineConfig(({ mode }) => {
   // Carregar variáveis de ambiente
   const env = loadEnv(mode, process.cwd(), '')
 
+  // Sentry: Só ativa source map upload em produção
+  const isProduction = mode === 'production'
+
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      // Sentry: Upload automático de source maps para o dashboard
+      // Só corre em build de produção quando SENTRY_AUTH_TOKEN está configurado
+      isProduction && process.env.SENTRY_AUTH_TOKEN && sentryVitePlugin({
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        org: process.env.SENTRY_ORG || 'power-precision',
+        project: process.env.SENTRY_PROJECT || 'powercell-frontend',
+        sourcemaps: {
+          // Gerar source maps mesmo que não estejam expostos ao browser
+          filesToDeleteAfterUpload: ['**/*.map'],
+        },
+        release: {
+          name: process.env.SENTRY_RELEASE || `powercell@${Date.now()}`,
+        },
+      }),
+    ].filter(Boolean),
 
     // Resolver alias @ para src/
     resolve: {
@@ -67,30 +87,16 @@ export default defineConfig(({ mode }) => {
     // Build configuration
     build: {
       outDir: 'dist',
-      sourcemap: true, // DEBUG: sourcemaps ON para ver variáveis reais no TDZ
-      minify: false,   // DEBUG: sem minificação para ver nomes reais no stack trace
+      // Source Maps: 'hidden' gera os .map mas NÃO os referencia no JS final.
+      // O ficheiro .map é gerado e enviado ao Sentry, mas o browser nunca o descarrega.
+      sourcemap: isProduction ? 'hidden' : true,
+      minify: 'esbuild',
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
-          // CRITICAL: Force ALL @radix-ui/* into a single chunk.
-          // This prevents TDZ ("Cannot access before initialization") errors
-          // caused by Rollup splitting circular Radix dependencies across
-          // multiple chunks with conflicting initialization order.
-          // Radix UI packages have internal circular deps between
-          // react-context, react-slot, react-primitive, etc. When these
-          // end up in separate chunks, const exports from one chunk may be
-          // referenced before initialization in another chunk.
+          // Group packages with internal circular deps into single chunks
+          // to prevent TDZ errors from cross-chunk initialization order
           manualChunks(id) {
-            // CRITICAL: Group ALL packages that share @radix-ui/* internal
-            // circular deps into a SINGLE chunk. This prevents TDZ errors
-            // caused by Rollup splitting these across multiple chunks with
-            // conflicting initialization order.
-            //
-            // cmdk depends on: @radix-ui/react-compose-refs, react-dialog,
-            //   react-id, react-primitive
-            // vaul depends on: @radix-ui/react-dialog
-            // @radix-ui/* has circular deps between react-context, react-slot,
-            //   react-primitive, react-compose-refs, etc.
             if (
               id.includes('node_modules/@radix-ui/') ||
               id.includes('node_modules/cmdk/') ||
@@ -98,7 +104,6 @@ export default defineConfig(({ mode }) => {
             ) {
               return 'vendor-radix'
             }
-            // Group recharts separately (bundles Redux + victory-vendor)
             if (id.includes('node_modules/recharts/') || id.includes('node_modules/victory-vendor/')) {
               return 'vendor-recharts'
             }
@@ -114,12 +119,10 @@ export default defineConfig(({ mode }) => {
       ...Object.keys(env)
         .filter(key => key.startsWith('REACT_APP_'))
         .reduce((acc, key) => {
-          // JSON.stringify é necessário porque define substitui literalmente
           acc[`process.env.${key}`] = JSON.stringify(env[key])
           return acc
         }, {}),
       // SEMPRE definir REACT_APP_BACKEND_URL com fallback robusto
-      // Importante: Isto garante que mesmo que loadEnv falhe no Vercel, temos um valor válido
       'process.env.REACT_APP_BACKEND_URL': JSON.stringify(
         env.REACT_APP_BACKEND_URL ||
         process.env.REACT_APP_BACKEND_URL ||
