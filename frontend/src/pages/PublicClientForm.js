@@ -338,7 +338,12 @@ export default function PublicClientForm({ previewMode = false }) {
   // Refs para campos do formulário (substitui document.querySelector)
   const fieldRefs = useRef({});
   const formContainerRef = useRef(null);
-  
+
+  // ⚠️ CRITICAL: Declared BEFORE any useCallback/useMemo that references them
+  // to avoid TDZ (Temporal Dead Zone) — const is hoisted but not initialized
+  const [customFields, setCustomFields] = useState([]);
+  const [allFieldsConfig, setAllFieldsConfig] = useState([]);
+
   // Função para registar refs de campos de forma declarativa
   const registerFieldRef = useCallback((fieldName) => (element) => {
     if (element) {
@@ -545,11 +550,7 @@ export default function PublicClientForm({ previewMode = false }) {
     return defaults;
   });
 
-  // Carregar campos personalizados do backend
-  // ⚠️ MOVED HERE: Must be declared BEFORE dynamicRequiredFields useMemo
-  // to avoid TDZ (Temporal Dead Zone) error — const is hoisted but not initialized.
-  const [customFields, setCustomFields] = useState([]);
-  const [allFieldsConfig, setAllFieldsConfig] = useState([]);
+  // Carregar campos personalizados do backend (useState already declared above)
   useEffect(() => {
     const fetchFormConfig = async () => {
       try {
