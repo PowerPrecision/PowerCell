@@ -9,6 +9,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { hasRole, hasAnyRole } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
@@ -91,6 +92,23 @@ function PageLoadingSkeleton() {
     <div className="min-h-[400px] flex items-center justify-center bg-background p-6">
       <FullPageSkeleton />
     </div>
+  );
+}
+
+// ====================================================================
+// ROUTE BOUNDARY — Combina Suspense + ErrorBoundary por rota
+// ====================================================================
+// Cada lazy-loaded route fica envolvida pelo seu próprio ErrorBoundary.
+// Se uma página crashar, APENAS essa página mostra erro — o menu,
+// sidebar e resto da app continuam a funcionar.
+// ====================================================================
+function RouteBoundary({ children, name }) {
+  return (
+    <ErrorBoundary variant="page" moduleName={name}>
+      <Suspense fallback={<PageLoadingSkeleton />}>
+        {children}
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
@@ -225,7 +243,11 @@ function RootRedirect() {
   }
 
   // Se não autenticado, mostra o formulário público
-  return <PublicClientForm />;
+  return (
+    <ErrorBoundary variant="page" moduleName="Formulário Público">
+      <PublicClientForm />
+    </ErrorBoundary>
+  );
 }
 
 function App() {
@@ -238,26 +260,25 @@ function App() {
           <BrowserRouter>
           <Sentry.ErrorBoundary fallback={ErrorFallback}>
           <LazyChunkErrorBoundary>
-          <Suspense fallback={<PageLoadingSkeleton />}>
           <Routes>
           {/* Root redirect - shows form or redirects to dashboard based on auth */}
           <Route path="/" element={<RootRedirect />} />
           {/* Public client registration form - explicit route */}
-          <Route path="/registo" element={<PublicClientForm />} />
+          <Route path="/registo" element={<ErrorBoundary variant="page" moduleName="Registo"><PublicClientForm /></ErrorBoundary>} />
           {/* Consultant form preview - view form without filling */}
-          <Route path="/formulario-consultor" element={<PublicClientForm previewMode={true} />} />
+          <Route path="/formulario-consultor" element={<ErrorBoundary variant="page" moduleName="Pré-visualização Formulário"><PublicClientForm previewMode={true} /></ErrorBoundary>} />
           
           {/* RGPD Public Page - for client consent signature */}
-          <Route path="/rgpd/:token" element={<RGPDPage />} />
+          <Route path="/rgpd/:token" element={<ErrorBoundary variant="page" moduleName="RGPD"><RGPDPage /></ErrorBoundary>} />
           
           {/* Temporary Link Upload - for client document upload */}
-          <Route path="/upload/:token" element={<TempLinkUploadPage />} />
+          <Route path="/upload/:token" element={<ErrorBoundary variant="page" moduleName="Upload Temporário"><TempLinkUploadPage /></ErrorBoundary>} />
           
           {/* Temporary Link Download - for client document download */}
-          <Route path="/download/:token" element={<TempLinkDownloadPage />} />
+          <Route path="/download/:token" element={<ErrorBoundary variant="page" moduleName="Download Temporário"><TempLinkDownloadPage /></ErrorBoundary>} />
           
           {/* Client Portal - Magic Link (passwordless, no auth required) */}
-          <Route path="/portal/:token" element={<ClientPortal />} />
+          <Route path="/portal/:token" element={<ErrorBoundary variant="page" moduleName="Portal do Cliente"><ClientPortal /></ErrorBoundary>} />
           
           {/* Staff login */}
           <Route path="/login" element={<LoginPage />} />
@@ -270,7 +291,9 @@ function App() {
             path="/kanban"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <KanbanPage />
+                <RouteBoundary name="Kanban">
+                  <KanbanPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -280,7 +303,9 @@ function App() {
             path="/staff"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ConsultorDashboard />
+                <RouteBoundary name="Dashboard Consultor">
+                  <ConsultorDashboard />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -293,7 +318,9 @@ function App() {
             path="/admin"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
-                <AdminDashboard />
+                <RouteBoundary name="Administração">
+                  <AdminDashboard />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -303,7 +330,9 @@ function App() {
             path="/estatisticas"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <StatisticsPage />
+                <RouteBoundary name="Estatísticas">
+                  <StatisticsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -313,7 +342,9 @@ function App() {
             path="/financeiro"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <FinanceDashboard />
+                <RouteBoundary name="Financeiro">
+                  <FinanceDashboard />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -323,7 +354,9 @@ function App() {
             path="/utilizadores"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <UsersManagementPage />
+                <RouteBoundary name="Gestão de Utilizadores">
+                  <UsersManagementPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -333,7 +366,9 @@ function App() {
             path="/processos"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ProcessesPage />
+                <RouteBoundary name="Processos">
+                  <ProcessesPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -343,7 +378,9 @@ function App() {
             path="/lista-processos"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ProcessesPage />
+                <RouteBoundary name="Processos">
+                  <ProcessesPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -353,7 +390,9 @@ function App() {
             path="/imoveis"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <PropertiesPage />
+                <RouteBoundary name="Imóveis">
+                  <PropertiesPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -363,7 +402,9 @@ function App() {
             path="/clientes"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ClientsPage />
+                <RouteBoundary name="Clientes">
+                  <ClientsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -373,7 +414,9 @@ function App() {
             path="/leads"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <LeadsPage />
+                <RouteBoundary name="Leads">
+                  <LeadsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -383,7 +426,9 @@ function App() {
             path="/meus-clientes"
             element={
               <ProtectedRoute allowedRoles={["consultor", "intermediario", "mediador", "consultor_intermediario", "admin", "ceo", "indexacao"]}>
-                <MyClientsPage />
+                <RouteBoundary name="Meus Clientes">
+                  <MyClientsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -393,7 +438,9 @@ function App() {
             path="/processo/:id"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ProcessDetails />
+                <RouteBoundary name="Detalhes do Processo">
+                  <ProcessDetails />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -401,7 +448,9 @@ function App() {
             path="/process/:id"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ProcessDetails />
+                <RouteBoundary name="Detalhes do Processo">
+                  <ProcessDetails />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -411,7 +460,9 @@ function App() {
             path="/definicoes"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <SettingsPage />
+                <RouteBoundary name="Definições">
+                  <SettingsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -421,7 +472,9 @@ function App() {
             path="/perfil"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ProfilePage />
+                <RouteBoundary name="Perfil">
+                  <ProfilePage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -431,12 +484,17 @@ function App() {
             path="/workflow-estados"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <WorkflowStatusesPage />
+                <RouteBoundary name="Estados de Workflow">
+                  <WorkflowStatusesPage />
+                </RouteBoundary>
               </ProtectedRoute>
-            } />
-            <Route path="/automation" element={
+            }
+          />
+          <Route path="/automation" element={
               <ProtectedRoute allowedRoles={ADMIN_ROLES}>
-                <AutomationPage />
+                <RouteBoundary name="Automação">
+                  <AutomationPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -446,7 +504,9 @@ function App() {
             path="/configuracoes-perfis"
             element={
               <ProtectedRoute allowedRoles={ADMIN_ROLES}>
-                <ProfileSettingsPage />
+                <RouteBoundary name="Configurações de Perfis">
+                  <ProfileSettingsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -456,7 +516,9 @@ function App() {
             path="/gestao-formulario"
             element={
               <ProtectedRoute allowedRoles={ADMIN_ROLES}>
-                <FormManagementPage />
+                <RouteBoundary name="Gestão de Formulário">
+                  <FormManagementPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -466,7 +528,9 @@ function App() {
             path="/templates"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
-                <TemplatesPage />
+                <RouteBoundary name="Templates">
+                  <TemplatesPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -476,7 +540,9 @@ function App() {
             path="/rascunhos"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
-                <DraftsPage />
+                <RouteBoundary name="Rascunhos">
+                  <DraftsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -486,7 +552,9 @@ function App() {
             path="/validades"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ExpiringDocumentsDashboard />
+                <RouteBoundary name="Validade de Documentos">
+                  <ExpiringDocumentsDashboard />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -496,7 +564,9 @@ function App() {
             path="/configuracoes"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <SystemConfigPage />
+                <RouteBoundary name="Configurações do Sistema">
+                  <SystemConfigPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -506,7 +576,9 @@ function App() {
             path="/contas-email"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <EmailAccountsPage />
+                <RouteBoundary name="Contas de Email">
+                  <EmailAccountsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -516,7 +588,9 @@ function App() {
             path="/configuracoes/ia"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
-                <AIConfigPage />
+                <RouteBoundary name="Configuração IA">
+                  <AIConfigPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -526,7 +600,9 @@ function App() {
             path="/configuracoes/treino-ia"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
-                <AITrainingPage />
+                <RouteBoundary name="Treino IA">
+                  <AITrainingPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -536,7 +612,9 @@ function App() {
             path="/admin/processos-background"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
-                <BackgroundJobsPage />
+                <RouteBoundary name="Processos em Background">
+                  <BackgroundJobsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -546,7 +624,9 @@ function App() {
             path="/configuracoes/notificacoes"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
-                <NotificationSettingsPage />
+                <RouteBoundary name="Configurações de Notificações">
+                  <NotificationSettingsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -556,7 +636,9 @@ function App() {
             path="/notificacoes"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <NotificationsPage />
+                <RouteBoundary name="Notificações">
+                  <NotificationsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -566,7 +648,9 @@ function App() {
             path="/admin/logs"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
-                <UnifiedLogsPage />
+                <RouteBoundary name="Logs do Sistema">
+                  <UnifiedLogsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -582,7 +666,9 @@ function App() {
             path="/admin/backups"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
-                <BackupsPage />
+                <RouteBoundary name="Backups">
+                  <BackupsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -592,7 +678,9 @@ function App() {
             path="/diagnosticos"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <DiagnosticsPage />
+                <RouteBoundary name="Diagnósticos">
+                  <DiagnosticsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -602,7 +690,9 @@ function App() {
             path="/minutas"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <MinutasPage />
+                <RouteBoundary name="Minutas">
+                  <MinutasPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -618,7 +708,9 @@ function App() {
             path="/registos-clientes"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <ClientRegistrationsPage />
+                <RouteBoundary name="Registos de Clientes">
+                  <ClientRegistrationsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -628,7 +720,9 @@ function App() {
             path="/ai-insights"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <AIInsightsPage />
+                <RouteBoundary name="AI Insights">
+                  <AIInsightsPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -638,7 +732,9 @@ function App() {
             path="/revisao-dados-ia"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
-                <AIDataReviewPage />
+                <RouteBoundary name="Revisão de Dados IA">
+                  <AIDataReviewPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -648,7 +744,9 @@ function App() {
             path="/auditoria"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <AuditTrailPage />
+                <RouteBoundary name="Auditoria">
+                  <AuditTrailPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -658,7 +756,9 @@ function App() {
             path="/rgpd-admin"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
-                <RGPDAdminPage />
+                <RouteBoundary name="Administração RGPD">
+                  <RGPDAdminPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -668,7 +768,9 @@ function App() {
             path="/admin/migracao-rgpd"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo", "diretor"]}>
-                <RGPDMigrationPage />
+                <RouteBoundary name="Migração RGPD">
+                  <RGPDMigrationPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -678,7 +780,9 @@ function App() {
             path="/webmail"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <WebmailPage />
+                <RouteBoundary name="Webmail">
+                  <WebmailPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -688,7 +792,9 @@ function App() {
             path="/processos-filtrados"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <FilteredProcessList />
+                <RouteBoundary name="Processos Filtrados">
+                  <FilteredProcessList />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -698,7 +804,9 @@ function App() {
             path="/pendentes"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <PendingItemsList />
+                <RouteBoundary name="Itens Pendentes">
+                  <PendingItemsList />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -708,7 +816,9 @@ function App() {
             path="/ficheiros"
             element={
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <FilesExplorerPage />
+                <RouteBoundary name="Explorador de Ficheiros">
+                  <FilesExplorerPage />
+                </RouteBoundary>
               </ProtectedRoute>
             }
           />
@@ -716,7 +826,6 @@ function App() {
           {/* Catch-all redirect */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
-        </Suspense>
         </LazyChunkErrorBoundary>
         </Sentry.ErrorBoundary>
         <ImpersonateBanner />
