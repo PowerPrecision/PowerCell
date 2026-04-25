@@ -13,7 +13,10 @@ export default [
       'dist/**',
       'build/**',
       '*.config.js',
+      '*.config.mjs',
       'coverage/**',
+      'public/**',
+      'craco.config.js',
     ],
   },
 

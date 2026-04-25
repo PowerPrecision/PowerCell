@@ -1,6 +1,45 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: sentry-eslint-build
+Agent: Main Agent
+Task: Configurar Sentry Vite Plugin, Hidden Source Maps, ESLint no-cycle, e gerar novo build
+
+Work Log:
+- **vite.config.js**: Verified and enhanced Sentry Vite Plugin configuration
+  - Auth token now reads from both `process.env` (Render) and `loadEnv()` (local .env files)
+  - `sentryAuthToken = process.env.SENTRY_AUTH_TOKEN || env.SENTRY_AUTH_TOKEN`
+  - Same fallback pattern applied to `sentryOrg`, `sentryProject`, `sentryRelease`
+  - `sourcemap: 'hidden'` confirmed — generates .map files but no `sourceMappingURL` in JS bundles
+  - `minify: 'esbuild'` confirmed for production builds
+  - `manualChunks` groups Radix UI + cmdk + vaul into single chunk to prevent TDZ
+  - `filesToDeleteAfterUpload: ['**/*.map']` — Sentry deletes maps after upload
+- **eslint.config.js**: Enhanced ignore patterns
+  - Added `*.config.mjs`, `public/**`, `craco.config.js` to ignores
+  - `import/no-cycle: ['error', { maxDepth: 10, ignoreExternal: true }]` already configured
+  - Other import rules: `no-duplicates`, `no-self-import`, `export` all as errors
+- **package.json**: Fixed lint script for ESLint 9 flat config
+  - Removed `--ext js,jsx` flag (not supported in flat config)
+  - ESLint file patterns defined in eslint.config.js via `files: ['**/*.{js,jsx}']`
+- **ESLint scan**: Ran on entire `src/` directory — 0 errors, 0 circular dependencies detected
+- **Production build**: `vite build` completed in 21.02s
+  - 5491 modules transformed
+  - 118 source map files generated in `dist/assets/`
+  - 0 JS files contain `sourceMappingURL` (hidden maps verified)
+  - vendor-radix chunk: 216.14 kB (Radix + cmdk + vaul grouped)
+  - vendor-recharts chunk: 387.64 kB
+  - index chunk: 557.89 kB
+  - ProcessDetails chunk: 805.41 kB
+
+Stage Summary:
+- 3 ficheiros alterados: `vite.config.js`, `eslint.config.js`, `package.json`
+- Build de produção OK — 21.02s, 0 erros
+- Hidden source maps: 118 ficheiros .map gerados, 0 referências em JS
+- ESLint: 0 dependências circulares detetadas no código fonte
+- Sentry plugin: configurado para upload automático quando SENTRY_AUTH_TOKEN disponível
+- Ambiente de produção pronto: source maps vão para Sentry, browser nunca os descarrega
+
+---
 Task ID: 6
 Agent: Main Agent
 Task: Enforce strict no-reply behavior and add footer warning for system emails

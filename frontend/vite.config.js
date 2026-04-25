@@ -5,27 +5,32 @@ import path from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // Carregar variáveis de ambiente
+  // Carregar variáveis de ambiente (prefixo '' = carregar TODAS as vars dos ficheiros .env)
   const env = loadEnv(mode, process.cwd(), '')
 
   // Sentry: Só ativa source map upload em produção
   const isProduction = mode === 'production'
+  // Auth token: prioridade system env (Render) → .env file (local dev)
+  const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN || env.SENTRY_AUTH_TOKEN
+  const sentryOrg = process.env.SENTRY_ORG || env.SENTRY_ORG || 'power-precision'
+  const sentryProject = process.env.SENTRY_PROJECT || env.SENTRY_PROJECT || 'powercell-frontend'
+  const sentryRelease = process.env.SENTRY_RELEASE || env.SENTRY_RELEASE || `powercell@${Date.now()}`
 
   return {
     plugins: [
       react(),
       // Sentry: Upload automático de source maps para o dashboard
       // Só corre em build de produção quando SENTRY_AUTH_TOKEN está configurado
-      isProduction && process.env.SENTRY_AUTH_TOKEN && sentryVitePlugin({
-        authToken: process.env.SENTRY_AUTH_TOKEN,
-        org: process.env.SENTRY_ORG || 'power-precision',
-        project: process.env.SENTRY_PROJECT || 'powercell-frontend',
+      isProduction && sentryAuthToken && sentryVitePlugin({
+        authToken: sentryAuthToken,
+        org: sentryOrg,
+        project: sentryProject,
         sourcemaps: {
           // Gerar source maps mesmo que não estejam expostos ao browser
           filesToDeleteAfterUpload: ['**/*.map'],
         },
         release: {
-          name: process.env.SENTRY_RELEASE || `powercell@${Date.now()}`,
+          name: sentryRelease,
         },
       }),
     ].filter(Boolean),
@@ -90,7 +95,7 @@ export default defineConfig(({ mode }) => {
       // Source Maps: 'hidden' gera os .map mas NÃO os referencia no JS final.
       // O ficheiro .map é gerado e enviado ao Sentry, mas o browser nunca o descarrega.
       sourcemap: isProduction ? 'hidden' : true,
-      minify: 'esbuild',
+      minify: false,
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
