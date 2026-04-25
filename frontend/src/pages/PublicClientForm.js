@@ -800,7 +800,65 @@ export default function PublicClientForm({ previewMode = false }) {
       .sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0));
   };
 
-  // ─── Dynamic field rendering helpers ───────────────────────────────────────
+  // ─── Field update helpers ──────────────────────────────────────────────
+  // ⚠️ MUST be declared BEFORE renderDynamicField useCallback that uses them.
+  // Using const (not function declarations) means they are NOT hoisted,
+  // so order matters — TDZ will crash if referenced before initialization.
+
+  const updateField = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const toggleCaracteristica = (value) => {
+    setFormData(prev => ({
+      ...prev,
+      caracteristicas: (prev.caracteristicas || []).includes(value)
+        ? prev.caracteristicas.filter(c => c !== value)
+        : [...(prev.caracteristicas || []), value]
+    }));
+  };
+
+  const toggleBanco = (banco) => {
+    setFormData(prev => {
+      const current = prev.bancos_creditos || [];
+      const exists = current.some(item => typeof item === 'object' ? item.banco === banco : item === banco);
+      if (exists) {
+        return { ...prev, bancos_creditos: current.filter(item => typeof item === 'object' ? item.banco !== banco : item !== banco) };
+      }
+      return { ...prev, bancos_creditos: [...current, { banco, valor: "" }] };
+    });
+  };
+
+  const updateBancoValor = (banco, valor) => {
+    setFormData(prev => ({
+      ...prev,
+      bancos_creditos: (prev.bancos_creditos || []).map(item => {
+        if (typeof item === 'object' && item.banco === banco) return { ...item, valor };
+        if (item === banco) return { banco, valor };
+        return item;
+      })
+    }));
+  };
+
+  const toggleBancoSimulacoes = (banco) => {
+    setFormData(prev => ({
+      ...prev,
+      bancos_simulacoes: (prev.bancos_simulacoes || []).includes(banco)
+        ? prev.bancos_simulacoes.filter(b => b !== banco)
+        : [...(prev.bancos_simulacoes || []), banco]
+    }));
+  };
+
+  const toggleContasAbertas = (banco) => {
+    setFormData(prev => ({
+      ...prev,
+      tem_creditos_activos: (prev.tem_creditos_activos || []).includes(banco)
+        ? prev.tem_creditos_activos.filter(b => b !== banco)
+        : [...(prev.tem_creditos_activos || []), banco]
+    }));
+  };
+
+  // ─── Dynamic field rendering helpers ───────────────────────────────────
 
   // Known fields that should span both grid columns (md:col-span-2)
   const FULL_WIDTH_FIELD_KEYS = new Set([
@@ -1686,59 +1744,6 @@ export default function PublicClientForm({ previewMode = false }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const updateField = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const toggleCaracteristica = (value) => {
-    setFormData(prev => ({
-      ...prev,
-      caracteristicas: (prev.caracteristicas || []).includes(value)
-        ? prev.caracteristicas.filter(c => c !== value)
-        : [...(prev.caracteristicas || []), value]
-    }));
-  };
-
-  const toggleBanco = (banco) => {
-    setFormData(prev => {
-      const current = prev.bancos_creditos || [];
-      const exists = current.some(item => typeof item === 'object' ? item.banco === banco : item === banco);
-      if (exists) {
-        return { ...prev, bancos_creditos: current.filter(item => typeof item === 'object' ? item.banco !== banco : item !== banco) };
-      }
-      return { ...prev, bancos_creditos: [...current, { banco, valor: "" }] };
-    });
-  };
-
-  const updateBancoValor = (banco, valor) => {
-    setFormData(prev => ({
-      ...prev,
-      bancos_creditos: (prev.bancos_creditos || []).map(item => {
-        if (typeof item === 'object' && item.banco === banco) return { ...item, valor };
-        if (item === banco) return { banco, valor };
-        return item;
-      })
-    }));
-  };
-
-  const toggleBancoSimulacoes = (banco) => {
-    setFormData(prev => ({
-      ...prev,
-      bancos_simulacoes: (prev.bancos_simulacoes || []).includes(banco)
-        ? prev.bancos_simulacoes.filter(b => b !== banco)
-        : [...(prev.bancos_simulacoes || []), banco]
-    }));
-  };
-
-  const toggleContasAbertas = (banco) => {
-    setFormData(prev => ({
-      ...prev,
-      tem_creditos_activos: (prev.tem_creditos_activos || []).includes(banco)
-        ? prev.tem_creditos_activos.filter(b => b !== banco)
-        : [...(prev.tem_creditos_activos || []), banco]
-    }));
   };
 
   const renderStepIndicator = () => (
