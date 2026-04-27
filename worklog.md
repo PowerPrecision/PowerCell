@@ -1037,3 +1037,34 @@ Stage Summary:
 - Webmail unread counter now consistent with inbox listing
 - FilteredProcessList correctly shows concluded/dropped processes
 - Files explorer accessible to Diretores and Administrativo
+
+---
+Task ID: error-boundary-layer4
+Agent: Main Agent
+Task: Implement 4th Error Boundary layer inside DashboardLayout + update RECOVERY.md
+
+Work Log:
+- Reviewed existing Error Boundary architecture (3 layers already implemented from previous sessions):
+  - Layer 1: Sentry.ErrorBoundary (global fullscreen fallback in App.js)
+  - Layer 2: LazyChunkErrorBoundary (stale chunk auto-reload in App.js)
+  - Layer 3: RouteBoundary per page (ErrorBoundary + Suspense for all routes in App.js)
+- Identified critical gap: DashboardLayout renders Sidebar + Header + {children}, but if page content crashes, RouteBoundary catches it and replaces EVERYTHING including the sidebar
+- **DashboardLayout.js**: Added ErrorBoundary import and wrapped {children} inside <main> with:
+  - `<ErrorBoundary variant="page" moduleName={title || 'Conteúdo'} showRetry={true}>`
+  - This ensures if page content crashes, sidebar and header remain intact
+  - Error fallback shows friendly message with retry button inside the content area
+- **RECOVERY.md**: Complete rewrite with:
+  - Corrected deployment platform (Render for both frontend and backend, not Vercel)
+  - Updated architecture diagram showing 4-layer system
+  - Added architectural decision rationale explaining why DashboardLayout needs its own ErrorBoundary
+  - Updated rollback procedures for Render (Redeploy this commit, Manual Deploy Rollback)
+  - Updated pre-deploy checklist
+- **Build verification**: vite build completed in 14.71s, 0 errors
+- **Source maps**: 117 .map files generated, 0 JS files with sourceMappingURL (hidden maps verified)
+- **Lint**: 0 errors, only pre-existing accessibility warnings
+
+Stage Summary:
+- 2 files changed: `DashboardLayout.js` (+3 lines), `RECOVERY.md` (rewritten)
+- Commit: `d9c614e` pushed to `dev`
+- Architecture now has 4 layers of error isolation — sidebar never disappears due to content crashes
+- Zero white screen guarantee: Global → Chunk → Route → Content
