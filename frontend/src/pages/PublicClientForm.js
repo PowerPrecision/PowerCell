@@ -305,7 +305,6 @@ const MOCK_DATA = {
   employer_nif: "516253487",
   trabalha_estrangeiro: "nao",
   acesso_portal_financas: "seguranca_social",
-  seg_social_utilizador: "12345678901",
   chave_movel_digital: "sim",
   salario_liquido: "1850",
   renda_habitacao_atual: "800",
@@ -1745,8 +1744,6 @@ export default function PublicClientForm({ previewMode = false }) {
           employer_name: formData.employer_name,
           employer_nif: formData.employer_nif,
           trabalha_estrangeiro: formData.trabalha_estrangeiro,
-          // Credenciais de portais (condicionais)
-          seg_social_utilizador: formData.seg_social_utilizador || null,
         },
         // Campos personalizados
         custom_fields: customFields.length > 0 ? customFields.reduce((acc, f) => {

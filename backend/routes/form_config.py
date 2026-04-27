@@ -188,9 +188,6 @@ DEFAULT_FORM_CONFIG = [
 
     # ── Step 4 — Situação Financeira ──────────────────────────────────
     {"field_key": "acesso_portal_financas", "label": "Acesso ao portal das finanças", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 1, "is_custom": False, "data_path": "financial_data", "options": ["Portal das Finanças", "Segurança Social Direta", "Ambos", "Nenhuma"]},
-    {"field_key": "seg_social_utilizador", "label": "Utilizador Seg. Social Direta", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 2, "is_custom": False, "data_path": "financial_data",
-     "depends_on": {"field": "acesso_portal_financas", "value_in": ["seguranca_social", "ambos"]},
-     "hint": "NISS ou email de acesso ao portal da Segurança Social Direta"},
     {"field_key": "chave_movel_digital", "label": "Chave Móvel Digital", "step": 4, "is_visible": True, "is_required": True, "field_type": "select", "order": 3, "is_custom": False, "data_path": "financial_data", "options": ["Sim", "Não"]},
     {"field_key": "renda_habitacao_atual", "label": "Renda de habitação atual", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 4, "is_custom": False, "data_path": "financial_data"},
     {"field_key": "precisa_vender_casa", "label": "Precisa de vender casa?", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 5, "is_custom": False, "data_path": "financial_data", "options": ["Sim", "Não"]},
