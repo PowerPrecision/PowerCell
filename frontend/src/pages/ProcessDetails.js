@@ -2193,9 +2193,9 @@ const ProcessDetails = () => {
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Nº Segurança Social (NISS)</Label>
                               <Input
-                                value={financialData.seg_social_utilizador || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, seg_social_utilizador: e.target.value })}
-                                disabled={!canEditFinancial}
+                                value={personalData.niss || ""}
+                                onChange={(e) => setPersonalData({ ...personalData, niss: e.target.value })}
+                                disabled={!canEditPersonal}
                                 className="h-9"
                                 placeholder="11 dígitos"
                               />

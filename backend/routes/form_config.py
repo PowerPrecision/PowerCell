@@ -132,6 +132,9 @@ DEFAULT_FORM_CONFIG = [
     {"field_key": "profissao", "label": "Profissão", "step": 1, "is_visible": True, "is_required": False, "field_type": "text", "order": 16, "is_custom": False, "data_path": "personal_data"},
     {"field_key": "altura", "label": "Altura (m)", "step": 1, "is_visible": False, "is_required": False, "field_type": "number", "order": 17, "is_custom": False, "data_path": "personal_data"},
 
+    {"field_key": "niss", "label": "Nº Segurança Social (NISS)", "step": 1, "is_visible": True, "is_required": False, "field_type": "text", "order": 3, "is_custom": False, "data_path": "personal_data",
+     "hint": "Número de Identificação na Segurança Social (11 dígitos)"},
+
     # ── Step 2 — Segundo Titular (condicional: compra_tipo === "outra_pessoa") ─
     {"field_key": "titular2_name", "label": "Nome do 2º Titular", "step": 2, "is_visible": True, "is_required": False, "field_type": "text", "order": 1, "is_custom": False, "data_path": "titular2_data", "depends_on": {"field": "compra_tipo", "value": "outra_pessoa"}},
     {"field_key": "titular2_email", "label": "Email (2º Titular)", "step": 2, "is_visible": True, "is_required": False, "field_type": "email", "order": 2, "is_custom": False, "data_path": "titular2_data", "depends_on": {"field": "compra_tipo", "value": "outra_pessoa"}},
@@ -185,9 +188,9 @@ DEFAULT_FORM_CONFIG = [
 
     # ── Step 4 — Situação Financeira ──────────────────────────────────
     {"field_key": "acesso_portal_financas", "label": "Acesso ao portal das finanças", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 1, "is_custom": False, "data_path": "financial_data", "options": ["Portal das Finanças", "Segurança Social Direta", "Ambos", "Nenhuma"]},
-    {"field_key": "seg_social_utilizador", "label": "Nº de Segurança Social (NISS)", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 2, "is_custom": False, "data_path": "financial_data",
+    {"field_key": "seg_social_utilizador", "label": "Utilizador Seg. Social Direta", "step": 4, "is_visible": True, "is_required": False, "field_type": "text", "order": 2, "is_custom": False, "data_path": "financial_data",
      "depends_on": {"field": "acesso_portal_financas", "value_in": ["seguranca_social", "ambos"]},
-     "hint": "Número de Identificação na Segurança Social (11 dígitos)"},
+     "hint": "NISS ou email de acesso ao portal da Segurança Social Direta"},
     {"field_key": "chave_movel_digital", "label": "Chave Móvel Digital", "step": 4, "is_visible": True, "is_required": True, "field_type": "select", "order": 3, "is_custom": False, "data_path": "financial_data", "options": ["Sim", "Não"]},
     {"field_key": "renda_habitacao_atual", "label": "Renda de habitação atual", "step": 4, "is_visible": True, "is_required": False, "field_type": "number", "order": 4, "is_custom": False, "data_path": "financial_data"},
     {"field_key": "precisa_vender_casa", "label": "Precisa de vender casa?", "step": 4, "is_visible": True, "is_required": False, "field_type": "select", "order": 5, "is_custom": False, "data_path": "financial_data", "options": ["Sim", "Não"]},

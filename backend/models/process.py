@@ -113,6 +113,7 @@ class PersonalData(BaseModel):
     nome: Optional[str] = Field(None, max_length=200, description="Nome completo (alias)")
     # Dados básicos (activos) com constraints
     nif: Optional[str] = Field(None, max_length=9, description="NIF - 9 dígitos")
+    niss: Optional[str] = Field(None, max_length=11, description="NISS - Nº de Identificação na Segurança Social (11 dígitos)")
     documento_id: Optional[str] = Field(None, max_length=30, description="Número do documento de ID")
     naturalidade: Optional[str] = Field(None, max_length=100, description="Local de nascimento")
     nacionalidade: Optional[str] = Field(None, max_length=50, description="Nacionalidade")

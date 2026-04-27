@@ -264,6 +264,7 @@ const MOCK_DATA = {
   email: "joao.santos.teste@email.pt",
   phone: "+351912345678",
   nif: "291654738", // NIF válido (checksum OK)
+  niss: "12345678901",
   documento_id: "00123456",
   data_validade_cc: "2030-06-15",
   naturalidade: "Lisboa",
@@ -303,7 +304,8 @@ const MOCK_DATA = {
   employer_name: "Tech Solutions Lda.",
   employer_nif: "516253487",
   trabalha_estrangeiro: "nao",
-  acesso_portal_financas: "sim",
+  acesso_portal_financas: "seguranca_social",
+  seg_social_utilizador: "12345678901",
   chave_movel_digital: "sim",
   salario_liquido: "1850",
   renda_habitacao_atual: "800",
@@ -451,6 +453,7 @@ export default function PublicClientForm({ previewMode = false }) {
       name: "",
       email: "",
       nif: "",
+      niss: "",
       documento_id: "",
       data_validade_cc: "",
       naturalidade: "",
@@ -503,7 +506,6 @@ export default function PublicClientForm({ previewMode = false }) {
       
       // Situação Financeira
       acesso_portal_financas: "",
-      seg_social_utilizador: "",
       chave_movel_digital: "",
       renda_habitacao_atual: "",
       precisa_vender_casa: "",
@@ -1671,6 +1673,7 @@ export default function PublicClientForm({ previewMode = false }) {
         process_type: "ambos",
         personal_data: {
           nif: formData.nif,
+          niss: formData.niss,
           documento_id: formData.documento_id,
           data_validade_cc: formData.data_validade_cc || null,
           naturalidade: formData.naturalidade,
@@ -1718,7 +1721,6 @@ export default function PublicClientForm({ previewMode = false }) {
         },
         financial_data: {
           acesso_portal_financas: formData.acesso_portal_financas,
-          seg_social_utilizador: formData.seg_social_utilizador,
           chave_movel_digital: formData.chave_movel_digital,
           renda_habitacao_atual: formData.renda_habitacao_atual ? parseFloat(formData.renda_habitacao_atual) : null,
           precisa_vender_casa: formData.precisa_vender_casa,
@@ -1743,6 +1745,8 @@ export default function PublicClientForm({ previewMode = false }) {
           employer_name: formData.employer_name,
           employer_nif: formData.employer_nif,
           trabalha_estrangeiro: formData.trabalha_estrangeiro,
+          // Credenciais de portais (condicionais)
+          seg_social_utilizador: formData.seg_social_utilizador || null,
         },
         // Campos personalizados
         custom_fields: customFields.length > 0 ? customFields.reduce((acc, f) => {
