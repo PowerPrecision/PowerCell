@@ -503,6 +503,7 @@ export default function PublicClientForm({ previewMode = false }) {
       
       // Situação Financeira
       acesso_portal_financas: "",
+      seg_social_utilizador: "",
       chave_movel_digital: "",
       renda_habitacao_atual: "",
       precisa_vender_casa: "",
@@ -718,13 +719,17 @@ export default function PublicClientForm({ previewMode = false }) {
   // Helper: check if a field's depends_on condition is satisfied
   // depends_on can be:
   //   {"field": X, "value": V}     → visible when formData[X] == V
+  //   {"field": X, "value_in": [V1, V2]} → visible when formData[X] is in array
   //   {"field": X, "not_value": V} → visible when formData[X] != V
   //   {"field": X, "contains": V}  → visible when formData[X] (array) contains V
   const checkDependsOn = useCallback((dependsOn) => {
     if (!dependsOn) return true;
-    const { field, value, not_value, contains } = dependsOn;
+    const { field, value, value_in, not_value, contains } = dependsOn;
     const fieldValue = formData[field];
 
+    if (value_in !== undefined) {
+      return Array.isArray(value_in) && value_in.includes(fieldValue);
+    }
     if (value !== undefined) {
       // For boolean values, compare strictly
       if (value === true) return fieldValue === true;
@@ -1713,6 +1718,7 @@ export default function PublicClientForm({ previewMode = false }) {
         },
         financial_data: {
           acesso_portal_financas: formData.acesso_portal_financas,
+          seg_social_utilizador: formData.seg_social_utilizador,
           chave_movel_digital: formData.chave_movel_digital,
           renda_habitacao_atual: formData.renda_habitacao_atual ? parseFloat(formData.renda_habitacao_atual) : null,
           precisa_vender_casa: formData.precisa_vender_casa,

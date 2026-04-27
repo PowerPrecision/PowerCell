@@ -2191,6 +2191,16 @@ const ProcessDetails = () => {
                               )}
                             </div>
                             <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Nº Segurança Social (NISS)</Label>
+                              <Input
+                                value={financialData.seg_social_utilizador || ""}
+                                onChange={(e) => setFinancialData({ ...financialData, seg_social_utilizador: e.target.value })}
+                                disabled={!canEditFinancial}
+                                className="h-9"
+                                placeholder="11 dígitos"
+                              />
+                            </div>
+                            <div className="space-y-1">
                               <div className="flex items-center justify-between">
                                 <Label className="text-xs text-muted-foreground">Nº Documento (CC)</Label>
                                 {getConfidenceIndicator("documento_id") && (
