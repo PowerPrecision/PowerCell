@@ -74,6 +74,7 @@ import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { hasRole } from "../utils/roleUtils";
+import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -814,8 +815,12 @@ const DashboardLayout = ({ children, title }) => {
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="p-4 lg:p-6 pb-24 md:pb-6 overflow-x-auto">{children}</main>
+        {/* Page content — ErrorBoundary isolates crashes here so sidebar stays alive */}
+        <main className="p-4 lg:p-6 pb-24 md:pb-6 overflow-x-auto">
+          <ErrorBoundary variant="page" moduleName={title || 'Conteúdo'} showRetry={true}>
+            {children}
+          </ErrorBoundary>
+        </main>
       </div>
       
       {/* Mobile Bottom Navigation */}
