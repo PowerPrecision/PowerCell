@@ -2315,32 +2315,51 @@ export default function PublicClientForm({ previewMode = false }) {
   // Função helper para obter erro de um campo específico
   const getFieldError = (fieldName) => fieldErrors[fieldName] || null;
 
-  const canProceed = () => {
+  const canProceed = useCallback(() => {
     if (previewMode) return true;
-    switch (step) {
-      case 1:
-        return formData.name && formData.email && formData.phone && formData.nif && 
-               formData.documento_id && formData.naturalidade && formData.nacionalidade &&
-               formData.morada_fiscal && formData.birth_date && formData.estado_civil;
-      case 2:
-        return true; // Always can proceed (2nd titular is optional)
-      case 3:
-        // Se for refinanciamento, não precisa dados de imóvel
-        if (formData.finalidade === "refinanciamento") {
-          return !!formData.finalidade;
-        }
-        // Se for compra, precisa dados do imóvel
-        return formData.finalidade && formData.tipo_imovel && formData.num_quartos && formData.localizacao;
-      case 4:
-        return formData.chave_movel_digital && formData.salario_liquido;
-      case 5:
-        return formData.capital_proprio && formData.valor_financiado;
-      case 6:
-        return formData.consent_data && formData.consent_contact;
-      default:
-        return true;
+
+    // ── Fallback enquanto config carrega (hardcoded) ────────────────────
+    if (!allFieldsConfig || allFieldsConfig.length === 0) {
+      switch (step) {
+        case 1:
+          return formData.name && formData.email && formData.phone && formData.nif &&
+                 formData.documento_id && formData.naturalidade && formData.nacionalidade &&
+                 formData.morada_fiscal && formData.birth_date && formData.estado_civil;
+        case 3:
+          if (formData.finalidade === "refinanciamento") return !!formData.finalidade;
+          return formData.finalidade && formData.tipo_imovel && formData.num_quartos && formData.localizacao;
+        case 4:
+          return formData.chave_movel_digital && formData.salario_liquido;
+        case 5:
+          return formData.capital_proprio && formData.valor_financiado;
+        case 6:
+          return formData.consent_data && formData.consent_contact;
+        default:
+          return true;
+      }
     }
-  };
+
+    // ── Dinâmico: usa a configuração do formulário ─────────────────────
+    // Só bloqueia em campos que sejam:
+    //   1. is_required = true
+    //   2. is_visible = true (não escondidos pelo admin)
+    //   3. depends_on satisfeito
+    const visibleRequired = allFieldsConfig
+      .filter(f => f.step === step && f.is_required && f.is_visible !== false && checkDependsOn(f.depends_on))
+      .map(f => f.field_key);
+
+    if (visibleRequired.length === 0) return true;
+
+    return visibleRequired.every(key => {
+      // Checkboxes (multi-select) não bloqueiam — o utilizador pode seleccionar "Nenhuma"
+      const fieldCfg = fieldConfigMap[key];
+      if (fieldCfg && fieldCfg.field_type === 'checkbox') return true;
+
+      const val = formData[key];
+      if (val === undefined || val === null || val === '') return false;
+      return true;
+    });
+  }, [previewMode, step, allFieldsConfig, formData, checkDependsOn, fieldConfigMap]);
 
   if (submitted || blockedMessage) {
     return (
