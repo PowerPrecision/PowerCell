@@ -2260,7 +2260,96 @@ export default function PublicClientForm({ previewMode = false }) {
   const validateStep = (stepNum) => {
     const errors = [];
     const newFieldErrors = {};
-    
+
+    // ── Quando allFieldsConfig carregou, usar validação dinâmica ──────────
+    // Respeita is_visible, is_required e depends_on do config (incluindo BD)
+    if (allFieldsConfig && allFieldsConfig.length > 0) {
+      const stepFields = allFieldsConfig.filter(f => {
+        if (f.step !== stepNum) return false;
+        if (f.is_visible === false) return false;
+        if (!f.is_required) return false;
+        // Check depends_on_all (ALL conditions must be met)
+        if (f.depends_on_all && Array.isArray(f.depends_on_all)) {
+          return f.depends_on_all.every(cond => checkDependsOn(cond));
+        }
+        return checkDependsOn(f.depends_on);
+      });
+
+      for (const field of stepFields) {
+        const key = field.field_key;
+        // Checkboxes (multi-select) não bloqueiam
+        if (field.field_type === 'checkbox') continue;
+        const val = formData[key];
+        if (val === undefined || val === null || val === '') {
+          const label = customLabelMap[key] || field.label || key;
+          errors.push(`${label} é obrigatório`);
+          newFieldErrors[key] = `${label} é obrigatório`;
+        }
+      }
+
+      // ── Validações especiais (NIF, email, telefone, idade) ──────────
+      // Estas são validações de FORMATO, não apenas de presença
+      if (stepNum === 1) {
+        const emailCheck = validateEmail(formData.email);
+        if (formData.email && !emailCheck.valid) {
+          errors.push(emailCheck.message);
+          newFieldErrors.email = emailCheck.message;
+        }
+        const phoneCheck = validatePhone(formData.phone);
+        if (formData.phone && !phoneCheck.valid) {
+          errors.push(phoneCheck.message);
+          newFieldErrors.phone = phoneCheck.message;
+        }
+        const nifCheck = validateNIF(formData.nif);
+        if (formData.nif && !nifCheck.valid) {
+          errors.push(nifCheck.message);
+          newFieldErrors.nif = nifCheck.message;
+        }
+        if (formData.birth_date) {
+          const birthDate = new Date(formData.birth_date);
+          const today = new Date();
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const monthDiff = today.getMonth() - birthDate.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+          }
+          if (age < 18) {
+            errors.push("O cliente deve ter idade igual ou superior a 18 anos");
+            newFieldErrors.birth_date = "O cliente deve ter idade igual ou superior a 18 anos";
+          } else if (age > 120) {
+            errors.push("Data de nascimento inválida");
+            newFieldErrors.birth_date = "Data de nascimento inválida";
+          }
+        }
+      }
+      if (stepNum === 2 && formData.compra_tipo === "outra_pessoa") {
+        if (formData.titular2_email) {
+          const email2Check = validateEmail(formData.titular2_email);
+          if (!email2Check.valid) {
+            errors.push(`2º Titular: ${email2Check.message}`);
+            newFieldErrors.titular2_email = email2Check.message;
+          }
+        }
+        if (formData.titular2_phone) {
+          const phone2Check = validatePhone(formData.titular2_phone);
+          if (!phone2Check.valid) {
+            errors.push(`2º Titular: ${phone2Check.message}`);
+            newFieldErrors.titular2_phone = phone2Check.message;
+          }
+        }
+        if (formData.titular2_nif) {
+          const nif2Check = validateNIF(formData.titular2_nif);
+          if (!nif2Check.valid) {
+            errors.push(`2º Titular: ${nif2Check.message}`);
+            newFieldErrors.titular2_nif = nif2Check.message;
+          }
+        }
+      }
+
+      return { errors, fieldErrors: newFieldErrors };
+    }
+
+    // ── Fallback: validação hardcoded (enquanto config não carrega) ───────
     switch (stepNum) {
       case 1: {
         if (!formData.name || formData.name.trim().length < 2) {
