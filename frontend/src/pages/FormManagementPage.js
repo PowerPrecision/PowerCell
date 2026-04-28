@@ -980,6 +980,7 @@ const FormManagementPage = () => {
   // ── Render ──
   return (
     <DashboardLayout>
+      <TooltipProvider delayDuration={300}>
       <div className="space-y-6" data-testid="form-management-page">
 
         {/* ── Header ── */}
@@ -1662,8 +1663,7 @@ const FormManagementPage = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Label className="text-base font-semibold">Visibilidade Condicional</Label>
-                    <TooltipProvider>
-                      <Tooltip>
+                    <Tooltip>
                         <TooltipTrigger asChild>
                           <button type="button" className="text-muted-foreground hover:text-foreground">
                             <Info className="h-3.5 w-3.5" />
@@ -1673,7 +1673,6 @@ const FormManagementPage = () => {
                           <p>Este campo só aparece quando o campo dependente tiver o valor indicado.</p>
                         </TooltipContent>
                       </Tooltip>
-                    </TooltipProvider>
                   </div>
                   <div className="flex items-center gap-2">
                     <Label className="text-sm text-muted-foreground">Mostrar apenas quando...</Label>
@@ -2030,6 +2029,7 @@ const FormManagementPage = () => {
         </Dialog>
 
       </div>
+      </TooltipProvider>
     </DashboardLayout>
   );
 };
