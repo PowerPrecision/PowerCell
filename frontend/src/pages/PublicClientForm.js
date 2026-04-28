@@ -599,7 +599,6 @@ export default function PublicClientForm({ previewMode = false }) {
         merged[stepNum] = dbEntry || defaultEntry;
       }
     }
-    console.log('[effectiveStepConfig] merged:', JSON.stringify(merged));
     return merged;
   }, [stepConfig]);
   useEffect(() => {
@@ -667,12 +666,7 @@ export default function PublicClientForm({ previewMode = false }) {
   const isStepVisible = useCallback((stepNum) => {
     const config = effectiveStepConfig[String(stepNum)];
     if (!config || !config.depends_on) return true;
-    const result = checkDependsOn(config.depends_on);
-    // Debug: log step visibility for conditional steps
-    if (config.depends_on) {
-      console.log(`[isStepVisible] step ${stepNum}:`, JSON.stringify(config.depends_on), '| field value:', formDataRef.current[config.depends_on.field], '| result:', result);
-    }
-    return result;
+    return checkDependsOn(config.depends_on);
   }, [effectiveStepConfig, checkDependsOn, formData]); // formData triggers re-creation so downstream hooks update
 
   // Maximum step number (supports custom steps beyond 6)
