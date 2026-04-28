@@ -313,12 +313,23 @@ async def update_form_config(
         if field.get("options") and isinstance(field["options"], list):
             field["options"] = [sanitize_string(opt, max_length=200) if isinstance(opt, str) else opt for opt in field["options"]]
     
+    # Ensure step_config preserves DEFAULT_STEP_CONFIG depends_on for step 2
+    # (prevents accidental removal of compra_tipo conditional visibility)
+    step_config_to_save = data.step_config if data.step_config is not None else DEFAULT_STEP_CONFIG
+    if "2" in DEFAULT_STEP_CONFIG:
+        if "2" not in step_config_to_save:
+            # Admin removed step 2 config — restore default depends_on
+            step_config_to_save["2"] = DEFAULT_STEP_CONFIG["2"]
+        elif not step_config_to_save["2"].get("depends_on") and DEFAULT_STEP_CONFIG["2"].get("depends_on"):
+            # Admin saved step 2 config without depends_on — preserve default
+            step_config_to_save["2"]["depends_on"] = DEFAULT_STEP_CONFIG["2"]["depends_on"]
+    
     await db.form_config.update_one(
         {"type": "public_form"},
         {"$set": {
             "type": "public_form",
             "fields": data.fields,
-            "step_config": data.step_config if data.step_config is not None else DEFAULT_STEP_CONFIG,
+            "step_config": step_config_to_save,
             "step_labels": data.step_labels if data.step_labels is not None else {},
             "updated_at": now,
             "updated_by": user.get("id"),
