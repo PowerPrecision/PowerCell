@@ -555,6 +555,12 @@ export default function PublicClientForm({ previewMode = false }) {
   // Carregar campos personalizados do backend (useState already declared above)
   const [stepConfig, setStepConfig] = useState({});
   const [stepLabels, setStepLabels] = useState({});
+  // Default step config: step 2 is conditional on compra_tipo
+  const DEFAULT_STEP_CONFIG = { "2": { "depends_on": { "field": "compra_tipo", "value": "outra_pessoa" } } };
+  const effectiveStepConfig = useMemo(() => {
+    const merged = { ...DEFAULT_STEP_CONFIG, ...(stepConfig || {}) };
+    return merged;
+  }, [stepConfig]);
   useEffect(() => {
     const fetchFormConfig = async () => {
       try {
@@ -603,16 +609,16 @@ export default function PublicClientForm({ previewMode = false }) {
   // step_config: { "2": { "depends_on": { "field": "compra_tipo", "value": "outra_pessoa" } } }
   // Returns true if the step should be visible based on current formData
   const isStepVisible = useCallback((stepNum) => {
-    const config = stepConfig[String(stepNum)];
+    const config = effectiveStepConfig[String(stepNum)];
     if (!config || !config.depends_on) return true;
     return checkDependsOn(config.depends_on);
-  }, [stepConfig, checkDependsOn]);
+  }, [effectiveStepConfig, checkDependsOn]);
 
   // Maximum step number (supports custom steps beyond 6)
   const maxStepNum = useMemo(() => {
     if (allFieldsConfig.length === 0) return 6;
-    return Math.max(6, ...allFieldsConfig.map(f => f.step || 1), ...Object.keys(stepConfig).map(Number));
-  }, [allFieldsConfig, stepConfig]);
+    return Math.max(6, ...allFieldsConfig.map(f => f.step || 1), ...Object.keys(effectiveStepConfig).map(Number));
+  }, [allFieldsConfig, effectiveStepConfig]);
 
   // Total de steps efetivos (exclui passos invisíveis)
   const totalSteps = useMemo(() => {
@@ -663,7 +669,7 @@ export default function PublicClientForm({ previewMode = false }) {
     return 0; // before the start
   }, [isStepVisible]);
 
-  // Auto-skip when a step becomes hidden (e.g., compra_tipo changes)
+  // Auto-skip when a step becomes hidden (e.g., compra_tipo changes, or stepConfig loads)
   useEffect(() => {
     if (!isStepVisible(step)) {
       // Current step is now hidden — jump to next visible step
