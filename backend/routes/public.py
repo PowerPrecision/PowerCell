@@ -442,10 +442,24 @@ async def get_public_form_config(request: Request):
     
     step_config = config.get("step_config", DEFAULT_STEP_CONFIG)
     step_labels = config.get("step_labels", {})
+    
+    # Deep merge: ensure DEFAULT_STEP_CONFIG depends_on is preserved if DB lacks it
+    merged_step_config = {}
+    all_step_keys = set(list(DEFAULT_STEP_CONFIG.keys()) + list(step_config.keys()))
+    for step_key in all_step_keys:
+        default_entry = DEFAULT_STEP_CONFIG.get(step_key)
+        db_entry = step_config.get(step_key)
+        if default_entry and db_entry:
+            merged_step_config[step_key] = {**default_entry, **db_entry}
+            # If DB has no depends_on but default does, preserve default
+            if not db_entry.get("depends_on") and default_entry.get("depends_on"):
+                merged_step_config[step_key]["depends_on"] = default_entry["depends_on"]
+        else:
+            merged_step_config[step_key] = db_entry or default_entry
 
     return JSONResponse(status_code=200, content={
         "custom_fields": custom_fields,
         "all_fields": all_fields,
-        "step_config": step_config,
+        "step_config": merged_step_config,
         "step_labels": step_labels
     })

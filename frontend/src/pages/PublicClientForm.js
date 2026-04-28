@@ -563,7 +563,24 @@ export default function PublicClientForm({ previewMode = false }) {
   // Default step config: step 2 is conditional on compra_tipo
   const DEFAULT_STEP_CONFIG = { "2": { "depends_on": { "field": "compra_tipo", "value": "outra_pessoa" } } };
   const effectiveStepConfig = useMemo(() => {
-    const merged = { ...DEFAULT_STEP_CONFIG, ...(stepConfig || {}) };
+    const dbConfig = stepConfig || {};
+    const merged = {};
+    // Collect all step numbers from both default and DB config
+    const allSteps = new Set([...Object.keys(DEFAULT_STEP_CONFIG), ...Object.keys(dbConfig)]);
+    for (const stepNum of allSteps) {
+      const defaultEntry = DEFAULT_STEP_CONFIG[stepNum];
+      const dbEntry = dbConfig[stepNum];
+      if (defaultEntry && dbEntry) {
+        // Deep merge: DB entry wins, but ensure depends_on from default is preserved if DB lacks it
+        merged[stepNum] = { ...defaultEntry, ...dbEntry };
+        // If DB has no depends_on but default does, keep the default
+        if (!dbEntry.depends_on && defaultEntry.depends_on) {
+          merged[stepNum].depends_on = defaultEntry.depends_on;
+        }
+      } else {
+        merged[stepNum] = dbEntry || defaultEntry;
+      }
+    }
     return merged;
   }, [stepConfig]);
   useEffect(() => {
@@ -624,7 +641,16 @@ export default function PublicClientForm({ previewMode = false }) {
   const isStepVisible = useCallback((stepNum) => {
     const config = effectiveStepConfig[String(stepNum)];
     if (!config || !config.depends_on) return true;
-    return checkDependsOn(config.depends_on);
+    const result = checkDependsOn(config.depends_on);
+    // Debug: log step visibility for step 2 to help troubleshoot conditional navigation
+    if (stepNum === 2) {
+      console.log('[isStepVisible] step 2:', {
+        depends_on: config.depends_on,
+        compra_tipo: formDataRef.current['compra_tipo'],
+        result
+      });
+    }
+    return result;
   }, [effectiveStepConfig, checkDependsOn, formData]); // formData triggers re-creation so downstream hooks update
 
   // Maximum step number (supports custom steps beyond 6)
