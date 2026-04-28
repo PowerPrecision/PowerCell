@@ -33,17 +33,19 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
+import { Checkbox } from "../components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "../components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "../components/ui/tooltip";
 import { toast } from "sonner";
 import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
   Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark,
-  GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check
+  GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check, GitBranch, Info
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -230,6 +232,12 @@ const WysiwygFieldCard = ({ field, isDragging, dragHandleProps, updateField, onE
             </Label>
             {field.is_custom && (
               <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0 shrink-0">Personalizado</Badge>
+            )}
+            {field.depends_on && (
+              <Badge className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0 shrink-0 flex items-center gap-1" title={`Visível quando: ${field.depends_on.field} ${field.depends_on.value !== undefined ? "= " + field.depends_on.value : field.depends_on.not_value ? "≠ " + field.depends_on.not_value : field.depends_on.contains ? "contém " + field.depends_on.contains : field.depends_on.value_in ? "∈ [" + field.depends_on.value_in.join(", ") + "]" : ""}`}>
+                <GitBranch className="h-3 w-3" />
+                Condicional
+              </Badge>
             )}
           </div>
 
@@ -438,6 +446,24 @@ const FormManagementPage = () => {
 
   const needsOptions = ["select", "checkbox"].includes(newField.field_type);
 
+  // Fields with selectable options (for depends_on dropdown)
+  const dependsOnFields = useMemo(() =>
+    fields.filter(f => {
+      if (!editingField || f.field_key === editingField.field_key) return false;
+      return (f.field_type === "select" || f.field_type === "radio") && (f.options && f.options.length > 0);
+    }),
+    [fields, editingField]
+  );
+
+  // Options of the currently selected depends_on field
+  const dependsOnFieldOptions = useMemo(() => {
+    if (!editFormData.depends_on_field) return [];
+    const found = fields.find(f => f.field_key === editFormData.depends_on_field);
+    if (!found) return [];
+    if (found.field_type === "radio") return ["Sim", "Não"];
+    return found.options || [];
+  }, [fields, editFormData.depends_on_field]);
+
   // ── Field mutations ──
   const updateField = useCallback((fieldKey, key, value) => {
     setFields(prev =>
@@ -625,6 +651,7 @@ const FormManagementPage = () => {
 
   // ── Edit field dialog ──
   const openEditDialog = (field) => {
+    const dep = field.depends_on || null;
     setEditingField(field);
     setEditFormData({
       label: field.label || "",
@@ -634,6 +661,11 @@ const FormManagementPage = () => {
       hint: field.hint || "",
       is_required: field.is_required || false,
       options: field.options ? [...field.options] : [],
+      depends_on_enabled: !!dep,
+      depends_on_field: dep?.field || "",
+      depends_on_operator: dep?.value_in ? "value_in" : dep?.not_value ? "not_value" : dep?.contains ? "contains" : dep?.value !== undefined ? "equals" : "equals",
+      depends_on_value: dep?.value || dep?.not_value || dep?.contains || "",
+      depends_on_values: dep?.value_in || [],
     });
     setEditOption("");
   };
@@ -688,6 +720,18 @@ const FormManagementPage = () => {
       if (JSON.stringify(editFormData.options) !== JSON.stringify(currentOptions)) {
         updateField(key, "options", editFormData.options);
       }
+    }
+
+    // Build depends_on object
+    if (editFormData.depends_on_enabled && editFormData.depends_on_field) {
+      const dep = { field: editFormData.depends_on_field };
+      if (editFormData.depends_on_operator === "equals") dep.value = editFormData.depends_on_value;
+      else if (editFormData.depends_on_operator === "not_value") dep.not_value = editFormData.depends_on_value;
+      else if (editFormData.depends_on_operator === "contains") dep.contains = editFormData.depends_on_value;
+      else if (editFormData.depends_on_operator === "value_in") dep.value_in = editFormData.depends_on_values || [];
+      updateField(key, "depends_on", dep);
+    } else {
+      updateField(key, "depends_on", null);
     }
 
     setEditingField(null);
@@ -1255,6 +1299,142 @@ const FormManagementPage = () => {
                   onCheckedChange={(v) => setEditFormData(prev => ({ ...prev, is_required: v }))}
                 />
                 <Label>Campo obrigatório</Label>
+              </div>
+
+              {/* ── Conditional Visibility (depends_on) ── */}
+              <div className="space-y-3 pt-2 border-t">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-base font-semibold">Visibilidade Condicional</Label>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button type="button" className="text-muted-foreground hover:text-foreground">
+                            <Info className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Este campo só aparece quando o campo dependente tiver o valor indicado.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm text-muted-foreground">Mostrar apenas quando...</Label>
+                    <Switch
+                      checked={editFormData.depends_on_enabled || false}
+                      onCheckedChange={(v) => setEditFormData(prev => ({ ...prev, depends_on_enabled: v }))}
+                    />
+                  </div>
+                </div>
+
+                {editFormData.depends_on_enabled && (
+                  <div className="space-y-3 pl-1">
+                    {/* Row: Campo dependente + Condição + Valor */}
+                    <div className="grid grid-cols-[1fr_1fr_1fr] gap-2">
+                      {/* Campo dependente */}
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Campo dependente</Label>
+                        <Select
+                          value={editFormData.depends_on_field || ""}
+                          onValueChange={(v) => setEditFormData(prev => ({ ...prev, depends_on_field: v, depends_on_value: "", depends_on_values: [] }))}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue placeholder="Selecionar campo..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {dependsOnFields.map(f => (
+                              <SelectItem key={f.field_key} value={f.field_key}>{f.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Condição */}
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Condição</Label>
+                        <Select
+                          value={editFormData.depends_on_operator || "equals"}
+                          onValueChange={(v) => setEditFormData(prev => ({ ...prev, depends_on_operator: v }))}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="equals">é igual a</SelectItem>
+                            <SelectItem value="not_value">é diferente de</SelectItem>
+                            <SelectItem value="contains">contém</SelectItem>
+                            <SelectItem value="value_in">é um de</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Valor */}
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Valor</Label>
+                        {editFormData.depends_on_operator === "value_in" ? (
+                          <div className="max-h-24 overflow-y-auto rounded-md border px-2 py-1.5 bg-background">
+                            {dependsOnFieldOptions.map(opt => (
+                              <label key={opt} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                                <Checkbox
+                                  checked={(editFormData.depends_on_values || []).includes(opt)}
+                                  onCheckedChange={(checked) => {
+                                    setEditFormData(prev => {
+                                      const vals = prev.depends_on_values || [];
+                                      return {
+                                        ...prev,
+                                        depends_on_values: checked
+                                          ? [...vals, opt]
+                                          : vals.filter(v => v !== opt),
+                                      };
+                                    });
+                                  }}
+                                />
+                                <span className="text-xs">{opt}</span>
+                              </label>
+                            ))}
+                          </div>
+                        ) : dependsOnFieldOptions.length > 0 ? (
+                          <Select
+                            value={editFormData.depends_on_value || ""}
+                            onValueChange={(v) => setEditFormData(prev => ({ ...prev, depends_on_value: v }))}
+                          >
+                            <SelectTrigger className="h-9 text-sm">
+                              <SelectValue placeholder="Selecionar..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {dependsOnFieldOptions.map(opt => (
+                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            className="h-9 text-sm"
+                            placeholder="Valor..."
+                            value={editFormData.depends_on_value || ""}
+                            onChange={(e) => setEditFormData(prev => ({ ...prev, depends_on_value: e.target.value }))}
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Live description */}
+                    {editFormData.depends_on_field && editFormData.depends_on_value && editFormData.depends_on_operator !== "value_in" && (
+                      <p className="text-xs text-muted-foreground bg-muted/50 rounded px-2.5 py-1.5">
+                        Visível quando <span className="font-medium text-foreground">{fields.find(f => f.field_key === editFormData.depends_on_field)?.label}</span>{" "}
+                        {editFormData.depends_on_operator === "equals" ? "é igual a" : editFormData.depends_on_operator === "not_value" ? "é diferente de" : "contém"}{" "}
+                        <span className="font-medium text-foreground">"{editFormData.depends_on_value}"</span>
+                      </p>
+                    )}
+                    {editFormData.depends_on_field && editFormData.depends_on_operator === "value_in" && (editFormData.depends_on_values || []).length > 0 && (
+                      <p className="text-xs text-muted-foreground bg-muted/50 rounded px-2.5 py-1.5">
+                        Visível quando <span className="font-medium text-foreground">{fields.find(f => f.field_key === editFormData.depends_on_field)?.label}</span>{" "}
+                        é um de: <span className="font-medium text-foreground">{editFormData.depends_on_values.join(", ")}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {editNeedsOptions && (
