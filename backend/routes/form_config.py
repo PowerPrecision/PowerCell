@@ -56,8 +56,11 @@ class FormConfigUpdate(BaseModel):
 
     Attributes:
         fields: Lista de dicionários com a configuração de cada campo.
+        step_config: Configuração de visibilidade condicional por passo.
+            Ex: {"2": {"depends_on": {"field": "compra_tipo", "value": "outra_pessoa"}}}
     """
     fields: list[dict]
+    step_config: Optional[dict] = None
 
 
 class CustomFieldCreate(BaseModel):
@@ -95,6 +98,17 @@ class TemplateSave(BaseModel):
     """
     name: str
     description: Optional[str] = None
+
+
+# Configuração padrão de visibilidade condicional de passos
+# Estrutura: { "step_number": { "depends_on": { "field": X, "value": V } } }
+# Quando o depends_on não for satisfeito, o passo inteiro é escondido no formulário público.
+DEFAULT_STEP_CONFIG = {
+    "2": {
+        "depends_on": {"field": "compra_tipo", "value": "outra_pessoa"},
+        "label": "Passo visível apenas quando Tipo de compra = outra_pessoa"
+    }
+}
 
 
 # Configuração padrão do formulário
@@ -230,7 +244,7 @@ async def get_form_config(user: dict = Depends(require_management())):
     """
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
     if not config:
-        return {"fields": DEFAULT_FORM_CONFIG}
+        return {"fields": DEFAULT_FORM_CONFIG, "step_config": DEFAULT_STEP_CONFIG}
 
     saved_fields = config.get("fields", [])
     # Construir mapa dos campos existentes (incluindo custom)
@@ -257,7 +271,9 @@ async def get_form_config(user: dict = Depends(require_management())):
 
     # Ordenar por step + order
     merged.sort(key=lambda f: (f.get("step", 0), f.get("order_index", f.get("order", 0))))
-    return {"fields": merged}
+
+    step_config = config.get("step_config", DEFAULT_STEP_CONFIG)
+    return {"fields": merged, "step_config": step_config}
 
 
 @router.put("/fields")
@@ -284,6 +300,7 @@ async def update_form_config(
         {"$set": {
             "type": "public_form",
             "fields": data.fields,
+            "step_config": data.step_config if data.step_config is not None else DEFAULT_STEP_CONFIG,
             "updated_at": now,
             "updated_by": user.get("id"),
         }},
@@ -397,13 +414,14 @@ async def reset_form_config(user: dict = Depends(require_roles([UserRole.ADMIN])
         {"$set": {
             "type": "public_form",
             "fields": DEFAULT_FORM_CONFIG,
+            "step_config": DEFAULT_STEP_CONFIG,
             "updated_at": now,
             "updated_by": user.get("id"),
         }},
         upsert=True
     )
     
-    return {"message": "Configuração reposta para valores padrão", "fields": DEFAULT_FORM_CONFIG}
+    return {"message": "Configuração reposta para valores padrão", "fields": DEFAULT_FORM_CONFIG, "step_config": DEFAULT_STEP_CONFIG}
 
 
 # =============================================

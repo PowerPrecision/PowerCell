@@ -41,7 +41,7 @@ from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, log_sanitization_rejection
 )
-from routes.form_config import DEFAULT_FORM_CONFIG
+from routes.form_config import DEFAULT_FORM_CONFIG, DEFAULT_STEP_CONFIG
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -403,7 +403,7 @@ async def get_public_form_config(request: Request):
         # Sem config na DB — retornar defaults (all_fields para o frontend usar)
         visible_defaults = [f for f in DEFAULT_FORM_CONFIG if f.get("is_visible")]
         visible_defaults.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
-        return JSONResponse(status_code=200, content={"custom_fields": [], "all_fields": visible_defaults})
+        return JSONResponse(status_code=200, content={"custom_fields": [], "all_fields": visible_defaults, "step_config": DEFAULT_STEP_CONFIG})
     
     saved_fields = config.get("fields", [])
     
@@ -440,7 +440,10 @@ async def get_public_form_config(request: Request):
     ]
     all_fields.sort(key=lambda f: (f.get("step", 0), f.get("order_index", f.get("order", 0))))
     
+    step_config = config.get("step_config", DEFAULT_STEP_CONFIG)
+
     return JSONResponse(status_code=200, content={
         "custom_fields": custom_fields,
-        "all_fields": all_fields
+        "all_fields": all_fields,
+        "step_config": step_config
     })

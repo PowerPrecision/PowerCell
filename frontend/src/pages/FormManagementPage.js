@@ -45,7 +45,8 @@ import { toast } from "sonner";
 import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
   Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark,
-  GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check, GitBranch, Info
+  GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check, GitBranch, Info,
+  Settings, Eye as EyeIcon
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -351,6 +352,7 @@ const FormManagementPage = () => {
 
   // ── Core state (single source of truth) ──
   const [fields, setFields] = useState([]);
+  const [stepConfig, setStepConfig] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -377,6 +379,10 @@ const FormManagementPage = () => {
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // Dialog: edit step visibility
+  const [editingStep, setEditingStep] = useState(null);
+  const [editStepFormData, setEditStepFormData] = useState({});
+
   // Dialog: edit field
   const [editingField, setEditingField] = useState(null);
   const [editFormData, setEditFormData] = useState({});
@@ -391,6 +397,7 @@ const FormManagementPage = () => {
       if (res.ok) {
         const data = await res.json();
         setFields(normalizeFields(data.fields));
+        setStepConfig(data.step_config || {});
         setHasChanges(false);
       }
     } catch (err) {
@@ -463,6 +470,59 @@ const FormManagementPage = () => {
     if (found.field_type === "radio") return ["Sim", "Não"];
     return found.options || [];
   }, [fields, editFormData.depends_on_field]);
+
+  // ── Step config helpers ──
+  // Available trigger fields for step-level depends_on (select/radio from PREVIOUS steps)
+  const getStepTriggerFields = useCallback((targetStep) => {
+    return fields.filter(f => {
+      if (f.step >= targetStep) return false; // only from previous steps
+      return (f.field_type === "select" || f.field_type === "radio") && f.options && f.options.length > 0 && f.is_visible;
+    });
+  }, [fields]);
+
+  // Options for the step-level trigger field
+  const getStepTriggerFieldOptions = useCallback((fieldKey) => {
+    const found = fields.find(f => f.field_key === fieldKey);
+    if (!found) return [];
+    if (found.field_type === "radio") return ["Sim", "Não"];
+    return found.options || [];
+  }, [fields]);
+
+  // Open step edit dialog
+  const openStepEditDialog = useCallback((stepNum) => {
+    const config = stepConfig[String(stepNum)];
+    const dep = config?.depends_on || null;
+    setEditingStep(stepNum);
+    setEditStepFormData({
+      enabled: !!dep,
+      depends_on_field: dep?.field || "",
+      depends_on_operator: dep?.not_value ? "not_value" : dep?.value_in ? "value_in" : "equals",
+      depends_on_value: dep?.value || dep?.not_value || "",
+      depends_on_values: dep?.value_in || [],
+    });
+  }, [stepConfig]);
+
+  // Save step config
+  const handleSaveStepConfig = useCallback(() => {
+    if (!editingStep) return;
+    if (editStepFormData.enabled && editStepFormData.depends_on_field) {
+      const dep = { field: editStepFormData.depends_on_field };
+      if (editStepFormData.depends_on_operator === "equals") dep.value = editStepFormData.depends_on_value;
+      else if (editStepFormData.depends_on_operator === "not_value") dep.not_value = editStepFormData.depends_on_value;
+      else if (editStepFormData.depends_on_operator === "value_in") dep.value_in = editStepFormData.depends_on_values || [];
+      setStepConfig(prev => ({ ...prev, [String(editingStep)]: { depends_on: dep } }));
+    } else {
+      setStepConfig(prev => {
+        const next = { ...prev };
+        delete next[String(editingStep)];
+        return next;
+      });
+    }
+    setHasChanges(true);
+    setEditingStep(null);
+    setEditStepFormData({});
+    toast.success("Configuração do passo atualizada");
+  }, [editingStep, editStepFormData]);
 
   // ── Field mutations ──
   const updateField = useCallback((fieldKey, key, value) => {
@@ -538,7 +598,7 @@ const FormManagementPage = () => {
       const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ fields: prepareFieldsForSave(fields) }),
+        body: JSON.stringify({ fields: prepareFieldsForSave(fields), step_config: stepConfig }),
       });
       if (res.ok) {
         toast.success("Configuração guardada com sucesso");
@@ -564,6 +624,7 @@ const FormManagementPage = () => {
       if (res.ok) {
         const data = await res.json();
         setFields(normalizeFields(data.fields));
+        setStepConfig(data.step_config || {});
         setHasChanges(false);
         toast.success("Configuração reposta para valores padrão");
       }
@@ -1018,22 +1079,64 @@ const FormManagementPage = () => {
               <div className="space-y-6">
                 {allSteps.map((step) => {
                   const stepFields = activeFieldsByStep[step] || [];
+                  const stepDepConfig = stepConfig[String(step)];
+                  const hasStepRule = !!stepDepConfig?.depends_on;
 
                   return (
-                    <Card key={step} className="overflow-hidden">
+                    <Card key={step} className={`overflow-hidden ${hasStepRule ? "ring-1 ring-blue-200 dark:ring-blue-800" : ""}`}>
                       <CardHeader className="pb-3 bg-muted/30 border-b">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground">{step}</span>
                             <CardTitle className="text-lg">{STEP_LABELS[step] || `Passo ${step}`}</CardTitle>
+                            {hasStepRule && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0 gap-1 cursor-help">
+                                    <GitBranch className="h-3 w-3" />
+                                    {stepDepConfig.depends_on.not_value ? "≠" : "="}{stepDepConfig.depends_on.value || stepDepConfig.depends_on.not_value || ""}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Passo condicional: visível quando {stepDepConfig.depends_on.field} {stepDepConfig.depends_on.not_value ? `≠ ${stepDepConfig.depends_on.not_value}` : `= ${stepDepConfig.depends_on.value}`}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
                           </div>
-                          <Badge variant="outline" className="text-xs">
-                            {stepFields.length} campo{stepFields.length !== 1 ? "s" : ""}
-                          </Badge>
+                          <div className="flex items-center gap-1">
+                            <Badge variant="outline" className="text-xs">
+                              {stepFields.length} campo{stepFields.length !== 1 ? "s" : ""}
+                            </Badge>
+                            {step > 1 && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className={`h-7 w-7 p-0 ${hasStepRule ? "text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20" : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"}`}
+                                    onClick={() => openStepEditDialog(step)}
+                                    title="Configurar visibilidade do passo"
+                                    data-testid={`step-settings-btn-${step}`}
+                                  >
+                                    <Settings className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {hasStepRule ? "Editar regra condicional" : "Tornar passo condicional"}
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                          </div>
                         </div>
                         {stepFields.some(f => f.is_custom) && (
                           <CardDescription className="mt-1">
                             Inclui {stepFields.filter(f => f.is_custom).length} campo{stepFields.filter(f => f.is_custom).length !== 1 ? "s" : ""} personalizado{stepFields.filter(f => f.is_custom).length !== 1 ? "s" : ""}
+                          </CardDescription>
+                        )}
+                        {hasStepRule && (
+                          <CardDescription className="mt-1 text-blue-600 dark:text-blue-400">
+                            <GitBranch className="h-3 w-3 inline mr-1" />
+                            Visível quando "{stepDepConfig.depends_on.field}" {stepDepConfig.depends_on.not_value ? `≠ "${stepDepConfig.depends_on.not_value}"` : `= "${stepDepConfig.depends_on.value}"`}
                           </CardDescription>
                         )}
                       </CardHeader>
@@ -1219,6 +1322,137 @@ const FormManagementPage = () => {
               >
                 {creating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
                 Criar Campo
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ══════════════════════════════════════════════════════════════
+            DIALOG: Step Visibility Configuration
+            ══════════════════════════════════════════════════════════════ */}
+        <Dialog open={!!editingStep} onOpenChange={(open) => { if (!open) setEditingStep(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Settings className="h-5 w-5" />
+                Passo {editingStep} — Visibilidade Condicional
+              </DialogTitle>
+              <DialogDescription>
+                Configure quando este passo deve ser visível no formulário público.
+                O passo só aparece quando a condição definida for satisfeita.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              {/* Toggle: Enable/Disable conditional */}
+              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <div className="flex items-center gap-2">
+                  <GitBranch className="h-4 w-4 text-blue-600" />
+                  <Label className="text-sm font-medium">Passo condicional</Label>
+                </div>
+                <Switch
+                  checked={editStepFormData.enabled || false}
+                  onCheckedChange={(checked) => setEditStepFormData(prev => ({ ...prev, enabled: checked }))}
+                />
+              </div>
+
+              {editStepFormData.enabled && (
+                <>
+                  {/* Trigger field selector */}
+                  <div className="space-y-2">
+                    <Label className="text-sm">
+                      Quando o campo <span className="text-muted-foreground">(passo anterior)</span>
+                    </Label>
+                    <Select
+                      value={editStepFormData.depends_on_field}
+                      onValueChange={(val) => setEditStepFormData(prev => ({ ...prev, depends_on_field: val, depends_on_value: "" }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecionar campo..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getStepTriggerFields(editingStep).map(f => (
+                          <SelectItem key={f.field_key} value={f.field_key}>{f.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {getStepTriggerFields(editingStep).length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Não existem campos de seleção em passos anteriores. Adicione um campo dropdown/rádio num passo anterior.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Operator */}
+                  {editStepFormData.depends_on_field && (
+                    <div className="space-y-2">
+                      <Label className="text-sm">Condição</Label>
+                      <Select
+                        value={editStepFormData.depends_on_operator || "equals"}
+                        onValueChange={(val) => setEditStepFormData(prev => ({ ...prev, depends_on_operator: val, depends_on_value: "" }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="equals">Igual a</SelectItem>
+                          <SelectItem value="not_value">Diferente de</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Value */}
+                  {editStepFormData.depends_on_field && (
+                    <div className="space-y-2">
+                      <Label className="text-sm">Valor</Label>
+                      <Select
+                        value={editStepFormData.depends_on_value || ""}
+                        onValueChange={(val) => setEditStepFormData(prev => ({ ...prev, depends_on_value: val }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecionar valor..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getStepTriggerFieldOptions(editStepFormData.depends_on_field).map(opt => (
+                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Preview */}
+                  {editStepFormData.enabled && editStepFormData.depends_on_field && editStepFormData.depends_on_value && (
+                    <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                      <p className="text-xs text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                        <Info className="h-3.5 w-3.5 shrink-0" />
+                        {editStepFormData.depends_on_operator === "not_value" ? (
+                          <>Passo {editingStep} visível quando <strong>{fields.find(f => f.field_key === editStepFormData.depends_on_field)?.label}</strong> for diferente de <strong>"{editStepFormData.depends_on_value}"</strong></>
+                        ) : (
+                          <>Passo {editingStep} visível quando <strong>{fields.find(f => f.field_key === editStepFormData.depends_on_field)?.label}</strong> for <strong>"{editStepFormData.depends_on_value}"</strong></>
+                        )}
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {!editStepFormData.enabled && (
+                <div className="p-3 rounded-lg bg-muted/50 text-center">
+                  <p className="text-sm text-muted-foreground">Este passo será sempre visível no formulário público.</p>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setEditingStep(null)}>Cancelar</Button>
+              <Button
+                onClick={handleSaveStepConfig}
+                disabled={editStepFormData.enabled && (!editStepFormData.depends_on_field || !editStepFormData.depends_on_value)}
+              >
+                <Check className="h-4 w-4 mr-1.5" />
+                Guardar
               </Button>
             </DialogFooter>
           </DialogContent>

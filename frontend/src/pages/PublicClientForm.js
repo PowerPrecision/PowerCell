@@ -553,12 +553,14 @@ export default function PublicClientForm({ previewMode = false }) {
   });
 
   // Carregar campos personalizados do backend (useState already declared above)
+  const [stepConfig, setStepConfig] = useState({});
   useEffect(() => {
     const fetchFormConfig = async () => {
       try {
         const res = await axios.get(`${API_URL}/public/form-config`);
         setCustomFields(res.data.custom_fields || []);
         setAllFieldsConfig(res.data.all_fields || []);
+        setStepConfig(res.data.step_config || {});
       } catch {
         // Endpoint pode não existir em deployments mais antigos
       }
@@ -566,42 +568,74 @@ export default function PublicClientForm({ previewMode = false }) {
     fetchFormConfig();
   }, []);
 
-  // ─── Conditional Step Logic ────────────────────────────────────────────
-  // Step 2 (2º Titular) só é visível se:
-  //   - formData.compra_tipo === 'outra_pessoa', OU
-  //   - existem campos no step 2 SEM depends_on (admin configurou para sempre mostrar)
-  const hasStep2Fields = useMemo(() => {
-    const step2Fields = allFieldsConfig.filter(f => f.step === 2);
-    if (step2Fields.length === 0) return false;
-    // Se algum campo não tem depends_on, o step é sempre visível
-    const alwaysVisible = step2Fields.some(f => !f.depends_on);
-    if (alwaysVisible) return true;
-    // Caso contrário, depende do depends_on resolver (ex: compra_tipo)
-    return formData.compra_tipo === 'outra_pessoa';
-  }, [allFieldsConfig, formData.compra_tipo]);
+  // ─── Conditional Step Logic (dynamic based on step_config) ─────────────
+  // step_config: { "2": { "depends_on": { "field": "compra_tipo", "value": "outra_pessoa" } } }
+  // Returns true if the step should be visible based on current formData
+  const isStepVisible = useCallback((stepNum) => {
+    const config = stepConfig[String(stepNum)];
+    if (!config || !config.depends_on) return true;
+    return checkDependsOn(config.depends_on);
+  }, [stepConfig, checkDependsOn]);
 
-  // Total de steps efetivos (5 ou 6 dependendo do step 2)
-  const totalSteps = useMemo(() => hasStep2Fields ? 6 : 5, [hasStep2Fields]);
+  // Total de steps efetivos (exclui passos invisíveis)
+  const totalSteps = useMemo(() => {
+    let count = 0;
+    for (let s = 1; s <= 6; s++) {
+      if (isStepVisible(s)) count++;
+    }
+    return count;
+  }, [isStepVisible]);
 
   // Map logical step (1..totalSteps) → real step number (1..6)
   const logicalToRealStep = useCallback((logicalStep) => {
-    if (!hasStep2Fields && logicalStep >= 2) return logicalStep + 1;
+    let logical = 0;
+    for (let s = 1; s <= 6; s++) {
+      if (isStepVisible(s)) {
+        logical++;
+        if (logical === logicalStep) return s;
+      }
+    }
     return logicalStep;
-  }, [hasStep2Fields]);
+  }, [isStepVisible]);
 
   // Map real step (1..6) → logical step (1..totalSteps)
   const realToLogicalStep = useCallback((realStep) => {
-    if (!hasStep2Fields && realStep >= 3) return realStep - 1;
-    return realStep;
-  }, [hasStep2Fields]);
-
-  // Override: when compra_tipo changes, adjust current step if needed
-  useEffect(() => {
-    if (!hasStep2Fields && step === 2) {
-      // Step 2 was hidden — jump to step 3 (logical step 2)
-      setStep(3);
+    let logical = 0;
+    for (let s = 1; s <= 6; s++) {
+      if (isStepVisible(s)) {
+        logical++;
+        if (s === realStep) return logical;
+      }
     }
-  }, [hasStep2Fields, step]);
+    return realStep;
+  }, [isStepVisible]);
+
+  // Get next visible real step (skipping hidden steps)
+  const getNextRealStep = useCallback((currentStep) => {
+    for (let s = currentStep + 1; s <= 6; s++) {
+      if (isStepVisible(s)) return s;
+    }
+    return 7; // past the end
+  }, [isStepVisible]);
+
+  // Get previous visible real step (skipping hidden steps)
+  const getPrevRealStep = useCallback((currentStep) => {
+    for (let s = currentStep - 1; s >= 1; s--) {
+      if (isStepVisible(s)) return s;
+    }
+    return 0; // before the start
+  }, [isStepVisible]);
+
+  // Auto-skip when a step becomes hidden (e.g., compra_tipo changes)
+  useEffect(() => {
+    if (!isStepVisible(step)) {
+      // Current step is now hidden — jump to next visible step
+      const nextVisible = getNextRealStep(step - 1);
+      if (nextVisible <= 6) {
+        setStep(nextVisible);
+      }
+    }
+  }, [isStepVisible, step, getNextRealStep]);
 
   // Dynamic required fields derived from allFieldsConfig
   const dynamicRequiredFields = useMemo(() => {
@@ -2269,12 +2303,7 @@ export default function PublicClientForm({ previewMode = false }) {
   const handleNextStep = () => {
     const maxRealStep = 6;
     if (previewMode) {
-      // Advance to next real step, skipping hidden step 2
-      let next = step + 1;
-      while (next <= maxRealStep) {
-        if (next === 2 && !hasStep2Fields) { next++; continue; }
-        break;
-      }
+      const next = getNextRealStep(step);
       setStep(Math.min(maxRealStep, next));
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -2302,12 +2331,7 @@ export default function PublicClientForm({ previewMode = false }) {
     
     // Limpar erros se passou na validação
     setFieldErrors({});
-    // Advance to next real step, skipping hidden step 2
-    let next = step + 1;
-    while (next <= maxRealStep) {
-      if (next === 2 && !hasStep2Fields) { next++; continue; }
-      break;
-    }
+    const next = getNextRealStep(step);
     setStep(Math.min(maxRealStep, next));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -2467,12 +2491,7 @@ export default function PublicClientForm({ previewMode = false }) {
               <Button
                 variant="outline"
                 onClick={() => {
-                  // Go to previous real step, skipping hidden step 2
-                  let prev = step - 1;
-                  while (prev >= 1) {
-                    if (prev === 2 && !hasStep2Fields) { prev--; continue; }
-                    break;
-                  }
+                  const prev = getPrevRealStep(step);
                   setStep(Math.max(1, prev));
                 }}
                 disabled={step === 1}
@@ -2481,7 +2500,7 @@ export default function PublicClientForm({ previewMode = false }) {
                 Voltar
               </Button>
               
-              {step < 6 && !(step === 5 && !hasStep2Fields) ? (
+              {getNextRealStep(step) <= 6 ? (
                 <Button
                   onClick={handleNextStep}
                   disabled={!canProceed()}
