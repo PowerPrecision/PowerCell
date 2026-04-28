@@ -2398,6 +2398,10 @@ export default function PublicClientForm({ previewMode = false }) {
           errors.push("Chave móvel digital é obrigatória");
           newFieldErrors.chave_movel_digital = "Chave móvel digital é obrigatória";
         }
+        if (!formData.employment_type) {
+          errors.push("Tipo de contrato é obrigatório");
+          newFieldErrors.employment_type = "Tipo de contrato é obrigatório";
+        }
         if (!formData.salario_liquido) {
           errors.push("Salário líquido é obrigatório");
           newFieldErrors.salario_liquido = "Salário líquido é obrigatório";
@@ -2484,7 +2488,7 @@ export default function PublicClientForm({ previewMode = false }) {
           if (formData.ja_tem_casa_escolhida) return !!formData.finalidade;
           return formData.finalidade && formData.tipo_imovel && formData.num_quartos && formData.localizacao;
         case 4:
-          return formData.chave_movel_digital && formData.salario_liquido;
+          return formData.chave_movel_digital && formData.employment_type && formData.salario_liquido;
         case 5:
           return formData.capital_proprio && formData.valor_financiado;
         case 6:
