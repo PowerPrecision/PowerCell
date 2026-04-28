@@ -552,6 +552,11 @@ export default function PublicClientForm({ previewMode = false }) {
     return defaults;
   });
 
+  // Keep a ref to formData so checkDependsOn always reads the LATEST value
+  // (avoids stale closure issues in the useCallback chain)
+  const formDataRef = useRef(formData);
+  formDataRef.current = formData;
+
   // Carregar campos personalizados do backend (useState already declared above)
   const [stepConfig, setStepConfig] = useState({});
   const [stepLabels, setStepLabels] = useState({});
@@ -585,7 +590,8 @@ export default function PublicClientForm({ previewMode = false }) {
   const checkDependsOn = useCallback((dependsOn) => {
     if (!dependsOn) return true;
     const { field, value, value_in, not_value, contains } = dependsOn;
-    let fieldValue = formData[field];
+    // Use ref to always read the LATEST formData (avoids stale closures)
+    let fieldValue = formDataRef.current[field];
 
     // Normalize "Sim"/"Não" to boolean for checkbox comparisons
     if (value === "Sim" || value === "Não" || not_value === "Sim" || not_value === "Não" ||
@@ -610,7 +616,7 @@ export default function PublicClientForm({ previewMode = false }) {
       return Array.isArray(fieldValue) && fieldValue.includes(contains);
     }
     return true;
-  }, [formData]);
+  }, []); // stable — reads formData via ref, no closure dependency
 
   // ─── Conditional Step Logic (dynamic based on step_config) ─────────────
   // step_config: { "2": { "depends_on": { "field": "compra_tipo", "value": "outra_pessoa" } } }
@@ -619,7 +625,7 @@ export default function PublicClientForm({ previewMode = false }) {
     const config = effectiveStepConfig[String(stepNum)];
     if (!config || !config.depends_on) return true;
     return checkDependsOn(config.depends_on);
-  }, [effectiveStepConfig, checkDependsOn]);
+  }, [effectiveStepConfig, checkDependsOn, formData]); // formData triggers re-creation so downstream hooks update
 
   // Maximum step number (supports custom steps beyond 6)
   const maxStepNum = useMemo(() => {
@@ -1048,7 +1054,7 @@ export default function PublicClientForm({ previewMode = false }) {
     return allFieldsConfig
       .filter(f => f.step === stepNum && f.is_visible !== false && checkDependsOn(f.depends_on))
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  }, [allFieldsConfig, checkDependsOn]);
+  }, [allFieldsConfig, checkDependsOn, formData]); // formData triggers re-filter when field values change
 
   // Render a single field dynamically based on its config
   // Special fields use their existing specialized rendering; others use DynamicFormField
