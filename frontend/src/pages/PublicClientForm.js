@@ -571,15 +571,25 @@ export default function PublicClientForm({ previewMode = false }) {
       const defaultEntry = DEFAULT_STEP_CONFIG[stepNum];
       const dbEntry = dbConfig[stepNum];
       if (defaultEntry && dbEntry) {
-        // Deep merge: DB entry wins, but ensure depends_on from default is preserved if DB lacks it
+        // Deep merge: DB entry wins for most fields, but depends_on needs special handling
         merged[stepNum] = { ...defaultEntry, ...dbEntry };
         // If DB has no depends_on but default does, keep the default
         if (!dbEntry.depends_on && defaultEntry.depends_on) {
           merged[stepNum].depends_on = defaultEntry.depends_on;
         }
-        // If DB has depends_on but it's missing "value" and default has it, deep-merge depends_on
+        // If DB has depends_on, deep-merge with special care for "value":
+        // The DB may store the DISPLAY LABEL (e.g. "Com outra pessoa") instead of
+        // the internal VALUE KEY (e.g. "outra_pessoa"). The DEFAULT always has the
+        // correct internal key, so we prefer it when there's a mismatch.
         if (dbEntry.depends_on && defaultEntry.depends_on) {
           merged[stepNum].depends_on = { ...defaultEntry.depends_on, ...dbEntry.depends_on };
+          // CRITICAL: Always prefer the DEFAULT depends_on value over DB.
+          // The DB may contain display labels saved by the admin UI, while the
+          // DEFAULT has the correct internal field value key that matches formData.
+          // e.g., default: "outra_pessoa" (key) vs db: "Com outra pessoa" (label)
+          if (defaultEntry.depends_on.value !== undefined) {
+            merged[stepNum].depends_on.value = defaultEntry.depends_on.value;
+          }
           // Clean up: remove value_in if it's null/undefined/empty (can cause false negatives)
           if (!dbEntry.depends_on.value_in && defaultEntry.depends_on.value) {
             delete merged[stepNum].depends_on.value_in;

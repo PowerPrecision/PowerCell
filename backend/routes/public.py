@@ -444,6 +444,9 @@ async def get_public_form_config(request: Request):
     step_labels = config.get("step_labels", {})
     
     # Deep merge: ensure DEFAULT_STEP_CONFIG depends_on is preserved if DB lacks it
+    # The DB may store display labels (e.g. "Com outra pessoa") instead of
+    # internal value keys (e.g. "outra_pessoa") in depends_on.value.
+    # Always prefer the DEFAULT's value since it's the correct internal key.
     merged_step_config = {}
     all_step_keys = set(list(DEFAULT_STEP_CONFIG.keys()) + list(step_config.keys()))
     for step_key in all_step_keys:
@@ -454,11 +457,15 @@ async def get_public_form_config(request: Request):
             # If DB has no depends_on but default does, preserve default
             if not db_entry.get("depends_on") and default_entry.get("depends_on"):
                 merged_step_config[step_key]["depends_on"] = default_entry["depends_on"]
-            # Deep merge depends_on: preserve default "value" if DB has it,
-            # and clean up null/empty value_in that can cause false negatives
+            # Deep merge depends_on: always prefer DEFAULT value over DB
             if db_entry.get("depends_on") and default_entry.get("depends_on"):
                 merged_dep = {**default_entry["depends_on"], **db_entry["depends_on"]}
-                # Remove value_in if it's null/empty but value exists (prevents false negatives)
+                # CRITICAL: Always prefer DEFAULT depends_on value — DB may have
+                # display labels (e.g. "Com outra pessoa") instead of internal
+                # value keys (e.g. "outra_pessoa") that match form field values
+                if default_entry["depends_on"].get("value") is not None:
+                    merged_dep["value"] = default_entry["depends_on"]["value"]
+                # Remove value_in if it's null/empty but value exists
                 if not db_entry["depends_on"].get("value_in") and default_entry["depends_on"].get("value"):
                     merged_dep.pop("value_in", None)
                 merged_step_config[step_key]["depends_on"] = merged_dep
