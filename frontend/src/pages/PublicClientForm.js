@@ -344,6 +344,7 @@ export default function PublicClientForm({ previewMode = false }) {
   // to avoid TDZ (Temporal Dead Zone) — const is hoisted but not initialized
   const [customFields, setCustomFields] = useState([]);
   const [allFieldsConfig, setAllFieldsConfig] = useState([]);
+  const [configLoaded, setConfigLoaded] = useState(false); // true once backend config is fetched
 
   // Função para registar refs de campos de forma declarativa
   const registerFieldRef = useCallback((fieldName) => (element) => {
@@ -611,6 +612,8 @@ export default function PublicClientForm({ previewMode = false }) {
         setStepLabels(res.data.step_labels || {});
       } catch {
         // Endpoint pode não existir em deployments mais antigos
+      } finally {
+        setConfigLoaded(true);
       }
     };
     fetchFormConfig();
@@ -738,11 +741,11 @@ export default function PublicClientForm({ previewMode = false }) {
   // Dynamic required fields derived from allFieldsConfig
   const dynamicRequiredFields = useMemo(() => {
     if (allFieldsConfig.length === 0) {
-      // Fallback while config loads – use well-known required fields
-      return ["name", "email", "nif", "phone", "birth_date", "estado_civil"];
+      // Config not loaded yet — return empty so progress bar doesn't show wrong data
+      return [];
     }
     return allFieldsConfig
-      .filter(f => f.is_required)
+      .filter(f => f.is_required && f.is_visible !== false)
       .map(f => f.field_key);
   }, [allFieldsConfig]);
 
@@ -2263,7 +2266,7 @@ export default function PublicClientForm({ previewMode = false }) {
 
     // ── Quando allFieldsConfig carregou, usar validação dinâmica ──────────
     // Respeita is_visible, is_required e depends_on do config (incluindo BD)
-    if (allFieldsConfig && allFieldsConfig.length > 0) {
+    if (configLoaded && allFieldsConfig && allFieldsConfig.length > 0) {
       const stepFields = allFieldsConfig.filter(f => {
         if (f.step !== stepNum) return false;
         if (f.is_visible === false) return false;
@@ -2349,177 +2352,77 @@ export default function PublicClientForm({ previewMode = false }) {
       return { errors, fieldErrors: newFieldErrors };
     }
 
-    // ── Fallback: validação hardcoded (enquanto config não carrega) ───────
-    switch (stepNum) {
-      case 1: {
-        if (!formData.name || formData.name.trim().length < 2) {
-          errors.push("Nome completo é obrigatório");
-          newFieldErrors.name = "Nome completo é obrigatório (mínimo 2 caracteres)";
-        }
+    // ── Fallback: config não carregou — não bloquear ───────────────────
+    // Enquanto o config carrega, não devemos bloquear o utilizador com
+    // validações hardcoded que podem não corresponder à configuração
+    // do admin (is_visible, is_required, depends_on).
+    // O botão "Seguinte" fica desabilitado visualmente enquanto config carrega.
+    //
+    // Mantemos apenas validações de FORMATO (não de presença) para campos
+    // preenchidos — estas são sempre aplicáveis independentemente do config.
+    if (stepNum === 1) {
+      if (formData.email) {
         const emailCheck = validateEmail(formData.email);
         if (!emailCheck.valid) {
           errors.push(emailCheck.message);
           newFieldErrors.email = emailCheck.message;
         }
+      }
+      if (formData.phone) {
         const phoneCheck = validatePhone(formData.phone);
         if (!phoneCheck.valid) {
           errors.push(phoneCheck.message);
           newFieldErrors.phone = phoneCheck.message;
         }
+      }
+      if (formData.nif) {
         const nifCheck = validateNIF(formData.nif);
         if (!nifCheck.valid) {
           errors.push(nifCheck.message);
           newFieldErrors.nif = nifCheck.message;
         }
-        if (!formData.documento_id) {
-          errors.push("Nº do documento é obrigatório");
-          newFieldErrors.documento_id = "Nº do documento é obrigatório";
-        }
-        if (!formData.data_validade_cc) {
-          errors.push("Data de validade do CC é obrigatória");
-          newFieldErrors.data_validade_cc = "Data de validade do CC é obrigatória";
-        }
-        if (!formData.naturalidade) {
-          errors.push("Naturalidade é obrigatória");
-          newFieldErrors.naturalidade = "Naturalidade é obrigatória";
-        }
-        if (!formData.nacionalidade) {
-          errors.push("Nacionalidade é obrigatória");
-          newFieldErrors.nacionalidade = "Nacionalidade é obrigatória";
-        }
-        if (!formData.morada_fiscal) {
-          errors.push("Morada fiscal é obrigatória");
-          newFieldErrors.morada_fiscal = "Morada fiscal é obrigatória";
-        }
-        if (!formData.birth_date) {
-          errors.push("Data de nascimento é obrigatória");
-          newFieldErrors.birth_date = "Data de nascimento é obrigatória";
-        } else {
-          // Validate minimum age (>= 18 years)
-          const birthDate = new Date(formData.birth_date);
-          const today = new Date();
-          let age = today.getFullYear() - birthDate.getFullYear();
-          const monthDiff = today.getMonth() - birthDate.getMonth();
-          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-            age--;
-          }
-          if (age < 18) {
-            errors.push("O cliente deve ter idade igual ou superior a 18 anos");
-            newFieldErrors.birth_date = "O cliente deve ter idade igual ou superior a 18 anos";
-          } else if (age > 120) {
-            errors.push("Data de nascimento inválida");
-            newFieldErrors.birth_date = "Data de nascimento inválida";
-          }
-        }
-        if (!formData.estado_civil) {
-          errors.push("Estado civil é obrigatório");
-          newFieldErrors.estado_civil = "Estado civil é obrigatório";
-        }
-        break;
       }
-      case 2: {
-        // Se tem 2º titular, validar os campos
-        if (formData.compra_tipo === "outra_pessoa") {
-          if (!formData.titular2_name || formData.titular2_name.trim().length < 2) {
-            errors.push("Nome do 2º titular é obrigatório");
-            newFieldErrors.titular2_name = "Nome do 2º titular é obrigatório";
-          }
-          if (!formData.titular2_nif) {
-            errors.push("NIF do 2º titular é obrigatório");
-            newFieldErrors.titular2_nif = "NIF do 2º titular é obrigatório";
-          } else {
-            const nif2Check = validateNIF(formData.titular2_nif);
-            if (!nif2Check.valid) {
-              errors.push(`2º Titular: ${nif2Check.message}`);
-              newFieldErrors.titular2_nif = nif2Check.message;
-            }
-          }
-          if (!formData.titular2_email) {
-            errors.push("Email do 2º titular é obrigatório");
-            newFieldErrors.titular2_email = "Email do 2º titular é obrigatório";
-          } else {
-            const email2Check = validateEmail(formData.titular2_email);
-            if (!email2Check.valid) {
-              errors.push(`2º Titular: ${email2Check.message}`);
-              newFieldErrors.titular2_email = email2Check.message;
-            }
-          }
-          if (!formData.titular2_phone) {
-            errors.push("Telemóvel do 2º titular é obrigatório");
-            newFieldErrors.titular2_phone = "Telemóvel do 2º titular é obrigatório";
-          } else {
-            const phone2Check = validatePhone(formData.titular2_phone);
-            if (!phone2Check.valid) {
-              errors.push(`2º Titular: ${phone2Check.message}`);
-              newFieldErrors.titular2_phone = phone2Check.message;
-            }
-          }
+      if (formData.birth_date) {
+        const birthDate = new Date(formData.birth_date);
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
         }
-        break;
+        if (age < 18) {
+          errors.push("O cliente deve ter idade igual ou superior a 18 anos");
+          newFieldErrors.birth_date = "O cliente deve ter idade igual ou superior a 18 anos";
+        } else if (age > 120) {
+          errors.push("Data de nascimento inválida");
+          newFieldErrors.birth_date = "Data de nascimento inválida";
+        }
       }
-      case 3: {
-        if (!formData.finalidade) {
-          errors.push("Finalidade é obrigatória");
-          newFieldErrors.finalidade = "Selecione a finalidade do pedido";
-        }
-        // Campos de pesquisa de imóvel só são obrigatórios se:
-        //   - não for refinanciamento
-        //   - E não tem casa já escolhida (se já tem, não precisa pesquisar)
-        const needsPropertySearch = formData.finalidade !== "refinanciamento" && !formData.ja_tem_casa_escolhida;
-        if (needsPropertySearch) {
-          if (!formData.tipo_imovel) {
-            errors.push("Tipo de imóvel é obrigatório");
-            newFieldErrors.tipo_imovel = "Tipo de imóvel é obrigatório";
-          }
-          if (!formData.num_quartos) {
-            errors.push("Número de quartos é obrigatório");
-            newFieldErrors.num_quartos = "Número de quartos é obrigatório";
-          }
-          if (!formData.localizacao) {
-            errors.push("Localização é obrigatória");
-            newFieldErrors.localizacao = "Localização é obrigatória";
-          }
-        }
-        break;
-      }
-      case 4:
-        if (!formData.chave_movel_digital) {
-          errors.push("Chave móvel digital é obrigatória");
-          newFieldErrors.chave_movel_digital = "Chave móvel digital é obrigatória";
-        }
-        if (!formData.employment_type) {
-          errors.push("Tipo de contrato é obrigatório");
-          newFieldErrors.employment_type = "Tipo de contrato é obrigatório";
-        }
-        if (!formData.salario_liquido) {
-          errors.push("Salário líquido é obrigatório");
-          newFieldErrors.salario_liquido = "Salário líquido é obrigatório";
-        }
-        break;
-      case 5:
-        if (!formData.capital_proprio) {
-          errors.push("Capital próprio é obrigatório");
-          newFieldErrors.capital_proprio = "Capital próprio é obrigatório";
-        }
-        if (!formData.valor_financiado) {
-          errors.push("Valor a financiar é obrigatório");
-          newFieldErrors.valor_financiado = "Valor a financiar é obrigatório";
-        }
-        break;
-      case 6:
-        if (!formData.consent_data) {
-          errors.push("Deve aceitar o tratamento de dados");
-          newFieldErrors.consent_data = "Obrigatório";
-        }
-        if (!formData.consent_contact) {
-          errors.push("Deve aceitar ser contactado");
-          newFieldErrors.consent_contact = "Obrigatório";
-        }
-        break;
-      default:
-        break;
     }
-    
+    if (stepNum === 2 && formData.compra_tipo === "outra_pessoa") {
+      if (formData.titular2_email) {
+        const email2Check = validateEmail(formData.titular2_email);
+        if (!email2Check.valid) {
+          errors.push(`2º Titular: ${email2Check.message}`);
+          newFieldErrors.titular2_email = email2Check.message;
+        }
+      }
+      if (formData.titular2_phone) {
+        const phone2Check = validatePhone(formData.titular2_phone);
+        if (!phone2Check.valid) {
+          errors.push(`2º Titular: ${phone2Check.message}`);
+          newFieldErrors.titular2_phone = phone2Check.message;
+        }
+      }
+      if (formData.titular2_nif) {
+        const nif2Check = validateNIF(formData.titular2_nif);
+        if (!nif2Check.valid) {
+          errors.push(`2º Titular: ${nif2Check.message}`);
+          newFieldErrors.titular2_nif = nif2Check.message;
+        }
+      }
+    }
+
     return { errors, fieldErrors: newFieldErrors };
   };
 
@@ -2565,26 +2468,12 @@ export default function PublicClientForm({ previewMode = false }) {
   const canProceed = useCallback(() => {
     if (previewMode) return true;
 
-    // ── Fallback enquanto config carrega (hardcoded) ────────────────────
-    if (!allFieldsConfig || allFieldsConfig.length === 0) {
-      switch (step) {
-        case 1:
-          return formData.name && formData.email && formData.phone && formData.nif &&
-                 formData.documento_id && formData.naturalidade && formData.nacionalidade &&
-                 formData.morada_fiscal && formData.birth_date && formData.estado_civil;
-        case 3:
-          if (formData.finalidade === "refinanciamento") return !!formData.finalidade;
-          if (formData.ja_tem_casa_escolhida) return !!formData.finalidade;
-          return formData.finalidade && formData.tipo_imovel && formData.num_quartos && formData.localizacao;
-        case 4:
-          return formData.chave_movel_digital && formData.employment_type && formData.salario_liquido;
-        case 5:
-          return formData.capital_proprio && formData.valor_financiado;
-        case 6:
-          return formData.consent_data && formData.consent_contact;
-        default:
-          return true;
-      }
+    // ── Config not loaded yet — don't block, just return true ──────────
+    // The "Next" button is visually disabled while config loads (see JSX),
+    // so the user can't click it prematurely. Once loaded, the dynamic
+    // validation below takes over and respects admin is_visible/is_required.
+    if (!configLoaded || !allFieldsConfig || allFieldsConfig.length === 0) {
+      return true;
     }
 
     // ── Dinâmico: usa a configuração do formulário ─────────────────────
@@ -2614,7 +2503,7 @@ export default function PublicClientForm({ previewMode = false }) {
       if (val === undefined || val === null || val === '') return false;
       return true;
     });
-  }, [previewMode, step, allFieldsConfig, formData, checkDependsOn, fieldConfigMap]);
+  }, [previewMode, step, allFieldsConfig, formData, checkDependsOn, fieldConfigMap, configLoaded]);
 
   if (submitted || blockedMessage) {
     return (
@@ -2684,6 +2573,15 @@ export default function PublicClientForm({ previewMode = false }) {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-6" ref={formContainerRef}>
+            {/* Loading indicator while config loads from backend */}
+            {!configLoaded && (
+              <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                <p className="text-sm">A carregar configuração do formulário...</p>
+              </div>
+            )}
+            {configLoaded && (
+            <>
             {/* Progress Bar com percentagem */}
             <FormProgressBar 
               currentStep={realToLogicalStep(step)} 
@@ -2735,7 +2633,7 @@ export default function PublicClientForm({ previewMode = false }) {
               {getNextRealStep(step) <= 6 ? (
                 <Button
                   onClick={handleNextStep}
-                  disabled={!canProceed()}
+                  disabled={!configLoaded || !canProceed()}
                   className="bg-teal-600 hover:bg-teal-700 text-white"
                 >
                   Próximo
@@ -2753,7 +2651,7 @@ export default function PublicClientForm({ previewMode = false }) {
               ) : (
                 <Button
                   onClick={handleSubmit}
-                  disabled={loading || !canProceed()}
+                  disabled={loading || !configLoaded || !canProceed()}
                   className="bg-amber-500 hover:bg-amber-600 text-white"
                 >
                   {loading ? (
@@ -2770,6 +2668,8 @@ export default function PublicClientForm({ previewMode = false }) {
                 </Button>
               )}
             </div>
+            </>
+            )}
           </CardContent>
         </Card>
         
