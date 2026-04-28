@@ -46,7 +46,7 @@ import {
 import DynamicFormField from "../components/DynamicFormField";
 import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
-import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye, FlaskConical, Play } from "lucide-react";
+import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye, FlaskConical, Play, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 import * as Sentry from "@sentry/react";
@@ -554,6 +554,7 @@ export default function PublicClientForm({ previewMode = false }) {
 
   // Carregar campos personalizados do backend (useState already declared above)
   const [stepConfig, setStepConfig] = useState({});
+  const [stepLabels, setStepLabels] = useState({});
   useEffect(() => {
     const fetchFormConfig = async () => {
       try {
@@ -561,6 +562,7 @@ export default function PublicClientForm({ previewMode = false }) {
         setCustomFields(res.data.custom_fields || []);
         setAllFieldsConfig(res.data.all_fields || []);
         setStepConfig(res.data.step_config || {});
+        setStepLabels(res.data.step_labels || {});
       } catch {
         // Endpoint pode não existir em deployments mais antigos
       }
@@ -577,46 +579,52 @@ export default function PublicClientForm({ previewMode = false }) {
     return checkDependsOn(config.depends_on);
   }, [stepConfig, checkDependsOn]);
 
+  // Maximum step number (supports custom steps beyond 6)
+  const maxStepNum = useMemo(() => {
+    if (allFieldsConfig.length === 0) return 6;
+    return Math.max(6, ...allFieldsConfig.map(f => f.step || 1), ...Object.keys(stepConfig).map(Number));
+  }, [allFieldsConfig, stepConfig]);
+
   // Total de steps efetivos (exclui passos invisíveis)
   const totalSteps = useMemo(() => {
     let count = 0;
-    for (let s = 1; s <= 6; s++) {
+    for (let s = 1; s <= maxStepNum; s++) {
       if (isStepVisible(s)) count++;
     }
     return count;
-  }, [isStepVisible]);
+  }, [isStepVisible, maxStepNum]);
 
-  // Map logical step (1..totalSteps) → real step number (1..6)
+  // Map logical step (1..totalSteps) → real step number (1..maxStepNum)
   const logicalToRealStep = useCallback((logicalStep) => {
     let logical = 0;
-    for (let s = 1; s <= 6; s++) {
+    for (let s = 1; s <= maxStepNum; s++) {
       if (isStepVisible(s)) {
         logical++;
         if (logical === logicalStep) return s;
       }
     }
     return logicalStep;
-  }, [isStepVisible]);
+  }, [isStepVisible, maxStepNum]);
 
-  // Map real step (1..6) → logical step (1..totalSteps)
+  // Map real step (1..maxStepNum) → logical step (1..totalSteps)
   const realToLogicalStep = useCallback((realStep) => {
     let logical = 0;
-    for (let s = 1; s <= 6; s++) {
+    for (let s = 1; s <= maxStepNum; s++) {
       if (isStepVisible(s)) {
         logical++;
         if (s === realStep) return logical;
       }
     }
     return realStep;
-  }, [isStepVisible]);
+  }, [isStepVisible, maxStepNum]);
 
   // Get next visible real step (skipping hidden steps)
   const getNextRealStep = useCallback((currentStep) => {
-    for (let s = currentStep + 1; s <= 6; s++) {
+    for (let s = currentStep + 1; s <= maxStepNum; s++) {
       if (isStepVisible(s)) return s;
     }
-    return 7; // past the end
-  }, [isStepVisible]);
+    return maxStepNum + 1; // past the end
+  }, [isStepVisible, maxStepNum]);
 
   // Get previous visible real step (skipping hidden steps)
   const getPrevRealStep = useCallback((currentStep) => {
@@ -631,11 +639,11 @@ export default function PublicClientForm({ previewMode = false }) {
     if (!isStepVisible(step)) {
       // Current step is now hidden — jump to next visible step
       const nextVisible = getNextRealStep(step - 1);
-      if (nextVisible <= 6) {
+      if (nextVisible <= maxStepNum) {
         setStep(nextVisible);
       }
     }
-  }, [isStepVisible, step, getNextRealStep]);
+  }, [isStepVisible, step, getNextRealStep, maxStepNum]);
 
   // Dynamic required fields derived from allFieldsConfig
   const dynamicRequiredFields = useMemo(() => {
@@ -2087,6 +2095,38 @@ export default function PublicClientForm({ previewMode = false }) {
     </div>
   );
 
+  // Render custom steps (step > 6) dynamically based on their fields
+  const renderDynamicStep = (stepNum) => {
+    const stepFields = getFieldsForStep(stepNum);
+    // Get step label from stepConfig or default
+    const labels = (stepConfig && stepConfig[String(stepNum)]?.label) ? {} : {};
+    const customLabel = stepLabels[String(stepNum)] || `Passo ${stepNum}`;
+    // Also check if stepConfig has a label for backward compat
+    const configLabel = typeof stepConfig[String(stepNum)] === 'object' && stepConfig[String(stepNum)]?.label ? stepConfig[String(stepNum)].label : null;
+
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-6">
+          <ClipboardList className="h-10 w-10 mx-auto mb-2 text-primary" />
+          <h2 className="text-xl font-semibold mb-2">{configLabel || customLabel}</h2>
+        </div>
+        {stepFields.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <p>Nenhum campo disponível neste passo.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {stepFields.map(field => (
+              <div key={field.field_key}>
+                {renderDynamicField(field)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderSuccessMessage = () => (
     <div className="text-center py-12">
       <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -2301,7 +2341,7 @@ export default function PublicClientForm({ previewMode = false }) {
   };
 
   const handleNextStep = () => {
-    const maxRealStep = 6;
+    const maxRealStep = maxStepNum;
     if (previewMode) {
       const next = getNextRealStep(step);
       setStep(Math.min(maxRealStep, next));
@@ -2486,6 +2526,7 @@ export default function PublicClientForm({ previewMode = false }) {
             {step === 4 && renderStep4()}
             {step === 5 && renderStep5()}
             {step === 6 && renderStep6()}
+            {step > 6 && renderDynamicStep(step)}
 
             <div className="flex justify-between mt-8 pt-6 border-t border-border">
               <Button
