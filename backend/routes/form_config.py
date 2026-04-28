@@ -324,6 +324,16 @@ async def update_form_config(
             # Admin saved step 2 config without depends_on — preserve default
             step_config_to_save["2"]["depends_on"] = DEFAULT_STEP_CONFIG["2"]["depends_on"]
     
+    # CRITICAL: Ensure fields referenced in step_config depends_on cannot be hidden
+    # If compra_tipo is hidden, step 2 conditional visibility breaks silently
+    for step_key, step_cfg in step_config_to_save.items():
+        dep = step_cfg.get("depends_on") if isinstance(step_cfg, dict) else None
+        if dep and dep.get("field"):
+            trigger_field_key = dep["field"]
+            for field in data.fields:
+                if field.get("field_key") == trigger_field_key and field.get("is_visible") is False:
+                    field["is_visible"] = True  # Force visible — it controls step visibility
+    
     await db.form_config.update_one(
         {"type": "public_form"},
         {"$set": {

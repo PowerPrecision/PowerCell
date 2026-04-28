@@ -1075,12 +1075,30 @@ export default function PublicClientForm({ previewMode = false }) {
     valor_extra: "Se precisa de capital adicional além do refinanciamento.",
   };
 
+  // Fields that control step visibility — must NEVER be hidden even if admin sets is_visible: false
+  const STEP_TRIGGER_FIELDS = useMemo(() => {
+    const fields = new Set();
+    for (const stepCfg of Object.values(effectiveStepConfig)) {
+      if (stepCfg?.depends_on?.field) {
+        fields.add(stepCfg.depends_on.field);
+      }
+    }
+    return fields;
+  }, [effectiveStepConfig]);
+
   // Get visible fields for a given step, sorted by order, filtered by depends_on
+  // Step trigger fields (e.g., compra_tipo) are always shown even if is_visible: false
   const getFieldsForStep = useCallback((stepNum) => {
     return allFieldsConfig
-      .filter(f => f.step === stepNum && f.is_visible !== false && checkDependsOn(f.depends_on))
+      .filter(f => {
+        if (f.step !== stepNum) return false;
+        // Step trigger fields are ALWAYS visible — they control step visibility
+        if (STEP_TRIGGER_FIELDS.has(f.field_key)) return true;
+        if (f.is_visible === false) return false;
+        return checkDependsOn(f.depends_on);
+      })
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  }, [allFieldsConfig, checkDependsOn, formData]); // formData triggers re-filter when field values change
+  }, [allFieldsConfig, checkDependsOn, formData, STEP_TRIGGER_FIELDS]); // formData triggers re-filter when field values change
 
   // Render a single field dynamically based on its config
   // Special fields use their existing specialized rendering; others use DynamicFormField
