@@ -1117,6 +1117,10 @@ export default function PublicClientForm({ previewMode = false }) {
         // Step trigger fields are ALWAYS visible — they control step visibility
         if (STEP_TRIGGER_FIELDS.has(f.field_key)) return true;
         if (f.is_visible === false) return false;
+        // Check depends_on_all (ALL conditions must be met) if present
+        if (f.depends_on_all && Array.isArray(f.depends_on_all)) {
+          return f.depends_on_all.every(cond => checkDependsOn(cond));
+        }
         return checkDependsOn(f.depends_on);
       })
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -2375,7 +2379,11 @@ export default function PublicClientForm({ previewMode = false }) {
           errors.push("Finalidade é obrigatória");
           newFieldErrors.finalidade = "Selecione a finalidade do pedido";
         }
-        if (formData.finalidade !== "refinanciamento") {
+        // Campos de pesquisa de imóvel só são obrigatórios se:
+        //   - não for refinanciamento
+        //   - E não tem casa já escolhida (se já tem, não precisa pesquisar)
+        const needsPropertySearch = formData.finalidade !== "refinanciamento" && !formData.ja_tem_casa_escolhida;
+        if (needsPropertySearch) {
           if (!formData.tipo_imovel) {
             errors.push("Tipo de imóvel é obrigatório");
             newFieldErrors.tipo_imovel = "Tipo de imóvel é obrigatório";
@@ -2479,6 +2487,7 @@ export default function PublicClientForm({ previewMode = false }) {
                  formData.morada_fiscal && formData.birth_date && formData.estado_civil;
         case 3:
           if (formData.finalidade === "refinanciamento") return !!formData.finalidade;
+          if (formData.ja_tem_casa_escolhida) return !!formData.finalidade;
           return formData.finalidade && formData.tipo_imovel && formData.num_quartos && formData.localizacao;
         case 4:
           return formData.chave_movel_digital && formData.salario_liquido;
@@ -2495,9 +2504,16 @@ export default function PublicClientForm({ previewMode = false }) {
     // Só bloqueia em campos que sejam:
     //   1. is_required = true
     //   2. is_visible = true (não escondidos pelo admin)
-    //   3. depends_on satisfeito
+    //   3. depends_on satisfeito (or depends_on_all ALL satisfied)
     const visibleRequired = allFieldsConfig
-      .filter(f => f.step === step && f.is_required && f.is_visible !== false && checkDependsOn(f.depends_on))
+      .filter(f => {
+        if (f.step !== step || !f.is_required || f.is_visible === false) return false;
+        // Check depends_on_all (ALL conditions must be met)
+        if (f.depends_on_all && Array.isArray(f.depends_on_all)) {
+          return f.depends_on_all.every(cond => checkDependsOn(cond));
+        }
+        return checkDependsOn(f.depends_on);
+      })
       .map(f => f.field_key);
 
     if (visibleRequired.length === 0) return true;
