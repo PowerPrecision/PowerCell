@@ -478,10 +478,11 @@ const FormManagementPage = () => {
   }, [fields, editFormData.depends_on_field]);
 
   // ── Step config helpers ──
-  // Available trigger fields for step-level depends_on (select/radio from PREVIOUS steps)
+  // Available trigger fields for step-level depends_on (select/radio/checkbox from PREVIOUS steps)
   const getStepTriggerFields = useCallback((targetStep) => {
     return fields.filter(f => {
       if (f.step >= targetStep) return false; // only from previous steps
+      if (f.field_type === "checkbox") return f.is_visible;
       return (f.field_type === "select" || f.field_type === "radio") && f.options && f.options.length > 0 && f.is_visible;
     });
   }, [fields]);
@@ -490,6 +491,7 @@ const FormManagementPage = () => {
   const getStepTriggerFieldOptions = useCallback((fieldKey) => {
     const found = fields.find(f => f.field_key === fieldKey);
     if (!found) return [];
+    if (found.field_type === "checkbox") return ["Sim", "Não"];
     if (found.field_type === "radio") return ["Sim", "Não"];
     return found.options || [];
   }, [fields]);

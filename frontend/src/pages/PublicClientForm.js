@@ -585,7 +585,14 @@ export default function PublicClientForm({ previewMode = false }) {
   const checkDependsOn = useCallback((dependsOn) => {
     if (!dependsOn) return true;
     const { field, value, value_in, not_value, contains } = dependsOn;
-    const fieldValue = formData[field];
+    let fieldValue = formData[field];
+
+    // Normalize "Sim"/"Não" to boolean for checkbox comparisons
+    if (value === "Sim" || value === "Não" || not_value === "Sim" || not_value === "Não" ||
+        (value_in && value_in.some(v => v === "Sim" || v === "Não"))) {
+      if (fieldValue === true) fieldValue = "Sim";
+      else if (fieldValue === false) fieldValue = "Não";
+    }
 
     if (value_in !== undefined) {
       return Array.isArray(value_in) && value_in.includes(fieldValue);
