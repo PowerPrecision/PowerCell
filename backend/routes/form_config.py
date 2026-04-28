@@ -58,9 +58,12 @@ class FormConfigUpdate(BaseModel):
         fields: Lista de dicionários com a configuração de cada campo.
         step_config: Configuração de visibilidade condicional por passo.
             Ex: {"2": {"depends_on": {"field": "compra_tipo", "value": "outra_pessoa"}}}
+        step_labels: Nomes personalizados para passos.
+            Ex: {"7": "Documentação Adicional"}
     """
     fields: list[dict]
     step_config: Optional[dict] = None
+    step_labels: Optional[dict] = None
 
 
 class CustomFieldCreate(BaseModel):
@@ -244,7 +247,7 @@ async def get_form_config(user: dict = Depends(require_management())):
     """
     config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
     if not config:
-        return {"fields": DEFAULT_FORM_CONFIG, "step_config": DEFAULT_STEP_CONFIG}
+        return {"fields": DEFAULT_FORM_CONFIG, "step_config": DEFAULT_STEP_CONFIG, "step_labels": {}}
 
     saved_fields = config.get("fields", [])
     # Construir mapa dos campos existentes (incluindo custom)
@@ -273,7 +276,8 @@ async def get_form_config(user: dict = Depends(require_management())):
     merged.sort(key=lambda f: (f.get("step", 0), f.get("order_index", f.get("order", 0))))
 
     step_config = config.get("step_config", DEFAULT_STEP_CONFIG)
-    return {"fields": merged, "step_config": step_config}
+    step_labels = config.get("step_labels", {})
+    return {"fields": merged, "step_config": step_config, "step_labels": step_labels}
 
 
 @router.put("/fields")
@@ -301,6 +305,7 @@ async def update_form_config(
             "type": "public_form",
             "fields": data.fields,
             "step_config": data.step_config if data.step_config is not None else DEFAULT_STEP_CONFIG,
+            "step_labels": data.step_labels if data.step_labels is not None else {},
             "updated_at": now,
             "updated_by": user.get("id"),
         }},
@@ -415,13 +420,14 @@ async def reset_form_config(user: dict = Depends(require_roles([UserRole.ADMIN])
             "type": "public_form",
             "fields": DEFAULT_FORM_CONFIG,
             "step_config": DEFAULT_STEP_CONFIG,
+            "step_labels": {},
             "updated_at": now,
             "updated_by": user.get("id"),
         }},
         upsert=True
     )
     
-    return {"message": "Configuração reposta para valores padrão", "fields": DEFAULT_FORM_CONFIG, "step_config": DEFAULT_STEP_CONFIG}
+    return {"message": "Configuração reposta para valores padrão", "fields": DEFAULT_FORM_CONFIG, "step_config": DEFAULT_STEP_CONFIG, "step_labels": {}}
 
 
 # =============================================

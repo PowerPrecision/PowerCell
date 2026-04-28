@@ -441,9 +441,11 @@ async def get_public_form_config(request: Request):
     all_fields.sort(key=lambda f: (f.get("step", 0), f.get("order_index", f.get("order", 0))))
     
     step_config = config.get("step_config", DEFAULT_STEP_CONFIG)
+    step_labels = config.get("step_labels", {})
 
     return JSONResponse(status_code=200, content={
         "custom_fields": custom_fields,
         "all_fields": all_fields,
-        "step_config": step_config
+        "step_config": step_config,
+        "step_labels": step_labels
     })

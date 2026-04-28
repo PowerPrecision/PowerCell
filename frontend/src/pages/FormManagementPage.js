@@ -353,6 +353,7 @@ const FormManagementPage = () => {
   // ── Core state (single source of truth) ──
   const [fields, setFields] = useState([]);
   const [stepConfig, setStepConfig] = useState({});
+  const [stepLabels, setStepLabels] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -383,6 +384,10 @@ const FormManagementPage = () => {
   const [editingStep, setEditingStep] = useState(null);
   const [editStepFormData, setEditStepFormData] = useState({});
 
+  // Dialog: create new step
+  const [createStepDialog, setCreateStepDialog] = useState(false);
+  const [newStepLabel, setNewStepLabel] = useState("");
+
   // Dialog: edit field
   const [editingField, setEditingField] = useState(null);
   const [editFormData, setEditFormData] = useState({});
@@ -398,6 +403,7 @@ const FormManagementPage = () => {
         const data = await res.json();
         setFields(normalizeFields(data.fields));
         setStepConfig(data.step_config || {});
+        setStepLabels(data.step_labels || {});
         setHasChanges(false);
       }
     } catch (err) {
@@ -524,6 +530,43 @@ const FormManagementPage = () => {
     toast.success("Configuração do passo atualizada");
   }, [editingStep, editStepFormData]);
 
+  // Create a new step
+  const handleCreateStep = useCallback(() => {
+    const trimmed = newStepLabel.trim();
+    if (!trimmed) {
+      toast.error("O nome do passo é obrigatório");
+      return;
+    }
+    const nextStepNum = Math.max(...allSteps, 0) + 1;
+    setStepLabels(prev => ({ ...prev, [String(nextStepNum)]: trimmed }));
+    setHasChanges(true);
+    setCreateStepDialog(false);
+    setNewStepLabel("");
+    toast.success(`Passo ${nextStepNum} "${trimmed}" criado. Agora pode arrastar campos para ele.`);
+  }, [newStepLabel, allSteps]);
+
+  // Delete a step (only custom steps with no fields)
+  const handleDeleteStep = useCallback((stepNum) => {
+    const stepFields = activeFieldsByStep[stepNum] || [];
+    if (stepFields.length > 0) {
+      toast.error("Não pode eliminar um passo com campos. Mova os campos primeiro.");
+      return;
+    }
+    // Remove step config and label
+    setStepConfig(prev => {
+      const next = { ...prev };
+      delete next[String(stepNum)];
+      return next;
+    });
+    setStepLabels(prev => {
+      const next = { ...prev };
+      delete next[String(stepNum)];
+      return next;
+    });
+    setHasChanges(true);
+    toast.success(`Passo ${stepNum} eliminado`);
+  }, [activeFieldsByStep]);
+
   // ── Field mutations ──
   const updateField = useCallback((fieldKey, key, value) => {
     setFields(prev =>
@@ -598,7 +641,7 @@ const FormManagementPage = () => {
       const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ fields: prepareFieldsForSave(fields), step_config: stepConfig }),
+        body: JSON.stringify({ fields: prepareFieldsForSave(fields), step_config: stepConfig, step_labels: stepLabels }),
       });
       if (res.ok) {
         toast.success("Configuração guardada com sucesso");
@@ -1081,14 +1124,19 @@ const FormManagementPage = () => {
                   const stepFields = activeFieldsByStep[step] || [];
                   const stepDepConfig = stepConfig[String(step)];
                   const hasStepRule = !!stepDepConfig?.depends_on;
+                  const isCustomStep = step > 6 || !!stepLabels[String(step)];
+                  const stepLabel = stepLabels[String(step)] || STEP_LABELS[step] || `Passo ${step}`;
 
                   return (
                     <Card key={step} className={`overflow-hidden ${hasStepRule ? "ring-1 ring-blue-200 dark:ring-blue-800" : ""}`}>
                       <CardHeader className="pb-3 bg-muted/30 border-b">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground">{step}</span>
-                            <CardTitle className="text-lg">{STEP_LABELS[step] || `Passo ${step}`}</CardTitle>
+                            <span className={`h-7 w-7 rounded-full flex items-center justify-center text-sm font-bold ${isCustomStep ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-primary text-primary-foreground"}`}>{step}</span>
+                            <CardTitle className="text-lg">{stepLabel}</CardTitle>
+                            {isCustomStep && (
+                              <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0">Personalizado</Badge>
+                            )}
                             {hasStepRule && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -1107,23 +1155,36 @@ const FormManagementPage = () => {
                             <Badge variant="outline" className="text-xs">
                               {stepFields.length} campo{stepFields.length !== 1 ? "s" : ""}
                             </Badge>
+                            {/* Conditional step toggle */}
                             {step > 1 && (
+                              <Button
+                                variant={hasStepRule ? "default" : "outline"}
+                                size="sm"
+                                className={`h-7 gap-1 text-xs ${hasStepRule ? "bg-blue-600 hover:bg-blue-700 text-white" : "text-muted-foreground"}`}
+                                onClick={() => openStepEditDialog(step)}
+                                data-testid={`step-settings-btn-${step}`}
+                              >
+                                <GitBranch className="h-3 w-3" />
+                                {hasStepRule ? "Condicional" : "Condicional"}
+                              </Button>
+                            )}
+                            {/* Delete custom step */}
+                            {isCustomStep && stepFields.length === 0 && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    className={`h-7 w-7 p-0 ${hasStepRule ? "text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20" : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"}`}
-                                    onClick={() => openStepEditDialog(step)}
-                                    title="Configurar visibilidade do passo"
-                                    data-testid={`step-settings-btn-${step}`}
+                                    className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                    onClick={() => {
+                                      if (window.confirm(`Eliminar o passo ${step} "${stepLabel}"?`)) handleDeleteStep(step);
+                                    }}
+                                    data-testid={`delete-step-btn-${step}`}
                                   >
-                                    <Settings className="h-3.5 w-3.5" />
+                                    <Trash2 className="h-3.5 w-3.5" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>
-                                  {hasStepRule ? "Editar regra condicional" : "Tornar passo condicional"}
-                                </TooltipContent>
+                                <TooltipContent>Eliminar passo</TooltipContent>
                               </Tooltip>
                             )}
                           </div>
@@ -1187,6 +1248,16 @@ const FormManagementPage = () => {
                     </Card>
                   );
                 })}
+                {/* Add New Step button */}
+                <Button
+                  variant="outline"
+                  className="w-full border-dashed border-2 border-muted-foreground/30 hover:border-primary/50 text-muted-foreground hover:text-foreground gap-2 py-6"
+                  onClick={() => setCreateStepDialog(true)}
+                  data-testid="create-step-btn"
+                >
+                  <Plus className="h-5 w-5" />
+                  <span className="text-sm font-medium">Novo Passo</span>
+                </Button>
               </div>
 
             </div>
@@ -1322,6 +1393,57 @@ const FormManagementPage = () => {
               >
                 {creating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
                 Criar Campo
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ══════════════════════════════════════════════════════════════
+            DIALOG: Create New Step
+            ══════════════════════════════════════════════════════════════ */}
+        <Dialog open={createStepDialog} onOpenChange={setCreateStepDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5" />
+                Criar Novo Passo
+              </DialogTitle>
+              <DialogDescription>
+                Adicione um novo passo ao formulário. Depois pode arrastar campos para ele
+                e configurar a visibilidade condicional.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Nome do passo <span className="text-red-500">*</span></Label>
+                <Input
+                  placeholder="Ex: Documentação Adicional"
+                  value={newStepLabel}
+                  onChange={(e) => setNewStepLabel(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateStep()}
+                  data-testid="new-step-label-input"
+                />
+              </div>
+              <div className="p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground space-y-1">
+                <p className="font-medium">Depois de criar:</p>
+                <ul className="list-disc list-inside space-y-0.5 ml-1">
+                  <li>Arraste campos existentes para o novo passo</li>
+                  <li>Ou crie campos personalizados directamente nele</li>
+                  <li>Configure a visibilidade condicional com o botão "Condicional"</li>
+                </ul>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => { setCreateStepDialog(false); setNewStepLabel(""); }}>Cancelar</Button>
+              <Button
+                onClick={handleCreateStep}
+                disabled={!newStepLabel.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                <Plus className="h-4 w-4 mr-1.5" />
+                Criar Passo
               </Button>
             </DialogFooter>
           </DialogContent>
