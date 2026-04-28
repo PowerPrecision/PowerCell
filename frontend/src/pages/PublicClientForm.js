@@ -570,6 +570,35 @@ export default function PublicClientForm({ previewMode = false }) {
     fetchFormConfig();
   }, []);
 
+  // ─── Helper: check depends_on condition ─────────────
+  // depends_on can be:
+  //   {"field": X, "value": V}     → visible when formData[X] == V
+  //   {"field": X, "value_in": [V1, V2]} → visible when formData[X] is in array
+  //   {"field": X, "not_value": V} → visible when formData[X] != V
+  //   {"field": X, "contains": V}  → visible when formData[X] (array) contains V
+  const checkDependsOn = useCallback((dependsOn) => {
+    if (!dependsOn) return true;
+    const { field, value, value_in, not_value, contains } = dependsOn;
+    const fieldValue = formData[field];
+
+    if (value_in !== undefined) {
+      return Array.isArray(value_in) && value_in.includes(fieldValue);
+    }
+    if (value !== undefined) {
+      // For boolean values, compare strictly
+      if (value === true) return fieldValue === true;
+      if (value === false) return fieldValue === false;
+      return fieldValue === value;
+    }
+    if (not_value !== undefined) {
+      return fieldValue !== not_value;
+    }
+    if (contains !== undefined) {
+      return Array.isArray(fieldValue) && fieldValue.includes(contains);
+    }
+    return true;
+  }, [formData]);
+
   // ─── Conditional Step Logic (dynamic based on step_config) ─────────────
   // step_config: { "2": { "depends_on": { "field": "compra_tipo", "value": "outra_pessoa" } } }
   // Returns true if the step should be visible based on current formData
@@ -758,35 +787,6 @@ export default function PublicClientForm({ previewMode = false }) {
   const isFieldRequired = (fieldKey, defaultRequired = false) => {
     return fieldKey in requiredOverrideMap ? requiredOverrideMap[fieldKey] : defaultRequired;
   };
-
-  // Helper: check if a field's depends_on condition is satisfied
-  // depends_on can be:
-  //   {"field": X, "value": V}     → visible when formData[X] == V
-  //   {"field": X, "value_in": [V1, V2]} → visible when formData[X] is in array
-  //   {"field": X, "not_value": V} → visible when formData[X] != V
-  //   {"field": X, "contains": V}  → visible when formData[X] (array) contains V
-  const checkDependsOn = useCallback((dependsOn) => {
-    if (!dependsOn) return true;
-    const { field, value, value_in, not_value, contains } = dependsOn;
-    const fieldValue = formData[field];
-
-    if (value_in !== undefined) {
-      return Array.isArray(value_in) && value_in.includes(fieldValue);
-    }
-    if (value !== undefined) {
-      // For boolean values, compare strictly
-      if (value === true) return fieldValue === true;
-      if (value === false) return fieldValue === false;
-      return fieldValue === value;
-    }
-    if (not_value !== undefined) {
-      return fieldValue !== not_value;
-    }
-    if (contains !== undefined) {
-      return Array.isArray(fieldValue) && fieldValue.includes(contains);
-    }
-    return true;
-  }, [formData]);
 
   // Build map of field configs by key (includes ALL fields from config, not just custom)
   const fieldConfigMap = useMemo(() => {
