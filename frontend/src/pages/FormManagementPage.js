@@ -470,20 +470,24 @@ const FormManagementPage = () => {
   const needsOptions = ["select", "checkbox"].includes(newField.field_type);
 
   // Fields with selectable options (for depends_on dropdown)
+  // Includes select, radio, and checkbox fields (visible only)
   const dependsOnFields = useMemo(() =>
     fields.filter(f => {
       if (!editingField || f.field_key === editingField.field_key) return false;
+      if (f.is_visible === false) return false;
+      if (f.field_type === "checkbox") return true;
       return (f.field_type === "select" || f.field_type === "radio") && (f.options && f.options.length > 0);
     }),
     [fields, editingField]
   );
 
-  // Options of the currently selected depends_on field
+  // Options of the currently selected depends_on field (field-level)
   const dependsOnFieldOptions = useMemo(() => {
     if (!editFormData.depends_on_field) return [];
     const found = fields.find(f => f.field_key === editFormData.depends_on_field);
     if (!found) return [];
     if (found.field_type === "radio") return ["Sim", "Não"];
+    if (found.field_type === "checkbox") return ["Sim", "Não"];
     return found.options || [];
   }, [fields, editFormData.depends_on_field]);
 
