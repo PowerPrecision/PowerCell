@@ -508,27 +508,44 @@ const FormManagementPage = () => {
     });
   }, [stepConfig]);
 
-  // Save step config
-  const handleSaveStepConfig = useCallback(() => {
+  // Save step config — auto-saves to backend immediately
+  const handleSaveStepConfig = useCallback(async () => {
     if (!editingStep) return;
+    let newStepConfig;
     if (editStepFormData.enabled && editStepFormData.depends_on_field) {
       const dep = { field: editStepFormData.depends_on_field };
       if (editStepFormData.depends_on_operator === "equals") dep.value = editStepFormData.depends_on_value;
       else if (editStepFormData.depends_on_operator === "not_value") dep.not_value = editStepFormData.depends_on_value;
       else if (editStepFormData.depends_on_operator === "value_in") dep.value_in = editStepFormData.depends_on_values || [];
-      setStepConfig(prev => ({ ...prev, [String(editingStep)]: { depends_on: dep } }));
+      newStepConfig = { ...stepConfig, [String(editingStep)]: { depends_on: dep } };
     } else {
-      setStepConfig(prev => {
-        const next = { ...prev };
-        delete next[String(editingStep)];
-        return next;
-      });
+      newStepConfig = { ...stepConfig };
+      delete newStepConfig[String(editingStep)];
     }
-    setHasChanges(true);
+
+    // Persist to backend immediately
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: prepareFieldsForSave(fields), step_config: newStepConfig, step_labels: stepLabels }),
+      });
+      if (res.ok) {
+        setStepConfig(newStepConfig);
+        setHasChanges(false);
+        toast.success("Configuração do passo guardada com sucesso");
+      } else {
+        toast.error("Erro ao guardar configuração do passo");
+      }
+    } catch {
+      toast.error("Erro de rede ao guardar");
+    } finally {
+      setSaving(false);
+    }
     setEditingStep(null);
     setEditStepFormData({});
-    toast.success("Configuração do passo atualizada");
-  }, [editingStep, editStepFormData]);
+  }, [editingStep, editStepFormData, stepConfig, stepLabels, fields, token]);
 
   // Create a new step
   const handleCreateStep = useCallback(() => {
@@ -1572,10 +1589,10 @@ const FormManagementPage = () => {
               <Button variant="outline" onClick={() => setEditingStep(null)}>Cancelar</Button>
               <Button
                 onClick={handleSaveStepConfig}
-                disabled={editStepFormData.enabled && (!editStepFormData.depends_on_field || !editStepFormData.depends_on_value)}
+                disabled={(editStepFormData.enabled && (!editStepFormData.depends_on_field || !editStepFormData.depends_on_value)) || saving}
               >
-                <Check className="h-4 w-4 mr-1.5" />
-                Guardar
+                {saving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Check className="h-4 w-4 mr-1.5" />}
+                {saving ? "A guardar..." : "Guardar"}
               </Button>
             </DialogFooter>
           </DialogContent>
