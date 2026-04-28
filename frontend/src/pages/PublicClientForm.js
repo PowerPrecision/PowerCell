@@ -577,10 +577,19 @@ export default function PublicClientForm({ previewMode = false }) {
         if (!dbEntry.depends_on && defaultEntry.depends_on) {
           merged[stepNum].depends_on = defaultEntry.depends_on;
         }
+        // If DB has depends_on but it's missing "value" and default has it, deep-merge depends_on
+        if (dbEntry.depends_on && defaultEntry.depends_on) {
+          merged[stepNum].depends_on = { ...defaultEntry.depends_on, ...dbEntry.depends_on };
+          // Clean up: remove value_in if it's null/undefined/empty (can cause false negatives)
+          if (!dbEntry.depends_on.value_in && defaultEntry.depends_on.value) {
+            delete merged[stepNum].depends_on.value_in;
+          }
+        }
       } else {
         merged[stepNum] = dbEntry || defaultEntry;
       }
     }
+    console.log('[effectiveStepConfig] merged:', JSON.stringify(merged));
     return merged;
   }, [stepConfig]);
   useEffect(() => {
@@ -612,19 +621,26 @@ export default function PublicClientForm({ previewMode = false }) {
 
     // Normalize "Sim"/"Não" to boolean for checkbox comparisons
     if (value === "Sim" || value === "Não" || not_value === "Sim" || not_value === "Não" ||
-        (value_in && value_in.some(v => v === "Sim" || v === "Não"))) {
+        (Array.isArray(value_in) && value_in.some(v => v === "Sim" || v === "Não"))) {
       if (fieldValue === true) fieldValue = "Sim";
       else if (fieldValue === false) fieldValue = "Não";
     }
 
-    if (value_in !== undefined) {
-      return Array.isArray(value_in) && value_in.includes(fieldValue);
-    }
+    // Prefer "value" (exact match) over "value_in" (array match) when BOTH are present.
+    // This prevents bugs where DB stores value_in: null/[] alongside value, which would
+    // cause value_in to take precedence and always return false.
     if (value !== undefined) {
       // For boolean values, compare strictly
       if (value === true) return fieldValue === true;
       if (value === false) return fieldValue === false;
       return fieldValue === value;
+    }
+    if (value_in !== undefined && value_in !== null) {
+      // Only use value_in if it's a valid non-empty array
+      if (Array.isArray(value_in) && value_in.length > 0) {
+        return value_in.includes(fieldValue);
+      }
+      // value_in is null, undefined, or empty array — skip this condition
     }
     if (not_value !== undefined) {
       return fieldValue !== not_value;
@@ -642,13 +658,9 @@ export default function PublicClientForm({ previewMode = false }) {
     const config = effectiveStepConfig[String(stepNum)];
     if (!config || !config.depends_on) return true;
     const result = checkDependsOn(config.depends_on);
-    // Debug: log step visibility for step 2 to help troubleshoot conditional navigation
-    if (stepNum === 2) {
-      console.log('[isStepVisible] step 2:', {
-        depends_on: config.depends_on,
-        compra_tipo: formDataRef.current['compra_tipo'],
-        result
-      });
+    // Debug: log step visibility for conditional steps
+    if (config.depends_on) {
+      console.log(`[isStepVisible] step ${stepNum}:`, JSON.stringify(config.depends_on), '| field value:', formDataRef.current[config.depends_on.field], '| result:', result);
     }
     return result;
   }, [effectiveStepConfig, checkDependsOn, formData]); // formData triggers re-creation so downstream hooks update

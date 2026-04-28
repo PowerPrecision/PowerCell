@@ -288,6 +288,14 @@ async def get_form_config(user: dict = Depends(require_management())):
             merged_step_config[step_key] = {**default_entry, **db_entry}
             if not db_entry.get("depends_on") and default_entry.get("depends_on"):
                 merged_step_config[step_key]["depends_on"] = default_entry["depends_on"]
+            # Deep merge depends_on: preserve default "value" if DB has it,
+            # and clean up null/empty value_in that can cause false negatives
+            if db_entry.get("depends_on") and default_entry.get("depends_on"):
+                merged_dep = {**default_entry["depends_on"], **db_entry["depends_on"]}
+                # Remove value_in if it's null/empty but value exists (prevents false negatives)
+                if not db_entry["depends_on"].get("value_in") and default_entry["depends_on"].get("value"):
+                    merged_dep.pop("value_in", None)
+                merged_step_config[step_key]["depends_on"] = merged_dep
         else:
             merged_step_config[step_key] = db_entry or default_entry
     
