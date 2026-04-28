@@ -433,8 +433,8 @@ const EmailHistoryPanel = ({
     return html;
   };
 
-  // Usar template
-  const useTemplate = async (templateId) => {
+  // Aplicar template ao email
+  const applyTemplate = async (templateId) => {
     try {
       const response = await fetch(`${API_URL}/api/emails/templates/${templateId}/use`, {
         method: "POST",
@@ -1214,7 +1214,7 @@ const EmailHistoryPanel = ({
                   <div
                     key={template.id}
                     className="p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
-                    onClick={() => useTemplate(template.id)}
+                    onClick={() => applyTemplate(template.id)}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -1317,7 +1317,7 @@ const EmailHistoryPanel = ({
             <Button
               onClick={() => {
                 if (previewTemplate) {
-                  useTemplate(previewTemplate.id);
+                  applyTemplate(previewTemplate.id);
                   setPreviewTemplate(null);
                   setIsTemplateDialogOpen(false);
                 }

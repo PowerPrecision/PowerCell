@@ -11,7 +11,7 @@
  * - Atribuir cliente a utilizador (cria processo)
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -59,7 +59,6 @@ import {
   Building,
   Clock,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
 

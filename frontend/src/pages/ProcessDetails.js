@@ -30,7 +30,7 @@
  * <Route path="/processo/:id" element={<ProcessDetails />} />
  * // O ID é obtido via useParams() internamente
  */
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -82,8 +82,9 @@ import {
   getClientS3Files,
   getS3DownloadUrl,
   deleteClient,
+  generateMagicLink,
+  sendMagicLinkEmail,
 } from "../services/api";
-import { generateMagicLink, sendMagicLinkEmail } from "../services/api";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
 import ProcessSummaryCard from "../components/ProcessSummaryCard";
@@ -971,7 +972,7 @@ const ProcessDetails = () => {
 
   const handleDownloadFile = async (filePath) => {
     try {
-      const res = await getS3DownloadUrl(processId, filePath);
+      const res = await getS3DownloadUrl(id, filePath);
       window.open(res.data.url, "_blank");
     } catch (e) {
       toast.error("Erro ao obter link de download");
@@ -4161,7 +4162,7 @@ const ProcessDetails = () => {
                               ) : (
                                 <Button
                                   size="sm"
-                                  onClick={() => handleAiSummary ? handleAiAnalysis(true) : handleAiAnalysis(false)}
+                                  onClick={() => handleAiAnalysis(true)}
                                   disabled={aiAnalysisLoading}
                                   className="bg-indigo-600 hover:bg-indigo-700 text-white"
                                 >

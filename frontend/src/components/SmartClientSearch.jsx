@@ -45,6 +45,27 @@ const SmartClientSearch = ({ onClientSelect, selectedClient, onClearClient }) =>
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Search callback — declared before any conditional return to satisfy Rules of Hooks
+  const search = useCallback(async (searchQuery) => {
+    if (searchQuery.length < 2) {
+      setResults([]);
+      setShowDropdown(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await searchClients(searchQuery, 10);
+      const items = response.data?.results || response.data || [];
+      setResults(items);
+      setShowDropdown(true);
+      setSelectedIndex(-1);
+    } catch {
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Se tem cliente selecionado, não mostrar pesquisa
   if (selectedClient) {
     return (
@@ -78,26 +99,6 @@ const SmartClientSearch = ({ onClientSelect, selectedClient, onClearClient }) =>
       </div>
     );
   }
-
-  const search = useCallback(async (searchQuery) => {
-    if (searchQuery.length < 2) {
-      setResults([]);
-      setShowDropdown(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const response = await searchClients(searchQuery, 10);
-      const items = response.data?.results || response.data || [];
-      setResults(items);
-      setShowDropdown(true);
-      setSelectedIndex(-1);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const handleInputChange = (e) => {
     const value = e.target.value;

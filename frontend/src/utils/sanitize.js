@@ -93,7 +93,7 @@ export function sanitizeUrl(url) {
   }
   
   // Remover espaços e caracteres de controlo
-  const cleaned = url.trim().replace(/[\x00-\x1F\x7F]/g, '');
+  const cleaned = url.trim().replace(/[\x00-\x1F\x7F]/gu, ''); // eslint-disable-line no-control-regex
   
   // Verificar protocolos perigosos
   const dangerousProtocols = [

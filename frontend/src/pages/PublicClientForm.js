@@ -1702,7 +1702,7 @@ export default function PublicClientForm({ previewMode = false }) {
       Sentry.withScope((scope) => {
         scope.setLevel('info');
         scope.setTransactionName('form-validation');
-        scope.setExtra('step', currentStep);
+        scope.setExtra('step', step);
         scope.setExtra('errors', validationErrors);
         scope.setExtra('formData_preview', {
           name: formData.name,
@@ -1858,7 +1858,7 @@ export default function PublicClientForm({ previewMode = false }) {
         scope.setTransactionName('form-submission');
         scope.setExtra('statusCode', statusCode);
         scope.setExtra('errorMessage', errorMessage);
-        scope.setExtra('step', currentStep);
+        scope.setExtra('step', step);
         scope.setExtra('formData_preview', {
           name: formData.name,
           email: formData.email,
@@ -2198,7 +2198,7 @@ export default function PublicClientForm({ previewMode = false }) {
     const newFieldErrors = {};
     
     switch (stepNum) {
-      case 1:
+      case 1: {
         if (!formData.name || formData.name.trim().length < 2) {
           errors.push("Nome completo é obrigatório");
           newFieldErrors.name = "Nome completo é obrigatório (mínimo 2 caracteres)";
@@ -2263,7 +2263,8 @@ export default function PublicClientForm({ previewMode = false }) {
           newFieldErrors.estado_civil = "Estado civil é obrigatório";
         }
         break;
-      case 2:
+      }
+      case 2: {
         // Se tem 2º titular, validar os campos
         if (formData.compra_tipo === "outra_pessoa") {
           if (!formData.titular2_name || formData.titular2_name.trim().length < 2) {
@@ -2302,7 +2303,8 @@ export default function PublicClientForm({ previewMode = false }) {
           }
         }
         break;
-      case 3:
+      }
+      case 3: {
         if (!formData.finalidade) {
           errors.push("Finalidade é obrigatória");
           newFieldErrors.finalidade = "Selecione a finalidade do pedido";
@@ -2322,6 +2324,7 @@ export default function PublicClientForm({ previewMode = false }) {
           }
         }
         break;
+      }
       case 4:
         if (!formData.chave_movel_digital) {
           errors.push("Chave móvel digital é obrigatória");
