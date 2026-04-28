@@ -46,7 +46,7 @@ import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
   Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark,
   GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check, GitBranch, Info,
-  Settings, Eye as EyeIcon
+  Settings, Eye as EyeIcon, ChevronDown, ChevronRight
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -353,6 +353,16 @@ const FormManagementPage = () => {
   // ── Core state (single source of truth) ──
   const [fields, setFields] = useState([]);
   const [stepConfig, setStepConfig] = useState({});
+  const [collapsedSteps, setCollapsedSteps] = useState(new Set());
+
+  const toggleStepCollapse = useCallback((step) => {
+    setCollapsedSteps(prev => {
+      const next = new Set(prev);
+      if (next.has(step)) next.delete(step);
+      else next.add(step);
+      return next;
+    });
+  }, []);
   const [stepLabels, setStepLabels] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -435,14 +445,14 @@ const FormManagementPage = () => {
   // ── Derived state ──
   const availableFields = useMemo(() =>
     fields
-      .filter(f => !f.is_visible)
+      .filter(f => f.is_visible === false)
       .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)),
     [fields]
   );
 
   const activeFieldsByStep = useMemo(() => {
     const active = fields
-      .filter(f => f.is_visible)
+      .filter(f => f.is_visible !== false)
       .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
     return active.reduce((acc, f) => {
       const step = f.step || 1;
@@ -1146,21 +1156,23 @@ const FormManagementPage = () => {
                   const hasStepRule = !!stepDepConfig?.depends_on;
                   const isCustomStep = step > 6 || !!stepLabels[String(step)];
                   const stepLabel = stepLabels[String(step)] || STEP_LABELS[step] || `Passo ${step}`;
+                  const isCollapsed = collapsedSteps.has(step);
 
                   return (
                     <Card key={step} className={`overflow-hidden ${hasStepRule ? "ring-1 ring-blue-200 dark:ring-blue-800" : ""}`}>
-                      <CardHeader className="pb-3 bg-muted/30 border-b">
+                      <CardHeader className="pb-3 bg-muted/30 border-b cursor-pointer select-none" onClick={() => toggleStepCollapse(step)}>
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className={`h-7 w-7 rounded-full flex items-center justify-center text-sm font-bold ${isCustomStep ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-primary text-primary-foreground"}`}>{step}</span>
-                            <CardTitle className="text-lg">{stepLabel}</CardTitle>
+                          <div className="flex items-center gap-2 min-w-0">
+                            {isCollapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+                            <span className={`h-7 w-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${isCustomStep ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-primary text-primary-foreground"}`}>{step}</span>
+                            <CardTitle className="text-lg truncate">{stepLabel}</CardTitle>
                             {isCustomStep && (
-                              <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0">Personalizado</Badge>
+                              <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0 shrink-0">Personalizado</Badge>
                             )}
                             {hasStepRule && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <Badge className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0 gap-1 cursor-help">
+                                  <Badge className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0 gap-1 cursor-help shrink-0">
                                     <GitBranch className="h-3 w-3" />
                                     {stepDepConfig.depends_on.not_value ? "≠" : "="}{stepDepConfig.depends_on.value || stepDepConfig.depends_on.not_value || ""}
                                   </Badge>
@@ -1171,7 +1183,7 @@ const FormManagementPage = () => {
                               </Tooltip>
                             )}
                           </div>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                             <Badge variant="outline" className="text-xs">
                               {stepFields.length} campo{stepFields.length !== 1 ? "s" : ""}
                             </Badge>
@@ -1221,6 +1233,7 @@ const FormManagementPage = () => {
                           </CardDescription>
                         )}
                       </CardHeader>
+                      {!isCollapsed && (
                       <CardContent className="p-4">
                         <Droppable droppableId={`step-${step}`}>
                           {(provided, snapshot) => (
@@ -1265,6 +1278,7 @@ const FormManagementPage = () => {
                           )}
                         </Droppable>
                       </CardContent>
+                      )}
                     </Card>
                   );
                 })}
