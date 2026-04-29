@@ -3,13 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [2026-06-28] - Remoção de Frame-Busting do Portal do Cliente
+## [2026-06-29] - Portal do Cliente: Correção Completa (iframe + loading + email)
 
 ### Corrigido
-- **Erro "Unsafe attempt to load URL" persistia ao clicar Magic Link em email client** (`fix`): O erro `Unsafe attempt to load URL ... from frame with URL chrome-error://chromewebdata/` continuava a aparecer porque os scripts de frame-busting (adicionados na correção anterior) eram a própria causa do problema. Quando o email client carrega o link num iframe com parent `chrome-error://chromewebdata/`, o frame-busting tentava `window.top.location.href = ...` que é bloqueado pelo browser por ser cross-origin. O `catch` fazia `window.open()` que era bloqueado pelo popup blocker. O `useEffect` secundário no React ainda mostrava uma mensagem de erro ao utilizador, impedindo o portal de renderizar.
-- **Remoção do frame-busting do index.html** (`fix`): Removido o script de frame-busting que executava antes do React. O portal funciona corretamente dentro de iframes — é uma SPA mobile-first independente com header e footer próprios.
-- **Remoção do frame-busting do ClientPortal.jsx** (`fix`): Removido o `useEffect` secundário que detetava iframe e mostrava mensagem de erro. Sem este bloqueio, o portal agora carrega normalmente em qualquer contexto (iframe, webview, top-level).
-- **Segurança mantida**: A segurança do portal é garantida pelo token JWT (validado no backend) — não depende de frame-busting. O `vercel.json` continua com `frame-ancestors *` para a rota `/portal(.*)`, permitindo carregamento em qualquer contexto.
+- **Portal não carrega dados (nem por URL directo)** (`fix`): O frame-busting no `index.html` e no `ClientPortal.jsx` causava o erro `chrome-error://chromewebdata/` SEMPRE (mesmo em URL directo) porque: (1) o script no `index.html` executava `window.open()` que falhava e deixava a página em estado quebrado; (2) o `useEffect` de frame-busting no React definia `error` e `loading=false` sem nunca carregar os dados. Solução: removido todo o frame-busting agressivo e substituído por `IframeDetector` — componente React que detecta iframe via `window.self !== window.top` e mostra botão "Abrir no Browser" com `<a target="_blank">` (não dispara erro cross-origin).
+- **`window.history.replaceState` causava race condition** (`fix`): Removido `replaceState` do fluxo de resolve. O token JWT resolvido fica guardado apenas em `sessionStorage`. Em refresh/re-render, o `sessionStorage` é verificado primeiro para evitar re-resolve desnecessário.
+- **`send_email()` com argumentos errados — 500 error** (`fix`): O endpoint `POST /processes/{id}/generate-magic-link/send` chamava `send_email(to_email=..., body=html_body)`. Corrigido para `send_email(account_name="power", to_emails=[...], body=text_body, body_html=html_body)`.
+- **Timeouts em fetches sem abort** (`fix`): Adicionados `AbortController` com timeouts (15s resolve, 20s status) para evitar requests pendentes indefinidamente.
+
+### Alterado
+- **Frame-busting removido do `index.html`** (`change`): Removido script inline que tentava `window.top.location.href` e `window.open()`. O iframe é agora tratado exclusivamente pelo componente React `IframeDetector` que é não-intrusivo.
+- **`ClientPortal.jsx` usa `useRef` para token estável** (`change`): O token JWT é guardado em `useRef` em vez de depender de `rawToken` da URL (que mudava com `replaceState` e causava re-execução do `useEffect`).
 
 ## [2026-06-28] - Links Curtos para Portal do Cliente
 

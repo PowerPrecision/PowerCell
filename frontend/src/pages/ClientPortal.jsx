@@ -444,6 +444,58 @@ function UploadedDocumentsList({ documents }) {
 }
 
 // ====================================================================
+// IFRAME DETECTION COMPONENT (non-intrusive — shows "Open in browser")
+// ====================================================================
+function IframeDetector({ children }) {
+  const [isIframe, setIsIframe] = useState(false);
+
+  useEffect(() => {
+    // Detecta se estamos dentro de um iframe (ex: email client WebView)
+    // SEM usar window.top.location ou window.open — usa apenas <a target="_blank">
+    try {
+      setIsIframe(window.self !== window.top);
+    } catch (_e) {
+      // Se nem window.top é acessível, certamente estamos num iframe
+      setIsIframe(true);
+    }
+  }, []);
+
+  if (!isIframe) {
+    return children;
+  }
+
+  // Dentro de iframe: mostrar botão "Abrir no browser" com <a target="_blank">
+  // Isto NÃO dispara o erro cross-origin porque <a target="_blank"> é permitido
+  const currentUrl = window.self.location.href;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full text-center">
+        <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <span className="text-3xl">🔐</span>
+        </div>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">Portal do Cliente</h2>
+        <p className="text-gray-600 mb-6">
+          Para aceder ao seu portal de forma segura, abra o link diretamente no seu navegador.
+        </p>
+        <a
+          href={currentUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
+        >
+          Abrir no Browser
+          <ChevronRight className="w-5 h-5" />
+        </a>
+        <p className="text-xs text-gray-400 mt-4">
+          Power Precision · Crédito Habitação
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
 // MAIN CLIENT PORTAL COMPONENT
 // ====================================================================
 export default function ClientPortal() {
@@ -572,30 +624,34 @@ export default function ClientPortal() {
   // ---- LOADING STATE ----
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
-        <div className="text-center">
-          <Loader2 className="w-10 h-10 text-emerald-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 font-medium">{loadingMessage}</p>
+      <IframeDetector>
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
+          <div className="text-center">
+            <Loader2 className="w-10 h-10 text-emerald-600 animate-spin mx-auto mb-4" />
+            <p className="text-gray-600 font-medium">{loadingMessage}</p>
+          </div>
         </div>
-      </div>
+      </IframeDetector>
     );
   }
 
   // ---- ERROR STATE ----
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertCircle className="w-8 h-8 text-red-500" />
+      <IframeDetector>
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full text-center">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-8 h-8 text-red-500" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Link Inválido</h2>
+            <p className="text-gray-600 mb-6">{error}</p>
+            <p className="text-sm text-gray-400">
+              Se precisa de acesso, contacte o seu consultor.
+            </p>
           </div>
-          <h2 className="text-xl font-bold text-gray-800 mb-2">Link Inválido</h2>
-          <p className="text-gray-600 mb-6">{error}</p>
-          <p className="text-sm text-gray-400">
-            Se precisa de acesso, contacte o seu consultor.
-          </p>
         </div>
-      </div>
+      </IframeDetector>
     );
   }
 
@@ -604,6 +660,7 @@ export default function ClientPortal() {
   const { process, progress, stepper, documents, consultor } = data;
 
   return (
+    <IframeDetector>
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {/* Header */}
       <header className="bg-white border-b border-gray-100 shadow-sm sticky top-0 z-50">
@@ -695,5 +752,6 @@ export default function ClientPortal() {
         </div>
       </footer>
     </div>
+    </IframeDetector>
   );
 }

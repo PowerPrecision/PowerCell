@@ -410,18 +410,17 @@ async def send_magic_link_email(
         f"Power Precision · Crédito Habitação"
     )
 
-    result = await send_email(
-        account_name="power",
-        to_emails=[client_email],
-        subject=f"Portal do Cliente — Acompanhe o seu processo ({client_name})",
-        body=text_body,
-        body_html=html_body,
-        force_system=True,
-        system_purpose="DOCUMENTS",
-    )
-
-    if not result.get("success"):
-        logger.error(f"Erro ao enviar magic link email: {result.get('error')}")
+    try:
+        await send_email(
+            account_name="power",
+            to_emails=[client_email],
+            subject=f"Portal do Cliente — Acompanhe o seu processo ({client_name})",
+            body=text_body,
+            body_html=html_body,
+            force_system=True,
+        )
+    except Exception as e:
+        logger.error(f"Erro ao enviar magic link email: {e}")
         raise HTTPException(status_code=500, detail="Erro ao enviar email. Tente copiar o link manualmente.")
 
     logger.info(
