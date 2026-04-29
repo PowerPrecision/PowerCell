@@ -8,7 +8,8 @@ Task: Corrigir erro "Unsafe attempt to load URL" quando Magic Link é clicado de
 Work Log:
 - **Diagnóstico**: Erro `chrome-error://chromewebdata/` ocorre quando o cliente clica num Magic Link dentro do webview de um email client (Outlook, Gmail app). O parent frame é `chrome-error://` e o browser bloqueia o carregamento cross-origin. Os headers `X-Frame-Options: DENY` e `frame-ancestors 'none'` impediam completamente o carregamento da página, incluindo o frame-busting JavaScript.
 - **Fix 1 — index.html**: Adicionado script de frame-busting no `<head>` (antes do React). Se `window.self !== window.top`, tenta `window.top.location.href`. Se bloqueado por cross-origin, faz `window.open(url, '_blank')`.
-- **Fix 2 — vercel.json**: Adicionada regra de headers para `/portal(.*)` com `frame-ancestors *`, permitindo que a página carregue dentro de iframes de email clients para que o frame-busting script execute. Regura listada ANTES do catch-all para ter prioridade. Rotas restantes mantêm `frame-ancestors 'none'`.
+- **Fix 2 — vercel.json**: Regra `/portal(.*)` com `frame-ancestors *` e SEM `X-Frame-Options: DENY`. Regra global usa negative lookahead `((?!portal).*)` para ser mutuamente exclusiva com `/portal`. Isto garante que `/portal` nunca recebe headers de bloqueio de iframe.
+- **Fix 2b — vercel.json (correção)**: Versão anterior tinha `/portal(.*)` + `/(.*)` — ambas as regras faziam match em `/portal`, e o Vercel aplicava headers de ambas (o `frame-ancestors 'none'` e `X-Frame-Options: DENY` do catch-all sobrepunham o portal). Corrigido com negative lookahead para exclusão mútua.
 - **Fix 3 — ClientPortal.jsx**: Adicionado `useEffect` de frame-busting como segunda camada de defesa. Em caso de cross-origin block, mostra mensagem ao utilizador a instruí-lo a abrir o link manualmente.
 - **CHANGELOG.md**: Documentação completa da correção.
 
