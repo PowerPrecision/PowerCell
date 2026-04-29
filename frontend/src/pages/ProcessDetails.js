@@ -891,12 +891,15 @@ const ProcessDetails = () => {
 
   const fetchData = async () => {
     try {
+      // Use Promise.allSettled so that a failure in one request (e.g. history/activities)
+      // doesn't prevent the page from loading. The main getProcess call determines
+      // whether the process exists; the others are supplementary.
       const [processRes, deadlinesRes, activitiesRes, historyRes, statusesRes] = await Promise.all([
-        getProcess(id),
-        getDeadlines(id),
-        getActivities(id),
-        getHistory(id),
-        getWorkflowStatuses(),
+        getProcess(id).catch(err => { throw err; }), // Re-throw: this is the critical call
+        getDeadlines(id).catch(() => ({ data: [] })),
+        getActivities(id).catch(() => ({ data: [] })),
+        getHistory(id).catch(() => ({ data: [] })),
+        getWorkflowStatuses().catch(() => ({ data: [] })),
       ]);
       const processData = processRes.data;
       setProcess(processData);
