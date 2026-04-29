@@ -424,6 +424,8 @@ const WebmailPage = () => {
     try {
       // Determine sync endpoint based on role and active box
       const isGeneralSync = activeBox === 'general' && showTabs;
+      const isPersonalSync = !isGeneralSync;
+
       const syncEndpoint = isGeneralSync
         ? `${API_URL}/api/emails/webmail/sync`
         : `${API_URL}/api/emails/webmail/sync-user`;
@@ -447,6 +449,34 @@ const WebmailPage = () => {
       }
 
       if (data.success === false) {
+        // If personal sync says "not configured" and user has admin privileges,
+        // automatically fallback to global sync
+        if (isPersonalSync && showTabs) {
+          try {
+            const fallbackParams = new URLSearchParams({ days: "7" });
+            const fallbackResponse = await fetch(
+              `${API_URL}/api/emails/webmail/sync?${fallbackParams.toString()}`,
+              {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+            const fallbackData = await fallbackResponse.json().catch(() => ({}));
+
+            if (fallbackData.success === false) {
+              toast.error(fallbackData.error || "Erro na sincronização global");
+              return;
+            }
+
+            toast.info("Sincronização global iniciada em background. Pode acompanhar o progresso em Tarefas em Background.");
+            setLastSyncTime(new Date());
+            setTimeout(() => { handleRefresh(); }, 5000);
+            return;
+          } catch (fallbackError) {
+            toast.error(data.error || "Erro na sincronização");
+            return;
+          }
+        }
         toast.error(data.error || "Erro na sincronização");
         return;
       }

@@ -3,6 +3,12 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-27] - Correção de Sincronização Webmail
+
+### Corrigido
+- **Sincronização webmail mostra toast "não configurado" incorretamente** (`fix`): Ao clicar "Sincronizar" no separador "Pessoal", se o utilizador não tinha email pessoal configurado mas existia config global (SystemConfigPage), o sync falhava com mensagem de "não configurado". Agora o `handleSyncEmails` faz fallback automático para o endpoint de sincronização global (`/webmail/sync`) quando o sync pessoal falha e o utilizador tem privilégios de admin.
+- **WelcomeConfigModal aparece para admins com email global configurado** (`fix`): O endpoint `/auth/me` agora verifica não só a config pessoal do utilizador (`email_config.is_configured`), mas também a config global do sistema (`system_config.email` e `system_webmail`) para admins/ceo/diretor/administrativo. Se existir config global, `email_configured` é `true` e o modal não aparece.
+
 ## [2026-06-26] - Correções de Webmail e UX
 
 ### Corrigido
