@@ -199,17 +199,19 @@ function AutoSaveIndicator({ lastSaved, isSaving }) {
 
 const ESTADOS_CIVIS = [
   { value: "solteiro", label: "Solteiro/a" },
-  { value: "divorciado", label: "Divorciado/a" },
-  { value: "viuvo", label: "Viúvo/a" },
+  { value: "casado", label: "Casado/a" },
   { value: "casado_adquiridos", label: "Casado/a: Comunhão de Adquiridos" },
   { value: "casado_geral", label: "Casado/a: Comunhão Geral de Bens" },
   { value: "casado_separacao", label: "Casado/a: Separação de Bens" },
-  { value: "outro", label: "Outro" },
+  { value: "divorciado", label: "Divorciado/a" },
+  { value: "viuvo", label: "Viúvo/a" },
+  { value: "uniao_facto", label: "União de Facto" },
 ];
 
 const TIPOS_IMOVEL = [
   { value: "apartamento", label: "Apartamento" },
   { value: "moradia", label: "Moradia" },
+  { value: "terreno", label: "Terreno" },
   { value: "outro", label: "Outro" },
 ];
 

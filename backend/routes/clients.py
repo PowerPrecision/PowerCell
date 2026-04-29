@@ -466,10 +466,17 @@ async def assign_client_to_user(
             personal_data["telefone"] = client_phone
         if client_name and not personal_data.get("nome"):
             personal_data["nome"] = client_name
+        # Remover blind indexes (nif_hash, email_hash) que não pertencem ao processo
+        personal_data.pop("nif_hash", None)
+        personal_data.pop("email_hash", None)
+        personal_data.pop("telefone_hash", None)
         
         # Criar documento do processo
         # Gerar caminho S3 com verificação de pasta existente para evitar duplicados
         titular2_data = client.get("titular2_data")
+        # Remover blind indexes do titular2_data
+        if titular2_data and isinstance(titular2_data, dict):
+            titular2_data.pop("nif_hash", None)
         second_client_name = titular2_data.get("name") if titular2_data else None
         
         # IMPORTANTE: Usar função que verifica pastas existentes antes de criar

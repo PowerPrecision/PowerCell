@@ -247,152 +247,6 @@ const validateNIF = (nif) => {
 // Fetches form config from /api/admin/form-config/fields and displays
 // all fields that have a corresponding value in the process data.
 // Custom fields created in Form Manager appear here automatically.
-const DynamicFormFieldsTab = ({ processId, token, personalData, titular2Data, realEstateData, financialData }) => {
-  const [formFields, setFormFields] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setFormFields(data.fields || []);
-        }
-      } catch (err) {
-        console.error("Error fetching form config for dynamic fields:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchConfig();
-  }, [token]);
-
-  // Build a flat map of all data sources for easy value lookup
-  const allData = useMemo(() => {
-    const map = {};
-    // Root-level fields from the process
-    if (personalData) Object.entries(personalData).forEach(([k, v]) => { if (v != null && v !== '') map[k] = v; });
-    if (titular2Data) Object.entries(titular2Data).forEach(([k, v]) => { if (v != null && v !== '') map[`titular2_${k}`] = v; });
-    if (realEstateData) Object.entries(realEstateData).forEach(([k, v]) => { if (v != null && v !== '') map[k] = v; });
-    if (financialData) Object.entries(financialData).forEach(([k, v]) => { if (v != null && v !== '') map[k] = v; });
-    return map;
-  }, [personalData, titular2Data, realEstateData, financialData]);
-
-  // Group fields by step and find fields with values
-  const fieldsByStep = useMemo(() => {
-    const steps = {};
-    formFields.forEach((field) => {
-      if (!field.step) return;
-      const step = field.step;
-      if (!steps[step]) steps[step] = [];
-      steps[step].push(field);
-    });
-    return steps;
-  }, [formFields]);
-
-  // Format a value for display
-  const formatValue = (val) => {
-    if (val === null || val === undefined) return null;
-    if (typeof val === "boolean") return val ? "Sim" : "Não";
-    if (Array.isArray(val)) {
-      if (val.length === 0) return null;
-      // If array items are objects with .banco, show bank names
-      if (val.some((v) => typeof v === "object" && v.banco)) {
-        return val.map((v) => v.banco).join(", ");
-      }
-      return val.join(", ");
-    }
-    return String(val);
-  };
-
-  const stepLabels = {
-    1: "Dados Pessoais — Titular",
-    2: "Dados do 2º Titular",
-    3: "Dados do Imóvel / Pedido",
-    4: "Situação Financeira",
-    5: "Créditos e Capital",
-    6: "Consentimentos",
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        <span className="ml-2 text-sm text-muted-foreground">A carregar configuração do formulário...</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-emerald-100 dark:bg-emerald-900/40 rounded-lg">
-            <Database className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-emerald-800 dark:text-emerald-200">Campos do Formulário</h3>
-            <p className="text-sm text-emerald-600 dark:text-emerald-400">
-              Todos os campos preenchidos no formulário de registo (incluindo campos personalizados)
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {Object.entries(fieldsByStep)
-        .sort(([a], [b]) => Number(a) - Number(b))
-        .map(([stepNum, fields]) => {
-          // Filter to fields that have data
-          const fieldsWithData = fields.filter((f) => {
-            const val = allData[f.field_key];
-            return val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0);
-          });
-
-          if (fieldsWithData.length === 0) return null;
-
-          return (
-            <Card key={stepNum} className="border-l-4 border-l-emerald-500">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Passo {stepNum}: {stepLabels[stepNum] || `Passo ${stepNum}`}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {fieldsWithData.map((field) => {
-                    const displayVal = formatValue(allData[field.field_key]);
-                    return (
-                      <div key={field.field_key} className="space-y-1">
-                        <p className="text-xs text-muted-foreground font-medium">
-                          {field.label}
-                          {field.is_custom && (
-                            <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0">Custom</Badge>
-                          )}
-                        </p>
-                        <p className="text-sm font-medium break-words">
-                          {displayVal || <span className="text-muted-foreground italic">—</span>}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-
-      {Object.keys(fieldsByStep).length > 0 && (
-        <p className="text-xs text-muted-foreground text-center">
-          Campos configurados no Gestor de Formulários aparecem automaticamente aqui.
-        </p>
-      )}
-    </div>
-  );
-};
-
 const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -937,6 +791,70 @@ const ProcessDetails = () => {
       if (fd.tipo_contrato && !fd.employment_type) {
         setFinancialData(prev => ({ ...prev, employment_type: prev.tipo_contrato }));
       }
+      // UNIFICAÇÃO backward-compat: se financial_data tem antiguidade_emprego mas não employment_duration, migrar
+      if (fd.antiguidade_emprego && !fd.employment_duration) {
+        setFinancialData(prev => ({ ...prev, employment_duration: prev.antiguidade_emprego }));
+      }
+      // UNIFICAÇÃO backward-compat: normalizar valores de display labels para internal keys
+      // sexo: "Masculino"/"Feminino" → "M"/"F"
+      if (pd.sexo === "Masculino") {
+        setPersonalData(prev => ({ ...prev, sexo: "M" }));
+      } else if (pd.sexo === "Feminino") {
+        setPersonalData(prev => ({ ...prev, sexo: "F" }));
+      }
+      // estado_civil: display labels → internal keys (e.g. "Solteiro(a)" → "solteiro")
+      const estadoCivilMap = {
+        "Solteiro(a)": "solteiro", "Solteiro": "solteiro",
+        "Casado(a)": "casado", "Casado": "casado",
+        "Casado(a) - Comunhão de Bens": "casado_geral",
+        "Casado(a) - Comunhão de Aquiridos": "casado_adquiridos",
+        "Casado(a) - Comunhão de Adquiridos": "casado_adquiridos",
+        "Casado(a) - Separação de Bens": "casado_separacao",
+        "Divorciado(a)": "divorciado", "Divorciado": "divorciado",
+        "Viúvo(a)": "viuvo", "Viúvo": "viuvo",
+        "União de Facto": "uniao_facto",
+      };
+      if (pd.estado_civil && estadoCivilMap[pd.estado_civil]) {
+        setPersonalData(prev => ({ ...prev, estado_civil: estadoCivilMap[prev.estado_civil] }));
+      }
+      // tipo_imovel: Title Case → lowercase (e.g. "Apartamento" → "apartamento")
+      const tipoImovelMap = {
+        "Apartamento": "apartamento", "Moradia": "moradia",
+        "Terreno": "terreno", "Outro": "outro",
+      };
+      const rd = processData.real_estate_data || {};
+      if (rd.tipo_imovel && tipoImovelMap[rd.tipo_imovel]) {
+        setRealEstateData(prev => ({ ...prev, tipo_imovel: tipoImovelMap[prev.tipo_imovel] }));
+      }
+      // employment_type: Title Case → lowercase (e.g. "Efetivo" → "efetivo")
+      const employmentTypeMap = {
+        "Efetivo": "efetivo", "Termo Certo": "termo_certo",
+        "Termo Incerto": "termo_incerto", "Independente": "independente",
+        "Empresário": "empresario", "Empresário em Nome Individual": "empresario",
+        "Reformado": "reformado", "Desempregado": "desempregado",
+      };
+      if (fd.employment_type && employmentTypeMap[fd.employment_type]) {
+        setFinancialData(prev => ({ ...prev, employment_type: employmentTypeMap[prev.employment_type] }));
+      }
+      // Titular2 backward-compat: normalizar estado_civil (Title Case → lowercase)
+      const t2 = processData.titular2_data || {};
+      if (t2.estado_civil && estadoCivilMap[t2.estado_civil]) {
+        setTitular2Data(prev => ({ ...prev, estado_civil: estadoCivilMap[prev.estado_civil] }));
+      }
+      // Titular2: limpar nif_hash (campo interno, não deve ser exibido)
+      if (t2.nif_hash) {
+        setTitular2Data(prev => {
+          const { nif_hash, ...rest } = prev;
+          return rest;
+        });
+      }
+      // Personal data: limpar nif_hash (campo interno, não deve ser exibido)
+      if (pd.nif_hash) {
+        setPersonalData(prev => {
+          const { nif_hash, ...rest } = prev;
+          return rest;
+        });
+      }
       // UNIFICAÇÃO: se personal_data tem email/phone, sincronizar com campos de topo
       if (pd.email && !processData.client_email) {
         setProcess(prev => ({ ...prev, client_email: pd.email }));
@@ -1041,6 +959,12 @@ const ProcessDetails = () => {
       cleaned.data_validade_cc = convertPortugueseDateToISO(cleaned.data_validade_cc);
     }
     
+    // Remover campos internos que não devem ser guardados no processo
+    delete cleaned.nif_hash;
+    delete cleaned.email_hash;
+    delete cleaned.telefone_hash;
+    delete cleaned.marital_status; // phantom field, usar estado_civil
+    
     // Remover campos undefined ou vazios que podem causar problemas
     Object.keys(cleaned).forEach(key => {
       if (cleaned[key] === undefined || cleaned[key] === '') {
@@ -1058,6 +982,9 @@ const ProcessDetails = () => {
     if (cleaned.birth_date) {
       cleaned.birth_date = convertPortugueseDateToISO(cleaned.birth_date);
     }
+    // Remover campos internos que não devem ser guardados no processo
+    delete cleaned.nif_hash;
+    
     // Remover campos undefined ou vazios
     Object.keys(cleaned).forEach(key => {
       if (cleaned[key] === undefined || cleaned[key] === '') {
@@ -1121,6 +1048,12 @@ const ProcessDetails = () => {
       'creditos_existentes', 'prestacao_creditos_mensal',
       // Rendimento agregado
       'rendimento_agregado',
+      // Rendimento anual (campo do modelo ClientFinancialData)
+      'rendimento_anual',
+      // Antiguidade no emprego (alias português)
+      'antiguidade_emprego',
+      // Outros rendimentos e despesas
+      'outros_rendimentos', 'despesas_mensais',
       // Contas abertas (bancos)
       'tem_creditos_activos',
     ];
@@ -2096,10 +2029,6 @@ const ProcessDetails = () => {
                       <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Crédito</span>
                     </TabsTrigger>
-                    <TabsTrigger value="formfields" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <Database className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Formulário</span>
-                    </TabsTrigger>
                     <TabsTrigger value="documents" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
                       <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Docs</span>
@@ -2281,6 +2210,9 @@ const ProcessDetails = () => {
                                 <SelectContent>
                                   <SelectItem value="solteiro">Solteiro(a)</SelectItem>
                                   <SelectItem value="casado">Casado(a)</SelectItem>
+                                  <SelectItem value="casado_adquiridos">Casado(a) - Comunhão de Adquiridos</SelectItem>
+                                  <SelectItem value="casado_geral">Casado(a) - Comunhão Geral</SelectItem>
+                                  <SelectItem value="casado_separacao">Casado(a) - Separação de Bens</SelectItem>
                                   <SelectItem value="divorciado">Divorciado(a)</SelectItem>
                                   <SelectItem value="viuvo">Viúvo(a)</SelectItem>
                                   <SelectItem value="uniao_facto">União de Facto</SelectItem>
@@ -2511,11 +2443,14 @@ const ProcessDetails = () => {
                                     <SelectValue placeholder="Selecionar" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="Solteiro">Solteiro(a)</SelectItem>
-                                    <SelectItem value="Casado">Casado(a)</SelectItem>
-                                    <SelectItem value="Divorciado">Divorciado(a)</SelectItem>
-                                    <SelectItem value="Viúvo">Viúvo(a)</SelectItem>
-                                    <SelectItem value="União de Facto">União de Facto</SelectItem>
+                                    <SelectItem value="solteiro">Solteiro(a)</SelectItem>
+                                    <SelectItem value="casado">Casado(a)</SelectItem>
+                                    <SelectItem value="casado_adquiridos">Casado(a) - Comunhão de Adquiridos</SelectItem>
+                                    <SelectItem value="casado_geral">Casado(a) - Comunhão Geral</SelectItem>
+                                    <SelectItem value="casado_separacao">Casado(a) - Separação de Bens</SelectItem>
+                                    <SelectItem value="divorciado">Divorciado(a)</SelectItem>
+                                    <SelectItem value="viuvo">Viúvo(a)</SelectItem>
+                                    <SelectItem value="uniao_facto">União de Facto</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
@@ -3345,7 +3280,8 @@ const ProcessDetails = () => {
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="efetivo">Contrato Efetivo</SelectItem>
-                                  <SelectItem value="termo">Contrato a Termo</SelectItem>
+                                  <SelectItem value="termo_certo">Termo Certo</SelectItem>
+                                  <SelectItem value="termo_incerto">Termo Incerto</SelectItem>
                                   <SelectItem value="independente">Trabalhador Independente</SelectItem>
                                   <SelectItem value="empresario">Empresário</SelectItem>
                                   <SelectItem value="reformado">Reformado</SelectItem>
@@ -3523,6 +3459,7 @@ const ProcessDetails = () => {
                                     <SelectItem value="apartamento">Apartamento</SelectItem>
                                     <SelectItem value="moradia">Moradia</SelectItem>
                                     <SelectItem value="terreno">Terreno</SelectItem>
+                                    <SelectItem value="outro">Outro</SelectItem>
                                     <SelectItem value="comercial">Espaço Comercial</SelectItem>
                                   </SelectContent>
                                 </Select>
@@ -3738,6 +3675,7 @@ const ProcessDetails = () => {
                                 >
                                   <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                   <SelectContent>
+                                    <SelectItem value="compra_imovel">Compra de Imóvel</SelectItem>
                                     <SelectItem value="habitacao_propria">Habitação Própria</SelectItem>
                                     <SelectItem value="investimento">Investimento</SelectItem>
                                     <SelectItem value="arrendamento">Arrendamento</SelectItem>
@@ -4256,18 +4194,6 @@ const ProcessDetails = () => {
                         </CardContent>
                       </Card>
                     </div>
-                  </TabsContent>
-
-                  {/* Form Fields Tab — Dynamic fields from form config */}
-                  <TabsContent value="formfields" className="mt-4">
-                    <DynamicFormFieldsTab
-                      processId={id}
-                      token={token}
-                      personalData={personalData}
-                      titular2Data={titular2Data}
-                      realEstateData={realEstateData}
-                      financialData={financialData}
-                    />
                   </TabsContent>
                 </Tabs>
 
