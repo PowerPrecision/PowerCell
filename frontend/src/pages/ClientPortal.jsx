@@ -453,28 +453,41 @@ export default function ClientPortal() {
   const [data, setData] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Extract token from URL
-  const rawToken = window.location.pathname.split('/portal/')[1];
+  // Extract token from URL (usado apenas para determinar o tipo de token)
+  const rawToken = useRef(window.location.pathname.split('/portal/')[1]);
 
   useEffect(() => {
-    if (!rawToken) {
+    let cancelled = false;
+    const token = rawToken.current;
+
+    if (!token) {
       setError('Link inválido. Contacte o seu consultor para receber um novo link.');
       setLoading(false);
       return;
     }
 
     // Determinar se é um JWT (contém '.') ou short_id (não contém '.')
-    const isShortToken = !rawToken.includes('.');
+    const isShortToken = !token.includes('.');
 
     // Fetch portal status
     const fetchStatus = async (jwtToken) => {
+      if (cancelled) return;
+
       try {
         // Store JWT token in sessionStorage
         sessionStorage.setItem('portal_token', jwtToken);
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+
         const response = await fetch(`${BACKEND_URL}/portal/status`, {
           headers: { Authorization: `Bearer ${jwtToken}` },
+          signal: controller.signal,
         });
+
+        clearTimeout(timeoutId);
+
+        if (cancelled) return;
 
         if (!response.ok) {
           const err = await response.json().catch(() => ({}));
@@ -482,12 +495,19 @@ export default function ClientPortal() {
         }
 
         const result = await response.json();
+        if (cancelled) return;
+
         setData(result);
         setError(null);
       } catch (err) {
-        setError(err.message);
+        if (cancelled) return;
+        if (err.name === 'AbortError') {
+          setError('A ligação demorou demasiado. Verifique a sua internet e tente novamente.');
+        } else {
+          setError(err.message || 'Erro ao carregar dados do processo.');
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
@@ -496,36 +516,54 @@ export default function ClientPortal() {
         if (isShortToken) {
           // Short token: resolver para JWT via API
           setLoadingMessage('A verificar link...');
-          const resolveRes = await fetch(`${BACKEND_URL}/portal/resolve/${rawToken}`);
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+          const resolveRes = await fetch(`${BACKEND_URL}/portal/resolve/${token}`, {
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (cancelled) return;
 
           if (!resolveRes.ok) {
             const err = await resolveRes.json().catch(() => ({}));
             throw new Error(err.detail || 'Link não encontrado ou expirado');
           }
 
-          const { token: jwtToken } = await resolveRes.json();
+          const resolveData = await resolveRes.json();
+          const jwtToken = resolveData?.token;
 
           if (!jwtToken) {
             throw new Error('Erro ao resolver link');
           }
 
-          // Atualizar URL no browser para o JWT (opcional, melhora UX em refresh)
-          window.history.replaceState(null, '', `/portal/${jwtToken}`);
+          // NÃO usar replaceState — causa re-render desnecessária e race conditions
+          // O JWT fica em sessionStorage para uso futuro (refresh, upload)
 
           setLoadingMessage('A carregar o seu processo...');
           await fetchStatus(jwtToken);
         } else {
           // Já é um JWT (link antigo) — usar diretamente
-          await fetchStatus(rawToken);
+          await fetchStatus(token);
         }
       } catch (err) {
-        setError(err.message);
+        if (cancelled) return;
+        if (err.name === 'AbortError') {
+          setError('A ligação demorou demasiado. Verifique a sua internet e tente novamente.');
+        } else {
+          setError(err.message);
+        }
         setLoading(false);
       }
     };
 
     init();
-  }, [rawToken, refreshKey]);
+
+    return () => { cancelled = true; };
+  }, [refreshKey]);
 
   const handleUploadSuccess = useCallback(() => {
     setRefreshKey((k) => k + 1);
