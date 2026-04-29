@@ -1,6 +1,40 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: frame-busting-portal
+Agent: Main Agent
+Task: Corrigir erro "Unsafe attempt to load URL" quando Magic Link é clicado dentro de email client
+
+Work Log:
+- **Diagnóstico**: Erro `chrome-error://chromewebdata/` ocorre quando o cliente clica num Magic Link dentro do webview de um email client (Outlook, Gmail app). O parent frame é `chrome-error://` e o browser bloqueia o carregamento cross-origin. Os headers `X-Frame-Options: DENY` e `frame-ancestors 'none'` impediam completamente o carregamento da página, incluindo o frame-busting JavaScript.
+- **Fix 1 — index.html**: Adicionado script de frame-busting no `<head>` (antes do React). Se `window.self !== window.top`, tenta `window.top.location.href`. Se bloqueado por cross-origin, faz `window.open(url, '_blank')`.
+- **Fix 2 — vercel.json**: Adicionada regra de headers para `/portal(.*)` com `frame-ancestors *`, permitindo que a página carregue dentro de iframes de email clients para que o frame-busting script execute. Regura listada ANTES do catch-all para ter prioridade. Rotas restantes mantêm `frame-ancestors 'none'`.
+- **Fix 3 — ClientPortal.jsx**: Adicionado `useEffect` de frame-busting como segunda camada de defesa. Em caso de cross-origin block, mostra mensagem ao utilizador a instruí-lo a abrir o link manualmente.
+- **CHANGELOG.md**: Documentação completa da correção.
+
+Stage Summary:
+- 4 ficheiros alterados: `frontend/index.html`, `frontend/vercel.json`, `frontend/src/pages/ClientPortal.jsx`, `CHANGELOG.md`
+- Correção em 3 camadas: HTML (primeiro script), Vercel headers (CSP), React (useEffect)
+- Página do portal nunca fica visível dentro de iframe — redireciona sempre para top-level
+
+---
+Task ID: webmail-sync-fix
+Agent: Main Agent
+Task: Corrigir toast "precisa configurar" ao sincronizar webmail já configurado
+
+Work Log:
+- **Diagnóstico**: O botão "Sincronizar" no separador "Pessoal" chamava `/webmail/sync-user` que verifica `user.email_config.is_configured` (config pessoal). Admins que só configuraram email global (SystemConfigPage) não tinham config pessoal, causando o toast falso.
+- **Fix 1 - WebmailPage.jsx handleSyncEmails**: Adicionado fallback automático — quando sync pessoal retorna `success: false` e o utilizador tem `showTabs` (admin/ceo/diretor/administrativo), faz automaticamente fetch ao endpoint global `/webmail/sync`. Se o global também falhar, mostra o erro do global.
+- **Fix 2 - auth.py /auth/me**: Adicionada verificação de config global do sistema para admins. Se o utilizador não tem `email_config.is_configured` pessoal, o endpoint agora verifica `system_config.email` (Bloco A - SMTP) e `system_webmail` (Bloco C - Webmail partilhado). Se existir qualquer config global, `email_configured = True`, impedindo que o WelcomeConfigModal apareça no login.
+- **CHANGELOG.md**: Documentação da correção.
+
+Stage Summary:
+- 3 ficheiros alterados: `backend/routes/auth.py`, `frontend/src/pages/WebmailPage.jsx`, `CHANGELOG.md`
+- Commit: `79d643f` pushed to `dev`
+- O sincronizar agora faz fallback para sync global quando config pessoal não existe
+- O modal de configuração de email no login já não aparece para admins com email global configurado
+
+---
 Task ID: sentry-eslint-build
 Agent: Main Agent
 Task: Configurar Sentry Vite Plugin, Hidden Source Maps, ESLint no-cycle, e gerar novo build

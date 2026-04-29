@@ -452,6 +452,24 @@ export default function ClientPortal() {
   const [data, setData] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Frame-busting: segurança adicional para garantir que o portal
+  // corre sempre no contexto top-level (previne iframe de email clients)
+  useEffect(() => {
+    if (window.self !== window.top) {
+      try {
+        window.top.location.href = window.self.location.href;
+      } catch (_e) {
+        // Cross-origin block: abre numa nova aba/janela
+        window.open(window.self.location.href, '_blank');
+        setError(
+          'Esta página não pode ser carregada dentro de outra janela. ' +
+          'Foi aberta uma nova aba — se não abriu automaticamente, copie o link e abra manualmente no seu navegador.'
+        );
+        setLoading(false);
+      }
+    }
+  }, []);
+
   // Extract token from URL
   const token = window.location.pathname.split('/portal/')[1];
 

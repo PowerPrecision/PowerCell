@@ -3,6 +3,14 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-28] - Correção de Frame-Busting no Portal do Cliente
+
+### Corrigido
+- **Magic Link bloqueado dentro de iframe de email client** (`fix`): Quando um cliente clica num Magic Link a partir de um email client (Outlook, Gmail app, etc.), o browser bloqueava o carregamento com erro `Unsafe attempt to load URL ... from frame with URL chrome-error://chromewebdata/`. Isto acontecia porque os headers `X-Frame-Options: DENY` e `frame-ancestors 'none'` impediam completamente o carregamento da página dentro de qualquer frame, incluindo o webview dos email clients.
+- **Frame-busting script em index.html** (`fix`): Adicionado script de frame-busting no `<head>` do `index.html` (executa antes do React). Se a página está dentro de um iframe (`window.self !== window.top`), tenta redirecionar para o top-level. Se bloqueado por cross-origin, abre numa nova aba com `window.open()`.
+- **CSP flexível para /portal no vercel.json** (`fix`): Adicionada regra de headers específica para `/portal(.*)` com `frame-ancestors *`, permitindo que a página carregue dentro de iframes de email clients para que o frame-busting script possa executar e redirecionar para o top-level. As restantes rotas mantêm `frame-ancestors 'none'` (segurança total).
+- **Verificação secundária no ClientPortal.jsx** (`fix`): Adicionado `useEffect` de frame-busting no componente React como segunda camada de defesa. Se detetado frame, tenta `window.top.location.href`; em caso de erro cross-origin, chama `window.open()` e mostra mensagem ao utilizador.
+
 ## [2026-06-27] - Emails do Sistema (Arquitetura por Propósito)
 
 ### Adicionado

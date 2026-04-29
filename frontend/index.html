@@ -8,8 +8,18 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/favicon.png" />
     <title>PowerCell</title>
-    
 
+    <!-- Frame-busting: previne carregamento dentro de iframes/frames de email clients -->
+    <script>
+      if (window.self !== window.top) {
+        try {
+          window.top.location.href = window.self.location.href;
+        } catch (e) {
+          // Se blocked por cross-origin, abre numa nova janela/aba
+          window.open(window.self.location.href, '_blank');
+        }
+      }
+    </script>
   </head>
   <body>
     <noscript>Precisa de activar JavaScript para usar esta aplicação.</noscript>
