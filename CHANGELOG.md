@@ -3,6 +3,14 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-28] - Remoção de Frame-Busting do Portal do Cliente
+
+### Corrigido
+- **Erro "Unsafe attempt to load URL" persistia ao clicar Magic Link em email client** (`fix`): O erro `Unsafe attempt to load URL ... from frame with URL chrome-error://chromewebdata/` continuava a aparecer porque os scripts de frame-busting (adicionados na correção anterior) eram a própria causa do problema. Quando o email client carrega o link num iframe com parent `chrome-error://chromewebdata/`, o frame-busting tentava `window.top.location.href = ...` que é bloqueado pelo browser por ser cross-origin. O `catch` fazia `window.open()` que era bloqueado pelo popup blocker. O `useEffect` secundário no React ainda mostrava uma mensagem de erro ao utilizador, impedindo o portal de renderizar.
+- **Remoção do frame-busting do index.html** (`fix`): Removido o script de frame-busting que executava antes do React. O portal funciona corretamente dentro de iframes — é uma SPA mobile-first independente com header e footer próprios.
+- **Remoção do frame-busting do ClientPortal.jsx** (`fix`): Removido o `useEffect` secundário que detetava iframe e mostrava mensagem de erro. Sem este bloqueio, o portal agora carrega normalmente em qualquer contexto (iframe, webview, top-level).
+- **Segurança mantida**: A segurança do portal é garantida pelo token JWT (validado no backend) — não depende de frame-busting. O `vercel.json` continua com `frame-ancestors *` para a rota `/portal(.*)`, permitindo carregamento em qualquer contexto.
+
 ## [2026-06-28] - Links Curtos para Portal do Cliente
 
 ### Adicionado

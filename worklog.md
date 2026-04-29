@@ -1,6 +1,23 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: remove-frame-busting
+Agent: Main Agent
+Task: Remover frame-busting que causava erro "Unsafe attempt to load URL" no portal do cliente
+
+Work Log:
+- **Diagnóstico**: O erro `Unsafe attempt to load URL ... from frame with URL chrome-error://chromewebdata/` persistia APESAR da correção anterior (frame-busting + headers Vercel). A causa REAL era os próprios scripts de frame-busting: quando o email client carrega o link num iframe com parent `chrome-error://chromewebdata/`, o script `window.top.location.href = ...` tentava navegar o parent frame (cross-origin de `chrome-error://` para `https://`), o que o browser bloqueia com este erro. O `catch` fazia `window.open()` bloqueado pelo popup blocker. O `useEffect` secundário no React ainda设置 `setError()` e `setLoading(false)`, impedindo o portal de renderizar.
+- **Fix — index.html**: Removido todo o bloco de frame-busting (script de 10 linhas no `<head>`). O portal funciona corretamente dentro de iframes — é uma SPA mobile-first independente com header/footer próprios.
+- **Fix — ClientPortal.jsx**: Removido o `useEffect` de frame-busting (17 linhas) que detetava iframe e mostrava mensagem de erro. Sem este bloqueio, o portal carrega normalmente em qualquer contexto.
+- **Segurança**: O JWT token validado no backend é o mecanismo de segurança — não depende de frame-busting. O `vercel.json` mantém `frame-ancestors *` para `/portal(.*)`.
+- **CHANGELOG.md**: Documentação da correção.
+
+Stage Summary:
+- 2 ficheiros alterados: `frontend/index.html` (-10 linhas), `frontend/src/pages/ClientPortal.jsx` (-17 linhas)
+- O portal agora carrega corretamente dentro de iframes de email clients
+- Sem erros na consola relacionados com cross-origin navigation
+
+---
 Task ID: short-magic-links
 Agent: Main Agent
 Task: Encurtar Magic Links do portal do cliente de ~280 para ~50 caracteres
