@@ -534,3 +534,100 @@ Cumprimentos,
     
     html_body = get_base_template(content, "Atualização do Processo")
     return await send_email_notification(client_email, subject, body, html_body)
+
+
+# =====================================================================
+# SYSTEM EMAIL TRANSPORTER — Obtém config SMTP para emails do sistema
+# =====================================================================
+
+VALID_SYSTEM_EMAIL_PURPOSES = ["DOCUMENTS", "RGPD", "SYSTEM_ALERTS", "NOTIFICATIONS", "CUSTOM"]
+
+
+async def get_system_transporter(purpose: str) -> dict:
+    """
+    Obtém configuração SMTP para um propósito específico do sistema.
+
+    Prioridade:
+    1. Configuração na DB (system_email_configs) para esse purpose, se is_active=True
+    2. Fallback: contas globais do sistema (env vars POWER_EMAIL, etc.)
+
+    Returns:
+        dict com chaves: host, port, user, password, from_name, from_email, use_ssl, use_tls, source
+        ou dict com "error" se nenhuma config disponível
+
+    Raises:
+        ValueError: se purpose não for válido
+    """
+    if purpose not in VALID_SYSTEM_EMAIL_PURPOSES:
+        raise ValueError(
+            f"Purpose inválido: '{purpose}'. "
+            f"Válidos: {VALID_SYSTEM_EMAIL_PURPOSES}"
+        )
+
+    from database import db as _db
+    from services.encryption import encryption_service
+
+    # === PRIORIDADE 1: Config na DB ===
+    try:
+        doc = await _db.system_email_configs.find_one(
+            {"purpose": purpose, "is_active": True}
+        )
+        if doc:
+            encrypted_pw = doc.get("encrypted_password", "")
+            password = encryption_service.decrypt(encrypted_pw) if encrypted_pw else ""
+
+            logger.info(
+                f"[get_system_transporter] Config DB encontrada para '{purpose}' "
+                f"(host={doc.get('host')}, user={doc.get('user')}, source=db)"
+            )
+            return {
+                "host": doc.get("host", ""),
+                "port": int(doc.get("port", 465)),
+                "user": doc.get("user", ""),
+                "password": password,
+                "from_name": doc.get("from_name") or "",
+                "from_email": doc.get("from_email") or doc.get("user") or "",
+                "use_ssl": doc.get("use_ssl", True),
+                "use_tls": doc.get("use_tls", False),
+                "source": "db",
+            }
+    except Exception as e:
+        logger.warning(
+            f"[get_system_transporter] Erro ao buscar config DB para '{purpose}': {e}"
+        )
+
+    # === PRIORIDADE 2: Fallback para env vars (get_email_accounts) ===
+    try:
+        from services.email_service import get_email_accounts
+        accounts = get_email_accounts()
+        if accounts:
+            account = accounts[0]
+            logger.info(
+                f"[get_system_transporter] Fallback para env var: "
+                f"'{account.name}' ({account.smtp_server}) para purpose '{purpose}'"
+            )
+            return {
+                "host": account.smtp_server,
+                "port": account.smtp_port,
+                "user": account.email,
+                "password": account.password,
+                "from_name": account.name,
+                "from_email": account.email,
+                "use_ssl": True,
+                "use_tls": False,
+                "source": "env_fallback",
+            }
+    except Exception as e:
+        logger.warning(
+            f"[get_system_transporter] Erro no fallback env vars para '{purpose}': {e}"
+        )
+
+    # === NENHUMA CONFIG DISPONÍVEL ===
+    logger.error(
+        f"[get_system_transporter] Nenhuma config disponível para '{purpose}' "
+        f"(DB ou env vars)"
+    )
+    return {
+        "error": "Nenhuma configuração de email disponível",
+        "source": "none",
+    }

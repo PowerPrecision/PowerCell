@@ -1159,7 +1159,8 @@ Mais uma vez, obrigado(a) pela sua colaboracao."""
         body=body_text,
         body_html=body_html,
         attachments=attachments,
-        force_system=True
+        force_system=True,
+        system_purpose="RGPD",
     )
     
     if result.get("success"):

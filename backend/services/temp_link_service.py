@@ -504,6 +504,7 @@ Equipa PowerCell
                 body=body_text,
                 body_html=body_html,
                 force_system=True,
+                system_purpose="DOCUMENTS",
             )
 
             if result.get("success"):

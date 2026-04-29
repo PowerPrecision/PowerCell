@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-27] - Emails do Sistema (Arquitetura por Propósito)
+
+### Adicionado
+- **SystemEmailConfig — CRUD para emails do sistema** (`feat`): Nova coleção MongoDB `system_email_configs` para guardar configurações SMTP isoladas por propósito (DOCUMENTS, RGPD, SYSTEM_ALERTS, NOTIFICATIONS, CUSTOM). Cada config tem: host, port, user, password (encriptada), from_name, from_email, use_ssl, use_tls, is_active.
+- **Rotas CRUD** em `system_config.py`: GET /system-emails, GET /system-emails/{purpose}, POST /system-emails, PUT /system-emails/{purpose}, DELETE /system-emails/{purpose}, POST /system-emails/{purpose}/test.
+- **`get_system_transporter(purpose)`** em `email.py`: Função utilitária que obtém config SMTP para um propósito específico. Prioridade 1: DB (system_email_configs), Prioridade 2: Fallback para env vars (POWER_EMAIL, etc.) — Zero Downtime garantido.
+- **`system_purpose` no `send_email()`**: Novo parâmetro opcional em `email_service.py`. Quando `force_system=True` e `system_purpose` fornecido, tenta o transporter específico antes do fallback.
+- **Atualização dos callers**: `temp_link_service.py` usa `system_purpose="DOCUMENTS"`, `rgpd_service.py` usa `system_purpose="RGPD"`, `routes/emails.py` (envio de documentação) usa `system_purpose="DOCUMENTS"`.
+- **UI "Emails do Sistema"** no SystemConfigPage: Novo separador com Cards independentes para cada propósito. Cada Card mostra config atual, botões Editar/Testar/Eliminar, e aviso "Se não configurado, o sistema usará o email principal". Formulário inline com Host, Porta, User, Password, Nome/Email Remetente, SSL/TLS.
+- **Segurança**: Passwords encriptadas com `encryption_service.encrypt()` (Fernet AES-128-CBC). GET endpoints devolvem `has_password: true/false` em vez da password.
+
 ## [2026-06-27] - Correção de Sincronização Webmail
 
 ### Corrigido

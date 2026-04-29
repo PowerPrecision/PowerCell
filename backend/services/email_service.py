@@ -445,10 +445,17 @@ async def send_email(
     created_by: Optional[str] = None,
     attachments: Optional[List[Dict[str, Any]]] = None,
     force_system: bool = False,
+    system_purpose: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
     ou Power Real Estate) e regista automaticamente a comunicação no histórico
+
+    Args:
+        system_purpose: Se fornecido (ex: 'DOCUMENTS', 'RGPD'), tenta usar
+            get_system_transporter() para obter SMTP específico antes do
+            fallback padrão (contas globais). Zero downtime — fallback
+            para contas existentes se config não encontrada.
     do processo.
 
     Esta função é o ponto central de saída de emails do CRM. É utilizada por
@@ -489,8 +496,31 @@ async def send_email(
     Raises:
         smtplib.SMTPException: Se a autenticação ou o envio SMTP falharem.
     """
-    accounts = get_email_accounts()
-    account = next((a for a in accounts if a.name == account_name), None)
+    # === system_purpose: tentar config específica por propósito (zero downtime) ===
+    account = None
+    if force_system and system_purpose:
+        try:
+            from services.email import get_system_transporter
+            transporter = await get_system_transporter(system_purpose)
+            if transporter.get("error"):
+                logger.warning(f"[Send Email] system_purpose '{system_purpose}': {transporter['error']}. Using fallback.")
+            else:
+                account = EmailAccount(
+                    name=f"system_{system_purpose.lower()}",
+                    imap_server=transporter["host"],
+                    imap_port=transporter["port"],
+                    smtp_server=transporter["host"],
+                    smtp_port=transporter["port"],
+                    email=transporter.get("from_email") or transporter["user"],
+                    password=transporter["password"],
+                )
+                logger.info(f"[Send Email] Usando system_purpose '{system_purpose}' (source={transporter.get('source')}): {transporter['user']}")
+        except Exception as e:
+            logger.warning(f"[Send Email] Erro ao obter system_transporter para '{system_purpose}': {e}. Using fallback.")
+
+    if account is None:
+        accounts = get_email_accounts()
+        account = next((a for a in accounts if a.name == account_name), None)
     
     # Se a conta pedida é "personal", ir diretamente para a config do utilizador
     # sem nunca cair nas contas globais (isolamento de remetente)

@@ -1048,6 +1048,7 @@ async def send_documentation_email(
         created_by=current_user["id"],
         attachments=email_attachments if email_attachments else None,
         force_system=True,
+        system_purpose="DOCUMENTS",
     )
     
     if not result["success"]:
