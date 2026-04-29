@@ -448,6 +448,7 @@ function UploadedDocumentsList({ documents }) {
 // ====================================================================
 export default function ClientPortal() {
   const [loading, setLoading] = useState(true);
+  const [loadingMessage, setLoadingMessage] = useState('A carregar o seu processo...');
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -471,23 +472,26 @@ export default function ClientPortal() {
   }, []);
 
   // Extract token from URL
-  const token = window.location.pathname.split('/portal/')[1];
+  const rawToken = window.location.pathname.split('/portal/')[1];
 
   useEffect(() => {
-    if (!token) {
+    if (!rawToken) {
       setError('Link inválido. Contacte o seu consultor para receber um novo link.');
       setLoading(false);
       return;
     }
 
-    // Store token in sessionStorage (not localStorage to avoid conflicts)
-    sessionStorage.setItem('portal_token', token);
+    // Determinar se é um JWT (contém '.') ou short_id (não contém '.')
+    const isShortToken = !rawToken.includes('.');
 
     // Fetch portal status
-    const fetchStatus = async () => {
+    const fetchStatus = async (jwtToken) => {
       try {
+        // Store JWT token in sessionStorage
+        sessionStorage.setItem('portal_token', jwtToken);
+
         const response = await fetch(`${BACKEND_URL}/portal/status`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${jwtToken}` },
         });
 
         if (!response.ok) {
@@ -505,8 +509,41 @@ export default function ClientPortal() {
       }
     };
 
-    fetchStatus();
-  }, [token, refreshKey]);
+    const init = async () => {
+      try {
+        if (isShortToken) {
+          // Short token: resolver para JWT via API
+          setLoadingMessage('A verificar link...');
+          const resolveRes = await fetch(`${BACKEND_URL}/portal/resolve/${rawToken}`);
+
+          if (!resolveRes.ok) {
+            const err = await resolveRes.json().catch(() => ({}));
+            throw new Error(err.detail || 'Link não encontrado ou expirado');
+          }
+
+          const { token: jwtToken } = await resolveRes.json();
+
+          if (!jwtToken) {
+            throw new Error('Erro ao resolver link');
+          }
+
+          // Atualizar URL no browser para o JWT (opcional, melhora UX em refresh)
+          window.history.replaceState(null, '', `/portal/${jwtToken}`);
+
+          setLoadingMessage('A carregar o seu processo...');
+          await fetchStatus(jwtToken);
+        } else {
+          // Já é um JWT (link antigo) — usar diretamente
+          await fetchStatus(rawToken);
+        }
+      } catch (err) {
+        setError(err.message);
+        setLoading(false);
+      }
+    };
+
+    init();
+  }, [rawToken, refreshKey]);
 
   const handleUploadSuccess = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -518,7 +555,7 @@ export default function ClientPortal() {
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
         <div className="text-center">
           <Loader2 className="w-10 h-10 text-emerald-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 font-medium">A carregar o seu processo...</p>
+          <p className="text-gray-600 font-medium">{loadingMessage}</p>
         </div>
       </div>
     );

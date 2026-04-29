@@ -29,6 +29,65 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal", tags=["Client Portal"])
 
+
+# ====================================================================
+# RESOLUÇÃO DE SHORT TOKEN
+# ====================================================================
+
+@router.get("/resolve/{short_id}")
+async def resolve_portal_token(short_id: str):
+    """
+    Resolve um short_id (8 chars) para o JWT completo do portal.
+
+    O frontend detecta que o token não é um JWT (não contém '.')
+    e chama este endpoint para obter o JWT real antes de
+    autenticar nas restantes rotas do portal.
+
+    Returns:
+    - token: JWT completo
+    - process_id: ID do processo
+    """
+    import re
+
+    # Validar formato do short_id (apenas alfanumérico + -_)
+    if not re.match(r'^[A-Za-z0-9_-]+$', short_id) or len(short_id) > 20:
+        raise HTTPException(status_code=400, detail="Token inválido")
+
+    # Buscar na BD
+    token_doc = await db.portal_tokens.find_one(
+        {"short_id": short_id},
+        {"_id": 0}
+    )
+
+    if not token_doc:
+        raise HTTPException(
+            status_code=404,
+            detail="Link não encontrado. Pode ter expirado ou sido desactivado."
+        )
+
+    # Validar JWT internamente (verificar se ainda é válido / não expirou)
+    try:
+        import jwt as jwt_lib
+        from config import JWT_SECRET, JWT_ALGORITHM
+        jwt_lib.decode(
+            token_doc["jwt_token"],
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+    except jwt_lib.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=410,
+            detail="Este link expirou. Contacte o seu consultor para receber um novo link."
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Link inválido.")
+
+    return {
+        "token": token_doc["jwt_token"],
+        "process_id": token_doc.get("process_id"),
+    }
+
+
 # Documentos que o cliente precisa submeter (categorias comuns)
 REQUIRED_DOCUMENT_CATEGORIES = [
     {"category": "Cartao_Cidadao", "label": "Cartão de Cidadão", "icon": "🪪"},

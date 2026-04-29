@@ -256,15 +256,18 @@ async def generate_magic_link(
     acompanhar o seu processo e submeter documentos, sem necessidade
     de registo ou password.
 
-    O link é um JWT com validade de 90 dias que contém:
-    - role: "client_portal" (isolado de staff)
-    - process_id: ID do processo
+    O link usa um short_id (8 caracteres) guardado na BD que resolve
+    para o JWT completo. Exemplo:
+    https://app.powercell.pt/portal/xK9mQ2pL
 
     Returns:
-    - magic_link: URL completa para enviar ao cliente
-    - token: JWT token (para debug/teste)
+    - magic_link: URL curta para enviar ao cliente
+    - short_id: ID curto do token
+    - token: JWT token completo (para debug)
     - expires_in_days: Validade do link
     """
+    import secrets
+
     process = await db.processes.find_one(
         {"id": process_id, "is_deleted": {"$ne": True}},
         {"_id": 0}
@@ -275,22 +278,160 @@ async def generate_magic_link(
     # Gerar magic link JWT
     token = create_client_magic_token(process_id)
 
-    # Construir URL completa
+    # Gerar short_id único (8 caracteres URL-safe)
+    short_id = secrets.token_urlsafe(6)[:8]
+
+    # Guardar short_id → JWT na BD (upsert por process_id)
+    await db.portal_tokens.update_one(
+        {"process_id": process_id},
+        {
+            "$set": {
+                "short_id": short_id,
+                "jwt_token": token,
+                "process_id": process_id,
+                "created_by": user.get("email", ""),
+                "updated_at": datetime.now(timezone.utc),
+            },
+            "$setOnInsert": {
+                "created_at": datetime.now(timezone.utc),
+            },
+        },
+        upsert=True,
+    )
+
+    # Construir URL curta
     frontend_url = os.environ.get("FRONTEND_URL", "https://app.powercell.pt")
-    magic_link = f"{frontend_url}/portal/{token}"
+    magic_link = f"{frontend_url}/portal/{short_id}"
 
     logger.info(
         f"Magic link gerado por {user.get('email')} para processo {process_id} "
-        f"(cliente: {process.get('client_name', 'N/A')})"
+        f"(cliente: {process.get('client_name', 'N/A')}, short_id: {short_id})"
     )
 
     return {
         "magic_link": magic_link,
+        "short_id": short_id,
         "token": token,
         "process_id": process_id,
         "client_name": process.get("client_name", ""),
         "client_email": process.get("client_email", ""),
         "expires_in_days": PORTAL_TOKEN_VALIDITY_DAYS,
+    }
+
+
+@router.post("/{process_id}/generate-magic-link/send")
+async def send_magic_link_email(
+    process_id: str,
+    user: dict = Depends(require_staff())
+):
+    """
+    Gera um Magic Link e envia-o por email ao cliente.
+
+    O email contém o link curto (short_id) para o cliente aceder
+    ao portal do seu processo.
+    """
+    import secrets
+    from services.email_service import send_email
+
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    client_email = process.get("client_email", "")
+    client_name = process.get("client_name", "Cliente")
+
+    if not client_email:
+        raise HTTPException(status_code=400, detail="Cliente não tem email associado")
+
+    # Gerar magic link JWT
+    token = create_client_magic_token(process_id)
+
+    # Gerar short_id
+    short_id = secrets.token_urlsafe(6)[:8]
+
+    # Guardar na BD
+    await db.portal_tokens.update_one(
+        {"process_id": process_id},
+        {
+            "$set": {
+                "short_id": short_id,
+                "jwt_token": token,
+                "process_id": process_id,
+                "created_by": user.get("email", ""),
+                "updated_at": datetime.now(timezone.utc),
+            },
+            "$setOnInsert": {
+                "created_at": datetime.now(timezone.utc),
+            },
+        },
+        upsert=True,
+    )
+
+    # Construir URL curta
+    frontend_url = os.environ.get("FRONTEND_URL", "https://app.powercell.pt")
+    magic_link = f"{frontend_url}/portal/{short_id}"
+
+    # Enviar email ao cliente
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+            <h1 style="margin: 0; font-size: 20px;">Power Precision · Crédito Habitação</h1>
+        </div>
+        <div style="padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+            <p style="font-size: 16px; color: #1e293b;">Olá {client_name},</p>
+            <p style="font-size: 14px; color: #475569;">
+                O seu consultor preparou o seu portal pessoal para acompanhar o seu processo de crédito habitação.
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{magic_link}" style="display: inline-block; background: #0F766E; color: white; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
+                    Aceder ao meu Portal
+                </a>
+            </div>
+            <p style="font-size: 12px; color: #94a3b8; text-align: center;">
+                Ou copie este link no seu navegador:<br>
+                <span style="color: #64748b;">{magic_link}</span>
+            </p>
+            <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
+                Este link é válido por 90 dias. Se precisar de um novo link, contacte o seu consultor.
+            </p>
+        </div>
+    </div>
+    """
+
+    text_body = (
+        f"Olá {client_name},\n\n"
+        f"O seu consultor preparou o seu portal pessoal para acompanhar o seu processo de crédito habitação.\n\n"
+        f"Aceda ao portal através deste link:\n{magic_link}\n\n"
+        f"Este link é válido por 90 dias.\n"
+        f"Se precisar de um novo link, contacte o seu consultor.\n\n"
+        f"Power Precision · Crédito Habitação"
+    )
+
+    try:
+        await send_email(
+            to_email=client_email,
+            subject=f"Portal do Cliente — Acompanhe o seu processo ({client_name})",
+            body=html_body,
+            body_html=html_body,
+            force_system=True,
+        )
+    except Exception as e:
+        logger.error(f"Erro ao enviar magic link email: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao enviar email. Tente copiar o link manualmente.")
+
+    logger.info(
+        f"Magic link enviado por email para {client_email} "
+        f"(processo {process_id}, short_id: {short_id})"
+    )
+
+    return {
+        "success": True,
+        "message": f"Email enviado para {client_email}",
+        "magic_link": magic_link,
+        "short_id": short_id,
     }
 
 

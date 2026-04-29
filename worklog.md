@@ -1,6 +1,26 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: short-magic-links
+Agent: Main Agent
+Task: Encurtar Magic Links do portal do cliente de ~280 para ~50 caracteres
+
+Work Log:
+- **Estratégia**: Gerar short_id (8 chars, URL-safe) na BD, devolver URL curta, frontend resolve via API
+- **backend/routes/processes.py — generate-magic-link**: Agora gera `secrets.token_urlsafe(6)[:8]` como short_id, guarda na coleção `portal_tokens` (upsert por process_id), devolve `magic_link` com URL curta
+- **backend/routes/processes.py — generate-magic-link/send** (NOVO): Endpoint que faltava (frontend fazia 404). Gera link, envia email HTML com botão e link curto ao cliente via `send_email(force_system=True)`
+- **backend/routes/portal.py — resolve/{short_id}** (NOVO): `GET /portal/resolve/{short_id}` — valida formato (regex alfanumérico), busca na BD, valida JWT internamente, retorna JWT. HTTP 410 se expirado, 404 se não encontrado
+- **frontend/src/pages/ClientPortal.jsx**: Detecta `!rawToken.includes('.')` para determinar short vs JWT. Se short, chama `/portal/resolve/{short_id}`, obtém JWT, atualiza URL com `history.replaceState`, prossegue com fetchStatus. Links JWT antigos continuam a funcionar.
+- **Python syntax**: py_compile OK para processes.py e portal.py
+
+Stage Summary:
+- 4 ficheiros alterados: `backend/routes/processes.py`, `backend/routes/portal.py`, `frontend/src/pages/ClientPortal.jsx`, `CHANGELOG.md`
+- Link antes: `https://app.powercell.pt/portal/eyJhbGciOi...` (~280 chars)
+- Link agora: `https://app.powercell.pt/portal/xK9mQ2pL` (~50 chars)
+- Backward compatibility: links JWT antigos continuam a funcionar
+- Endpoint "Enviar por Email" agora funciona (antes dava 404)
+
+---
 Task ID: frame-busting-portal
 Agent: Main Agent
 Task: Corrigir erro "Unsafe attempt to load URL" quando Magic Link é clicado dentro de email client

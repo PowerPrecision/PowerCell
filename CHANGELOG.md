@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-28] - Links Curtos para Portal do Cliente
+
+### Adicionado
+- **Magic Links curtos (short_id)** (`feat`): Os links do portal passaram de ~280 caracteres (JWT na URL) para ~50 caracteres. Exemplo: `https://app.powercell.pt/portal/xK9mQ2pL`. Um `short_id` de 8 caracteres é gerado e guardado na coleção `portal_tokens` da MongoDB. O frontend detecta automaticamente se é short_id ou JWT e resolve via API.
+- **Endpoint `GET /portal/resolve/{short_id}`** (`feat`): Resolve um short_id para o JWT completo. Valida formato, verifica existência na BD, e valida que o JWT não expirou. Retorna o JWT para o frontend usar nas restantes rotas autenticadas.
+- **Endpoint `POST /processes/{id}/generate-magic-link/send`** (`feat`): Gera Magic Link e envia por email ao cliente. O email HTML contém um botão "Aceder ao meu Portal" com o link curto, mais instrução para copiar o link. Resolve o bug em que este endpoint não existia (frontend fazia 404).
+
+### Alterado
+- **`POST /processes/{id}/generate-magic-link`**: Agora devolve `magic_link` com short_id (URL curta) em vez do JWT completo na URL. Continua a devolver o `token` JWT para debug.
+- **`ClientPortal.jsx`**: Detecta automaticamente se o token na URL é um short_id (sem `.`) ou JWT (com `.`). Se for short_id, chama `/portal/resolve/{short_id}` para obter o JWT antes de carregar os dados. Links JWT antigos continuam a funcionar (backward compatibility).
+
 ## [2026-06-28] - Correção de Frame-Busting no Portal do Cliente
 
 ### Corrigido
