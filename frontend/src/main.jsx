@@ -13,29 +13,41 @@ if (import.meta.env.DEV) {
 
 // ====================================================================
 // SENTRY INITIALIZATION - Observabilidade e tracking de erros
-// Suporta: VITE_DSN_SENTRY_FRONTEND (preferido) e VITE_SENTRY_DSN (legado)
+// DESATIVADO em rotas públicas (portal, RGPD, uploads, registo):
+// O Sentry SDK acede a window.top.location internamente via
+// browserTracingIntegration e replayIntegration. Quando a página
+// carrega dentro do webview/iframe de um email client (cujo parent
+// é chrome-error://chromewebdata/), isso causa o erro:
+//   "Unsafe attempt to load URL ... from chrome-error://chromewebdata/"
+// Rotas públicas são acedidas por clientes externos (não staff),
+// pelo que não precisam de tracking de erros. O Sentry.ErrorBoundary
+// no App.jsx continua a funcionar sem init — apenas não envia erros.
 // ====================================================================
-const SENTRY_DSN = import.meta.env.VITE_DSN_SENTRY_FRONTEND || import.meta.env.VITE_SENTRY_DSN || '';
+const isPublicRoute = /^\/(portal|rgpd|upload|download|registo)/.test(window.location.pathname);
 
-if (SENTRY_DSN) {
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    environment: import.meta.env.VITE_SENTRY_ENVIRONMENT || 'development',
-    integrations: [
-      Sentry.browserTracingIntegration(),
-      Sentry.replayIntegration({
-        maskAllText: false,
-        blockAllMedia: false,
-      }),
-    ],
-    // Performance Monitoring
-    tracesSampleRate: parseFloat(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE || '1.0'),
-    // Session Replay
-    replaysSessionSampleRate: 0.1,
-    replaysOnErrorSampleRate: 1.0,
-    // Send default PII (personal info)
-    sendDefaultPii: import.meta.env.VITE_SENTRY_SEND_DEFAULT_PII === 'true',
-  });
+if (!isPublicRoute) {
+  const SENTRY_DSN = import.meta.env.VITE_DSN_SENTRY_FRONTEND || import.meta.env.VITE_SENTRY_DSN || '';
+
+  if (SENTRY_DSN) {
+    Sentry.init({
+      dsn: SENTRY_DSN,
+      environment: import.meta.env.VITE_SENTRY_ENVIRONMENT || 'development',
+      integrations: [
+        Sentry.browserTracingIntegration(),
+        Sentry.replayIntegration({
+          maskAllText: false,
+          blockAllMedia: false,
+        }),
+      ],
+      // Performance Monitoring
+      tracesSampleRate: parseFloat(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE || '1.0'),
+      // Session Replay
+      replaysSessionSampleRate: 0.1,
+      replaysOnErrorSampleRate: 1.0,
+      // Send default PII (personal info)
+      sendDefaultPii: import.meta.env.VITE_SENTRY_SEND_DEFAULT_PII === 'true',
+    });
+  }
 }
 
 // ====================================================================
