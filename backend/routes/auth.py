@@ -145,6 +145,28 @@ async def get_me(user: dict = Depends(get_current_user)):
         except Exception:
             pass  # Falha silenciosa — não bloqueia o request
     
+    # Determinar email_configured usando o resolver (suporta configs nested por role)
+    email_configured = False
+    raw_email_config = user.get("email_config", {})
+    if raw_email_config:
+        # Verificar se é uma config nested (per-role) ou flat (legacy)
+        from services.email_config_resolver import _is_nested_email_config, _extract_role_email_config
+        if _is_nested_email_config(raw_email_config):
+            # Nested: verificar se qualquer sub-config tem is_configured=True
+            for key, value in raw_email_config.items():
+                if isinstance(value, dict) and value.get("is_configured"):
+                    email_configured = True
+                    break
+        elif raw_email_config.get("is_configured"):
+            # Flat (legacy): verificar diretamente
+            email_configured = True
+        # Também verificar se tem credenciais (password ou OAuth) sem flag is_configured
+        if not email_configured:
+            from services.email_config_resolver import _extract_role_email_config
+            flat_config = _extract_role_email_config(raw_email_config)
+            if flat_config.get("encrypted_password") or flat_config.get("google_refresh_token"):
+                email_configured = True
+
     response = {
         "id": user["id"],
         "email": user["email"],
@@ -157,7 +179,7 @@ async def get_me(user: dict = Depends(get_current_user)):
         "permissions": synced_perms,
         "additional_roles": user.get("additional_roles", []),
         # Indica se o utilizador tem email configurado para sincronização
-        "email_configured": user.get("email_config", {}).get("is_configured", False),
+        "email_configured": email_configured,
         "email_signature": user.get("email_signature", ""),
     }
     

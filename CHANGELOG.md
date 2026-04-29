@@ -3,6 +3,16 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-26] - Correções de Webmail e UX
+
+### Corrigido
+- **email_configured sempre false no /auth/me** (`fix`): O endpoint `/auth/me` verificava `user.email_config.is_configured` no topo, mas a config é armazenada em estrutura nested por role (`email_config.default.is_configured`). Agora usa `_is_nested_email_config` e `_extract_role_email_config` do `email_config_resolver` para verificar corretamente qualquer sub-config.
+- **WelcomeConfigModal aparece sempre no login** (`fix`): Consequência do bug acima — como `email_configured` era sempre `false`, o modal de configuração de email era exibido em cada login mesmo com email já configurado. Adicionado `refreshUser` ao `AuthContext` para atualizar `user.email_configured` após guardar a configuração.
+- **ProfilePage não atualizava email_configured** (`fix`): `EmailConfigForm` agora recebe `onSuccess={refreshUser}` para refazer fetch do `/auth/me` após guardar, atualizando a flag `email_configured` no contexto.
+
+### Melhorado
+- **EmailConfigForm — Campos protegidos quando configurado** (`feat`): Quando o email já está configurado, todos os campos do formulário ficam disabled (readOnly) com visual `bg-muted`. Um botão com ícone de lápis (`Pencil`) permite ativar o modo de edição. O modo de edição pode ser cancelado, revertendo alterações não guardadas. Os botões "Testar" e "Guardar" só aparecem quando se está a editar ou quando ainda não está configurado.
+
 ## [2026-04-22] - Arquitetura Agnóstica de Provedores e Correções de UI
 
 ### Adicionado

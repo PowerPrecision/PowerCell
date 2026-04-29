@@ -12,6 +12,12 @@
  * - onSuccess: Callback após guardar com sucesso
  * - onCancel: Callback para cancelar/fechar
  *
+ * COMPORTAMENTO DE EDIÇÃO:
+ * - Quando o email já está configurado, os campos ficam disabled (readOnly)
+ * - Um botão com ícone de lápis permite ativar o modo de edição
+ * - O modo de edição pode ser cancelado, revertendo as alterações não guardadas
+ * - Isto evita alterações acidentais numa configuração que funciona
+ *
  * GOOGLE OAUTH:
  * O botão "Ligar Google OAuth" usa um fluxo de dois passos para evitar
  * o bug de redirecionamento 401:
@@ -29,7 +35,7 @@ import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
 import api from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
-import { Mail, Save, RefreshCw, Loader2, Eye, EyeOff, Shield, AlertCircle, Unlink } from "lucide-react";
+import { Mail, Save, RefreshCw, Loader2, Eye, EyeOff, Shield, AlertCircle, Unlink, Pencil, X } from "lucide-react";
 
 const roleLabels = {
   consultor: "Consultor",
@@ -77,6 +83,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     password: "",
   });
   const [webmailConfigured, setWebmailConfigured] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -84,6 +91,9 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   const [testResult, setTestResult] = useState(null);
   const [googleOAuthConnecting, setGoogleOAuthConnecting] = useState(false);
   const [googleOAuthConnected, setGoogleOAuthConnected] = useState(false);
+
+  // Whether form fields should be disabled (configured + not editing)
+  const isFieldsLocked = webmailConfigured && !isEditing;
 
   // Load existing config
   useEffect(() => {
@@ -243,6 +253,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
       if (result.success) {
         toast.success("Ligação IMAP/SMTP bem-sucedida");
         setWebmailConfigured(true);
+        setIsEditing(false);
       } else {
         toast.error(`Erro na ligação: ${result.error || "Desconhecido"}`);
       }
@@ -279,6 +290,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
       toast.success("Configuração de webmail guardada com sucesso");
       setEmailConfig((prev) => ({ ...prev, password: "" }));
       setTestResult(null);
+      setIsEditing(false);
+      setWebmailConfigured(true);
       loadConfig();
       if (onSuccess) onSuccess();
     } catch (error) {
@@ -286,6 +299,18 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEmailConfig((prev) => ({ ...prev, password: "" }));
+    setTestResult(null);
+    // Reload config to discard any changes
+    loadConfig();
+  };
+
+  const handleStartEdit = () => {
+    setIsEditing(true);
   };
 
   if (loading) {
@@ -322,8 +347,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         </div>
       )}
 
-      {/* Config Status Badge */}
-      <div className="flex items-center gap-2">
+      {/* Config Status Badge + Edit Button */}
+      <div className="flex items-center gap-2 flex-wrap">
         {webmailConfigured ? (
           <Badge className="bg-green-600 hover:bg-green-700 text-white">
             Configurado
@@ -336,10 +361,32 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
             Google OAuth
           </Badge>
         )}
-        {webmailConfigured && (
-          <span className="text-xs text-muted-foreground">
-            Deixe a password em branco para manter a atual
-          </span>
+        {webmailConfigured && !isEditing && (
+          <>
+            <span className="text-xs text-muted-foreground">
+              Deixe a password em branco para manter a atual
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleStartEdit}
+              className="gap-1.5 ml-auto"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Editar Configuração
+            </Button>
+          </>
+        )}
+        {isEditing && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCancelEdit}
+            className="gap-1.5 text-muted-foreground ml-auto"
+          >
+            <X className="h-3.5 w-3.5" />
+            Cancelar Edição
+          </Button>
         )}
       </div>
 
@@ -395,6 +442,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, email_address: e.target.value })
             }
             placeholder="seu@email.com"
+            disabled={isFieldsLocked}
+            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
         <div className="space-y-2">
@@ -417,6 +466,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
                   ? "Nova password (deixar em branco para manter)"
                   : "Password do email"
               }
+              disabled={isFieldsLocked}
+              className={isFieldsLocked ? "bg-muted cursor-not-allowed pr-9" : "pr-9"}
             />
             <Button
               type="button"
@@ -424,6 +475,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               size="icon"
               className="absolute right-0 top-0 h-full"
               onClick={() => setShowPassword(!showPassword)}
+              tabIndex={isFieldsLocked ? -1 : 0}
+              disabled={isFieldsLocked}
             >
               {showPassword ? (
                 <EyeOff className="h-4 w-4" />
@@ -443,6 +496,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, imap_server: e.target.value })
             }
             placeholder="imap.exemplo.com"
+            disabled={isFieldsLocked}
+            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
         <div className="space-y-2">
@@ -455,6 +510,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, imap_port: parseInt(e.target.value) || 993 })
             }
             placeholder="993"
+            disabled={isFieldsLocked}
+            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
         <div className="space-y-2">
@@ -467,6 +524,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, smtp_server: e.target.value })
             }
             placeholder="smtp.exemplo.com"
+            disabled={isFieldsLocked}
+            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
         <div className="space-y-2">
@@ -479,6 +538,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, smtp_port: parseInt(e.target.value) || 465 })
             }
             placeholder="465"
+            disabled={isFieldsLocked}
+            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
       </div>
@@ -512,32 +573,36 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3 pt-2">
-        <Button
-          variant="outline"
-          onClick={handleTest}
-          disabled={testing}
-          className="gap-2"
-        >
-          {testing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-          {testing ? "A testar..." : "Testar Ligação"}
-        </Button>
-        <Button
-          onClick={handleSave}
-          disabled={saving}
-          className="gap-2"
-        >
-          {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          {saving ? "A guardar..." : "Guardar Configuração"}
-        </Button>
-        {onCancel && (
+        {(isEditing || !webmailConfigured) && (
+          <>
+            <Button
+              variant="outline"
+              onClick={handleTest}
+              disabled={testing}
+              className="gap-2"
+            >
+              {testing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {testing ? "A testar..." : "Testar Ligação"}
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="gap-2"
+            >
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              {saving ? "A guardar..." : "Guardar Configuração"}
+            </Button>
+          </>
+        )}
+        {onCancel && !isEditing && (
           <Button variant="ghost" onClick={onCancel}>
             Cancelar
           </Button>

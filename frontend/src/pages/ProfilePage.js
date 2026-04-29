@@ -71,7 +71,7 @@ import {
 // ====================================================================
 
 const ProfilePage = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
 
   // Estados para dados do perfil
@@ -854,7 +854,7 @@ const ProfilePage = () => {
                   <span>A utilizar configuração individual. Os servidores foram definidos manualmente.</span>
                 </div>
               )}
-              <EmailConfigForm mode="self" />
+              <EmailConfigForm mode="self" onSuccess={refreshUser} />
             </CardContent>
           </Card>
         )}

@@ -318,6 +318,16 @@ export function AuthProvider({ children }) {
     sessionStorage.setItem("activeRole", newRole);
   }, []);
 
+  // Refresh user data from /auth/me (e.g. after email config save)
+  const refreshUser = useCallback(async () => {
+    try {
+      const response = await api.get("/auth/me");
+      setUser(response.data);
+    } catch (error) {
+      console.error("Error refreshing user:", error);
+    }
+  }, []);
+
   // Memoize context value to prevent unnecessary re-renders of all consumers
   // when unrelated state changes. Without useMemo, every setState call creates
   // a new object reference, causing ALL useContext(AuthContext) consumers
@@ -335,8 +345,9 @@ export function AuthProvider({ children }) {
     stopImpersonating,
     activeRole,
     switchActiveRole,
+    refreshUser,
     effectiveRole: activeRole || user?.role,
-  }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole]);
+  }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole, refreshUser]);
 
   return (
     <AuthContext.Provider value={value}>
