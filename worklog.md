@@ -1068,3 +1068,46 @@ Stage Summary:
 - Commit: `d9c614e` pushed to `dev`
 - Architecture now has 4 layers of error isolation — sidebar never disappears due to content crashes
 - Zero white screen guarantee: Global → Chunk → Route → Content
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Fix form data not being saved/displayed correctly in client profile (ProcessDetails)
+
+Work Log:
+- Investigated full data flow: Public form → Client doc → Process doc → API → Frontend display
+- Found root cause: DEFAULT_FORM_CONFIG options used display labels (e.g. "Solteiro(a)", "Masculino") as values instead of internal keys (e.g. "solteiro", "M"), causing mismatch with ProcessDetails Select components
+- Fixed DEFAULT_FORM_CONFIG (form_config.py):
+  - estado_civil: Changed from plain strings to {value, label} format with internal keys (solteiro, casado, casado_adquiridos, casado_geral, casado_separacao, divorciado, viuvo, uniao_facto)
+  - sexo: Changed from plain strings to {value: "M"/"F"/"O", label: "Masculino"/"Feminino"/"Outro"}
+  - employment_type: Changed from plain strings to {value: "efetivo"/"termo_certo"/etc, label: ...}
+  - tipo_imovel: Changed from plain strings to {value: "apartamento"/"moradia"/"terreno"/"outro", label: ...}
+  - titular2_estado_civil: Added options (was missing)
+- Fixed PublicClientForm.js:
+  - Updated ESTADOS_CIVIS to include "casado" and "uniao_facto" options (matching ProcessDetails)
+  - Added "terreno" to TIPOS_IMOVEL
+- Fixed ProcessDetails.js backward-compat migrations on data load:
+  - sexo: "Masculino"/"Feminino" → "M"/"F"
+  - estado_civil: display labels → internal keys
+  - employment_type: Title Case → lowercase
+  - tipo_imovel: Title Case → lowercase
+  - antiguidade_emprego → employment_duration migration
+  - Remove nif_hash/email_hash/telefone_hash from display
+- Fixed ProcessDetails.js titular2 estado_civil Select: changed from Title Case values ("Solteiro", "Casado") to lowercase internal keys ("solteiro", "casado") matching the form
+- Fixed ProcessDetails.js titular1 estado_civil Select: added missing options (casado_adquiridos, casado_geral, casado_separacao)
+- Fixed ProcessDetails.js employment_type Select: added termo_certo and termo_incerto options
+- Fixed ProcessDetails.js tipo_imovel Select: added "outro" option
+- Fixed ProcessDetails.js finalidade Select: added "compra_imovel" option
+- Fixed ProcessDetails.js validFields: added rendimento_anual, antiguidade_emprego, outros_rendimentos, despesas_mensais
+- Fixed cleanPersonalDataForSubmit: removes nif_hash, email_hash, telefone_hash, marital_status on save
+- Fixed cleanTitular2DataForSubmit: removes nif_hash on save
+- Removed "Formulário" tab (DynamicFormFieldsTab component) as requested by user
+- Fixed backend clients.py: removes blind indexes (nif_hash, email_hash, telefone_hash) when copying client data to process doc
+
+Stage Summary:
+- 4 files changed: form_config.py, PublicClientForm.js, ProcessDetails.js, clients.py
+- Commit: 6d9e8b0 on dev branch
+- Key fix: Form now sends internal keys (e.g. "solteiro") instead of display labels (e.g. "Solteiro(a)"), matching ProcessDetails Select values
+- Backward-compat: Old data with display labels auto-converts to internal keys on load
+- nif_hash no longer shows in titular2 NIF field
+- Removed unused Formulário tab
