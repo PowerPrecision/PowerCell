@@ -46,7 +46,10 @@ import {
   Check,
 } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com/api';
+// vite.config.js define REACT_APP_BACKEND_URL como "https://powercell.onrender.com" (sem /api)
+// O || '...fallback' é código morto porque Vite substitui a variável em build-time.
+// Por isso, SOMOS SEMPRE nós a adicionar /api.
+const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
 
 // ====================================================================
 // STEPPER COMPONENT

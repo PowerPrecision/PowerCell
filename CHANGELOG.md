@@ -3,6 +3,11 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] - Portal do Cliente: Página em Branco — Bug Crítico
+
+### Corrigido
+- **Página do portal renderiza em branco (ecrã vazio)** (`fix` — **CRÍTICO**): O `ClientPortal.jsx` construiu URLs da API como `${BACKEND_URL}/portal/resolve/...` onde `BACKEND_URL` era `https://powercell.onrender.com` (definido pelo `vite.config.js` em build-time). Faltava o prefixo `/api`. Todas as chamadas (resolve + status + upload) iam para `https://powercell.onrender.com/portal/...` (404) em vez de `https://powercell.onrender.com/api/portal/...`. O fallback `|| 'https://powercell.onrender.com/api'` era código morto porque o Vite substitui `process.env.REACT_APP_BACKEND_URL` em build-time — o `||` nunca era avaliado. Corrigido para anexar `/api` diretamente: `(process.env.REACT_APP_BACKEND_URL || '...') + '/api'`, igual ao padrão usado em `api.js`.
+
 ## [2026-06-29] - Portal do Cliente: Correção Completa (iframe + loading + email)
 
 ### Corrigido
