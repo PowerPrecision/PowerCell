@@ -414,7 +414,16 @@ async def get_public_form_config(request: Request):
     for default_field in DEFAULT_FORM_CONFIG:
         key = default_field["field_key"]
         if key in saved_map:
-            merged.append(saved_map[key])
+            # Merge: DB wins for admin-editable fields, but fall back to DEFAULT
+            # for fields the admin can't edit (e.g. options, data_path, field_type)
+            db_field = saved_map[key]
+            merged_field = {**default_field, **db_field}
+            # Preserve DEFAULT options if DB is missing them (native select/checkbox fields)
+            if not db_field.get("options") and default_field.get("options"):
+                merged_field["options"] = default_field["options"]
+            if not db_field.get("field_type") and default_field.get("field_type"):
+                merged_field["field_type"] = default_field["field_type"]
+            merged.append(merged_field)
         else:
             merged.append(default_field)
         added_keys.add(key)

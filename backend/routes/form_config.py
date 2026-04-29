@@ -265,8 +265,21 @@ async def get_form_config(user: dict = Depends(require_management())):
     for default_field in DEFAULT_FORM_CONFIG:
         key = default_field["field_key"]
         if key in saved_map:
-            # Campo existe — usar versão salva (com eventuais alterações do admin)
-            merged.append(saved_map[key])
+            # Campo existe — fazer merge: DB wins for admin-editable fields (label,
+            # is_visible, is_required, order, step, placeholder, hint, depends_on),
+            # but fall back to DEFAULT for fields that the admin can't edit and that
+            # may be missing from the DB (e.g. options, data_path, field_type).
+            db_field = saved_map[key]
+            merged_field = {**default_field, **db_field}
+            # Special handling: if DB has no options but DEFAULT does, keep DEFAULT options.
+            # The admin UI only manages options for custom fields; native select/checkbox
+            # fields get their options from the DEFAULT config (hardcoded in the frontend).
+            if not db_field.get("options") and default_field.get("options"):
+                merged_field["options"] = default_field["options"]
+            # Same for field_type — DB should not lose this
+            if not db_field.get("field_type") and default_field.get("field_type"):
+                merged_field["field_type"] = default_field["field_type"]
+            merged.append(merged_field)
         else:
             # Campo novo (adicionado em actualização) — usar default
             merged.append(default_field)
