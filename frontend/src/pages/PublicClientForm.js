@@ -1840,6 +1840,8 @@ export default function PublicClientForm({ previewMode = false }) {
           valor_maximo_imovel: formData.valor_maximo_imovel || null,
           finalidade: formData.finalidade || null,
           ja_tem_casa_escolhida: formData.ja_tem_casa_escolhida || false,
+          ja_tem_imovel: formData.ja_tem_casa_escolhida || false,  // Alias for ProcessDetails compatibility
+          has_property: formData.ja_tem_casa_escolhida || false,   // Alias for ProcessDetails compatibility
           proprietario_nome: formData.proprietario_nome || null,
           proprietario_contacto: formData.proprietario_contacto || null,
           caracteristicas_imovel: formData.caracteristicas_imovel || null,
@@ -1856,6 +1858,9 @@ export default function PublicClientForm({ previewMode = false }) {
           efetivo: formData.efetivo,
           fiador: formData.fiador,
           monthly_income: formData.salario_liquido ? parseFloat(formData.salario_liquido) : null,
+          rendimento_mensal: formData.salario_liquido ? parseFloat(formData.salario_liquido) : null,  // Alias for ProcessDetails
+          rendimento_anual: formData.salario_liquido ? parseFloat(formData.salario_liquido) * 12 : null,  // Calculated from monthly
+          salario_liquido: formData.salario_liquido ? parseFloat(formData.salario_liquido) : null,  // Alias
           bancos_creditos: formData.bancos_creditos && formData.bancos_creditos.length > 0
             ? formData.bancos_creditos.map(item => ({
                 banco: typeof item === 'object' ? item.banco : item,
@@ -1870,8 +1875,11 @@ export default function PublicClientForm({ previewMode = false }) {
           tem_creditos_activos: formData.tem_creditos_activos && formData.tem_creditos_activos.length > 0 ? formData.tem_creditos_activos : null,
           // Campos de emprego
           employment_type: formData.employment_type,
+          tipo_contrato: formData.employment_type,  // Alias for ProcessDetails backward-compat
           employment_duration: formData.employment_duration,
+          antiguidade_emprego: formData.employment_duration,  // Alias for ProcessDetails backward-compat
           employer_name: formData.employer_name,
+          empresa: formData.employer_name,  // Alias for ProcessDetails backward-compat
           employer_nif: formData.employer_nif,
           trabalha_estrangeiro: formData.trabalha_estrangeiro,
         },

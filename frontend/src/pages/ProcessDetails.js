@@ -763,8 +763,16 @@ const ProcessDetails = () => {
       setHistory(historyRes.data);
       setWorkflowStatuses(statusesRes.data);
       setStatus(processData.status);
-      setPersonalData(processData.personal_data || {});
-      setTitular2Data(processData.titular2_data || {});  // Carregar dados do 2º titular
+      // Clean nif_hash from personal_data and titular2_data before setting state
+      // (these are internal blind-index fields that should never be displayed)
+      const cleanPersonalData = { ...(processData.personal_data || {}) };
+      delete cleanPersonalData.nif_hash;
+      delete cleanPersonalData.email_hash;
+      delete cleanPersonalData.telefone_hash;
+      const cleanTitular2Data = { ...(processData.titular2_data || {}) };
+      delete cleanTitular2Data.nif_hash;
+      setPersonalData(cleanPersonalData);
+      setTitular2Data(cleanTitular2Data);  // Carregar dados do 2º titular
       setFinancialData(processData.financial_data || {});
       setRealEstateData(processData.real_estate_data || {});
       setCreditData(processData.credit_data || {});
@@ -815,7 +823,8 @@ const ProcessDetails = () => {
         "União de Facto": "uniao_facto",
       };
       if (pd.estado_civil && estadoCivilMap[pd.estado_civil]) {
-        setPersonalData(prev => ({ ...prev, estado_civil: estadoCivilMap[prev.estado_civil] }));
+        const mappedEC = estadoCivilMap[pd.estado_civil];
+        setPersonalData(prev => ({ ...prev, estado_civil: mappedEC }));
       }
       // tipo_imovel: Title Case → lowercase (e.g. "Apartamento" → "apartamento")
       const tipoImovelMap = {
@@ -824,7 +833,8 @@ const ProcessDetails = () => {
       };
       const rd = processData.real_estate_data || {};
       if (rd.tipo_imovel && tipoImovelMap[rd.tipo_imovel]) {
-        setRealEstateData(prev => ({ ...prev, tipo_imovel: tipoImovelMap[prev.tipo_imovel] }));
+        const mappedTI = tipoImovelMap[rd.tipo_imovel];
+        setRealEstateData(prev => ({ ...prev, tipo_imovel: mappedTI }));
       }
       // employment_type: Title Case → lowercase (e.g. "Efetivo" → "efetivo")
       const employmentTypeMap = {
@@ -834,27 +844,16 @@ const ProcessDetails = () => {
         "Reformado": "reformado", "Desempregado": "desempregado",
       };
       if (fd.employment_type && employmentTypeMap[fd.employment_type]) {
-        setFinancialData(prev => ({ ...prev, employment_type: employmentTypeMap[prev.employment_type] }));
+        const mappedET = employmentTypeMap[fd.employment_type];
+        setFinancialData(prev => ({ ...prev, employment_type: mappedET }));
       }
       // Titular2 backward-compat: normalizar estado_civil (Title Case → lowercase)
       const t2 = processData.titular2_data || {};
       if (t2.estado_civil && estadoCivilMap[t2.estado_civil]) {
-        setTitular2Data(prev => ({ ...prev, estado_civil: estadoCivilMap[prev.estado_civil] }));
+        const mappedT2EC = estadoCivilMap[t2.estado_civil];
+        setTitular2Data(prev => ({ ...prev, estado_civil: mappedT2EC }));
       }
-      // Titular2: limpar nif_hash (campo interno, não deve ser exibido)
-      if (t2.nif_hash) {
-        setTitular2Data(prev => {
-          const { nif_hash, ...rest } = prev;
-          return rest;
-        });
-      }
-      // Personal data: limpar nif_hash (campo interno, não deve ser exibido)
-      if (pd.nif_hash) {
-        setPersonalData(prev => {
-          const { nif_hash, ...rest } = prev;
-          return rest;
-        });
-      }
+      // Note: nif_hash is already cleaned synchronously above when setting initial state
       // UNIFICAÇÃO: se personal_data tem email/phone, sincronizar com campos de topo
       if (pd.email && !processData.client_email) {
         setProcess(prev => ({ ...prev, client_email: pd.email }));
