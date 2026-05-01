@@ -3,6 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] — Portal do Cliente: UX & Lógica — Redesenho Completo
+
+### Alterado
+- **Layout responsivo 2 colunas** (`refactor`): Desktop usa grid `lg:grid-cols-5` — coluna esquerda (3/5) para estado/stepper/consultor, coluna direita (2/5) para documentos. Mobile empilha verticalmente. Container passou de `max-w-lg` para `max-w-6xl`.
+- **Stepper vertical em desktop** (`refactor`): Em desktop, o stepper é agora uma timeline vertical com linhas conectoras, labels e descrições. Em mobile mantém horizontal compacto.
+- **Documentos dinâmicos** (`refactor`): A lista de documentos pendentes vem do backend (docs com status REQUESTED/PENDING). Cada item tem o seu próprio botão de upload com a categoria correta. O upload envia `category` e `document_id` ao backend, eliminando o hardcoded `category: 'Outros'`.
+- **Confirm-upload atualiza docs REQUESTED** (`refactor`): Se o cliente faz upload de um doc que o admin solicitou (com `document_id`), o registo existente é atualizado para `status: UPLOADED` em vez de criar um duplicado. Sem `document_id`, cria registo novo.
+- **Status dos documentos** (`feat`): Uploads do portal ficam com `status: "UPLOADED"` na BD. Docs solicitados são query com `status: REQUESTED/PENDING`.
+
+### Adicionado
+- **DOCUMENT_CATEGORY_MAP** (`feat`): Dicionário de 13 categorias (Cartao_Cidadao, IRS, Recibo_Vencimento, etc.) com label e icon. Usado pelo backend para normalizar labels dos documentos.
+- **Cores dinâmicas do stepper** (`feat`): Função `stepColor()` mapeia cores do workflow (yellow/blue/orange/green/red/purple) para classes Tailwind completas.
+- **Helper `_get_consultor_info()`** (`feat`): Extraído do endpoint status para função reutilizável. Verifica consultor e mediador.
+
 ## [2026-06-29] - Portal do Cliente: Remover Domínio Hardcoded
 
 ### Corrigido
