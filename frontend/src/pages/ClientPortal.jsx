@@ -24,7 +24,7 @@
  * @route /portal/:token — Rota pública parametrizada pelo token do Magic Link
  *
  * @example
- * // O cliente recebe um link como: https://app.powercell.pt/portal/abc123def
+ * // O cliente recebe um link como: https://<seu-dominio>/portal/abc123def
  * <ClientPortal />
  * // O token é extraído automaticamente da URL
  */

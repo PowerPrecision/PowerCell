@@ -244,9 +244,43 @@ router = APIRouter(prefix="/processes", tags=["Processes"])
 # ENDPOINTS DE CRIAÇÃO
 # ====================================================================
 
+def _get_frontend_url(request: Request) -> str:
+    """
+    Obtém a URL base do frontend para construir links públicos.
+
+    Prioridade:
+    1. Header Referer (vem do browser do staff — é sempre o domínio correto)
+    2. Env var FRONTEND_URL (configurada no deploy)
+    3. Sem fallback hardcoded — levanta erro se não for possível determinar
+
+    Isto garante que os links do portal funcionem independentemente
+    do domínio onde a app está deployada (Vercel, Netlify, custom domain).
+    """
+    referer = request.headers.get("referer") or request.headers.get("origin")
+    if referer:
+        # Extrair scheme + host (ex: "https://app.powercell.pt" de "https://app.powercell.pt/processes/...")
+        from urllib.parse import urlparse
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+
+    # Fallback para env var (sem domínio hardcoded)
+    frontend_url = os.environ.get("FRONTEND_URL")
+    if frontend_url:
+        return frontend_url.rstrip("/")
+
+    # Último recurso: não podemos gerar links válidos sem saber o domínio
+    logger.warning(
+        "[MAGIC LINK] FRONTEND_URL não configurada e sem Referer header. "
+        "Configure a env var FRONTEND_URL no backend."
+    )
+    return ""
+
+
 @router.post("/{process_id}/generate-magic-link")
 async def generate_magic_link(
     process_id: str,
+    request: Request,
     user: dict = Depends(require_staff())
 ):
     """
@@ -258,7 +292,7 @@ async def generate_magic_link(
 
     O link usa um short_id (8 caracteres) guardado na BD que resolve
     para o JWT completo. Exemplo:
-    https://app.powercell.pt/portal/xK9mQ2pL
+    {FRONTEND_URL}/portal/xK9mQ2pL
 
     Returns:
     - magic_link: URL curta para enviar ao cliente
@@ -299,8 +333,8 @@ async def generate_magic_link(
         upsert=True,
     )
 
-    # Construir URL curta
-    frontend_url = os.environ.get("FRONTEND_URL", "https://app.powercell.pt")
+    # Construir URL curta (usa Referer header ou FRONTEND_URL env var)
+    frontend_url = _get_frontend_url(request)
     magic_link = f"{frontend_url}/portal/{short_id}"
 
     logger.info(
@@ -322,6 +356,7 @@ async def generate_magic_link(
 @router.post("/{process_id}/generate-magic-link/send")
 async def send_magic_link_email(
     process_id: str,
+    request: Request,
     user: dict = Depends(require_staff())
 ):
     """
@@ -370,8 +405,8 @@ async def send_magic_link_email(
         upsert=True,
     )
 
-    # Construir URL curta
-    frontend_url = os.environ.get("FRONTEND_URL", "https://app.powercell.pt")
+    # Construir URL curta (usa Referer header ou FRONTEND_URL env var)
+    frontend_url = _get_frontend_url(request)
     magic_link = f"{frontend_url}/portal/{short_id}"
 
     # Enviar email ao cliente

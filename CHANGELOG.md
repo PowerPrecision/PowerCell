@@ -3,6 +3,13 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] - Portal do Cliente: Remover Domínio Hardcoded
+
+### Corrigido
+- **Links do portal gerados com domínio hardcoded `app.powercell.pt`** (`fix`): Os endpoints `POST /processes/{id}/generate-magic-link` e `POST /processes/{id}/generate-magic-link/send` construíam URLs com `os.environ.get("FRONTEND_URL", "https://app.powercell.pt")`. Como `FRONTEND_URL` não estava configurada no backend (Render), o fallback era sempre usado — gerando links para um domínio inativo. Removido completamente o domínio hardcoded.
+- **Função `_get_frontend_url(request)`** (`feat`): Nova função helper que determina a URL base do frontend dinamicamente: (1) Extrai do header `Referer`/`Origin` da request do staff (sempre o domínio correto), (2) Fallback para env var `FRONTEND_URL` (sem hardcoded), (3) Log de warning se não for possível determinar. Ambos os endpoints de magic link agora recebem `request: Request` e usam esta função.
+- **CSP do portal bloqueava Google Fonts** (`fix`): Adicionados `https://fonts.googleapis.com` a `style-src` e `https://fonts.gstatic.com` a `font-src` no `vercel.json` para a rota `/portal(.*)`.
+
 ## [2026-06-29] - Portal do Cliente: Página em Branco — Bug Crítico
 
 ### Corrigido
