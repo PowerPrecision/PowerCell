@@ -243,7 +243,9 @@ async def create_workflow_status(data: WorkflowStatusCreate, user: dict = Depend
         "color": data.color,
         "description": data.description,
         "is_default": False,
-        "internal_code": str(data.order).zfill(2)
+        "internal_code": str(data.order).zfill(2),
+        "portal_label": data.portal_label,
+        "visible_in_portal": data.visible_in_portal,
     }
     
     await db.workflow_statuses.insert_one(status_doc)
@@ -282,6 +284,10 @@ async def update_workflow_status(status_id: str, data: WorkflowStatusUpdate, use
         update_data["color"] = data.color
     if data.description is not None:
         update_data["description"] = data.description
+    if data.portal_label is not None:
+        update_data["portal_label"] = data.portal_label
+    if data.visible_in_portal is not None:
+        update_data["visible_in_portal"] = data.visible_in_portal
     
     if update_data:
         await db.workflow_statuses.update_one({"id": status_id}, {"$set": update_data})

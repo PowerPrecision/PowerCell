@@ -166,7 +166,8 @@ async def get_portal_status(
     process_id = process["id"]
 
     # ── Workflow statuses para o stepper ──
-    statuses = await db.workflow_statuses.find(
+    # Buscar todos os statuses (incluindo hidden, para calcular progresso)
+    all_statuses = await db.workflow_statuses.find(
         {}, {"_id": 0}
     ).sort("order", 1).to_list(100)
 
@@ -174,41 +175,51 @@ async def get_portal_status(
     current_status_label = current_status
     current_status_color = "#94a3b8"
 
-    for s in statuses:
+    # Determinar label e cor do status atual
+    # Usar portal_label se disponível (client-facing)
+    for s in all_statuses:
         if s.get("name") == current_status:
-            current_status_label = s.get("label", current_status)
+            current_status_label = s.get("portal_label") or s.get("label", current_status)
             current_status_color = s.get("color", "#94a3b8")
             break
 
-    # Excluir statuses terminais para progresso
+    # Excluir statuses terminais E ocultos no portal
     terminal_statuses = ["concluidos", "desistencias", "eliminados", "perdido", "arquivo"]
-    active_steps = [s for s in statuses if s.get("name") not in terminal_statuses]
+    active_steps = [
+        s for s in all_statuses
+        if s.get("name") not in terminal_statuses
+        and s.get("visible_in_portal", True) is not False
+    ]
     total_active_steps = len(active_steps) if active_steps else 1
 
-    # Posição atual e progresso
+    # Posição atual e progresso — usar TODOS os active (não apenas visíveis)
+    all_active = [s for s in all_statuses if s.get("name") not in terminal_statuses]
     current_order = 0
-    for s in active_steps:
+    for s in all_active:
         if s.get("name") == current_status:
             current_order = s.get("order", 0)
             break
 
-    current_active_index = sum(1 for s in active_steps if s.get("order", 0) < current_order)
-    if any(s.get("name") == current_status for s in active_steps):
+    current_active_index = sum(1 for s in all_active if s.get("order", 0) < current_order)
+    if any(s.get("name") == current_status for s in all_active):
         current_active_index = max(current_active_index, 1)
 
-    progress_percent = min(100, int((current_active_index / total_active_steps) * 100))
+    progress_percent = min(100, int((current_active_index / len(all_active)) * 100)) if all_active else 100
 
-    # ── Stepper data ──
+    # ── Stepper data (apenas visíveis no portal) ──
     stepper = []
     for status in active_steps:
         is_current = status.get("name") == current_status
         is_completed = status.get("order", 0) < current_order
 
+        # Usar portal_label se disponível, senão label, senão name
+        display_label = status.get("portal_label") or status.get("label", status.get("name"))
+
         stepper.append({
             "id": status.get("name"),
-            "label": status.get("label", status.get("name")),
+            "label": display_label,
             "color": status.get("color", "#94a3b8"),
-            "description": status.get("description", ""),
+            "description": status.get("portal_description") or status.get("description", ""),
             "is_current": is_current,
             "is_completed": is_completed,
         })

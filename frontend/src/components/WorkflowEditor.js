@@ -4,9 +4,10 @@
  * ====================================================================
  * Componente para gerir os estados do workflow (fases do processo).
  * Permite criar, editar, reordenar e eliminar estados.
+ * Inclui campos portal_label e visible_in_portal para controlo
+ * do que o cliente vê no Portal do Cliente.
  * ====================================================================
  */
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -16,6 +17,7 @@ import { Badge } from "./ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Textarea } from "./ui/textarea";
+import { Switch } from "./ui/switch";
 import { toast } from "sonner";
 import {
   Plus,
@@ -27,6 +29,9 @@ import {
   ArrowUp,
   ArrowDown,
   AlertTriangle,
+  Eye,
+  EyeOff,
+  Globe,
 } from "lucide-react";
 import {
   getWorkflowStatuses,
@@ -58,6 +63,8 @@ const WorkflowEditor = () => {
     order: 1,
     color: "blue",
     description: "",
+    portal_label: "",
+    visible_in_portal: true,
   });
 
   useEffect(() => {
@@ -90,7 +97,9 @@ const WorkflowEditor = () => {
         label: formData.label,
         order: formData.order || statuses.length + 1,
         color: formData.color,
-        description: formData.description,
+        description: formData.description || undefined,
+        portal_label: formData.portal_label || undefined,
+        visible_in_portal: formData.visible_in_portal,
       });
       toast.success("Estado criado com sucesso");
       setIsCreateDialogOpen(false);
@@ -109,12 +118,15 @@ const WorkflowEditor = () => {
 
     setFormLoading(true);
     try {
-      await updateWorkflowStatus(selectedStatus.id, {
+      const payload = {
         label: formData.label,
         order: formData.order,
         color: formData.color,
-        description: formData.description,
-      });
+        description: formData.description || undefined,
+        portal_label: formData.portal_label || null,
+        visible_in_portal: formData.visible_in_portal,
+      };
+      await updateWorkflowStatus(selectedStatus.id, payload);
       toast.success("Estado atualizado com sucesso");
       setIsEditDialogOpen(false);
       resetForm();
@@ -134,13 +146,13 @@ const WorkflowEditor = () => {
       const response = await deleteWorkflowStatus(selectedStatus.id);
       const processesMoved = response.data?.processes_moved || 0;
       const movedTo = response.data?.moved_to;
-      
+
       if (processesMoved > 0) {
         toast.success(`Estado eliminado. ${processesMoved} processo(s) movido(s) para "${movedTo || 'Clientes em Espera'}"`);
       } else {
         toast.success("Estado eliminado com sucesso");
       }
-      
+
       setIsDeleteDialogOpen(false);
       setSelectedStatus(null);
       fetchStatuses();
@@ -180,6 +192,8 @@ const WorkflowEditor = () => {
       order: status.order,
       color: status.color,
       description: status.description || "",
+      portal_label: status.portal_label || "",
+      visible_in_portal: status.visible_in_portal !== false,
     });
     setIsEditDialogOpen(true);
   };
@@ -195,6 +209,8 @@ const WorkflowEditor = () => {
       order: statuses.length + 1,
       color: "blue",
       description: "",
+      portal_label: "",
+      visible_in_portal: true,
     });
     setSelectedStatus(null);
   };
@@ -223,7 +239,11 @@ const WorkflowEditor = () => {
                 Gestão de Estados do Workflow
               </CardTitle>
               <CardDescription>
-                Adicione, edite ou reordene as fases do processo
+                Adicione, edite ou reordene as fases do processo.
+                <span className="block text-xs mt-1 text-muted-foreground">
+                  <Globe className="h-3 w-3 inline mr-1" />
+                  O campo &quot;Nome no Portal&quot; permite definir um nome diferente para o cliente ver.
+                </span>
               </CardDescription>
             </div>
             <Button
@@ -278,10 +298,20 @@ const WorkflowEditor = () => {
                         Padrão
                       </Badge>
                     )}
+                    {status.portal_label && (
+                      <Badge className="bg-emerald-100 text-emerald-700 text-xs flex-shrink-0" variant="outline">
+                        <Globe className="h-2.5 w-2.5 mr-1" />
+                        {status.portal_label}
+                      </Badge>
+                    )}
                   </div>
                 </div>
 
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  {/* Portal visibility indicator */}
+                  <span className={`text-xs flex items-center gap-0.5 ${status.visible_in_portal !== false ? "text-emerald-600" : "text-gray-400"}`} title={status.visible_in_portal !== false ? "Visível no portal" : "Oculto no portal"}>
+                    {status.visible_in_portal !== false ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </span>
                   <span className="text-xs text-muted-foreground hidden sm:inline">
                     #{status.order}
                   </span>
@@ -318,7 +348,7 @@ const WorkflowEditor = () => {
 
       {/* Dialog Criar Estado */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent aria-describedby="create-status-description">
+        <DialogContent aria-describedby="create-status-description" className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Criar Novo Estado</DialogTitle>
             <DialogDescription id="create-status-description">
@@ -327,7 +357,7 @@ const WorkflowEditor = () => {
           </DialogHeader>
           <form onSubmit={handleCreateStatus} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="create-label">Nome do Estado *</Label>
+              <Label htmlFor="create-label">Nome do Estado (Interno) *</Label>
               <Input
                 id="create-label"
                 value={formData.label}
@@ -335,6 +365,21 @@ const WorkflowEditor = () => {
                 placeholder="Ex: Clientes em Espera"
                 required
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-portal-label" className="flex items-center gap-1.5">
+                <Globe className="h-3.5 w-3.5 text-emerald-600" />
+                Nome no Portal do Cliente
+              </Label>
+              <Input
+                id="create-portal-label"
+                value={formData.portal_label}
+                onChange={(e) => setFormData({ ...formData, portal_label: e.target.value })}
+                placeholder="Ex: Em Espera (deixe vazio para usar o nome interno)"
+              />
+              <p className="text-xs text-muted-foreground">
+                Se definido, este é o nome que o cliente vê no portal. Se vazio, usa o nome interno.
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -381,6 +426,22 @@ const WorkflowEditor = () => {
                 rows={2}
               />
             </div>
+            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+              <div className="space-y-0.5">
+                <Label htmlFor="create-visible-portal" className="text-sm font-medium flex items-center gap-1.5">
+                  <Eye className="h-3.5 w-3.5" />
+                  Visível no Portal do Cliente
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Se desativado, esta etapa não aparece no stepper do portal
+                </p>
+              </div>
+              <Switch
+                id="create-visible-portal"
+                checked={formData.visible_in_portal}
+                onCheckedChange={(checked) => setFormData({ ...formData, visible_in_portal: checked })}
+              />
+            </div>
             <DialogFooter>
               <Button
                 type="button"
@@ -403,7 +464,7 @@ const WorkflowEditor = () => {
 
       {/* Dialog Editar Estado */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent aria-describedby="edit-status-description">
+        <DialogContent aria-describedby="edit-status-description" className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Editar Estado</DialogTitle>
             <DialogDescription id="edit-status-description">
@@ -412,13 +473,29 @@ const WorkflowEditor = () => {
           </DialogHeader>
           <form onSubmit={handleEditStatus} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-label">Etiqueta (Nome Visível) *</Label>
+              <Label htmlFor="edit-label">Etiqueta (Nome Interno) *</Label>
               <Input
                 id="edit-label"
                 value={formData.label}
                 onChange={(e) => setFormData({ ...formData, label: e.target.value })}
                 required
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-portal-label" className="flex items-center gap-1.5">
+                <Globe className="h-3.5 w-3.5 text-emerald-600" />
+                Nome no Portal do Cliente
+              </Label>
+              <Input
+                id="edit-portal-label"
+                value={formData.portal_label}
+                onChange={(e) => setFormData({ ...formData, portal_label: e.target.value })}
+                placeholder="Ex: Em Espera (deixe vazio para usar o nome interno)"
+              />
+              <p className="text-xs text-muted-foreground">
+                Se definido, este é o nome que o cliente vê no portal. Se vazio, usa o nome interno.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -463,6 +540,22 @@ const WorkflowEditor = () => {
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 rows={2}
+              />
+            </div>
+            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+              <div className="space-y-0.5">
+                <Label htmlFor="edit-visible-portal" className="text-sm font-medium flex items-center gap-1.5">
+                  <Eye className="h-3.5 w-3.5" />
+                  Visível no Portal do Cliente
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Se desativado, esta etapa não aparece no stepper do portal
+                </p>
+              </div>
+              <Switch
+                id="edit-visible-portal"
+                checked={formData.visible_in_portal}
+                onCheckedChange={(checked) => setFormData({ ...formData, visible_in_portal: checked })}
               />
             </div>
             <DialogFooter>
