@@ -433,6 +433,67 @@ async def fix_duplicate_workflow_statuses(user: dict = Depends(require_roles([Us
     }
 
 
+@router.post("/workflow-statuses/migrate-portal-labels")
+async def migrate_portal_labels(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """
+    Migração: adiciona campos portal_label e visible_in_portal aos workflow_statuses.
+
+    Executa automaticamente ao deploy. Idempotente — pode ser chamado múltiplas vezes.
+    """
+    DEFAULTS = {
+        "clientes_espera":    {"portal_label": "Em Espera",                   "visible_in_portal": True},
+        "fase_documental":    {"portal_label": "Recolha de Documentos",        "visible_in_portal": True},
+        "fase_documental_ii": {"portal_label": "Documentação Complementar",   "visible_in_portal": True},
+        "enviado_bruno":      {"portal_label": "Análise do Processo",         "visible_in_portal": True},
+        "enviado_luis":       {"portal_label": "Validação Interna",           "visible_in_portal": True},
+        "enviado_bcp_rui":    {"portal_label": "Análise Bancária",            "visible_in_portal": True},
+        "entradas_precision": {"portal_label": "Em Processamento",            "visible_in_portal": True},
+        "fase_bancaria":      {"portal_label": "Aprovação Bancária",          "visible_in_portal": True},
+        "fase_visitas":       {"portal_label": "Visitas ao Imóvel",           "visible_in_portal": True},
+        "ch_aprovado":        {"portal_label": "Crédito Aprovado",            "visible_in_portal": True},
+        "fase_escritura":     {"portal_label": "Preparação da Escritura",     "visible_in_portal": True},
+        "escritura_agendada": {"portal_label": "Escritura Agendada",          "visible_in_portal": True},
+        "concluidos":         {"portal_label": None,                          "visible_in_portal": False},
+        "desistencias":       {"portal_label": None,                          "visible_in_portal": False},
+    }
+
+    all_statuses = await db.workflow_statuses.find({}).to_list(length=None)
+    updated = 0
+    skipped = 0
+
+    for status in all_statuses:
+        name = status.get("name", "")
+        defaults = DEFAULTS.get(name)
+        updates = {}
+
+        if defaults:
+            if "portal_label" not in status:
+                updates["portal_label"] = defaults["portal_label"]
+            if "visible_in_portal" not in status:
+                updates["visible_in_portal"] = defaults["visible_in_portal"]
+        else:
+            # Status personalizado — garantir que visible_in_portal existe
+            if "visible_in_portal" not in status:
+                updates["visible_in_portal"] = True
+
+        if updates:
+            await db.workflow_statuses.update_one(
+                {"_id": status["_id"]},
+                {"$set": updates}
+            )
+            updated += 1
+        else:
+            skipped += 1
+
+    return {
+        "success": True,
+        "message": f"Migration concluída: {updated} atualizados, {skipped} ignorados",
+        "updated": updated,
+        "skipped": skipped,
+        "total": len(all_statuses),
+    }
+
+
 @router.post("/processes/fix-duplicates")
 async def fix_duplicate_processes(user: dict = Depends(require_roles([UserRole.ADMIN]))):
     """

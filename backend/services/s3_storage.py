@@ -64,10 +64,68 @@ class S3Service:
                     region_name=AWS_REGION
                 )
                 logger.info("S3 Service inicializado com sucesso.")
+                self._ensure_cors_configured()
             except Exception as e:
                 logger.error(f"Erro ao ligar ao S3: {e}")
         else:
             logger.warning("Credenciais S3 não encontradas. O serviço não funcionará.")
+
+    def _ensure_cors_configured(self):
+        """
+        Garante que o bucket S3 tem CORS configurado para uploads diretos do browser.
+
+        Necessário para pre-signed URL uploads do Portal do Cliente e do CRM.
+        Sem CORS, o browser bloqueia o PUT request ao S3 com erro:
+        'No Access-Control-Allow-Origin header is present'.
+        """
+        if not self.s3_client or not self.bucket_name:
+            return
+
+        try:
+            existing = self.s3_client.get_bucket_cors(Bucket=self.bucket_name)
+            if existing and existing.get('CORSRules'):
+                logger.info("S3 CORS já configurado.")
+                return
+        except ClientError as e:
+            if e.response.get('Error', {}).get('Code') != 'NoSuchCORSConfiguration':
+                logger.warning(f"Erro ao verificar CORS do S3: {e}")
+                return
+
+        # CORS ainda não configurado — aplicar configuração
+        cors_config = {
+            'CORSRules': [
+                {
+                    'AllowedHeaders': ['Content-Type', 'x-amz-*'],
+                    'AllowedMethods': ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
+                    'AllowedOrigins': [
+                        'https://powercell.pt',
+                        'https://www.powercell.pt',
+                        'https://powercell-1.onrender.com',
+                        'https://powercell.onrender.com',
+                        'http://localhost:3000',
+                        'http://localhost:5173',
+                        'http://localhost:5000',
+                        'http://127.0.0.1:3000',
+                        'http://127.0.0.1:5173',
+                    ],
+                    'ExposeHeaders': [
+                        'ETag',
+                        'x-amz-request-id',
+                        'x-amz-id-2',
+                    ],
+                    'MaxAgeSeconds': 3600,
+                }
+            ]
+        }
+
+        try:
+            self.s3_client.put_bucket_cors(
+                Bucket=self.bucket_name,
+                CORSConfiguration=cors_config
+            )
+            logger.info("✅ S3 CORS configurado com sucesso.")
+        except ClientError as e:
+            logger.error(f"Erro ao configurar CORS no S3: {e}")
 
     def is_configured(self) -> bool:
         """Verifica se o serviço S3 está pronto para operações.
