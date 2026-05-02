@@ -433,6 +433,95 @@ async def fix_duplicate_workflow_statuses(user: dict = Depends(require_roles([Us
     }
 
 
+@router.get("/s3/cors-status")
+@router.post("/s3/fix-cors")
+async def s3_cors_diagnostic(force_fix: bool = False, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """
+    Diagnóstico e fix da configuração CORS do bucket S3.
+
+    GET: Lê a config CORS atual e reporta estado.
+    POST: Força a aplicação da config CORS correcta.
+
+    O browser bloqueia uploads diretos ao S3 se não houver CORS configurado.
+    """
+    from services.s3_storage import s3_service, AWS_BUCKET_NAME, AWS_REGION
+    from botocore.exceptions import ClientError
+
+    result = {
+        "bucket": AWS_BUCKET_NAME,
+        "region": AWS_REGION,
+        "service_configured": s3_service.is_configured(),
+    }
+
+    if not s3_service.is_configured():
+        return {**result, "error": "S3 não configurado (faltam credenciais)"}
+
+    # Ler CORS atual
+    try:
+        existing = s3_service.s3_client.get_bucket_cors(Bucket=AWS_BUCKET_NAME)
+        result["current_cors"] = existing.get("CORSRules", [])
+        result["has_cors"] = True
+    except ClientError as e:
+        if e.response.get('Error', {}).get('Code') == 'NoSuchCORSConfiguration':
+            result["has_cors"] = False
+            result["current_cors"] = None
+        else:
+            result["error_reading"] = str(e)
+            result["has_cors"] = None
+
+    # Aplicar CORS (só em POST ou com force_fix)
+    if force_fix or request.method == "POST":
+        cors_config = {
+            'CORSRules': [
+                {
+                    'AllowedHeaders': ['Content-Type', 'x-amz-*'],
+                    'AllowedMethods': ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
+                    'AllowedOrigins': [
+                        'https://powercell.pt',
+                        'https://www.powercell.pt',
+                        'https://powercell-1.onrender.com',
+                        'https://powercell.onrender.com',
+                        'http://localhost:3000',
+                        'http://localhost:5173',
+                        'http://localhost:5000',
+                        'http://127.0.0.1:3000',
+                        'http://127.0.0.1:5173',
+                    ],
+                    'ExposeHeaders': [
+                        'ETag',
+                        'x-amz-request-id',
+                        'x-amz-id-2',
+                    ],
+                    'MaxAgeSeconds': 3600,
+                }
+            ]
+        }
+
+        try:
+            s3_service.s3_client.put_bucket_cors(
+                Bucket=AWS_BUCKET_NAME,
+                CORSConfiguration=cors_config
+            )
+            result["fix_applied"] = True
+            result["fix_message"] = "CORS configurado com sucesso!"
+
+            # Verificar imediatamente
+            verify = s3_service.s3_client.get_bucket_cors(Bucket=AWS_BUCKET_NAME)
+            result["verified_cors"] = verify.get("CORSRules", [])
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            error_msg = e.response.get('Error', {}).get('Message', str(e))
+            result["fix_applied"] = False
+            result["fix_error"] = f"[{error_code}] {error_msg}"
+            result["fix_hint"] = (
+                "A IAM key não tem permissão 's3:PutBucketCORS'. "
+                "Adicione esta permissão à IAM policy OU configure CORS manualmente na AWS Console: "
+                "S3 > powerprecision-docs-storage > Permissions > Cross-origin resource sharing (CORS)"
+            )
+
+    return result
+
+
 @router.post("/workflow-statuses/migrate-portal-labels")
 async def migrate_portal_labels(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """

@@ -77,21 +77,13 @@ class S3Service:
         Necessário para pre-signed URL uploads do Portal do Cliente e do CRM.
         Sem CORS, o browser bloqueia o PUT request ao S3 com erro:
         'No Access-Control-Allow-Origin header is present'.
+
+        IMPORTANTE: Sempre substitui a config CORS existente para garantir
+        que as origens correctas estão incluídas.
         """
         if not self.s3_client or not self.bucket_name:
             return
 
-        try:
-            existing = self.s3_client.get_bucket_cors(Bucket=self.bucket_name)
-            if existing and existing.get('CORSRules'):
-                logger.info("S3 CORS já configurado.")
-                return
-        except ClientError as e:
-            if e.response.get('Error', {}).get('Code') != 'NoSuchCORSConfiguration':
-                logger.warning(f"Erro ao verificar CORS do S3: {e}")
-                return
-
-        # CORS ainda não configurado — aplicar configuração
         cors_config = {
             'CORSRules': [
                 {
@@ -125,7 +117,11 @@ class S3Service:
             )
             logger.info("✅ S3 CORS configurado com sucesso.")
         except ClientError as e:
-            logger.error(f"Erro ao configurar CORS no S3: {e}")
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            error_msg = e.response.get('Error', {}).get('Message', str(e))
+            logger.error(f"❌ Erro ao configurar CORS no S3 [{error_code}]: {error_msg}")
+            logger.error("   A IAM key pode não ter permissão s3:PutBucketCORS.")
+            logger.error("   Configure manualmente na AWS Console > S3 > Bucket > Permissions > CORS.")
 
     def is_configured(self) -> bool:
         """Verifica se o serviço S3 está pronto para operações.
