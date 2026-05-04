@@ -3631,59 +3631,71 @@ async def create_portal_document_request(
     Solicita um documento ao cliente via portal.
     Cria um registo com status REQUESTED que aparece no portal do cliente.
     """
-    # Verify process exists
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    try:
+        # Verify process exists
+        process = await db.processes.find_one({"id": process_id})
+        if not process:
+            raise HTTPException(status_code=404, detail="Processo não encontrado")
 
-    category = data.category
-    if category not in DOCUMENT_CATEGORY_MAP:
-        category = "Outros"
+        category = data.category
+        if category not in DOCUMENT_CATEGORY_MAP:
+            category = "Outros"
 
-    doc_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+        doc_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
 
-    doc = {
-        "id": doc_id,
-        "process_id": process_id,
-        "category": category,
-        "filename": None,
-        "original_filename": None,
-        "status": "REQUESTED",
-        "notes": data.notes or "",
-        "custom_label": data.custom_label,
-        "requested_by": user["id"],
-        "requested_by_name": user.get("name", ""),
-        "source": "admin_request",
-        "created_at": now,
-        "updated_at": now,
-    }
+        user_id = user.get("id", "")
+        user_name = user.get("name", "")
 
-    await db.documents.insert_one(doc)
-
-    # Audit log
-    await db.history.insert_one({
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "user_id": user["id"],
-        "user_name": user.get("name", ""),
-        "action": f"Documento solicitado via portal: {category}",
-        "field": "portal_document_requested",
-        "old_value": None,
-        "new_value": category,
-        "created_at": now,
-    })
-
-    cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
-
-    return {
-        "success": True,
-        "document": {
-            **doc,
-            "category_label": cat_info["label"],
-            "category_icon": cat_info["icon"],
+        doc = {
+            "id": doc_id,
+            "process_id": process_id,
+            "category": category,
+            "filename": None,
+            "original_filename": None,
+            "status": "REQUESTED",
+            "notes": data.notes or "",
+            "custom_label": data.custom_label,
+            "requested_by": user_id,
+            "requested_by_name": user_name,
+            "source": "admin_request",
+            "created_at": now,
+            "updated_at": now,
         }
-    }
+
+        await db.documents.insert_one(doc)
+
+        # Audit log (fire-and-forget — don't fail the request if history insert fails)
+        try:
+            await db.history.insert_one({
+                "id": str(uuid.uuid4()),
+                "process_id": process_id,
+                "user_id": user_id,
+                "user_name": user_name,
+                "action": f"Documento solicitado via portal: {category}",
+                "field": "portal_document_requested",
+                "old_value": None,
+                "new_value": category,
+                "created_at": now,
+            })
+        except Exception as hist_err:
+            logging.getLogger(__name__).warning(f"Failed to write audit log: {hist_err}")
+
+        cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
+
+        return {
+            "success": True,
+            "document": {
+                **doc,
+                "category_label": cat_info["label"],
+                "category_icon": cat_info["icon"],
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Error creating portal request: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro ao criar pedido: {str(e)}")
 
 
 class DocumentStatusUpdate(BaseModel):
@@ -3703,53 +3715,70 @@ async def update_portal_document_request(
     - REQUESTED: volta a pedir (aparece como pendente no portal)
     - UPLOADED: cliente submeteu o ficheiro
     """
-    valid_statuses = ["REQUESTED", "PENDING", "RECEIVED", "UPLOADED"]
-    new_status = data.status.upper()
-    if new_status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Status inválido. Use um de: {', '.join(valid_statuses)}")
+    try:
+        valid_statuses = ["REQUESTED", "PENDING", "RECEIVED", "UPLOADED"]
+        new_status = data.status.upper()
+        if new_status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Status inválido. Use um de: {', '.join(valid_statuses)}")
 
-    existing = await db.documents.find_one({"id": document_id, "process_id": process_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Documento não encontrado")
+        existing = await db.documents.find_one({"id": document_id, "process_id": process_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Documento não encontrado")
 
-    old_status = existing.get("status", "")
-    now = datetime.now(timezone.utc).isoformat()
+        old_status = existing.get("status", "")
+        now = datetime.now(timezone.utc).isoformat()
+        user_id = user.get("id", "")
+        user_name = user.get("name", "")
 
-    await db.documents.update_one(
-        {"id": document_id, "process_id": process_id},
-        {"$set": {
-            "status": new_status,
-            "updated_at": now,
-            "reviewed_by": user["id"],
-            "reviewed_at": now,
-        }}
-    )
+        await db.documents.update_one(
+            {"id": document_id, "process_id": process_id},
+            {"$set": {
+                "status": new_status,
+                "updated_at": now,
+                "reviewed_by": user_id,
+                "reviewed_at": now,
+            }}
+        )
 
-    # Audit log
-    status_labels = {
-        "REQUESTED": "Pendente",
-        "RECEIVED": "Recebido",
-        "UPLOADED": "Submetido pelo cliente",
-    }
-    await db.history.insert_one({
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "user_id": user["id"],
-        "user_name": user.get("name", ""),
-        "action": f"Status do documento alterado: {old_status} → {new_status}",
-        "field": "portal_document_status",
-        "old_value": old_status,
-        "new_value": new_status,
-        "created_at": now,
-    })
+        # Audit log (fire-and-forget)
+        try:
+            status_labels = {
+                "REQUESTED": "Pendente",
+                "RECEIVED": "Recebido",
+                "UPLOADED": "Submetido pelo cliente",
+            }
+            await db.history.insert_one({
+                "id": str(uuid.uuid4()),
+                "process_id": process_id,
+                "user_id": user_id,
+                "user_name": user_name,
+                "action": f"Status do documento alterado: {old_status} → {new_status}",
+                "field": "portal_document_status",
+                "old_value": old_status,
+                "new_value": new_status,
+                "created_at": now,
+            })
+        except Exception as hist_err:
+            logging.getLogger(__name__).warning(f"Failed to write audit log: {hist_err}")
 
-    return {
-        "success": True,
-        "document_id": document_id,
-        "old_status": old_status,
-        "new_status": new_status,
-        "new_status_label": status_labels.get(new_status, new_status),
-    }
+        status_labels = {
+            "REQUESTED": "Pendente",
+            "RECEIVED": "Recebido",
+            "UPLOADED": "Submetido pelo cliente",
+        }
+
+        return {
+            "success": True,
+            "document_id": document_id,
+            "old_status": old_status,
+            "new_status": new_status,
+            "new_status_label": status_labels.get(new_status, new_status),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Error updating portal request: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar pedido: {str(e)}")
 
 
 @router.delete("/portal-requests/{process_id}/{document_id}")

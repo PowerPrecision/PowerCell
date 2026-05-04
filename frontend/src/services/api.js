@@ -333,19 +333,28 @@ api.interceptors.response.use(
     // 500+ - ERROS DE SERVIDOR
     // ================================================================
     if (status >= 500) {
+      // Show the actual error detail from backend when available,
+      // otherwise show generic message
+      const serverDetail = data?.detail || "";
+      const isGenericError = !serverDetail || serverDetail === "Erro interno do servidor";
+      const description = isGenericError
+        ? "Ocorreu um erro interno. Contacte o suporte se o problema persistir."
+        : serverDetail;
+
       toast({
         variant: "destructive",
         title: "Erro de Servidor",
-        description: "Ocorreu um erro interno. Contacte o suporte se o problema persistir.",
+        description,
       });
-      
+
       // Log do erro para debugging
       console.error("[API] Server error:", {
         status,
         url: config.url,
         message: errorMessage,
+        detail: data?.detail,
       });
-      
+
       return Promise.reject(error);
     }
     
