@@ -97,7 +97,7 @@ const roleLabels = {
 // Cores dos badges de papel - Azul PowerCell, Dourado Precision
 const roleColors = {
   cliente: "bg-blue-100 text-blue-800",
-  consultor: "bg-teal-600 text-white",                    // PowerCell
+  consultor: "bg-brand text-white",                    // PowerCell
   mediador: "bg-amber-500 text-white",                    // PowerCell
   intermediario: "bg-amber-500 text-white",               // PowerCell
   consultor_intermediario: "bg-gradient-to-r from-blue-900 to-amber-500 text-white",
@@ -585,7 +585,7 @@ const DashboardLayout = ({ children, title }) => {
                     to={item.href}
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                       isActive
-                        ? "bg-teal-600 text-white"
+                        ? "bg-brand text-white"
                         : "text-slate-300 hover:bg-slate-800 hover:text-white"
                     }`}
                     onClick={() => {
@@ -635,7 +635,7 @@ const DashboardLayout = ({ children, title }) => {
                           to={item.href}
                           className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
                             isActive
-                              ? "bg-teal-600/80 text-white"
+                              ? "bg-brand/80 text-white"
                               : "text-slate-400 hover:bg-slate-800 hover:text-white"
                           }`}
                           onClick={(e) => {

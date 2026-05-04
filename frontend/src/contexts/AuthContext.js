@@ -41,6 +41,17 @@ import { hasRole } from "../utils/roleUtils";
 
 const AuthContext = createContext(null);
 
+// ── Brand Theme Helper ──
+// Aplica classe de tema no <html> consoante a empresa do utilizador.
+// "power" ou null = tema por defeito (sem classe extra)
+// "precision" = adiciona .theme-precision que sobrepõe --color-brand
+function applyBrandTheme(company) {
+  document.documentElement.classList.remove('theme-precision');
+  if (company === 'precision') {
+    document.documentElement.classList.add('theme-precision');
+  }
+}
+
 const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
 // Constantes para refresh tokens
@@ -156,6 +167,9 @@ export function AuthProvider({ children }) {
       const userData = response.data;
       setUser(userData);
 
+      // ── Brand Theme: aplica classe de tema consoante a empresa ──
+      applyBrandTheme(userData.company);
+
       // Initialize activeRole only once (not on every fetchUser call)
       if (!activeRoleInitialized.current) {
         const savedRole = sessionStorage.getItem("activeRole");
@@ -205,6 +219,9 @@ export function AuthProvider({ children }) {
     setUser(userData);
     setIsImpersonating(false);
     setOriginalAdminName(null);
+
+    // ── Brand Theme ──
+    applyBrandTheme(userData.company);
 
     // Reset activeRole to primary role on login
     const primaryRole = userData.role;
@@ -257,6 +274,7 @@ export function AuthProvider({ children }) {
     setRefreshToken(null);
     setUser(null);
     setIsImpersonating(false);
+    document.documentElement.classList.remove('theme-precision');
     setOriginalAdminName(null);
 
     // Clear active role on logout

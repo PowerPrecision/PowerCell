@@ -114,6 +114,19 @@ code {
         /* Cores das empresas */
         --power-blue: 224 70% 30%;           /* Power Real Estate */
         --precision-gold: 43 85% 50%;        /* Precision Crédito */
+
+        /* Cor de Destaque (Brand) — Power Real Estate (default) */
+        --color-brand: 215 28% 17%;           /* #15191e Azul Ardósia Escuro */
+        --color-brand-light: 36 38% 56%;      /* #bfa360 Dourado (hover) */
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       TEMA PRECISION CRÉDITO — Cor de Destaque
+       Substitui apenas as variáveis de marca, mantém todo o resto.
+       ═══════════════════════════════════════════════════════════════ */
+    .theme-precision {
+        --color-brand: 175 61% 15%;           /* #0e3e3b Verde Esmeralda Escuro */
+        --color-brand-light: 175 52% 26%;     /* #20635f Verde Esmeralda (hover) */
     }
     
     /* TEMA ESCURO - Redesenhado para legibilidade e conforto visual */
