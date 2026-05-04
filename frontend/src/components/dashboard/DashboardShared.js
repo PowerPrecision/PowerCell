@@ -123,9 +123,14 @@ export const StatusBadge = ({ status, workflowStatuses }) => {
     purple: "bg-purple-100 text-purple-800",
   };
   
+  // Safely extract label — it should be a string but may be an object {value, label}
+  const label = typeof statusInfo.label === 'object' && statusInfo.label !== null
+    ? (statusInfo.label.label || statusInfo.label.value || String(statusInfo.label))
+    : (statusInfo.label || status);
+  
   return (
     <Badge className={`${colorClasses[statusInfo.color] || "bg-gray-100 text-gray-800"} border`}>
-      {statusInfo.order || ''} - {statusInfo.label}
+      {statusInfo.order || ''} - {label}
     </Badge>
   );
 };
