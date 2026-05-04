@@ -99,33 +99,63 @@ class S3Service:
 
         IMPORTANTE: Sempre substitui a config CORS existente para garantir
         que as origens correctas estão incluídas.
+
+        Estratégia de CORS:
+        - Regra 1: Origens explícitas (produção, dev, Render)
+        - Regra 2: * (curinga) para Vercel previews e outros domínios dinâmicos
+          Isto é seguro porque o bucket é privado e todo acesso requer
+          URLs pre-assinadas com assinatura criptográfica + expiração.
+          CORS é apenas um mecanismo do browser, não adiciona segurança real.
         """
         if not self.s3_client or not self.bucket_name:
             return
 
+        # Ler origens do config.py (falha graciosamente se não disponível)
+        explicit_origins = []
+        try:
+            from backend.config import CORS_ORIGINS
+            explicit_origins = list(CORS_ORIGINS)
+        except Exception:
+            # Fallback para origens hardcoded se config não estiver disponível
+            explicit_origins = [
+                'https://powercell.pt',
+                'https://www.powercell.pt',
+                'https://powercell-1.onrender.com',
+                'https://powercell.onrender.com',
+                'http://localhost:3000',
+                'http://localhost:5173',
+                'http://localhost:5000',
+                'http://127.0.0.1:3000',
+                'http://127.0.0.1:5173',
+            ]
+
         cors_config = {
             'CORSRules': [
+                # Regra 1: Origens explícitas
                 {
                     'AllowedHeaders': ['Content-Type', 'x-amz-*'],
                     'AllowedMethods': ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
-                    'AllowedOrigins': [
-                        'https://powercell.pt',
-                        'https://www.powercell.pt',
-                        'https://powercell-1.onrender.com',
-                        'https://powercell.onrender.com',
-                        'http://localhost:3000',
-                        'http://localhost:5173',
-                        'http://localhost:5000',
-                        'http://127.0.0.1:3000',
-                        'http://127.0.0.1:5173',
-                    ],
+                    'AllowedOrigins': explicit_origins,
                     'ExposeHeaders': [
                         'ETag',
                         'x-amz-request-id',
                         'x-amz-id-2',
                     ],
                     'MaxAgeSeconds': 3600,
-                }
+                },
+                # Regra 2: Curinga para Vercel previews e domínios dinâmicos
+                # Seguro: bucket privado, URLs pre-assinadas com expiração
+                {
+                    'AllowedHeaders': ['Content-Type', 'x-amz-*'],
+                    'AllowedMethods': ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
+                    'AllowedOrigins': ['*'],
+                    'ExposeHeaders': [
+                        'ETag',
+                        'x-amz-request-id',
+                        'x-amz-id-2',
+                    ],
+                    'MaxAgeSeconds': 3600,
+                },
             ]
         }
 
@@ -134,13 +164,16 @@ class S3Service:
                 Bucket=self.bucket_name,
                 CORSConfiguration=cors_config
             )
-            logger.info("✅ S3 CORS configurado com sucesso.")
+            logger.info(f"✅ S3 CORS configurado com sucesso ({len(explicit_origins)} origens explícitas + curinga).")
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', 'Unknown')
             error_msg = e.response.get('Error', {}).get('Message', str(e))
             logger.error(f"❌ Erro ao configurar CORS no S3 [{error_code}]: {error_msg}")
             logger.error("   A IAM key pode não ter permissão s3:PutBucketCORS.")
             logger.error("   Configure manualmente na AWS Console > S3 > Bucket > Permissions > CORS.")
+            logger.error("   CORS config pretendida:")
+            for rule in cors_config['CORSRules']:
+                logger.error(f"     Origens: {rule['AllowedOrigins']}")
 
     def is_configured(self) -> bool:
         """Verifica se o serviço S3 está pronto para operações.
