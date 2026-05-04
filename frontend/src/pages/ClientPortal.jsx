@@ -589,7 +589,7 @@ export default function ClientPortal() {
       <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex items-center gap-3">
           <img
-            src="/PowerLogo-removebg-preview.png"
+            src="/PowerCell-default.png"
             alt="PowerCell"
             className="h-10 w-auto object-contain flex-shrink-0"
           />

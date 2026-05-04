@@ -65,7 +65,7 @@ export default function LoginPage() {
         <div className="relative z-10 flex flex-col justify-center px-12 text-white">
           <div className="flex items-center gap-3 mb-6">
             <img
-              src="/PowerLogo-removebg-preview.png"
+              src="/PowerCell-default.png"
               alt="PowerCell"
               className="h-12 w-auto object-contain"
             />
@@ -94,7 +94,7 @@ export default function LoginPage() {
           <CardHeader className="space-y-1 text-center">
             <div className="flex justify-center mb-4 lg:hidden">
               <img
-                src="/PowerLogo-removebg-preview.png"
+                src="/PowerCell-default.png"
                 alt="PowerCell"
                 className="h-10 w-auto object-contain"
               />

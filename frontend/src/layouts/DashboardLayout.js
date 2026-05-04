@@ -560,7 +560,7 @@ const DashboardLayout = ({ children, title }) => {
           <div className="h-14 flex items-center justify-between px-4 lg:px-6 border-b border-slate-700 bg-slate-900">
             <div className="flex items-center gap-2">
               <img
-                src={user?.company === 'precision' ? '/logoPrecision-removebg-preview.png' : '/PowerLogo-removebg-preview.png'}
+                src={user?.company === 'power' ? '/PowerLogo-removebg-preview.png' : user?.company === 'precision' ? '/logoPrecision-removebg-preview.png' : '/PowerCell-default.png'}
                 alt="Logo"
                 className="h-7 w-auto object-contain"
               />
