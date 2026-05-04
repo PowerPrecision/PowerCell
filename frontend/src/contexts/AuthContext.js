@@ -77,9 +77,17 @@ export function AuthProvider({ children }) {
     }
 
     try {
+      // Incluir o token actual no Authorization header para que o backend
+      // possa preservar metadados de impersonate (se existirem)
+      const currentToken = localStorage.getItem("token");
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) {
+        headers['Authorization'] = `Bearer ${currentToken}`;
+      }
+
       const response = await fetch(`${API_URL}/auth/refresh`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ refresh_token: currentRefreshToken })
       });
 
@@ -305,7 +313,31 @@ export function AuthProvider({ children }) {
       return userData;
     } catch (error) {
       console.error("Error stopping impersonate:", error);
-      // Não redirecionar para login - apenas propagar o erro para o componente tratar
+      
+      // Se o servidor diz que não está em modo impersonate (ex: token foi
+      // renovado e perdeu metadados), limpar o estado local e restaurar o
+      // token original se existir.
+      if (error.response?.status === 400) {
+        const originalToken = localStorage.getItem("originalToken");
+        if (originalToken) {
+          localStorage.setItem("token", originalToken);
+          localStorage.removeItem("originalToken");
+          setAuthToken(originalToken);
+          setToken(originalToken);
+        }
+        setIsImpersonating(false);
+        setOriginalAdminName(null);
+        // Re-buscar dados do utilizador para actualizar o estado
+        try {
+          const meResponse = await api.get("/auth/me");
+          setUser(meResponse.data);
+          window.location.href = "/admin";
+        } catch {
+          window.location.href = "/admin";
+        }
+        return;
+      }
+      
       throw error;
     }
   };

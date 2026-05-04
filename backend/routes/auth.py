@@ -498,7 +498,10 @@ async def refresh_tokens(request: Request, data: dict):
     """
     Renova tokens usando refresh token.
     Implementa rotação segura: token antigo é invalidado, novo é criado.
+    Preserva metadados de impersonate do token anterior, se existirem.
     """
+    import jwt as pyjwt
+    
     refresh_token = data.get("refresh_token")
     if not refresh_token:
         raise HTTPException(status_code=400, detail="refresh_token é obrigatório")
@@ -517,11 +520,28 @@ async def refresh_tokens(request: Request, data: dict):
     
     _, new_refresh_token, user = result
     
+    # Preservar metadados de impersonate do token anterior (se existirem)
+    additional_data = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        old_token = auth_header[7:]
+        try:
+            old_payload = pyjwt.decode(old_token, options={"verify_signature": False, "verify_exp": False})
+            if old_payload.get("is_impersonated"):
+                additional_data = {
+                    "impersonated_by": old_payload.get("impersonated_by"),
+                    "impersonated_by_name": old_payload.get("impersonated_by_name"),
+                    "is_impersonated": True,
+                }
+        except Exception:
+            pass  # Token ilegível — continuar sem metadados de impersonate
+    
     # Criar novo access token
     access_token = create_access_token(
         user["id"],
         user["email"],
-        user["role"]
+        user["role"],
+        additional_data=additional_data
     )
     
     return {
