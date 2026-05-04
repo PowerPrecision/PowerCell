@@ -260,11 +260,13 @@ async def get_portal_status(
     async for doc in uploaded_cursor:
         cat = doc.get("category", "Outros")
         cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
+        # Show custom_label for "Outros" category, otherwise use category label
+        display_label = doc.get("custom_label") if cat == "Outros" and doc.get("custom_label") else cat_info["label"]
         uploaded_docs.append({
             "id": doc.get("id"),
             "filename": doc.get("original_filename", doc.get("filename", "")),
             "category": cat,
-            "category_label": cat_info["label"],
+            "category_label": display_label,
             "icon": cat_info["icon"],
             "uploaded_at": doc.get("uploaded_at", ""),
             "file_size": doc.get("file_size"),
@@ -488,6 +490,7 @@ async def confirm_portal_upload(
     file_size = data.get("file_size")
     content_type = data.get("content_type", "application/octet-stream")
     document_id = data.get("document_id")  # ID do doc REQUESTED a satisfazer
+    custom_label = data.get("custom_label")  # Custom label for "Outros" category
 
     if not file_key:
         raise HTTPException(status_code=400, detail="file_key é obrigatório")
@@ -538,7 +541,7 @@ async def confirm_portal_upload(
         doc_id = str(uuid.uuid4())
         await _create_document_record(
             doc_id, process_id, file_key, original_filename,
-            category, file_size, content_type, now
+            category, file_size, content_type, now, custom_label
         )
 
     # Invalidar cache de estatísticas
@@ -572,7 +575,8 @@ async def confirm_portal_upload(
 async def _create_document_record(
     doc_id: str, process_id: str, file_key: str,
     original_filename: str, category: str,
-    file_size: int, content_type: str, now: str
+    file_size: int, content_type: str, now: str,
+    custom_label: str = None
 ):
     """Cria um registo de documento na BD com status UPLOADED."""
     document = {
@@ -589,6 +593,8 @@ async def _create_document_record(
         "uploaded_by": "portal_client",
         "source": "client_portal",
     }
+    if custom_label:
+        document["custom_label"] = custom_label
     await db.documents.insert_one(document)
 
 

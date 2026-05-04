@@ -3785,7 +3785,7 @@ async def update_portal_document_request(
 async def delete_portal_document_request(
     process_id: str,
     document_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Remove um pedido de documento do portal.

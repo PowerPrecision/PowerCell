@@ -26,9 +26,29 @@ import {
   ExternalLink,
   Shield,
   BarChart3,
+  FolderPlus,
 } from 'lucide-react';
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
+
+// ====================================================================
+// DOCUMENT CATEGORIES (mirrors PortalDocumentRequests.js)
+// ====================================================================
+const DOCUMENT_CATEGORIES = [
+  { value: 'Cartao_Cidadao', label: 'Cartão de Cidadão', icon: '🪪' },
+  { value: 'IRS', label: 'Declaração de IRS', icon: '📋' },
+  { value: 'Recibo_Vencimento', label: 'Recibo de Vencimento', icon: '💰' },
+  { value: 'Comprovativo_IBAN', label: 'Comprovativo de IBAN', icon: '🏦' },
+  { value: 'Certidao_Nascimento', label: 'Certidão de Nascimento', icon: '📄' },
+  { value: 'Atestado_Trabalho', label: 'Atestado de Trabalho', icon: '🏢' },
+  { value: 'Mapa_Creditos', label: 'Mapa de Créditos', icon: '📊' },
+  { value: 'Declaracao_Imposto_Renda', label: 'Declaração de Imposto de Renda', icon: '📑' },
+  { value: 'Certidao_Permanente', label: 'Certidão Permanente', icon: '📜' },
+  { value: 'Contrato_Promessa', label: 'Contrato de Promessa', icon: '📝' },
+  { value: 'Plantas_Casa', label: 'Plantas da Casa', icon: '🏠' },
+  { value: 'Certificado_Energetico', label: 'Certificado Energético', icon: '⚡' },
+  { value: 'Outros', label: 'Outro Documento', icon: '📎' },
+];
 
 // ====================================================================
 // STEP COLOR HELPER
@@ -267,6 +287,188 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
 // ====================================================================
 // DOCUMENTS PANEL — Right column (desktop) / Section (mobile)
 // ====================================================================
+function DocumentCategoryUpload({ onUploadSuccess }) {
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [customLabel, setCustomLabel] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const selectedCatInfo = DOCUMENT_CATEGORIES.find(c => c.value === selectedCategory);
+
+  const doUpload = async (file) => {
+    setUploading(true);
+    setProgress(0);
+    setResult(null);
+
+    try {
+      const token = sessionStorage.getItem('portal_token');
+      if (!token) throw new Error('Sessão expirada. Recarregue a página.');
+
+      // Step 1: pre-signed URL
+      setProgress(10);
+      const urlRes = await fetch(`${BACKEND_URL}/portal/upload-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          filename: file.name,
+          content_type: file.type || 'application/octet-stream',
+          category: selectedCategory,
+        }),
+      });
+      if (!urlRes.ok) { const e = await urlRes.json(); throw new Error(e.detail || 'Erro ao gerar link'); }
+      const { upload_url, file_key } = await urlRes.json();
+
+      // Step 2: upload to S3
+      setProgress(30);
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', upload_url);
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(30 + Math.round((e.loaded / e.total) * 60)); };
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error('Erro ao enviar'));
+        xhr.onerror = () => reject(new Error('Erro de ligação'));
+        xhr.send(file);
+      });
+
+      // Step 3: confirm
+      setProgress(95);
+      const confRes = await fetch(`${BACKEND_URL}/portal/confirm-upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          file_key,
+          original_filename: file.name,
+          category: selectedCategory,
+          file_size: file.size,
+          content_type: file.type,
+          custom_label: selectedCategory === 'Outros' && customLabel ? customLabel : undefined,
+        }),
+      });
+      if (!confRes.ok) { const e = await confRes.json(); throw new Error(e.detail || 'Erro ao confirmar'); }
+
+      setProgress(100);
+      setResult({ success: true, filename: file.name });
+      setSelectedCategory('');
+      setCustomLabel('');
+      setTimeout(() => onUploadSuccess && onUploadSuccess(), 800);
+    } catch (err) {
+      setResult({ error: err.message });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFileSelected = (e) => {
+    const f = e.target.files[0];
+    if (f) doUpload(f);
+    // Reset so the same file can be selected again
+    e.target.value = '';
+  };
+
+  const handleUploadClick = () => {
+    if (!selectedCategory) return;
+    fileInputRef.current?.click();
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <h3 className="text-base font-bold text-gray-800 mb-1 flex items-center gap-2">
+        <FolderPlus className="w-5 h-5 text-teal-600" />
+        Upload de Documentos
+      </h3>
+      <p className="text-sm text-gray-500 mb-4">
+        Envie documentos adicionais para o seu processo.
+      </p>
+
+      <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={handleFileSelected} />
+
+      <div className="space-y-3">
+        {/* Category dropdown */}
+        <div className="relative">
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="w-full appearance-none bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 pr-10 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-colors cursor-pointer"
+          >
+            <option value="">Selecione o tipo de documento...</option>
+            {DOCUMENT_CATEGORIES.map(cat => (
+              <option key={cat.value} value={cat.value}>
+                {cat.icon}  {cat.label}
+              </option>
+            ))}
+          </select>
+          <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none rotate-90" />
+        </div>
+
+        {/* Custom label for "Outros" */}
+        {selectedCategory === 'Outros' && (
+          <input
+            type="text"
+            value={customLabel}
+            onChange={(e) => setCustomLabel(e.target.value)}
+            placeholder="Descreva o documento (ex: Certidão de Casamento)..."
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-colors"
+          />
+        )}
+
+        {/* Upload button */}
+        <button
+          onClick={handleUploadClick}
+          disabled={!selectedCategory || uploading}
+          className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+            !selectedCategory || uploading
+              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              : 'bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800'
+          }`}
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>A enviar... {progress}%</span>
+            </>
+          ) : (
+            <>
+              <Upload className="w-4 h-4" />
+              <span>{selectedCatInfo ? `Enviar ${selectedCatInfo.label}` : 'Enviar Documento'}</span>
+            </>
+          )}
+        </button>
+
+        {/* Progress bar */}
+        {uploading && (
+          <div className="w-full bg-gray-200 rounded-full h-1.5">
+            <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+          </div>
+        )}
+
+        {/* Success message */}
+        {result?.success && (
+          <div className="flex items-center gap-2 p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            <span className="text-sm text-emerald-700 font-medium">Documento enviado com sucesso!</span>
+          </div>
+        )}
+
+        {/* Error message */}
+        {result?.error && (
+          <div className="flex items-center gap-2 p-3 bg-red-50 rounded-xl border border-red-200">
+            <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <span className="text-sm text-red-700 flex-1">{result.error}</span>
+            <button onClick={() => setResult(null)} className="text-xs text-red-500 hover:text-red-700 font-medium flex-shrink-0">
+              Tentar
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// DOCUMENTS PANEL — Right column (desktop) / Section (mobile)
+// ====================================================================
 function DocumentsPanel({ documents, onUploadSuccess }) {
   const { requested = [], uploaded = [], received = [], has_pending } = documents || {};
 
@@ -295,6 +497,9 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
           </div>
         )}
       </div>
+
+      {/* Free Upload with Category Selector */}
+      <DocumentCategoryUpload onUploadSuccess={onUploadSuccess} />
 
       {/* Uploaded by client */}
       {uploaded.length > 0 && (
