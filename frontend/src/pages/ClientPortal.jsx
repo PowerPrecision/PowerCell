@@ -222,11 +222,11 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
   const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files.length > 0) uploadFiles(Array.from(e.dataTransfer.files));
   };
 
   const handleFileChange = (e) => {
-    if (e.target.files.length > 0) uploadFiles(e.target.files);
+    if (e.target.files.length > 0) uploadFiles(Array.from(e.target.files));
     e.target.value = '';
   };
 
@@ -251,7 +251,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
 
         {!uploading && !result?.success && (
           <>
-            <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" multiple
+            <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" multiple={true}
               onChange={handleFileChange} />
             <button onClick={() => fileInputRef.current?.click()}
               className="flex-shrink-0 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1">
