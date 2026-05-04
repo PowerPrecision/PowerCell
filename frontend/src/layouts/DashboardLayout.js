@@ -406,6 +406,11 @@ const DashboardLayout = ({ children, title }) => {
           icon: FileSignature,
           href: "/gestao-formulario",
         },
+        {
+          label: "Estados do Workflow",
+          icon: Activity,
+          href: "/workflow-estados",
+        },
       ],
     };
 
