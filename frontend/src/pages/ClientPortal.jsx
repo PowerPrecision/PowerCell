@@ -235,7 +235,13 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
     : `${progress}%`;
 
   return (
-    <div className={`border rounded-xl p-3 transition-all relative ${uploading ? 'border-emerald-300 bg-emerald-50/50' : result?.success ? 'border-emerald-200 bg-emerald-50' : dragOver ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white'}`}>
+    <div
+      className={`border rounded-xl p-3 transition-all ${uploading ? 'border-emerald-300 bg-emerald-50/50' : result?.success ? 'border-emerald-200 bg-emerald-50' : dragOver ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white'}`}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+    >
       <div className="flex items-center gap-3">
         <span className="text-xl flex-shrink-0">{doc.icon}</span>
         <div className="flex-1 min-w-0">
@@ -287,16 +293,6 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
           <span>{result.error}</span>
           <button onClick={() => setResult(null)} className="ml-auto text-red-400 hover:text-red-600">Tentar</button>
         </div>
-      )}
-
-      {/* Dropzone overlay */}
-      {!uploading && !result?.success && (
-        <div
-          className={`absolute inset-0 rounded-xl border-2 border-dashed transition-colors pointer-events-auto ${dragOver ? 'border-emerald-400 bg-emerald-50' : 'border-transparent'}`}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-        />
       )}
     </div>
   );
