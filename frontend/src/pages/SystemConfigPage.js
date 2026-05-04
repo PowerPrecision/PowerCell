@@ -1511,12 +1511,11 @@ const SystemConfigPage = () => {
       if (response.ok) {
         const data = await response.json();
         // Converter arrays para string em campos textarea
-        if (data.config?.auto_draft?.eligible_doc_types) {
-          data.config.auto_draft.eligible_doc_types = JSON.stringify(
-            data.config.auto_draft.eligible_doc_types,
-            null,
-            2
-          );
+        if (data.config?.auto_draft?.eligible_doc_types != null) {
+          const docTypes = data.config.auto_draft.eligible_doc_types;
+          data.config.auto_draft.eligible_doc_types = Array.isArray(docTypes)
+            ? JSON.stringify(docTypes, null, 2)
+            : String(docTypes);
         }
         setConfig(data.config);
         setFields(data.fields);
@@ -1539,11 +1538,19 @@ const SystemConfigPage = () => {
     // Pré-processar campos especiais
     const processedData = { ...data };
     if (section === "auto_draft" && typeof processedData.eligible_doc_types === "string") {
-      try {
-        processedData.eligible_doc_types = JSON.parse(processedData.eligible_doc_types);
-      } catch {
-        toast.error("Formato inválido em Tipos de Documento Elegíveis (deve ser JSON array)");
-        return;
+      const trimmed = processedData.eligible_doc_types.trim();
+      if (!trimmed) {
+        processedData.eligible_doc_types = [];
+      } else {
+        try {
+          processedData.eligible_doc_types = JSON.parse(trimmed);
+          if (!Array.isArray(processedData.eligible_doc_types)) {
+            processedData.eligible_doc_types = [];
+          }
+        } catch {
+          toast.error("Formato inválido em Tipos de Documento Elegíveis (deve ser JSON array)");
+          return;
+        }
       }
     }
 
