@@ -15,7 +15,7 @@ import { hasRole } from "../utils/roleUtils";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { Building2, Mail, Lock, Loader2, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 export default function LoginPage() {
@@ -64,7 +64,11 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-blue-950/90" />
         <div className="relative z-10 flex flex-col justify-center px-12 text-white">
           <div className="flex items-center gap-3 mb-6">
-            <Building2 className="h-12 w-12 text-amber-400" />
+            <img
+              src="/PowerLogo-removebg-preview.png"
+              alt="PowerCell"
+              className="h-12 w-auto object-contain"
+            />
           </div>
           <h1 className="text-4xl font-bold mb-4 tracking-tight">PowerCell</h1>
           <p className="text-lg text-blue-100 max-w-md">
@@ -89,7 +93,11 @@ export default function LoginPage() {
         <Card className="w-full max-w-md border-border shadow-sm">
           <CardHeader className="space-y-1 text-center">
             <div className="flex justify-center mb-4 lg:hidden">
-              <Building2 className="h-10 w-10 text-blue-900" />
+              <img
+                src="/PowerLogo-removebg-preview.png"
+                alt="PowerCell"
+                className="h-10 w-auto object-contain"
+              />
             </div>
             <CardTitle className="text-2xl font-bold tracking-tight text-foreground">
               Bem-vindo de volta

@@ -556,11 +556,14 @@ const DashboardLayout = ({ children, title }) => {
         style={isImpersonating ? { height: 'calc(100vh - 48px)', top: '48px' } : {}}
       >
         <div className="flex flex-col h-full">
-          {/* Logo - PowerCell */}
+          {/* Logo — dinâmico consoante a empresa */}
           <div className="h-14 flex items-center justify-between px-4 lg:px-6 border-b border-slate-700 bg-slate-900">
             <div className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-amber-400" />
-              <span className="font-bold text-sm tracking-tight text-white">PowerCell</span>
+              <img
+                src={user?.company === 'precision' ? '/logoPrecision-removebg-preview.png' : '/PowerLogo-removebg-preview.png'}
+                alt="Logo"
+                className="h-7 w-auto object-contain"
+              />
             </div>
             <Button
               variant="ghost"

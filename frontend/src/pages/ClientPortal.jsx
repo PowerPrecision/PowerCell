@@ -588,9 +588,11 @@ export default function ClientPortal() {
       {/* Header */}
       <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-emerald-600 to-teal-700 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-sm">
-            PC
-          </div>
+          <img
+            src="/PowerLogo-removebg-preview.png"
+            alt="PowerCell"
+            className="h-10 w-auto object-contain flex-shrink-0"
+          />
           <div className="flex-1 min-w-0">
             <h1 className="text-lg font-bold text-gray-800">PowerCell</h1>
             <p className="text-xs text-gray-400">Acompanhe o seu processo</p>
