@@ -1263,3 +1263,26 @@ Stage Summary:
 - Backward-compat: Old data with display labels auto-converts to internal keys on load
 - nif_hash no longer shows in titular2 NIF field
 - Removed unused Formulário tab
+
+---
+Task ID: fix-s3-cors-portal-upload
+Agent: Main Agent
+Task: Corrigir CORS do S3 que bloqueia uploads do portal do cliente (botão Submeter)
+
+Work Log:
+- **Problema**: Uploads do portal do cliente (presigned URL PUT) falhavam com erro CORS: "No Access-Control-Allow-Origin header is present"
+- **Causa**: O `s3_storage.py` tinha origens CORS hardcoded que não incluíam domínios de preview do Vercel (ex: `power-cell-git-dev-power-precisions-projects.vercel.app`)
+- **Diagnóstico**: O browser faz preflight OPTIONS → S3 não tinha regra CORS para o origin → bloqueava o PUT
+- **Investigação**: O `config.py` já suportava Vercel previews via regex (`CORS_ORIGIN_REGEX`), mas S3 CORS não suporta regex — só origens exatas ou `*`
+- **Fix**: Atualizado `_ensure_cors_configured()` em `s3_storage.py`:
+  - Regra 1: Importa `CORS_ORIGINS` de `config.py` (origens explícitas do env var)
+  - Regra 2: Adiciona `*` como curinga para Vercel previews e outros domínios dinâmicos
+  - Fallback hardcoded se import do config falhar
+  - Logging melhorado para mostrar config pretendida em caso de erro
+- **Segurança**: O uso de `*` é seguro porque o bucket é privado e todo acesso requer URLs pre-assinadas com assinatura criptográfica + expiração de 5 minutos. CORS é apenas mecanismo do browser.
+
+Stage Summary:
+- 1 ficheiro alterado: `backend/services/s3_storage.py` (+45/-12 linhas)
+- Commit: `24cd0b8` on dev branch
+- O CORS será aplicado ao bucket S3 no próximo restart do backend (Render)
+- Após restart, uploads do portal (PUT presigned URL) funcionarão de qualquer origin
