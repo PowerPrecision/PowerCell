@@ -27,6 +27,25 @@ DEFAULT_CATEGORIES = [
     "Outros"
 ]
 
+# Mapping from portal document categories to S3 admin categories.
+# When a client uploads via the portal with a portal category (e.g. "Cartao_Cidadao"),
+# the file is stored in the corresponding S3 admin category folder (e.g. "Documentos_Pessoais").
+PORTAL_TO_S3_CATEGORY = {
+    "Cartao_Cidadao": "Documentos Pessoais",
+    "Certidao_Nascimento": "Documentos Pessoais",
+    "Atestado_Trabalho": "Documentos Pessoais",
+    "Certidao_Permanente": "Documentos Pessoais",
+    "IRS": "Financeiros",
+    "Recibo_Vencimento": "Financeiros",
+    "Declaracao_Imposto_Renda": "Financeiros",
+    "Mapa_Creditos": "Financeiros",
+    "Comprovativo_IBAN": "Bancários",
+    "Contrato_Promessa": "Imóvel",
+    "Plantas_Casa": "Imóvel",
+    "Certificado_Energetico": "Imóvel",
+    "Outros": "Outros",
+}
+
 
 def sanitize_folder_name(name: str) -> str:
     """Remove caracteres especiais do nome da pasta."""
@@ -1010,7 +1029,10 @@ class S3Service:
         if category.lower() == "all":
             category = "Outros"
         
-        safe_category = sanitize_folder_name(category)
+        # Map portal categories (e.g. "Cartao_Cidadao") to S3 admin categories (e.g. "Documentos Pessoais")
+        mapped_category = PORTAL_TO_S3_CATEGORY.get(category, category)
+        
+        safe_category = sanitize_folder_name(mapped_category)
         file_key = f"{base_path}/{safe_category}/{filename}"
         
         try:
