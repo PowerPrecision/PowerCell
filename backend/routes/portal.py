@@ -229,7 +229,8 @@ async def get_portal_status(
     requested_cursor = db.documents.find(
         {
             "process_id": process_id,
-            "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]}
+            "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
+            "source": {"$ne": "admin_received"}  # Exclude admin-marked received docs
         },
         {"_id": 0, "file_content": 0}
     ).sort("created_at", 1)
@@ -268,6 +269,28 @@ async def get_portal_status(
             "uploaded_at": doc.get("uploaded_at", ""),
             "file_size": doc.get("file_size"),
             "status": doc.get("status", "UPLOADED"),
+        })
+
+    # ── Documentos recebidos pelo admin (marcados como RECEIVED) ──
+    received_docs = []
+    received_cursor = db.documents.find(
+        {
+            "process_id": process_id,
+            "status": {"$in": ["RECEIVED", "received"]}
+        },
+        {"_id": 0, "file_content": 0}
+    ).sort("updated_at", -1)
+
+    async for doc in received_cursor:
+        cat = doc.get("category", "Outros")
+        cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
+        received_docs.append({
+            "id": doc.get("id"),
+            "filename": doc.get("original_filename") or doc.get("filename") or cat_info["label"],
+            "category": cat,
+            "category_label": cat_info["label"],
+            "icon": cat_info["icon"],
+            "received_at": doc.get("reviewed_at", doc.get("updated_at", "")),
         })
 
     # ── Fallback: se não há docs REQUESTED, calcular pendentes por categoria ──
@@ -320,6 +343,7 @@ async def get_portal_status(
         "documents": {
             "requested": requested_docs,
             "uploaded": uploaded_docs,
+            "received": received_docs,
             "has_pending": has_pending,
         },
         "consultor": consultor_info,

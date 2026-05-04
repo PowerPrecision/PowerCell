@@ -435,7 +435,7 @@ async def fix_duplicate_workflow_statuses(user: dict = Depends(require_roles([Us
 
 @router.get("/s3/cors-status")
 @router.post("/s3/fix-cors")
-async def s3_cors_diagnostic(force_fix: bool = False, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def s3_cors_diagnostic(force_fix: bool = False, request: Request = None, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     """
     Diagnóstico e fix da configuração CORS do bucket S3.
 
@@ -470,7 +470,7 @@ async def s3_cors_diagnostic(force_fix: bool = False, user: dict = Depends(requi
             result["has_cors"] = None
 
     # Aplicar CORS (só em POST ou com force_fix)
-    if force_fix or request.method == "POST":
+    if force_fix or (request and request.method == "POST"):
         cors_config = {
             'CORSRules': [
                 {

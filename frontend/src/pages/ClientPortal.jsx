@@ -268,7 +268,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
 // DOCUMENTS PANEL — Right column (desktop) / Section (mobile)
 // ====================================================================
 function DocumentsPanel({ documents, onUploadSuccess }) {
-  const { requested = [], uploaded = [], has_pending } = documents || {};
+  const { requested = [], uploaded = [], received = [], has_pending } = documents || {};
 
   return (
     <div className="space-y-4">
@@ -296,7 +296,7 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
         )}
       </div>
 
-      {/* Uploaded */}
+      {/* Uploaded by client */}
       {uploaded.length > 0 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
@@ -315,6 +315,32 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
                   </p>
                 </div>
                 <Check className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Received by admin (documents delivered outside portal) */}
+      {received && received.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-teal-500" />
+            Documentos Recebidos ({received.length})
+          </h3>
+          <p className="text-xs text-gray-400 mb-3">Estes documentos foram recebidos pela nossa equipa.</p>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {received.map((doc) => (
+              <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-teal-50/50 hover:bg-teal-50 transition-colors">
+                <span className="text-base flex-shrink-0">{doc.icon || '📄'}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-gray-700 truncate font-medium">{doc.filename}</p>
+                  <p className="text-xs text-gray-400">
+                    {doc.category_label || doc.category}
+                    {doc.received_at && ` · ${new Date(doc.received_at).toLocaleDateString('pt-PT')}`}
+                  </p>
+                </div>
+                <Check className="w-4 h-4 text-teal-500 flex-shrink-0" />
               </div>
             ))}
           </div>

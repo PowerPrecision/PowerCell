@@ -101,6 +101,7 @@ import RiskCalculator from "../components/RiskCalculator";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
 import TempLinkButton from "../components/TempLinkButton";
 import SendDocumentationModal from "../components/SendDocumentationModal";
+import PortalDocumentRequests from "../components/PortalDocumentRequests";
 import {
   ArrowLeft,
   User,
@@ -4158,6 +4159,9 @@ const ProcessDetails = () => {
                           />
                         </CardContent>
                       </Card>
+
+                      {/* Pedidos de Documentos do Portal */}
+                      <PortalDocumentRequests processId={id} />
                     </div>
                   </TabsContent>
 

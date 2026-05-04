@@ -679,6 +679,12 @@ export const getRGPDTemplateVersion = (versionId) => api.get(`/rgpd/admin/templa
 export const generateMagicLink = (processId) => api.post(`/processes/${processId}/generate-magic-link`);
 export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/generate-magic-link/send`);
 
+// ===== PORTAL DOCUMENT REQUESTS (Admin manages client doc requests) =====
+export const getPortalDocRequests = (processId) => api.get(`/documents/portal-requests/${processId}`);
+export const createPortalDocRequest = (processId, data) => api.post(`/documents/portal-requests/${processId}`, data);
+export const updatePortalDocRequest = (processId, documentId, data) => api.put(`/documents/portal-requests/${processId}/${documentId}`, data);
+export const deletePortalDocRequest = (processId, documentId) => api.delete(`/documents/portal-requests/${processId}/${documentId}`);
+
 // ===== TTL MIGRATION (Data Lifecycle Management) =====
 export const getTTLStatus = () => api.get("/diagnostics/ttl-status");
 export const migrateTTLFields = () => api.post("/diagnostics/migrate-ttl-fields");
