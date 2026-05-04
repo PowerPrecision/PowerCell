@@ -3641,6 +3641,21 @@ async def create_portal_document_request(
         if category not in DOCUMENT_CATEGORY_MAP:
             category = "Outros"
 
+        # ── Duplicate check: prevent requesting same category twice ──
+        existing = await db.documents.find_one(
+            {
+                "process_id": process_id,
+                "category": category,
+                "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
+            }
+        )
+        if existing:
+            cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category})
+            raise HTTPException(
+                status_code=409,
+                detail=f"Já existe um pedido de '{cat_info['label']}' pendente para este processo."
+            )
+
         doc_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
@@ -3663,7 +3678,9 @@ async def create_portal_document_request(
             "updated_at": now,
         }
 
-        await db.documents.insert_one(doc)
+        insert_result = await db.documents.insert_one(doc)
+        if not insert_result.inserted_id:
+            raise HTTPException(status_code=500, detail="Erro ao inserir documento na base de dados")
 
         # Audit log (fire-and-forget — don't fail the request if history insert fails)
         try:
