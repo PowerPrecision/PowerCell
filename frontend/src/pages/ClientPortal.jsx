@@ -128,20 +128,19 @@ function WorkflowStepper({ stepper }) {
 }
 
 // ====================================================================
-// SINGLE DOCUMENT UPLOAD ITEM
+// SINGLE DOCUMENT UPLOAD ITEM (supports multi-file via drag & drop / multiple)
 // ====================================================================
 function DocumentUploadItem({ doc, onUploadSuccess }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
   const [dragOver, setDragOver] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadCount, setUploadCount] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(1);
   const fileInputRef = useRef(null);
 
   const doUpload = async (file) => {
-    setUploading(true);
     setProgress(0);
-    setResult(null);
 
     try {
       const token = sessionStorage.getItem('portal_token');
@@ -183,25 +182,60 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
       });
       if (!confRes.ok) { const e = await confRes.json(); throw new Error(e.detail || 'Erro ao confirmar'); }
 
-      setProgress(100);
-      setResult({ success: true, filename: file.name });
-      setTimeout(() => onUploadSuccess && onUploadSuccess(), 800);
+      return { success: true, filename: file.name };
     } catch (err) {
-      setResult({ error: err.message });
-    } finally {
-      setUploading(false);
+      return { error: err.message, filename: file.name };
     }
+  };
+
+  const uploadFiles = async (files) => {
+    if (!files || files.length === 0) return;
+
+    setUploading(true);
+    setUploadTotal(files.length);
+    setUploadCount(0);
+    setProgress(0);
+    setResult(null);
+
+    const results = [];
+    for (let i = 0; i < files.length; i++) {
+      setUploadCount(i + 1);
+      const res = await doUpload(files[i]);
+      results.push(res);
+    }
+
+    const successes = results.filter(r => r.success);
+    const errors = results.filter(r => r.error);
+
+    if (errors.length === 0) {
+      setResult({ success: true, count: successes.length });
+      setTimeout(() => onUploadSuccess && onUploadSuccess(), 800);
+    } else if (successes.length > 0) {
+      setResult({ success: true, count: successes.length, errorCount: errors.length });
+      setTimeout(() => onUploadSuccess && onUploadSuccess(), 800);
+    } else {
+      setResult({ error: errors[0].error });
+    }
+    setUploading(false);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) doUpload(file);
+    if (e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files);
   };
 
+  const handleFileChange = (e) => {
+    if (e.target.files.length > 0) uploadFiles(e.target.files);
+    e.target.value = '';
+  };
+
+  const progressLabel = uploadTotal > 1
+    ? `${uploadCount}/${uploadTotal}`
+    : `${progress}%`;
+
   return (
-    <div className={`border rounded-xl p-3 transition-all ${uploading ? 'border-emerald-300 bg-emerald-50/50' : result?.success ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-white'}`}>
+    <div className={`border rounded-xl p-3 transition-all relative ${uploading ? 'border-emerald-300 bg-emerald-50/50' : result?.success ? 'border-emerald-200 bg-emerald-50' : dragOver ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white'}`}>
       <div className="flex items-center gap-3">
         <span className="text-xl flex-shrink-0">{doc.icon}</span>
         <div className="flex-1 min-w-0">
@@ -211,8 +245,8 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
 
         {!uploading && !result?.success && (
           <>
-            <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              onChange={(e) => { const f = e.target.files[0]; if (f) doUpload(f); }} />
+            <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" multiple
+              onChange={handleFileChange} />
             <button onClick={() => fileInputRef.current?.click()}
               className="flex-shrink-0 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1">
               <Upload className="w-3.5 h-3.5" /> Submeter
@@ -223,14 +257,17 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
         {uploading && (
           <div className="flex-shrink-0 flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-            <span className="text-xs text-emerald-600 font-medium">{progress}%</span>
+            <span className="text-xs text-emerald-600 font-medium">{progressLabel}</span>
           </div>
         )}
 
         {result?.success && (
           <div className="flex-shrink-0 flex items-center gap-1 text-emerald-600">
             <CheckCircle2 className="w-4 h-4" />
-            <span className="text-xs font-medium">Enviado</span>
+            <span className="text-xs font-medium">
+              {result.count > 1 ? `${result.count} ficheiros` : 'Enviado'}
+              {result.errorCount ? ` (${result.errorCount} erro${result.errorCount > 1 ? 's' : ''})` : ''}
+            </span>
           </div>
         )}
       </div>
@@ -238,12 +275,13 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
       {/* Progress bar */}
       {uploading && (
         <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2.5">
-          <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+          <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
+            style={{ width: `${uploadTotal > 1 ? ((uploadCount / uploadTotal) * 100) : progress}%` }} />
         </div>
       )}
 
       {/* Error */}
-      {result?.error && (
+      {result?.error && !result?.success && (
         <div className="mt-2 flex items-center gap-1.5 text-xs text-red-600">
           <AlertCircle className="w-3.5 h-3.5" />
           <span>{result.error}</span>
@@ -251,10 +289,10 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
         </div>
       )}
 
-      {/* Hidden dropzone overlay */}
+      {/* Dropzone overlay */}
       {!uploading && !result?.success && (
         <div
-          className={`absolute inset-0 rounded-xl border-2 border-dashed transition-colors pointer-events-none ${dragOver ? 'border-emerald-400 bg-emerald-50' : 'border-transparent'}`}
+          className={`absolute inset-0 rounded-xl border-2 border-dashed transition-colors pointer-events-auto ${dragOver ? 'border-emerald-400 bg-emerald-50' : 'border-transparent'}`}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
@@ -351,50 +389,58 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
 }
 
 // ====================================================================
-// CONSULTANT CARD
+// TEAM CARD — Shows consultants and mediadores
 // ====================================================================
-function ConsultantCard({ consultor }) {
-  if (!consultor) return null;
+function TeamCard({ team, consultor }) {
+  const consultores = team?.consultores || [];
+  const mediadores = team?.mediadores || [];
+  const allContacts = [...consultores, ...mediadores];
 
-  const whatsappUrl = consultor.phone ? `https://wa.me/351${consultor.phone.replace(/\D/g, '')}` : null;
-  const initials = consultor.name ? consultor.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : '?';
+  if (allContacts.length === 0 && !consultor) return null;
+
+  // Fallback for backward compat (single consultor object)
+  const displayContacts = allContacts.length > 0 ? allContacts : (consultor ? [consultor] : []);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-      <h3 className="text-base font-bold text-gray-800 mb-4">O seu Consultor</h3>
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-md">
-          {initials}
-        </div>
-        <div>
-          <p className="font-semibold text-gray-800">{consultor.name}</p>
-          <p className="text-sm text-gray-500">Power Precision</p>
-        </div>
+      <h3 className="text-base font-bold text-gray-800 mb-4">A sua Equipa</h3>
+      <div className="space-y-3">
+        {displayContacts.map((contact, i) => (
+          <ContactCard key={contact.name || i} contact={contact} />
+        ))}
       </div>
-      <div className="space-y-2">
-        {consultor.phone && (
-          <a href={`tel:${consultor.phone}`} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors group">
-            <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center group-hover:bg-emerald-200 transition-colors">
-              <Phone className="w-4 h-4 text-emerald-600" />
-            </div>
-            <span className="text-sm text-gray-700">{consultor.phone}</span>
+    </div>
+  );
+}
+
+function ContactCard({ contact }) {
+  const whatsappUrl = contact.phone ? `https://wa.me/351${contact.phone.replace(/\D/g, '')}` : null;
+  const initials = contact.name ? contact.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : '?';
+  const roleLabel = contact.role ? contact.role.charAt(0).toUpperCase() + contact.role.slice(1) : 'Power Precision';
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-md flex-shrink-0">
+        {initials}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold text-gray-800 text-sm truncate">{contact.name}</p>
+        <p className="text-xs text-gray-400">{roleLabel}</p>
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {contact.phone && (
+          <a href={`tel:${contact.phone}`} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors" title="Telefone">
+            <Phone className="w-4 h-4 text-emerald-600" />
           </a>
         )}
-        {consultor.email && (
-          <a href={`mailto:${consultor.email}`} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors group">
-            <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
-              <Mail className="w-4 h-4 text-blue-600" />
-            </div>
-            <span className="text-sm text-gray-700">{consultor.email}</span>
+        {contact.email && (
+          <a href={`mailto:${contact.email}`} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors" title="Email">
+            <Mail className="w-4 h-4 text-blue-600" />
           </a>
         )}
         {whatsappUrl && (
-          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-3 p-3 bg-green-50 rounded-xl hover:bg-green-100 transition-colors group">
-            <div className="w-9 h-9 rounded-lg bg-green-100 flex items-center justify-center group-hover:bg-green-200 transition-colors">
-              <MessageCircle className="w-4 h-4 text-green-600" />
-            </div>
-            <span className="text-sm text-green-700 font-medium">WhatsApp</span>
+          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="p-2 bg-green-50 rounded-lg hover:bg-green-100 transition-colors" title="WhatsApp">
+            <MessageCircle className="w-4 h-4 text-green-600" />
           </a>
         )}
       </div>
@@ -536,7 +582,7 @@ export default function ClientPortal() {
 
   if (!data) return null;
 
-  const { process, progress, stepper, documents, consultor } = data;
+  const { process, progress, stepper, documents, team, consultor } = data;
   const currentStep = stepper?.find(s => s.is_current);
   const statusColor = currentStep ? stepColor(currentStep.color) : stepColor('green');
 
@@ -606,9 +652,9 @@ export default function ClientPortal() {
               <WorkflowStepper stepper={stepper} />
             </div>
 
-            {/* Consultant (mobile) */}
+            {/* Team (mobile) */}
             <div className="lg:hidden">
-              <ConsultantCard consultor={consultor} />
+              <TeamCard team={team} consultor={consultor} />
             </div>
           </div>
 
@@ -616,9 +662,9 @@ export default function ClientPortal() {
           <div className="lg:col-span-2">
             <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
 
-            {/* Consultant (desktop) */}
+            {/* Team (desktop) */}
             <div className="hidden lg:block">
-              <ConsultantCard consultor={consultor} />
+              <TeamCard team={team} consultor={consultor} />
             </div>
           </div>
 

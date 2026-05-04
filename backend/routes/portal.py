@@ -322,8 +322,8 @@ async def get_portal_status(
 
         has_pending = len(requested_docs) > 0
 
-    # ── Consultor atribuído ──
-    consultor_info = await _get_consultor_info(process)
+    # ── Equipa atribuída (consultores + mediadores) ──
+    team_info = await _get_team_info(process)
 
     return {
         "process": {
@@ -348,7 +348,8 @@ async def get_portal_status(
             "received": received_docs,
             "has_pending": has_pending,
         },
-        "consultor": consultor_info,
+        "team": team_info,
+        "consultor": team_info["consultores"][0] if team_info["consultores"] else None,
     }
 
 
@@ -356,35 +357,64 @@ async def get_portal_status(
 # HELPER: Consultor Info
 # ====================================================================
 
-async def _get_consultor_info(process: dict) -> dict:
-    """Obtém informações de contacto do consultor/mediador atribuído."""
-    user_ids = (
+async def _get_user_contact_info(user_id: str) -> dict:
+    """Obtém informações de contacto de um utilizador."""
+    if not user_id:
+        return None
+    user = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "password": 0}
+    )
+    if not user:
+        return None
+    return {
+        "name": user.get("name", ""),
+        "email": user.get("email", ""),
+        "phone": user.get("phone", ""),
+        "role": user.get("role", ""),
+    }
+
+
+async def _get_team_info(process: dict) -> dict:
+    """Obtém informações da equipa atribuída ao processo.
+
+    Retorna consultores e mediadores como listas separadas, sem duplicados.
+    """
+    # Gather consultor IDs
+    consultor_ids = list(set(filter(None, (
         process.get("assigned_consultor_ids") or
         ([process["assigned_consultor_id"]] if process.get("assigned_consultor_id") else [])
-    )
+    ))))
 
-    if not user_ids:
-        user_ids = (
-            process.get("assigned_mediador_ids") or
-            ([process["assigned_mediador_id"]] if process.get("assigned_mediador_id") else [])
-        )
+    # Gather mediador IDs (excluding consultor IDs to avoid duplicates)
+    mediador_ids = list(set(filter(None, (
+        process.get("assigned_mediador_ids") or
+        ([process["assigned_mediador_id"]] if process.get("assigned_mediador_id") else [])
+    ))))
+    mediador_ids = [mid for mid in mediador_ids if mid not in consultor_ids]
 
-    for user_id in user_ids:
-        if not user_id:
-            continue
-        user = await db.users.find_one(
-            {"id": user_id},
-            {"_id": 0, "password": 0}
-        )
-        if user:
-            return {
-                "name": user.get("name", ""),
-                "email": user.get("email", ""),
-                "phone": user.get("phone", ""),
-                "role": user.get("role", ""),
-            }
+    # Fetch all
+    consultores = []
+    for uid in consultor_ids:
+        info = await _get_user_contact_info(uid)
+        if info:
+            consultores.append(info)
 
-    return None
+    mediadores = []
+    for uid in mediador_ids:
+        info = await _get_user_contact_info(uid)
+        if info:
+            mediadores.append(info)
+
+    # Fallback: if no consultores found, show mediadores as main contacts
+    if not consultores and mediadores:
+        consultores = mediadores
+        mediadores = []
+
+    return {
+        "consultores": consultores,
+        "mediadores": mediadores,
+    }
 
 
 # ====================================================================
