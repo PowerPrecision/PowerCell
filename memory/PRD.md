@@ -5,7 +5,7 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 
 ## Stack Tecnológica
 - **Backend**: FastAPI, MongoDB, Pydantic, JWT Auth, AWS S3, slowapi, sentry-sdk, upstash-redis
-- **Frontend**: React 18, Vite, TailwindCSS, Shadcn UI, Sonner, Lucide Icons, @sentry/react, @axe-core/react
+- **Frontend**: React 19, Vite, TailwindCSS 4, Shadcn UI, Sonner, Lucide Icons, @sentry/react, @axe-core/react, @hello-pangea/dnd
 - **DB**: MongoDB (via MONGO_URL)
 - **Observabilidade**: Sentry (backend + frontend)
 - **Cache**: Upstash Redis (REST API, degradação graciosa)
@@ -33,7 +33,9 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Configurações de Perfis (`/configuracoes-perfis`): Permissões por utilizador
 - Gestão do Formulário (`/gestao-formulario`): Campos + templates
 - Motor de Automação No-Code (`/automation`): Regras "Se X, Então Y"
-- Gestão de Estados do Workflow
+- Gestão de Estados do Workflow (`/workflow-estados`): Cores, labels, ordem, portal labels
+- **Portal do Cliente**: Magic links curtos, stepper visual, upload categorizado, pedidos de documentos
+- **Notificações WebSocket**: Notificações em tempo real com fallback polling
 
 ### Segurança e Observabilidade
 - Encriptação AES (Fernet), DOMPurify, MIME validation
@@ -44,6 +46,8 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Nenhuma tarefa prioritária pendente (P1/P2 removidos por opção do utilizador)
 
 ## Correções Recentes
+- **2026-07-03**: Correções de CSP (vercel.live frame-src, wss: connect-src, non-portal completo), React error #31 na gestão de formulários ({value, label} objects como React children), stop-impersonate 400 (metadados de impersonate perdidos no refresh), menu lateral "Estados do Workflow" adicionado
+- **2026-06-29**: Portal do cliente redesenho completo (layout 2 colunas, stepper vertical, upload categorizado, pedidos de documentos), S3 CORS auto-config, mapeamento de categorias portal→S3, show mediador no portal
 - **2026-03-24**: Corrigido Dockerfile + requirements.txt para build de produção. Adicionada pré-visualização de formulário para consultores (`/formulario-consultor`). Filtro por defeito na tabela de registos mostra apenas clientes sem processo. Lista expandível de processos sem atualização no Dashboard. Link S3 automático ao criar processo. Estados finais corrigidos no alerta de processos stale.
 
 ## Credenciais de Teste
@@ -53,8 +57,11 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 
 ## Rotas Principais
 - Formulário público: `/` (raiz)
+- Portal do cliente: `/portal/:token` (magic link)
+- Gestão fases: `/workflow-estados`
 - Form config público: `GET /api/public/form-config`
 - Form config admin: `/api/admin/form-config/*`
+- Portal requests: `/api/documents/portal-requests/*`
 - Templates: `/api/admin/form-config/templates/*`
 - Automação: `/api/admin/automation/*`
 - Perfis: `/configuracoes-perfis`

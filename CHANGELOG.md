@@ -3,6 +3,18 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-03] — Correções de CSP, Impersonate e Gestão de Fases
+
+### Adicionado
+- **Menu "Estados do Workflow" no sidebar** (`feat`): A página `/workflow-estados` existia mas não tinha item no menu lateral, tornando-a inacessível. Adicionado ao grupo "Configurações de Sistema" (visível apenas para admin) com ícone Activity. Permite criar, editar, eliminar e reordenar fases do processo.
+
+### Corrigido
+- **CSP — vercel.live iframe bloqueado** (`fix`): Adicionado `frame-src 'self' https://vercel.live` ao CSP do portal e das páginas administrativas para permitir o iframe de feedback da Vercel em preview deployments.
+- **CSP — wss: WebSocket bloqueado** (`fix`): Adicionado `wss:` ao `connect-src` de ambos os CSPs. As notificações em tempo real via WebSocket estavam bloqueadas pelo Content Security Policy.
+- **CSP — páginas non-portal demasiado restritivas** (`fix`): O CSP das páginas administrativas (non-portal) bloqueava inline scripts, Google Fonts, API calls ao render.com, Sentry e blob workers. Atualizado para permitir `unsafe-inline`/`eval` em script-src, Google Fonts em style-src/font-src, `https:` em connect-src e `blob:` em worker-src.
+- **stop-impersonate retorna 400** (`fix`): Quando o access token era renovado automaticamente (a cada ~2h), os metadados de impersonate eram perdidos — o frontend continuava a mostrar o banner "A ver como..." mas o backend não reconhecia o modo. Corrigido em 3 pontos: (1) Backend `/auth/refresh` preserva metadados de impersonate do token antigo ao criar o novo, (2) Frontend passa o token atual no header Authorization durante refresh, (3) Frontend `stopImpersonating()` trata erro 400 com restauração automática do token original.
+- **React error #31 `{value, label}` na Gestão de Formulários** (`fix`): O backend envia opções em dois formatos (strings e objetos `{value, label}`). O componente `FormManagementPage.js` renderizava objetos diretamente como React children em 7 locais. Adicionadas helpers `optStr()` e `optVal()` para normalizar ambos os formatos em toda a página.
+
 ## [2026-06-29] — Portal do Cliente: UX & Lógica — Redesenho Completo
 
 ### Alterado

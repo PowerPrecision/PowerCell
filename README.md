@@ -7,8 +7,8 @@ Sistema CRM completo para gestão de processos de crédito imobiliário, cliente
 ## Tecnologias
 
 - **Backend**: FastAPI (Python 3.11) + Motor (async MongoDB)
-- **Frontend**: React 19 + Vite + Tailwind CSS 4 + Shadcn UI (New York style)
-- **Base de dados**: MongoDB Atlas
+- **Frontend**: React 19 + Vite + Tailwind CSS 4 + Shadcn UI (New York style) + @hello-pangea/dnd
+- **Base de dados**: MongoDB Atlas (via Motor async driver)
 - **Armazenamento**: AWS S3 (pre-signed URLs)
 - **Armazenamento (Factory)**: AWS S3, Local (filesystem), OneDrive (placeholder) — agnóstico via `storage_service.py`
 - **Cache**: Upstash Redis (REST API, degradação graciosa)
@@ -205,9 +205,13 @@ PowerCell/
 - **Links temporários**: Upload/download seguro por link único (sem login)
 
 ### Portal do Cliente
-- **Magic Link**: Acesso sem password via link único
-- **Upload de documentos**: Cliente envia documentação diretamente
-- **Visualização**: Download de documentos disponíveis
+- **Magic Link**: Acesso sem password via link curto (~50 chars, short_id)
+- **Visualização do processo**: Stepper de fases com cores dinâmicas, estado atual, consultor e mediador
+- **Upload de documentos**: Upload categorizado (13 categorias) com multi-ficheiro
+- **Pedido de documentos**: Admin solicita documentos específicos → cliente vê lista e responde
+- **Documentos carregados**: Cliente vê histórico de uploads com status (pendente, uploaded)
+- **Mapeamento S3 automático**: Categorias do portal mapeiam para pastas S3 do admin
+- **Gestão disponível para todos os roles**: Endpoints portal-requests acessíveis a 8 roles
 
 ### Perfis de Utilizador e Permissões
 
@@ -239,7 +243,7 @@ O perfil de **Indexação** foi projetado para operadores focados na organizaç�
 - **Proteção de dados**: O backend retorna HTTP 403 se o utilizador tentar editar dados base via API
 
 ### Segurança
-- JWT com access token (24h) + refresh token (7d)
+- JWT com access token (2h) + refresh token (7d) com rotação segura
 - Rate limiting por role (admin: 1000/min, consultor: 200/min, cliente: 100/min)
 - Encriptação AES-128-CBC (Fernet) para dados sensíveis
 - **Blind Indexing**: Hashes determinísticos (HMAC-SHA256) para pesquisa de dados encriptados
@@ -378,6 +382,9 @@ flowchart TD
 | GET/PUT | `/api/admin/users` | Gestão de utilizadores |
 | POST | `/api/admin/impersonate/{id}` | Impersonate utilizador |
 | POST | `/api/admin/stop-impersonate` | Parar impersonate |
+| GET/POST/PUT/DELETE | `/api/documents/portal-requests/*` | Gestão pedidos documentos portal |
+| GET | `/api/admin/workflow-statuses` | Estados do workflow |
+| POST/PUT/DELETE | `/api/admin/workflow-statuses/*` | CRUD estados do workflow |
 | GET/PUT | `/api/admin/form-config/fields` | Configuração do formulário |
 | POST/DELETE | `/api/admin/form-config/custom-field` | Campos personalizados |
 | GET/POST/DELETE | `/api/admin/form-config/templates/*` | Templates de formulário |
@@ -573,6 +580,12 @@ npm run build
 
 - `main` - Produção
 - `dev` - Desenvolvimento
+
+## Problemas Conhecidos / Limitações
+
+- **Render cold start**: O backend pode levar ~30s a responder no primeiro request após inatividade
+- **Vercel preview CSP**: Headers CSP são configurados via vercel.json — mudanças requerem novo deploy
+- **S3 CORS**: Configuração automática via endpoint, mas pode requerer verificação manual no bucket
 
 ## Licença
 

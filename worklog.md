@@ -1,6 +1,86 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: sidebar-workflow-estados
+Agent: Main Agent
+Task: Adicionar item "Estados do Workflow" ao menu lateral — utilizador não encontrava a gestão de fases
+
+Work Log:
+- **Problema**: A página `/workflow-estados` existia com CRUD completo (WorkflowStatusesPage + WorkflowEditor), mas não tinha nenhum item no menu lateral — completamente invisível para admins
+- **Investigação**: Confirmado que a rota existia em App.js e a página era acessível por URL direta (admin/ceo), mas o `getNavItems()` em DashboardLayout.js não tinha entrada
+- **Fix**: Adicionado `{ label: "Estados do Workflow", icon: Activity, href: "/workflow-estados" }` ao array `items` do `configSistemaGroup` (linha 409)
+- **O ícone Activity já estava importado** do lucide-react — sem novos imports necessários
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/src/layouts/DashboardLayout.js` (+5 linhas)
+- Commit: `d6988a2` pushed to `dev`
+- Menu: Configurações de Sistema → Estados do Workflow (admin only)
+
+---
+Task ID: fix-csp-vercel-live-stop-impersonate
+Agent: Main Agent
+Task: Corrigir CSP vercel.live framing + erro 400 ao parar impersonate
+
+Work Log:
+- **CSP vercel.live**: Adicionado `frame-src 'self' https://vercel.live` a ambos os CSP (portal e non-portal) no vercel.json
+- **stop-impersonate 400 — diagnóstico**: Quando o access token é renovado (a cada ~2h), os metadados de impersonate eram perdidos. O frontend continuava a mostrar o banner "A ver como..." mas o backend retornava 400 "Não está em modo de personificação"
+- **Fix backend** (`/auth/refresh`): Ao renovar token, extrai metadados de impersonate do token antigo (sem verificar assinatura/expiração) e passa-os para o novo token via `additional_data`
+- **Fix frontend** (`refreshTokens`): Passa o token atual no Authorization header durante refresh para que o backend possa ler os metadados
+- **Fix frontend** (`stopImpersonating`): Se o backend retorna 400, restaura automaticamente o originalToken do localStorage e redireciona para /admin sem mostrar erro
+
+Stage Summary:
+- 3 ficheiros alterados: `frontend/vercel.json`, `backend/routes/auth.py`, `frontend/src/contexts/AuthContext.js`
+- Commit: `4e462de` pushed to `dev`
+
+---
+Task ID: fix-csp-complete-non-portal
+Agent: Main Agent
+Task: Completar CSP das páginas non-portal — bloqueava inline scripts, fonts, API calls
+
+Work Log:
+- **Problema**: CSP non-portal tinha apenas `frame-ancestors 'none'` + `default-src 'self'`, bloqueando: inline scripts/styles, Google Fonts, API calls ao render.com, Sentry, blob workers
+- **Fix**: CSP atualizado para permitir: `unsafe-inline`/`eval` em script-src, Google Fonts em style-src/font-src, `https:` em connect-src, `blob:` em worker-src/script-src
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/vercel.json` (connect-src + style-src + font-src + script-src + worker-src)
+- Commit: `accf8b2` pushed to `dev`
+
+---
+Task ID: fix-wss-csp-react-error-31
+Agent: Main Agent
+Task: Adicionar wss: ao CSP + corrigir React error #31 em Gestão de Formulários
+
+Work Log:
+- **wss CSP**: Adicionado `wss:` ao connect-src em ambos os CSP (portal e non-portal) para permitir ligações WebSocket ao backend
+- **React error #31 — diagnóstico**: O backend DEFAULT_FORM_CONFIG envia opções em dois formatos: strings `"individual"` e objetos `{value: "solteiro", label: "Solteiro(a)"}`. O componente FormManagementPage.js renderizava objetos como React children em 7 locais
+- **Fix**: Adicionadas helpers `optStr()` e `optVal()` no topo do ficheiro. Aplicadas a todos os 7 locais:
+  1. WysiwygFieldPreview — select options
+  2. WysiwygFieldPreview — checkbox options
+  3. Step visibility dialog — trigger field dropdown
+  4. Edit field dialog — checkbox list (depends_on_values)
+  5. Edit field dialog — operator value dropdown
+  6. Edit field dialog — options list display
+  7. New field dialog — options list display
+
+Stage Summary:
+- 2 ficheiros alterados: `frontend/vercel.json`, `frontend/src/pages/FormManagementPage.js`
+- Commit: `42e4c5d` pushed to `dev`
+- React error #31 resolvido — opção `{value, label}` agora tratada como string em todo o FormManagementPage
+
+---
+Task ID: docs-update-session
+Agent: Main Agent
+Task: Atualizar worklog, CHANGELOG, README, PRD e restante documentação
+
+Work Log:
+- Leitura completa de worklog.md (1185 linhas), CHANGELOG.md (393), README.md (579), ARCHITECTURE.md (831), PRD.md
+- Inventário de toda a documentação existente
+- Atualização de todos os ficheiros com as alterações recentes
+
+Stage Summary:
+- Documentação atualizada com os últimos 4 commits de correção
+
+---
 Task ID: remove-frame-busting
 Agent: Main Agent
 Task: Remover frame-busting que causava erro "Unsafe attempt to load URL" no portal do cliente
