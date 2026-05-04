@@ -29,6 +29,22 @@ import { pt } from "date-fns/locale";
 import { getProcesses, getStats, getUpcomingExpiries, getWorkflowStatuses, createDocumentExpiry, getClientS3Files, analyzeOneDriveDocument } from "../../services/api";
 
 // ====================================================================
+// HELPERS
+// ====================================================================
+
+/**
+ * Safely extracts a string label from a value that may be an object {value, label}.
+ * The backend sometimes returns workflow status labels as objects instead of strings,
+ * which causes React error #31 when rendered directly as a child.
+ */
+export const safeLabel = (label, fallback = "") => {
+  if (label == null) return fallback;
+  if (typeof label === "string") return label;
+  if (typeof label === "object") return label.label || label.value || String(label);
+  return String(label);
+};
+
+// ====================================================================
 // CONSTANTES PARTILHADAS
 // ====================================================================
 export const TYPE_LABELS = {
@@ -156,7 +172,7 @@ export const SearchFilters = ({ searchTerm, setSearchTerm, statusFilter, setStat
       <SelectContent>
         <SelectItem value="all">Todos</SelectItem>
         {workflowStatuses.map((s) => (
-          <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>
+          <SelectItem key={s.name} value={s.name}>{safeLabel(s.label)}</SelectItem>
         ))}
       </SelectContent>
     </Select>

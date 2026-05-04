@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
 import { toast } from "sonner";
+import { safeLabel } from "./dashboard/DashboardShared";
 import {
   Plus,
   Edit,
@@ -292,7 +293,7 @@ const WorkflowEditor = () => {
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-sm truncate">{status.label}</span>
+                    <span className="font-medium text-sm truncate">{safeLabel(status.label)}</span>
                     {status.is_default && (
                       <Badge className="bg-blue-100 text-blue-800 text-xs flex-shrink-0">
                         Padrão

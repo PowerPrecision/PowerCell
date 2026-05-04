@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { safeLabel } from "../components/dashboard/DashboardShared";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -295,7 +296,7 @@ const MyClientsPage = () => {
                   <SelectItem value="all">Todas as fases</SelectItem>
                   {workflowStatuses.map((status) => (
                     <SelectItem key={status.name} value={status.name}>
-                      {status.label}
+                      {safeLabel(status.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>

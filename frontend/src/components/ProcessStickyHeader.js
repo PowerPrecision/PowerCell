@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { safeLabel } from "./dashboard/DashboardShared";
 import {
   Phone,
   Mail,
@@ -164,7 +165,7 @@ const ProcessStickyHeader = ({
             <div className="flex items-center gap-2">
               {/* Status badge */}
               <Badge className={`${currentStatusColor} border text-xs`}>
-                {statusInfo?.label || process?.status}
+                {safeLabel(statusInfo?.label) || process?.status}
               </Badge>
 
               {/* Calculadoras - sempre visíveis */}

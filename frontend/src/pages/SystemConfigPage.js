@@ -1548,8 +1548,8 @@ const SystemConfigPage = () => {
             processedData.eligible_doc_types = [];
           }
         } catch {
-          toast.error("Formato inválido em Tipos de Documento Elegíveis (deve ser JSON array)");
-          return;
+          // If not valid JSON, send as empty array rather than blocking the save
+          processedData.eligible_doc_types = [];
         }
       }
     }

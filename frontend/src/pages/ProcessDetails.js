@@ -33,6 +33,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { safeLabel } from "../components/dashboard/DashboardShared";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -1477,7 +1478,7 @@ const ProcessDetails = () => {
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-200 text-sm">
             <Lock className="h-4 w-4 shrink-0" />
             <span>
-              Este processo encontra-se em estado terminal (<strong>{currentStatusInfo.label}</strong>). 
+              Este processo encontra-se em estado terminal (<strong>{safeLabel(currentStatusInfo.label)}</strong>). 
               A edição de dados está bloqueada para todos os utilizadores.
             </span>
           </div>
@@ -1494,7 +1495,7 @@ const ProcessDetails = () => {
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-xl font-semibold truncate">{process.client_name}</h2>
                 <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
-                  {currentStatusInfo.label}
+                  {safeLabel(currentStatusInfo.label)}
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
@@ -1707,7 +1708,7 @@ const ProcessDetails = () => {
                 </SelectTrigger>
                 <SelectContent>
                   {workflowStatuses.map((s) => (
-                    <SelectItem key={s.id} value={s.name}>{s.label}</SelectItem>
+                    <SelectItem key={s.id} value={s.name}>{safeLabel(s.label)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

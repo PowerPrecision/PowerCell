@@ -13,6 +13,7 @@ import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Search, Eye, Loader2 } from "lucide-react";
+import { safeLabel } from "../dashboard/DashboardShared";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -141,7 +142,7 @@ const ClientSearchTab = ({ workflowStatuses }) => {
                               </TableCell>
                               <TableCell>
                                 <Badge className={`bg-${status?.color || 'gray'}-100 text-${status?.color || 'gray'}-800 border`}>
-                                  {status?.label || process.status}
+                                  {safeLabel(status?.label) || process.status}
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-xs font-mono">

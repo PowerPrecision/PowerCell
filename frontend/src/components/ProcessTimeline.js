@@ -12,6 +12,7 @@ import { ScrollArea, ScrollBar } from "./ui/scroll-area";
 import { Loader2, CheckCircle, Clock, Circle, ArrowRight } from "lucide-react";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeLabel } from "./dashboard/DashboardShared";
 
 // Cores de fallback mapeadas a partir do nome da cor da BD
 const COLOR_MAP = {
@@ -77,7 +78,7 @@ const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, date, daysInPhase }) 
       {/* Label */}
       <div className="mt-1 text-center max-w-[80px]">
         <p className={`text-[10px] font-medium leading-tight ${isCurrent ? "text-blue-600" : isCompleted ? "text-green-600" : "text-gray-500"}`}>
-          {label}
+          {safeLabel(label)}
         </p>
         {date && (
           <p className="text-[9px] text-muted-foreground">
@@ -252,7 +253,7 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
                 className="text-[10px] px-1.5 py-0"
                 style={{ backgroundColor: getColor(currentPhaseInfo.color), color: '#fff' }}
               >
-                {currentPhaseInfo.label}
+                {safeLabel(currentPhaseInfo.label)}
               </Badge>
             )}
           </div>

@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { safeLabel } from "../components/dashboard/DashboardShared";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -457,7 +458,7 @@ export default function ClientsPage() {
                     <SelectItem value="all">Todas as Fases</SelectItem>
                     {availablePhases.map((phase) => (
                       <SelectItem key={phase.name} value={phase.name}>
-                        {phase.label}
+                        {safeLabel(phase.label)}
                       </SelectItem>
                     ))}
                   </SelectContent>
