@@ -91,6 +91,11 @@ const normalizeFields = (rawFields) =>
     order_index: f.order_index ?? f.order ?? i,
   }));
 
+/** Normalize a single option to a string (handles both {value, label} objects and plain strings) */
+const optStr = (opt) => (typeof opt === "object" && opt !== null ? opt.label || opt.value : String(opt));
+/** Get the value from an option (handles both {value, label} objects and plain strings) */
+const optVal = (opt) => (typeof opt === "object" && opt !== null ? String(opt.value) : String(opt));
+
 const prepareFieldsForSave = (fields) => {
   // Convert global order_index to per-step order values.
   // Backend sorts by (step, order) so order must be 1-based per-step.
@@ -126,7 +131,7 @@ const WysiwygFieldPreview = ({ field }) => {
         </SelectTrigger>
         <SelectContent>
           {(options || []).map((opt) => (
-            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+            <SelectItem key={optVal(opt)} value={optVal(opt)}>{optStr(opt)}</SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -137,9 +142,9 @@ const WysiwygFieldPreview = ({ field }) => {
     return (
       <div className="space-y-2">
         {options.slice(0, 6).map((opt) => (
-          <label key={opt} className="flex items-center gap-2 text-sm text-muted-foreground cursor-default">
+          <label key={optVal(opt)} className="flex items-center gap-2 text-sm text-muted-foreground cursor-default">
             <div className="h-4 w-4 rounded border border-muted-foreground/40 bg-muted/30" />
-            {opt}
+            {optStr(opt)}
           </label>
         ))}
         {options.length > 6 && (
@@ -1393,7 +1398,7 @@ const FormManagementPage = () => {
                       {newField.options.map((opt, idx) => (
                         <div key={idx} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                           <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span className="text-sm flex-1">{opt}</span>
+                          <span className="text-sm flex-1">{optStr(opt)}</span>
                           <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500 hover:text-red-700" onClick={() => removeOption(idx)}>
                             <X className="h-3 w-3" />
                           </Button>
@@ -1575,7 +1580,7 @@ const FormManagementPage = () => {
                         </SelectTrigger>
                         <SelectContent>
                           {getStepTriggerFieldOptions(editStepFormData.depends_on_field).map(opt => (
-                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                            <SelectItem key={optVal(opt)} value={optVal(opt)}>{optStr(opt)}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -1767,22 +1772,22 @@ const FormManagementPage = () => {
                         {editFormData.depends_on_operator === "value_in" ? (
                           <div className="max-h-24 overflow-y-auto rounded-md border px-2 py-1.5 bg-background">
                             {dependsOnFieldOptions.map(opt => (
-                              <label key={opt} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                              <label key={optVal(opt)} className="flex items-center gap-2 py-0.5 cursor-pointer">
                                 <Checkbox
-                                  checked={(editFormData.depends_on_values || []).includes(opt)}
+                                  checked={(editFormData.depends_on_values || []).includes(optVal(opt))}
                                   onCheckedChange={(checked) => {
                                     setEditFormData(prev => {
                                       const vals = prev.depends_on_values || [];
                                       return {
                                         ...prev,
                                         depends_on_values: checked
-                                          ? [...vals, opt]
-                                          : vals.filter(v => v !== opt),
+                                          ? [...vals, optVal(opt)]
+                                          : vals.filter(v => v !== optVal(opt)),
                                       };
                                     });
                                   }}
                                 />
-                                <span className="text-xs">{opt}</span>
+                                <span className="text-xs">{optStr(opt)}</span>
                               </label>
                             ))}
                           </div>
@@ -1796,7 +1801,7 @@ const FormManagementPage = () => {
                             </SelectTrigger>
                             <SelectContent>
                               {dependsOnFieldOptions.map(opt => (
-                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                <SelectItem key={optVal(opt)} value={optVal(opt)}>{optStr(opt)}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
@@ -1840,7 +1845,7 @@ const FormManagementPage = () => {
                     <div className="space-y-1.5">
                       {(editFormData.options || []).map((opt, idx) => (
                         <div key={idx} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                          <span className="text-sm flex-1">{opt}</span>
+                          <span className="text-sm flex-1">{optStr(opt)}</span>
                           <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500 hover:text-red-700" onClick={() => removeEditOption(idx)}>
                             <X className="h-3 w-3" />
                           </Button>
