@@ -11,7 +11,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
 import {
   ArrowRight, MessageSquare, FileText, Mail, UserPlus,
-  Clock, Filter, ChevronDown, ChevronUp, CheckSquare
+  Clock, Filter, ChevronDown, ChevronUp, CheckSquare, Globe
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -23,12 +23,14 @@ const EVENT_TYPES = {
   email: { label: "Email", icon: Mail, color: "text-orange-500 bg-orange-50 dark:bg-orange-950" },
   assignment: { label: "Atribuição", icon: UserPlus, color: "text-indigo-500 bg-indigo-50 dark:bg-indigo-950" },
   task: { label: "Tarefa", icon: CheckSquare, color: "text-amber-500 bg-amber-50 dark:bg-amber-950" },
+  portal_upload: { label: "Portal", icon: Globe, color: "text-teal-500 bg-teal-50 dark:bg-teal-950" },
   other: { label: "Outro", icon: Clock, color: "text-gray-500 bg-gray-50 dark:bg-gray-950" },
 };
 
 const classifyEvent = (entry) => {
   if (entry.type === "status_change" || entry.action?.includes("status") || entry.field === "status") return "status_change";
   if (entry.type === "comment" || entry.comment) return "comment";
+  if (entry.action === "DOCUMENT_UPLOADED_BY_CLIENT") return "portal_upload";
   if (entry.type === "document" || entry.action?.includes("document") || entry.action?.includes("upload")) return "document";
   if (entry.type === "email" || entry.action?.includes("email")) return "email";
   if (entry.type === "assignment" || entry.action?.includes("atribu")) return "assignment";
@@ -91,6 +93,13 @@ const EventItem = ({ event }) => {
                 <span className="font-medium">{event.user_name || "Sistema"}</span>
                 {" "}{event.action || "ação de tarefa"}
                 {event.new_value && <span className="text-muted-foreground font-medium"> — {event.new_value}</span>}
+              </p>
+            )}
+            {type === "portal_upload" && (
+              <p className="text-sm">
+                <span className="font-medium">{event.user_name || "Cliente (Portal)"}</span>
+                {" submeteu documento: "}
+                <span className="font-medium">{event.new_value || event.field}</span>
               </p>
             )}
             {type === "other" && (

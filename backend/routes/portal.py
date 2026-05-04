@@ -577,6 +577,21 @@ async def confirm_portal_upload(
     # Invalidar cache de estatísticas
     await invalidate_stats_cache()
 
+    # ── Audit Trail — registo de upload pelo cliente no histórico do processo ──
+    try:
+        from services.history import log_history
+        client_name = process.get("client_name", "Cliente")
+        await log_history(
+            process_id,
+            user={"id": None, "name": f"{client_name} (Portal)", "role": "client_portal"},
+            action="DOCUMENT_UPLOADED_BY_CLIENT",
+            field="documento",
+            old_value=None,
+            new_value=f"{original_filename} [{category}]"
+        )
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao registar histórico de upload: {e}")
+
     # Obter URL temporária para preview
     temporary_url = s3_service.get_presigned_url(file_key) or ""
 
