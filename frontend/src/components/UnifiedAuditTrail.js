@@ -11,7 +11,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
 import {
   ArrowRight, MessageSquare, FileText, Mail, UserPlus,
-  Clock, Filter, ChevronDown, ChevronUp
+  Clock, Filter, ChevronDown, ChevronUp, CheckSquare
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -22,6 +22,7 @@ const EVENT_TYPES = {
   document: { label: "Documento", icon: FileText, color: "text-purple-500 bg-purple-50 dark:bg-purple-950" },
   email: { label: "Email", icon: Mail, color: "text-orange-500 bg-orange-50 dark:bg-orange-950" },
   assignment: { label: "Atribuição", icon: UserPlus, color: "text-indigo-500 bg-indigo-50 dark:bg-indigo-950" },
+  task: { label: "Tarefa", icon: CheckSquare, color: "text-amber-500 bg-amber-50 dark:bg-amber-950" },
   other: { label: "Outro", icon: Clock, color: "text-gray-500 bg-gray-50 dark:bg-gray-950" },
 };
 
@@ -31,6 +32,7 @@ const classifyEvent = (entry) => {
   if (entry.type === "document" || entry.action?.includes("document") || entry.action?.includes("upload")) return "document";
   if (entry.type === "email" || entry.action?.includes("email")) return "email";
   if (entry.type === "assignment" || entry.action?.includes("atribu")) return "assignment";
+  if (entry.type === "task" || entry.action?.includes("tarefa") || entry.field === "tarefa") return "task";
   return "other";
 };
 
@@ -82,6 +84,13 @@ const EventItem = ({ event }) => {
                 <span className="font-medium">{event.user_name || "Sistema"}</span>
                 {" "}{event.action || "atribuiu processo"}
                 {event.new_value && <span className="text-muted-foreground"> a {event.new_value}</span>}
+              </p>
+            )}
+            {type === "task" && (
+              <p className="text-sm">
+                <span className="font-medium">{event.user_name || "Sistema"}</span>
+                {" "}{event.action || "ação de tarefa"}
+                {event.new_value && <span className="text-muted-foreground font-medium"> — {event.new_value}</span>}
               </p>
             )}
             {type === "other" && (

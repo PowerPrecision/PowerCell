@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from database import db
 from models.task import TaskCreate, TaskUpdate, TaskResponse
 from services.auth import get_current_user
+from services.history import log_history
 from services.realtime_notifications import send_realtime_notification
 from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_url, sanitize_html, log_sanitization_rejection)
 
@@ -130,6 +131,10 @@ async def create_task(
     
     await db.tasks.insert_one(task)
     logger.info(f"Tarefa criada: {task_id} por {current_user['name']}")
+
+    # ── Audit Trail ──
+    if task_data.process_id:
+        await log_history(task_data.process_id, current_user, "Criou tarefa", "tarefa", None, title)
     
     # Enviar notificações para os utilizadores atribuídos
     due_info = ""
@@ -453,6 +458,10 @@ async def update_task(
                 )
     
     await db.tasks.update_one({"id": task_id}, {"$set": update_data})
+
+    # ── Audit Trail ──
+    if task.get("process_id"):
+        await log_history(task["process_id"], current_user, "Atualizou tarefa", "tarefa", task.get("title"), update_data.get("title") or task.get("title"))
     
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     enriched = await enrich_task(updated_task)
@@ -483,7 +492,11 @@ async def complete_task(
     )
     
     logger.info(f"Tarefa {task_id} marcada como concluída por {current_user['name']}")
-    
+
+    # ── Audit Trail ──
+    if task.get("process_id"):
+        await log_history(task["process_id"], current_user, "Concluiu tarefa", "tarefa", None, task.get("title"))
+
     # Notificar o criador se for diferente de quem concluiu
     if task["created_by"] != current_user["id"]:
         await send_realtime_notification(
@@ -520,7 +533,11 @@ async def reopen_task(
             "updated_at": datetime.now(timezone.utc).isoformat()
         }}
     )
-    
+
+    # ── Audit Trail ──
+    if task.get("process_id"):
+        await log_history(task["process_id"], current_user, "Reabriu tarefa", "tarefa", None, task.get("title"))
+
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     enriched = await enrich_task(updated_task)
     return TaskResponse(**enriched)
@@ -543,5 +560,9 @@ async def delete_task(
     
     await db.tasks.delete_one({"id": task_id})
     logger.info(f"Tarefa {task_id} eliminada por {current_user['name']}")
+
+    # ── Audit Trail ──
+    if task.get("process_id"):
+        await log_history(task["process_id"], current_user, "Eliminou tarefa", "tarefa", task.get("title"), None)
     
     return {"success": True, "message": "Tarefa eliminada"}
