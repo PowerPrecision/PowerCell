@@ -1990,6 +1990,20 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     # Desencriptar dados sensíveis
     process = decrypt_sensitive_data(process)
     
+    # Auto-sync: se personal_data.email existe mas client_email está vazio, sincronizar
+    pd = process.get("personal_data") or {}
+    pd_email = pd.get("email", "").strip() if pd.get("email") else ""
+    current_client_email = process.get("client_email", "").strip() if process.get("client_email") else ""
+    if pd_email and not current_client_email:
+        sanitized = sanitize_email(pd_email)
+        if sanitized:
+            await db.processes.update_one(
+                {"id": process_id},
+                {"$set": {"client_email": sanitized}}
+            )
+            process["client_email"] = sanitized
+            logger.info(f"Auto-sync: client_email atualizado para '{sanitized}' no processo {process_id}")
+    
     return ProcessResponse(**process)
 
 
@@ -2127,6 +2141,13 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 if not sanitized_name:
                     raise HTTPException(status_code=400, detail="Nome do cliente inválido após sanitização")
                 update_data["client_name"] = sanitized_name
+
+            # Sincronizar personal_data.email → client_email para manter consistência
+            new_email = personal_dict.get("email")
+            if new_email:
+                sanitized_new_email = sanitize_email(new_email)
+                if sanitized_new_email:
+                    update_data["client_email"] = sanitized_new_email
         elif not data.personal_data and not is_indexacao:
             logger.debug(f"No personal_data in update for process {process_id} by {user.get('email')} (role={role})")
         

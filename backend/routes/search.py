@@ -368,6 +368,7 @@ async def search_processes(
     query = {
         "$or": [
             name_filter,
+            {"client_email": simple_regex},
             {"personal_data.nif": simple_regex},
             {"personal_data.email": simple_regex},
             {"personal_data.telefone": simple_regex},

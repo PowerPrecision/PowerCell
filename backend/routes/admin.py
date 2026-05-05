@@ -3302,3 +3302,70 @@ async def admin_test_user_email_config(
     }
     return result
 
+
+@router.post("/sync-process-emails")
+async def sync_process_emails(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """
+    Migração: sincroniza personal_data.email → client_email em todos os processos.
+
+    Corrige processos onde o email existe em personal_data.email mas client_email
+    está vazio ou diferente. Também gera/actualiza o email_hash.
+    """
+    from services.encryption import generate_email_hash
+    from utils.input_sanitization import sanitize_email
+
+    pipeline = [
+        {"$match": {
+            "status": {"$ne": "eliminado"},
+            "$or": [
+                {"personal_data.email": {"$exists": True, "$ne": "", "$ne": None}},
+                {"personal_data.email_hash": {"$exists": True, "$ne": None}},
+            ]
+        }},
+        {"$project": {"id": 1, "client_email": 1, "personal_data.email": 1, "personal_data.email_hash": 1}}
+    ]
+
+    processes = await db.processes.aggregate(pipeline).to_list(length=None)
+    updated = 0
+    errors = 0
+
+    for proc in processes:
+        try:
+            pd_email = (proc.get("personal_data") or {}).get("email", "")
+            pd_email = str(pd_email).strip() if pd_email else ""
+            current = str(proc.get("client_email", "") or "").strip()
+
+            update_fields = {}
+
+            # Sync email se personal_data.email tem valor e client_email está vazio/diferente
+            if pd_email and pd_email != current:
+                sanitized = sanitize_email(pd_email)
+                if sanitized:
+                    update_fields["client_email"] = sanitized
+
+            # Garantir que email_hash existe
+            if pd_email:
+                email_hash = generate_email_hash(pd_email.lower().strip())
+                if email_hash:
+                    existing_hash = (proc.get("personal_data") or {}).get("email_hash")
+                    if existing_hash != email_hash:
+                        update_fields["personal_data.email_hash"] = email_hash
+
+            if update_fields:
+                await db.processes.update_one(
+                    {"id": proc["id"]},
+                    {"$set": update_fields}
+                )
+                updated += 1
+        except Exception as e:
+            errors += 1
+            logger.error(f"Erro ao sincronizar email do processo {proc.get('id')}: {e}")
+
+    return {
+        "success": True,
+        "total_checked": len(processes),
+        "updated": updated,
+        "errors": errors,
+        "message": f"Sincronização concluída: {updated} processos actualizados de {len(processes)} verificados."
+    }
+
