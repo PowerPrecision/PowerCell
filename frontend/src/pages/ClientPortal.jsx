@@ -410,7 +410,16 @@ function TeamCard({ team, consultor }) {
 }
 
 function ContactCard({ contact }) {
-  const whatsappUrl = contact.phone ? `https://wa.me/351${contact.phone.replace(/\D/g, '')}` : null;
+  // Normalizar número para WhatsApp: remover +351/00351 duplicados
+  let whatsappUrl = null;
+  if (contact.phone) {
+    let digits = contact.phone.replace(/\D/g, '');
+    // Se já tem o indicativo 351 no início (com 12 dígitos: 351 + 9 do telemóvel), remover
+    if (digits.startsWith('351') && digits.length === 12) {
+      digits = digits.slice(3);
+    }
+    whatsappUrl = `https://wa.me/351${digits}`;
+  }
   const initials = contact.name ? contact.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : '?';
   const roleLabel = contact.role ? contact.role.charAt(0).toUpperCase() + contact.role.slice(1) : 'Power Precision';
 
