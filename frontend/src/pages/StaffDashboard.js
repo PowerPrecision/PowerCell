@@ -24,7 +24,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Loader2, LayoutGrid, Calendar, Users, FileText, FileX, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert, Mail, Send, Trash2, Edit3, ChevronRight, AlertCircle, Rss } from "lucide-react";
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
-import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, getAutoDrafts, sendAutoDraft, deleteAutoDraft, getWebmailStats } from "../services/api";
+import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, createClient, getAutoDrafts, sendAutoDraft, deleteAutoDraft, getWebmailStats } from "../services/api";
 import SmartClientSearch from "../components/SmartClientSearch";
 import TeamMural from "../components/TeamMural";
 import { hasRole, filterByAnyRole, filterByRole } from "../utils/roleUtils";
@@ -244,8 +244,38 @@ const StaffDashboard = () => {
       const clientPhone = selectedClient?.phone || newLead.client_phone;
       const clientNif = selectedClient?.nif || "";
 
+      let clientId = selectedClient?.id || null;
+
+      // Se é um cliente novo (sem ID), criar primeiro na BD
+      if (!clientId) {
+        try {
+          const newClientRes = await createClient({
+            nome: clientName,
+            contacto: {
+              email: clientEmail || undefined,
+              telefone: clientPhone || undefined,
+            },
+            dados_pessoais: {
+              nif: clientNif || undefined,
+            },
+          });
+          clientId = newClientRes.data?.id || newClientRes.data?.client?.id;
+          if (!clientId) {
+            toast.error('Erro ao criar cliente: resposta sem ID');
+            return;
+          }
+        } catch (createErr) {
+          console.error('Erro ao criar cliente:', createErr);
+          toast.error(createErr.response?.data?.detail || 'Erro ao criar cliente na base de dados');
+          return;
+        }
+      }
+
       const payload = {
         process_type: newLead.process_type,
+        client_id: clientId,
+        client_name: clientName,
+        client_email: clientEmail,
         personal_data: {
           nome_completo: clientName,
           email: clientEmail,
@@ -253,13 +283,6 @@ const StaffDashboard = () => {
           ...(clientNif ? { nif: clientNif } : {}),
         }
       };
-
-      // Se veio da pesquisa (cliente existente), passar client_id
-      if (selectedClient?.id) {
-        payload.client_id = selectedClient.id;
-        payload.client_name = clientName;
-        payload.client_email = clientEmail;
-      }
 
       await createClientProcess(payload);
       

@@ -32,7 +32,7 @@ import {
 } from '../ui/select';
 import { Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { createClientProcess } from '../../services/api';
+import { createClientProcess, createClient } from '../../services/api';
 import SmartClientSearch from '../SmartClientSearch';
 
 const INITIAL_FORM_STATE = {
@@ -62,8 +62,39 @@ const CreateClientModal = memo(({
 
     setIsCreating(true);
     try {
+      let clientId = selectedClient.id;
+
+      // Se é um cliente novo (sem ID), criar primeiro na BD
+      if (!clientId) {
+        try {
+          const newClientRes = await createClient({
+            nome: selectedClient.name,
+            contacto: {
+              email: selectedClient.email || undefined,
+              telefone: selectedClient.phone || undefined,
+            },
+            dados_pessoais: {
+              nif: selectedClient.nif || undefined,
+            },
+          });
+          clientId = newClientRes.data?.id || newClientRes.data?.client?.id;
+          if (!clientId) {
+            toast.error('Erro ao criar cliente: resposta sem ID');
+            return;
+          }
+        } catch (createErr) {
+          console.error('Erro ao criar cliente:', createErr);
+          toast.error(createErr.response?.data?.detail || 'Erro ao criar cliente na base de dados');
+          return;
+        }
+      }
+
+      // Criar o processo com o client_id
       const payload = {
         process_type: formData.process_type,
+        client_id: clientId,
+        client_name: selectedClient.name,
+        client_email: selectedClient.email,
         personal_data: {
           nome_completo: selectedClient.name,
           email: selectedClient.email,
@@ -71,13 +102,6 @@ const CreateClientModal = memo(({
           ...(selectedClient.nif ? { nif: selectedClient.nif } : {}),
         },
       };
-
-      // Se cliente existente, passar o ID para o backend
-      if (selectedClient.id) {
-        payload.client_id = selectedClient.id;
-        payload.client_name = selectedClient.name;
-        payload.client_email = selectedClient.email;
-      }
 
       await createClientProcess(payload);
       toast.success(`Processo criado para "${selectedClient.name}"!`);
