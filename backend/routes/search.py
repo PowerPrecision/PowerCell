@@ -89,6 +89,36 @@ def create_accent_insensitive_regex(search_term: str) -> dict:
     return {"$regex": pattern, "$options": ""}  # Não precisa de 'i' porque já incluímos maiúsculas
 
 
+def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
+    """
+    Constrói filtro de pesquisa que suporta múltiplas palavras.
+    
+    Se o termo contém espaços, divide em palavras e exige que TODAS
+    apareçam em qualquer ordem no campo de nome (AND lógico).
+    
+    Exemplo: 'vera teixeira' encontra 'Vera Lucia Da Costa Teixeira'
+    porque 'vera' E 'teixeira' existem no nome.
+    """
+    if not search_term:
+        return {}
+    
+    words = search_term.strip().split()
+    
+    if len(words) <= 1:
+        return {name_field: create_accent_insensitive_regex(search_term.strip())}
+    
+    # Múltiplas palavras — AND: cada palavra deve aparecer no campo
+    word_filters = []
+    for word in words:
+        if len(word.strip()) >= 1:
+            word_filters.append({name_field: create_accent_insensitive_regex(word.strip())})
+    
+    if len(word_filters) == 1:
+        return word_filters[0]
+    
+    return {"$and": word_filters}
+
+
 @router.get("/global")
 async def global_search(
     q: str = Query(..., min_length=1, description="Termo de pesquisa"),
@@ -150,8 +180,9 @@ async def global_search(
     
     try:
         # Pesquisar processos - usar blind indexes quando apropriado
+        name_filter_processes = build_multiword_search_filter(search_term, "client_name")
         process_search_conditions = [
-            {"client_name": regex_pattern},
+            name_filter_processes,
             {"process_type": regex_pattern},
         ]
         
@@ -194,8 +225,9 @@ async def global_search(
         results["processes"] = processes
         
         # Pesquisar CLIENTES (registos de clientes) - usar blind indexes
+        name_filter_clients = build_multiword_search_filter(search_term, "nome")
         client_search_conditions = [
-            {"nome": regex_pattern},
+            name_filter_clients,
         ]
         
         # Se parece NIF, usar blind index
@@ -275,11 +307,12 @@ async def global_search(
         results["clients"] = formatted_clients
         
         # Pesquisar tarefas
+        name_filter_tasks = build_multiword_search_filter(search_term, "client_name")
         task_query = {
             "$or": [
                 {"title": regex_pattern},
                 {"description": regex_pattern},
-                {"client_name": regex_pattern},
+                name_filter_tasks,
             ]
         }
         
@@ -330,9 +363,11 @@ async def search_processes(
     regex_pattern = create_accent_insensitive_regex(search_term)
     simple_regex = {"$regex": re.escape(search_term), "$options": "i"}
     
+    name_filter = build_multiword_search_filter(search_term, "client_name")
+    
     query = {
         "$or": [
-            {"client_name": regex_pattern},
+            name_filter,
             {"personal_data.nif": simple_regex},
             {"personal_data.email": simple_regex},
             {"personal_data.telefone": simple_regex},
@@ -370,10 +405,11 @@ async def get_search_suggestions(
     
     # Regex que ignora acentos para sugestões
     regex_pattern = create_accent_insensitive_regex(search_term)
+    name_filter = build_multiword_search_filter(search_term, "client_name")
     
     # Buscar nomes de clientes que começam com o termo
     clients = await db.processes.find(
-        {"client_name": regex_pattern},
+        name_filter,
         {"_id": 0, "client_name": 1}
     ).limit(5).to_list(5)
     

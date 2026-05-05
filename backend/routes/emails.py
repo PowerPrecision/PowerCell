@@ -2761,13 +2761,12 @@ async def webmail_sync_user(
         }
     
     # === UTILIZADORES NORMAIS: usar credenciais pessoais ===
-    # Verificar se o utilizador tem configuração
-    user = await db.users.find_one(
-        {"id": user_id},
-        {"_id": 0, "email_config": 1}
-    )
+    # Usar o resolver que suporta config individual, company e system (herança)
+    active_role = user_role  # já obtido acima via get_effective_role
+    from services.email_config_resolver import resolve_email_config_for_sync
+    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role)
     
-    if not user or not user.get("email_config", {}).get("is_configured"):
+    if not resolved:
         return {
             "success": False,
             "error": "Configuração de email não encontrada. Vá ao seu Perfil > Configuração de Webmail para configurar."

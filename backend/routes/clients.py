@@ -107,10 +107,10 @@ async def get_my_assigned_clients(
     # Search filter
     if search:
         search = sanitize_string(search, max_length=200)
-        name_regex = create_accent_insensitive_regex(search)
+        name_filter = build_multiword_search_filter(search, "client_name")
         search_filter = {
             "$or": [
-                {"client_name": name_regex},
+                name_filter,
                 {"client_email": {"$regex": re.escape(search), "$options": "i"}}
             ]
         }
@@ -162,17 +162,9 @@ async def get_my_assigned_clients(
     }
 
 
-def create_accent_insensitive_regex(search_term: str) -> dict:
-    """
-    Cria um regex MongoDB que ignora acentos.
-    
-    Exemplo: pesquisar 'jose' encontra 'José', 'JOSE', 'josé', 'JÓSÉ'
-    """
-    if not search_term:
-        return {"$regex": "", "$options": "i"}
-    
-    # Mapeamento de caracteres base para todas as suas variantes acentuadas
-    accent_map = {
+def _accent_map() -> dict:
+    """Mapeamento de caracteres base para todas as suas variantes acentuadas."""
+    return {
         'a': '[aàáâãäåAÀÁÂÃÄÅ]',
         'e': '[eèéêëEÈÉÊË]',
         'i': '[iìíîïIÌÍÎÏ]',
@@ -182,6 +174,18 @@ def create_accent_insensitive_regex(search_term: str) -> dict:
         'n': '[nñNÑ]',
         'y': '[yýÿYÝŸ]',
     }
+
+
+def create_accent_insensitive_regex(search_term: str) -> dict:
+    """
+    Cria um regex MongoDB que ignora acentos.
+    
+    Exemplo: pesquisar 'jose' encontra 'José', 'JOSE', 'josé', 'JÓSÉ'
+    """
+    if not search_term:
+        return {"$regex": "", "$options": "i"}
+    
+    accent_map = _accent_map()
     
     # Construir padrão regex caractere a caractere
     pattern_parts = []
@@ -197,6 +201,39 @@ def create_accent_insensitive_regex(search_term: str) -> dict:
     
     pattern = ''.join(pattern_parts)
     return {"$regex": pattern, "$options": ""}
+
+
+def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
+    """
+    Constrói filtro de pesquisa que suporta múltiplas palavras.
+    
+    Se o termo contém espaços, divide em palavras e exige que TODAS
+    apareçam em qualquer ordem no campo de nome (AND lógico).
+    
+    Exemplo: 'vera teixeira' encontra 'Vera Lucia Da Costa Teixeira'
+    porque 'vera' E 'teixeira' existem no nome.
+    
+    Se o termo não tem espaços, comporta-se como create_accent_insensitive_regex.
+    """
+    if not search_term:
+        return {}
+    
+    words = search_term.strip().split()
+    
+    if len(words) <= 1:
+        # Termo único — usar regex simples
+        return {name_field: create_accent_insensitive_regex(search_term.strip())}
+    
+    # Múltiplas palavras — AND: cada palavra deve aparecer no campo
+    word_filters = []
+    for word in words:
+        if len(word.strip()) >= 1:
+            word_filters.append({name_field: create_accent_insensitive_regex(word.strip())})
+    
+    if len(word_filters) == 1:
+        return word_filters[0]
+    
+    return {"$and": word_filters}
 
 
 # As funções de encriptação/desencriptação de clientes estão agora em services/encryption.py
@@ -248,13 +285,13 @@ async def list_registered_clients(
     # NOTA: Para NIF, usamos blind index (nif_hash) para pesquisa exata
     # A pesquisa por regex em NIF plain text é mantida para compatibilidade com dados antigos
     if search:
-        name_regex = create_accent_insensitive_regex(search)
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
+        name_filter = build_multiword_search_filter(search, "nome")
 
         # Verificar se a pesquisa é um NIF válido (9 dígitos)
         nif_clean = re.sub(r'[^\d]', '', search)
         search_conditions = [
-            {"nome": name_regex},
+            name_filter,
             {"contacto.email": simple_regex},
         ]
 
@@ -579,16 +616,17 @@ async def search_clients(
     """Pesquisa leve de clientes para autocomplete."""
     q = sanitize_string(q, max_length=200)
 
-    name_regex = create_accent_insensitive_regex(q)
     simple_regex = {"$regex": re.escape(q), "$options": "i"}
+    name_filter = build_multiword_search_filter(q, "nome")
 
-    query = {
-        "$or": [
-            {"nome": name_regex},
-            {"contacto.email": simple_regex},
-            {"dados_pessoais.nif": simple_regex},
-        ]
-    }
+    # Para email/NIF, usar pesquisa simples (contígua)
+    or_conditions = [
+        name_filter,
+        {"contacto.email": simple_regex},
+        {"dados_pessoais.nif": simple_regex},
+    ]
+
+    query = {"$or": or_conditions}
 
     clients = await db.clients.find(
         query,
@@ -659,11 +697,11 @@ async def list_clients(
         process_query = {}
         
         if search:
-            name_regex = create_accent_insensitive_regex(search)
             simple_regex = {"$regex": re.escape(search), "$options": "i"}
+            name_filter = build_multiword_search_filter(search, "client_name")
             process_query = {
                 "$or": [
-                    {"client_name": name_regex},
+                    name_filter,
                     {"client_email": simple_regex},
                     {"personal_data.nif": simple_regex}
                 ]
@@ -885,11 +923,11 @@ async def list_clients(
     process_query = role_query
     
     if search:
-        name_regex = create_accent_insensitive_regex(search)
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
+        name_filter = build_multiword_search_filter(search, "client_name")
         search_filter = {
             "$or": [
-                {"client_name": name_regex},
+                name_filter,
                 {"client_email": simple_regex},
                 {"personal_data.nif": simple_regex}
             ]
