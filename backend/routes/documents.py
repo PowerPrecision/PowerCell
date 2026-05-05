@@ -3598,7 +3598,7 @@ async def get_portal_document_requests(
         {
             "process_id": process_id,
             "status": {"$in": ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED", "requested", "pending", "uploaded", "submitted", "received"]},
-            "source": {"$in": ["client_portal", "admin_request", None]}
+            "source": {"$in": ["client_portal", "admin_request", "auto_default", None]}
         },
         {"_id": 0}
     ).sort("created_at", 1)

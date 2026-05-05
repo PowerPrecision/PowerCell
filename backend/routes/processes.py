@@ -787,6 +787,37 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # Inserir na base de dados
     await db.processes.insert_one(process_doc)
     
+    # === AUTO-CRIAR DOCUMENTOS PORTAL POR DEFEITO ===
+    # Criar pedidos de documentos padrão para o portal do cliente,
+    # garantindo consistência entre o que o cliente vê no portal
+    # e o que o staff vê nos detalhes do processo.
+    try:
+        from routes.portal import DEFAULT_PENDING_CATEGORIES, DOCUMENT_CATEGORY_MAP
+        now_iso = datetime.now(timezone.utc).isoformat()
+        default_docs = []
+        for cat_key in DEFAULT_PENDING_CATEGORIES:
+            default_docs.append({
+                "id": str(uuid.uuid4()),
+                "process_id": process_id,
+                "category": cat_key,
+                "label": DOCUMENT_CATEGORY_MAP.get(cat_key, {}).get("label", cat_key),
+                "filename": None,
+                "original_filename": None,
+                "s3_key": None,
+                "status": "REQUESTED",
+                "notes": "",
+                "source": "auto_default",
+                "requested_by": user["id"],
+                "requested_by_name": user.get("name", "Sistema"),
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            })
+        if default_docs:
+            await db.documents.insert_many(default_docs)
+            logger.info(f"Criados {len(default_docs)} documentos padrão para processo {process_id}")
+    except Exception as e:
+        logger.warning(f"Erro ao criar documentos padrão para processo {process_id}: {e}")
+    
     # === CACHE INVALIDATION: Novo processo criado por staff afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
     

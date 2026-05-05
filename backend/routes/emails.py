@@ -2804,6 +2804,30 @@ async def webmail_sync_user(
     }
 
 
+@router.get("/jobs/{job_id}")
+async def get_email_job_status(
+    job_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Obtém o estado de um job de sincronização de emails.
+    
+    Permite ao frontend fazer polling para saber quando a sincronização
+    terminou e quantos emails foram sincronizados.
+    """
+    from services.background_jobs import BackgroundJobService
+    
+    job = await BackgroundJobService().get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    
+    # Verificar permissão: apenas o dono do job ou admin podem ver
+    if job.get("user_id") != current_user.get("id") and current_user.get("role") not in ["admin", "ceo", "diretor"]:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    
+    return job
+
+
 @router.get("/process/{process_id}", response_model=List[EmailResponse])
 async def get_process_emails(
     process_id: str,

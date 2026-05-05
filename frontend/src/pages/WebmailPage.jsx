@@ -418,6 +418,41 @@ const WebmailPage = () => {
   // ============================================================
   // SYNC EMAILS (IMAP → DB)
   // ============================================================
+  // Poll job status until completed/failed, then refresh emails
+  const pollJobStatus = useCallback((jobId) => {
+    if (!jobId || !token) return;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/emails/jobs/${jobId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          setSyncing(false);
+          return;
+        }
+        const job = await res.json();
+        if (job.status === 'completed') {
+          const synced = job.result?.synced || 0;
+          toast.success(synced > 0
+            ? `Sincronização concluída: ${synced} email(s) sincronizado(s)`
+            : "Sincronização concluída. Sem novos emails.");
+          setSyncing(false);
+          handleRefresh();
+        } else if (job.status === 'failed') {
+          toast.error(`Erro na sincronização: ${job.error || 'desconhecido'}`);
+          setSyncing(false);
+        } else {
+          // Still processing — poll again in 3 seconds
+          setTimeout(poll, 3000);
+        }
+      } catch {
+        // Network error — retry in 5 seconds
+        setTimeout(poll, 5000);
+      }
+    };
+    setTimeout(poll, 3000); // First check after 3s
+  }, [token, handleRefresh]);
+
   const handleSyncEmails = useCallback(async () => {
     if (!token || syncing) return;
     setSyncing(true);
@@ -445,6 +480,7 @@ const WebmailPage = () => {
 
       if (!response.ok) {
         toast.error(data.detail || "Erro na sincronização");
+        setSyncing(false);
         return;
       }
 
@@ -465,37 +501,35 @@ const WebmailPage = () => {
 
             if (fallbackData.success === false) {
               toast.error(fallbackData.error || "Erro na sincronização global");
+              setSyncing(false);
               return;
             }
 
-            toast.info("Sincronização global iniciada em background. Pode acompanhar o progresso em Tarefas em Background.");
+            toast.info("Sincronização global iniciada...");
             setLastSyncTime(new Date());
-            setTimeout(() => { handleRefresh(); }, 5000);
+            pollJobStatus(fallbackData.job_id);
             return;
           } catch (fallbackError) {
             toast.error(data.error || "Erro na sincronização");
+            setSyncing(false);
             return;
           }
         }
         toast.error(data.error || "Erro na sincronização");
+        setSyncing(false);
         return;
       }
 
-      // Background sync started — show info toast
-      toast.info("Sincronização iniciada em background. Pode acompanhar o progresso em Tarefas em Background.");
+      // Background sync started — poll for completion
+      toast.info("Sincronização iniciada...");
       setLastSyncTime(new Date());
-
-      // Auto-refresh after a delay to pick up synced emails
-      setTimeout(() => {
-        handleRefresh();
-      }, 5000);
+      pollJobStatus(data.job_id);
     } catch (error) {
       console.error("Erro ao sincronizar emails:", error);
       toast.error("Erro de ligação ao servidor");
-    } finally {
       setSyncing(false);
     }
-  }, [token, account, syncing, handleRefresh, activeBox, showTabs]);
+  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
