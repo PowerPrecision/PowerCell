@@ -4,7 +4,7 @@
  */
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { safeString, safeNumber } from "./dashboard/DashboardShared";
+import { safeNumber } from "./dashboard/DashboardShared";
 import { 
   User, Phone, Mail, MapPin, Euro, Building2, 
   Calendar, Clock, Users, Percent

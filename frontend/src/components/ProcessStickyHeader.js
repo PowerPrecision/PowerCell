@@ -11,7 +11,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { safeLabel, safeString, safeNumber } from "./dashboard/DashboardShared";
+import { safeLabel, safeNumber } from "./dashboard/DashboardShared";
+import { safeString } from "../utils/safeString";
 import {
   Phone,
   Mail,
