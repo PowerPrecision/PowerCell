@@ -189,6 +189,7 @@ PowerCell/
 - **Sincronização automática**: Background job sincroniza emails via IMAP (30 dias)
 - **Sincronização manual**: Botão "Sincronizar" no WebmailPage para trigger imediato
 - **Múltiplas contas**: Suporte a Precision Crédito e Power Real Estate (IMAP separado)
+- **Pastas padrão e personalizadas**: 5 pastas padrão (Inbox, Sent, Starred, Drafts, Trash) + pastas personalizadas criadas pelo utilizador
 - **Per-user personal config**: Cada utilizador configura o seu IMAP/SMTP em Perfil > Config Webmail
 - **Shared role accounts**: Indexação/Suporte usam conta partilhada global (Google OAuth ou IMAP)
 - **System SMTP (Bloco A)**: Emails transacionais do sistema (documentação, alertas) via SMTP global configurado pelo Admin
@@ -203,6 +204,7 @@ PowerCell/
 - **Anotações contextuais em PDFs**: 5 tipos de anotação (Nota, Questão, Aviso, Financeiro, Aprovação) em documentos, com resolução e estatísticas por processo
 - **Enviar Documentação para Balcões (Email B2B)**: Envio de documentação para bancos com editor de texto rico (HTML), templates de email personalizáveis, gestão de destinatários BCC, validação de bloqueio por banco, e anexação automática de documentos
 - **Links temporários**: Upload/download seguro por link único (sem login)
+- **Explorador de Ficheiros** (`/ficheiros`): Página dedicada para navegação global no S3, com breadcrumb, pesquisa, upload, download, renomear, eliminar e criação de pastas. Acesso para consultores e intermediários (leitura e download), admin/CEO/diretor/administrativo (acesso total)
 
 ### Portal do Cliente
 - **Magic Link**: Acesso sem password via link curto (~50 chars, short_id)
@@ -212,6 +214,7 @@ PowerCell/
 - **Documentos carregados**: Cliente vê histórico de uploads com status (pendente, uploaded)
 - **Mapeamento S3 automático**: Categorias do portal mapeiam para pastas S3 do admin
 - **Gestão disponível para todos os roles**: Endpoints portal-requests acessíveis a 8 roles
+- **Estado do RGPD**: Quando o consentimento RGPD está assinado, o portal mostra um card verde "RGPD Assinado" com a data. Se pendente, mostra um card amarelo "RGPD Pendente"
 
 ### Perfis de Utilizador e Permissões
 
@@ -222,8 +225,8 @@ O sistema suporta os seguintes perfis (roles), cada um com permissões específi
 | **Admin** | Todas | Todas |
 | **CEO** | Todas | Todas |
 | **Diretor** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, Stats, Imóveis, Minutas, Leads | CRUD processos/clientes, upload/delete docs, financeiros |
-| **Consultor** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Imóveis, Minutas, Leads | CRUD processos/clientes, upload docs, financeiros, imóveis |
-| **Mediador/Intermediário** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Minutas | CRUD processos/clientes, upload docs, financeiros |
+| **Consultor** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Imóveis, Minutas, Leads, Ficheiros (Explorador) | CRUD processos/clientes, upload docs, financeiros, imóveis |
+| **Mediador/Intermediário** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Minutas, Ficheiros (Explorador) | CRUD processos/clientes, upload docs, financeiros |
 | **Administrativo** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, Registos, Validades | CRUD processos/clientes, upload/delete docs |
 | **Indexação** | Kanban, Processos, Clientes, Docs, Notificações, **Meus Clientes** | Upload/delete/download docs, atribuir clientes, gerir tarefas, chat |
 | **Cliente** | Nenhuma (acesso externo via Magic Link) | Upload/download docs |
@@ -391,6 +394,34 @@ flowchart TD
 | GET/POST | `/api/admin/automation/rules` | CRUD regras de automação |
 | GET/PUT | `/api/system-config/*` | Configurações do sistema |
 | GET | `/api/admin/ai-training/stats` | Estatísticas de chamadas IA |
+
+## Rotas Principais (Frontend)
+
+| Rota | Componente | Descrição |
+|------|-----------|----------|
+| `/` | StaffDashboard / AdminDashboard | Dashboard principal (conforme role) |
+| `/kanban` | KanbanPage | Quadro Kanban com drag-drop |
+| `/processos` | MyClientsPage | Lista de processos |
+| `/processos/:id` | ProcessDetails | Detalhes do processo |
+| `/clientes` | ClientsPage | Gestão de clientes |
+| `/docs` | DocumentsPage | Documentação |
+| `/calendario` | CalendarPage | Calendário |
+| `/notificacoes` | NotificationsPage | Notificações |
+| `/imoveis` | PropertiesPage | Imóveis |
+| `/minutas` | DraftsPage | Minutas |
+| `/leads` | LeadsPage | Leads |
+| `/meus-clientes` | MyClientsPage | Os Meus Processos |
+| `/financeiro` | FinanceDashboard | Dashboard financeiro |
+| `/automation` | AutomationPage | Motor de automação No-Code |
+| `/gestao-formulario` | FormManagementPage | Gestão do formulário |
+| `/workflow-estados` | WorkflowStatusesPage | Gestão de estados do workflow |
+| `/configuracoes-perfis` | ProfileSettingsPage | Gestão de perfis e permissões |
+| `/definicoes` | SettingsPage | Definições pessoais do utilizador |
+| `/configuracoes` | SystemConfigPage | Configurações do sistema (admin) |
+| `/ficheiros` | FilesExplorerPage | Explorador de ficheiros S3 |
+| `/webmail` | WebmailPage | Cliente de email |
+| `/rgpd/:token` | RGPDPage | Consentimento RGPD (público) |
+| `/formulario-consultor` | PublicClientForm | Pré-visualização do formulário |
 
 ## Configuração
 
@@ -586,6 +617,10 @@ npm run build
 - **Render cold start**: O backend pode levar ~30s a responder no primeiro request após inatividade
 - **Vercel preview CSP**: Headers CSP são configurados via vercel.json — mudanças requerem novo deploy
 - **S3 CORS**: Configuração automática via endpoint, mas pode requerer verificação manual no bucket
+- **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretas, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Definições Gerais.
+- **Rota /definicoes vs /configuracoes**: A rota `/definicoes` carrega a SettingsPage (definições pessoais), enquanto `/configuracoes` carrega a SystemConfigPage (configurações do sistema). Alguns elementos da UI referenciam incorretamente `/definicoes` quando o destino pretendido é `/configuracoes`.
+- **React Minified Error #31**: Em ProcessDetails, objetos `{value, label}` podem ser renderizados como React children, causando erro. Já corrigido em FormManagementPage (helpers `optStr()` e `optVal()`), mas pode ocorrer noutros componentes.
+- **500 error em POST /api/documents/portal-requests/{processId}**: O endpoint de pedido de documentos via portal pode retornar 500 em determinados cenários.
 
 ## Licença
 

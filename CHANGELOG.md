@@ -3,6 +3,28 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-04] — Atualização de Documentação e Issues Conhecidos
+
+### Alterado
+- **Documentação atualizada** (`docs`): README.md, CHANGELOG.md e PRD.md atualizados para refletir o estado atual do sistema:
+  - Perfis de utilizador atualizados (consultores/intermediários têm acesso ao Explorador de Ficheiros)
+  - Rotas documentadas (`/definicoes` vs `/configuracoes` vs `/ficheiros`)
+  - Issues conhecidos documentados (explorador vazio, rota /definicoes, React #31, 500 portal-requests)
+  - Estado do RGPD no portal documentado (card assinado/pendente)
+  - Pastas do webmail documentadas (inbox, sent, starred, drafts, trash + custom)
+  - Explorador de Ficheiros documentado na secção de Documentos
+
+### Problemas Conhecidos (Pendentes)
+- **Explorador de Ficheiros não mostra ficheiros**: Quando o S3 está configurado, o explorador pode não mostrar ficheiros se o Base Path ou as credenciais estiverem incorretas. A UI atual mostra "Nenhum ficheiro encontrado" sem detalhes do erro.
+- **Rota /definicoes incorreta**: Ao clicar "Definições Gerais" nalgumas partes da UI, o utilizador é redirecionado para `/definicoes` (SettingsPage pessoal) em vez de `/configuracoes` (SystemConfigPage). Estes são menus diferentes com propósitos distintos.
+- **React Minified Error #31**: Objetos `{value, label}` renderizados como React children em ProcessDetails (corrige com helpers `optStr()`/`optVal()`, já aplicado em FormManagementPage).
+- **500 Internal Server Error em POST /api/documents/portal-requests/{processId}**: Endpoint de pedidos de documentos via portal pode falhar em certos cenários.
+
+### Funcionalidades Pendentes (Pedidos do Utilizador)
+- **Filtro de documentos já solicitados**: Quando se solicitam documentos ao cliente, os tipos de documento já pedidos devem ser filtrados da lista de seleção (evitar duplicados).
+- **Multi-seleção de documentos**: Permitir selecionar múltiplos tipos de documento ao mesmo tempo quando se pedem documentos ao cliente via portal.
+- **Pastas do Webmail (Enviados, Rascunhos, Lixo)**: Garantir que as pastas Enviados, Rascunhos e Lixo são corretamente sincronizadas e exibidas no webmail.
+
 ## [2026-07-03] — Correções de CSP, Impersonate e Gestão de Fases
 
 ### Adicionado

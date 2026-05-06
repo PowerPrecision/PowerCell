@@ -46,6 +46,7 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Nenhuma tarefa prioritária pendente (P1/P2 removidos por opção do utilizador)
 
 ## Correções Recentes
+- **2026-07-04**: Documentação atualizada com issues conhecidos, funcionalidades pendentes e referência de rotas. Identificados 4 bugs e 3 pedidos de funcionalidade pendentes.
 - **2026-07-03**: Correções de CSP (vercel.live frame-src, wss: connect-src, non-portal completo), React error #31 na gestão de formulários ({value, label} objects como React children), stop-impersonate 400 (metadados de impersonate perdidos no refresh), menu lateral "Estados do Workflow" adicionado
 - **2026-06-29**: Portal do cliente redesenho completo (layout 2 colunas, stepper vertical, upload categorizado, pedidos de documentos), S3 CORS auto-config, mapeamento de categorias portal→S3, show mediador no portal
 - **2026-03-24**: Corrigido Dockerfile + requirements.txt para build de produção. Adicionada pré-visualização de formulário para consultores (`/formulario-consultor`). Filtro por defeito na tabela de registos mostra apenas clientes sem processo. Lista expandível de processos sem atualização no Dashboard. Link S3 automático ao criar processo. Estados finais corrigidos no alerta de processos stale.
@@ -66,3 +67,33 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Automação: `/api/admin/automation/*`
 - Perfis: `/configuracoes-perfis`
 - Gestão formulário: `/gestao-formulario`
+
+## Issues Conhecidos e Bugs (2026-07-04)
+
+### Bugs Reportados
+1. **Explorador de Ficheiros não mostra ficheiros**: O S3 está configurado mas o explorador mostra "Nenhum ficheiro encontrado". Causas possíveis: Base Path incorreto, credenciais S3 inválidas, ou permissões insuficientes. Os consultores e intermediários têm acesso de leitura/download ao explorador (`canViewExplorer`).
+2. **Rota /definicoes incorreta para "Definições Gerais"**: Ao clicar para aceder às definições gerais, alguns elementos da UI navegam para `/definicoes` (SettingsPage - definições pessoais do utilizador) em vez de `/configuracoes` (SystemConfigPage - configurações do sistema). Estas são páginas diferentes.
+3. **React Minified Error #31**: Em ProcessDetails, objetos `{value, label}` são renderizados como React children. Já corrigido em FormManagementPage com helpers `optStr()` e `optVal()`, mas pode persistir noutros componentes.
+4. **500 Internal Server Error em POST /api/documents/portal-requests/{processId}**: O endpoint para criar pedidos de documentos via portal do cliente retorna erro 500 em determinados cenários.
+
+### Funcionalidades Pedidas (Pending)
+1. **Filtro de documentos já solicitados**: Ao pedir documentos ao cliente, filtrar da lista de seleção os tipos de documento que já foram solicitados (evitar pedidos duplicados).
+2. **Multi-seleção de tipos de documento**: Permitir selecionar múltiplos tipos de documento ao mesmo tempo ao solicitar documentos ao cliente (atualmente só permite um de cada vez).
+3. **Pastas do Webmail - Enviados/Rascunhos/Lixo**: As pastas de Enviados, Rascunhos e Lixo devem aparecer e ser corretamente sincronizadas no webmail. O frontend já define 5 pastas (inbox, sent, starred, drafts, trash) mas a sincronização IMAP pode não estar a popular estas pastas corretamente.
+
+## Rotas Importantes (Referência Rápida)
+
+| Rota | Página | Descrição |
+|------|--------|-----------|
+| `/configuracoes` | SystemConfigPage | Configurações do sistema (admin) |
+| `/definicoes` | SettingsPage | Definições pessoais do utilizador |
+| `/ficheiros` | FilesExplorerPage | Explorador de ficheiros S3 |
+| `/webmail` | WebmailPage | Cliente de email IMAP |
+| `/perfil` | ProfilePage | Perfil do utilizador |
+| `/configuracoes-perfis` | ProfileSettingsPage | Gestão de permissões por utilizador |
+| `/gestao-formulario` | FormManagementPage | Gestão do formulário público |
+| `/workflow-estados` | WorkflowStatusesPage | Gestão de estados do workflow |
+| `/rgpd-admin` | RGPDAdminPage | Administração RGPD |
+| `/automation` | AutomationPage | Motor de automação No-Code |
+
+**Nota**: `/configuracoes` e `/definicoes` são rotas DIFERENTES. A primeira é para admin configurar o sistema (SMTP, storage, RGPD, etc.), a segunda é para o utilizador gerir as suas definições pessoais.
