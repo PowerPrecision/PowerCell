@@ -1007,7 +1007,7 @@ export default function RGPDPage() {
                       />
                     ) : (
                       <div className="pr-3 space-y-3 text-xs text-muted-foreground">
-                        <p>A carregar o texto da política de privacidade...</p>
+                        <p className="italic">Texto da política de privacidade indisponível. O documento será gerado com o texto padrão após a assinatura.</p>
                       </div>
                     )}
                   </ScrollArea>
@@ -1037,6 +1037,7 @@ export default function RGPDPage() {
                         <div className="space-y-1 flex-1">
                           <p className="text-sm font-medium text-foreground">
                             {consent.label}
+                            <span className="text-destructive"> *</span>
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {consent.description}
@@ -1119,8 +1120,7 @@ export default function RGPDPage() {
                   </ScrollArea>
                 ) : (
                   <div className="text-sm text-muted-foreground text-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-                    A carregar o texto da minuta...
+                    <p className="italic">Texto da minuta indisponível. O documento será gerado com o texto padrão após a assinatura.</p>
                   </div>
                 )}
               </CardContent>

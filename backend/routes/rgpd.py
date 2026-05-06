@@ -399,68 +399,67 @@ async def get_rgpd_form_data(token: str):
     }
     
     # Renderizar templates com variáveis dinâmicas
+    # Cada template é renderizado de forma independente — se um falhar,
+    # o outro ainda é devolvido (evita perder ambos por um erro isolado).
+    
+    # Helper: substitui variáveis de template de forma segura (converte None → "")
+    def _render(template: str) -> str:
+        if not template:
+            return ""
+        rendered = template
+        rendered = rendered.replace("{{NOME_CLIENTE}}", str(request.get("client_name") or ""))
+        rendered = rendered.replace("{{NOME}}", str(request.get("client_name") or ""))
+        rendered = rendered.replace("{{NOME_EMPRESA}}", str(empresa_nome or ""))
+        rendered = rendered.replace("{{CONTRIBUINTE}}", str(response_data.get("nif") or ""))
+        rendered = rendered.replace("{{MORADA}}", str(response_data.get("morada") or ""))
+        rendered = rendered.replace("{{LOCALIDADE}}", str(response_data.get("localidade") or ""))
+        rendered = rendered.replace("{{CODIGO_POSTAL}}", str(response_data.get("codigo_postal") or ""))
+        rendered = rendered.replace("{{TIPO_DOCUMENTO}}", str(get_tipo_documento_label(tipo_documento)))
+        rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", str(numero_documento or ""))
+        rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", str(response_data.get("validade_documento") or ""))
+        rendered = rendered.replace("{{DATA_ASSINATURA}}", str(data_assinatura or ""))
+        return rendered
+
+    # Tentar obter nome da empresa da configuração do sistema
+    empresa_nome = "Power Real Estate, Lda."
+    try:
+        config = await db.system_config.find_one(
+            {"_id": "main"},
+            {"_id": 0, "settings.empresa_nome": 1}
+        )
+        if config:
+            settings = config.get("settings", {})
+            if settings.get("empresa_nome"):
+                empresa_nome = settings["empresa_nome"]
+    except Exception:
+        pass  # Usar nome padrão
+
+    # Data atual formatada como DD/MM/YYYY
+    data_assinatura = datetime.now(timezone.utc).strftime("%d/%m/%Y")
+
+    # Renderizar template RGPD
     try:
         template_text = await _get_active_rgpd_template()
-        minuta_text = await _get_active_minuta_template()
-        
-        # Tentar obter nome da empresa da configuração do sistema
-        empresa_nome = "Power Real Estate, Lda."
-        try:
-            config = await db.system_config.find_one(
-                {"_id": "main"},
-                {"_id": 0, "settings.empresa_nome": 1}
-            )
-            if config:
-                settings = config.get("settings", {})
-                if settings.get("empresa_nome"):
-                    empresa_nome = settings["empresa_nome"]
-        except Exception:
-            pass  # Usar nome padrão
-        
-        # Data atual formatada como DD/MM/YYYY
-        data_assinatura = datetime.now(timezone.utc).strftime("%d/%m/%Y")
-        
-        # Substituir variáveis dinâmicas no template RGPD
         if template_text:
-            rendered = template_text
-            rendered = rendered.replace("{{NOME_CLIENTE}}", request["client_name"])
-            rendered = rendered.replace("{{NOME}}", request["client_name"])
-            rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
-            rendered = rendered.replace("{{CONTRIBUINTE}}", response_data["nif"])
-            rendered = rendered.replace("{{MORADA}}", response_data["morada"])
-            rendered = rendered.replace("{{LOCALIDADE}}", response_data["localidade"])
-            rendered = rendered.replace("{{CODIGO_POSTAL}}", response_data["codigo_postal"])
-            tipo_documento_label = get_tipo_documento_label(tipo_documento)
-            rendered = rendered.replace("{{TIPO_DOCUMENTO}}", tipo_documento_label)
-            rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", numero_documento)
-            rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", response_data["validade_documento"])
-            rendered = rendered.replace("{{DATA_ASSINATURA}}", data_assinatura)
-            response_data["rgpd_text"] = rendered
+            response_data["rgpd_text"] = _render(template_text)
         else:
-            response_data["rgpd_text"] = None
-        
-        # Substituir variáveis dinâmicas no template Minuta
-        if minuta_text:
-            rendered_minuta = minuta_text
-            rendered_minuta = rendered_minuta.replace("{{NOME_CLIENTE}}", request["client_name"])
-            rendered_minuta = rendered_minuta.replace("{{NOME}}", request["client_name"])
-            rendered_minuta = rendered_minuta.replace("{{NOME_EMPRESA}}", empresa_nome)
-            rendered_minuta = rendered_minuta.replace("{{CONTRIBUINTE}}", response_data["nif"])
-            rendered_minuta = rendered_minuta.replace("{{MORADA}}", response_data["morada"])
-            rendered_minuta = rendered_minuta.replace("{{LOCALIDADE}}", response_data["localidade"])
-            rendered_minuta = rendered_minuta.replace("{{CODIGO_POSTAL}}", response_data["codigo_postal"])
-            rendered_minuta = rendered_minuta.replace("{{TIPO_DOCUMENTO}}", get_tipo_documento_label(tipo_documento))
-            rendered_minuta = rendered_minuta.replace("{{NUMERO_DOCUMENTO}}", numero_documento)
-            rendered_minuta = rendered_minuta.replace("{{VALIDADE_DOCUMENTO}}", response_data["validade_documento"])
-            rendered_minuta = rendered_minuta.replace("{{DATA_ASSINATURA}}", data_assinatura)
-            response_data["minuta_text"] = rendered_minuta
-        else:
-            response_data["minuta_text"] = None
-            
+            logger.warning("[RGPD] Template RGPD vazio — a usar default")
+            response_data["rgpd_text"] = _render(RGPD_DEFAULT_TEMPLATE)
     except Exception as e:
-        logger.warning(f"Não foi possível renderizar templates: {e}")
-        response_data["rgpd_text"] = None
-        response_data["minuta_text"] = None
+        logger.error(f"[RGPD] Erro ao renderizar template RGPD: {e}", exc_info=True)
+        response_data["rgpd_text"] = _render(RGPD_DEFAULT_TEMPLATE)
+
+    # Renderizar template Minuta
+    try:
+        minuta_text = await _get_active_minuta_template()
+        if minuta_text:
+            response_data["minuta_text"] = _render(minuta_text)
+        else:
+            logger.warning("[RGPD] Template Minuta vazio — a usar default")
+            response_data["minuta_text"] = _render(MINUTA_DEFAULT_TEMPLATE)
+    except Exception as e:
+        logger.error(f"[RGPD] Erro ao renderizar template Minuta: {e}", exc_info=True)
+        response_data["minuta_text"] = _render(MINUTA_DEFAULT_TEMPLATE)
     
     return response_data
 
