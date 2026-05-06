@@ -961,8 +961,8 @@ const RGPDPedidosTab = () => {
         onConfirm={handleDelete}
         title="Confirmar Eliminação"
         description="Tem a certeza que deseja eliminar este RGPD? Esta ação não pode ser revertida."
-        itemName={deleteModal.rgpd?.client_name}
-        itemDetails={deleteModal.rgpd ? `${deleteModal.rgpd.client_email} • Estado: ${deleteModal.rgpd.status}` : ""}
+        itemName={safeString(deleteModal.rgpd?.client_name)}
+        itemDetails={deleteModal.rgpd ? `${safeString(deleteModal.rgpd.client_email)} • Estado: ${safeString(deleteModal.rgpd.status)}` : ""}
         loading={actionLoading}
       />
     </div>

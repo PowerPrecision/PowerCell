@@ -6,6 +6,7 @@ import React from "react";
 import { Card, CardContent } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
+import { safeString } from "../../utils/safeString";
 import {
   Select,
   SelectContent,
@@ -44,7 +45,7 @@ export const StatCard = ({ title, value, icon: Icon, color }) => (
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-muted-foreground">{title}</p>
-          <p className={`text-2xl font-bold ${color}`}>{value}</p>
+          <p className={`text-2xl font-bold ${color}`}>{typeof value === 'number' ? value : safeString(value)}</p>
         </div>
         <Icon className={`h-8 w-8 ${color} opacity-50`} />
       </div>
@@ -76,8 +77,8 @@ export const ConfirmDeleteModal = ({
       </DialogHeader>
 
       <div className="py-4 bg-red-50 dark:bg-red-950/30 rounded-lg p-4">
-        {itemName && <p className="font-medium">{itemName}</p>}
-        {itemDetails && <p className="text-sm text-muted-foreground">{itemDetails}</p>}
+        {itemName && <p className="font-medium">{safeString(itemName)}</p>}
+        {itemDetails && <p className="text-sm text-muted-foreground">{safeString(itemDetails)}</p>}
       </div>
 
       <DialogFooter>
