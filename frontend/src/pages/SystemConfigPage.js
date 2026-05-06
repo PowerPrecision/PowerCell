@@ -41,7 +41,6 @@ import { Textarea } from "../components/ui/textarea";
 // Tabs removed — replaced with vertical master-detail layout
 import DocumentRecipientsManager from "../components/DocumentRecipientsManager";
 import RichTextEditor from "../components/ui/RichTextEditor";
-import SmartRichEditor from "../components/ui/SmartRichEditor";
 import {
   Select,
   SelectContent,
@@ -330,9 +329,9 @@ const ConfigSection = ({ section, sectionKey, config, fields, onSave, onTest }) 
     try {
       await onSave(sectionKey, localConfig);
       setHasChanges(false);
-      toast.success("Configuração guardada");
+      toast.success("Configuração guardada", { id: "config-save" });
     } catch (error) {
-      toast.error("Erro ao guardar");
+      toast.error("Erro ao guardar", { id: "config-save" });
     } finally {
       setSaving(false);
     }
@@ -2474,7 +2473,7 @@ const SystemConfigPage = () => {
         });
         if (response.ok) {
           const data = await response.json();
-          toast.success(`Template RGPD guardado (v${data.version || ""})`);
+          toast.success(`Template RGPD guardado (v${data.version || ""})`, { id: "rgpd-save" });
           setOriginalContent(templateContent);
           setChangelog("");
           fetchTemplate();
@@ -2515,6 +2514,27 @@ const SystemConfigPage = () => {
     };
 
     const hasChanges = templateContent !== originalContent;
+
+    // Insert a variable at the current textarea cursor position
+    const insertVariable = (variableKey) => {
+      const textarea = document.querySelector('.rgpd-editor-textarea');
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const before = templateContent.substring(0, start);
+        const after = templateContent.substring(end);
+        const insertion = `{{${variableKey}}}`;
+        setTemplateContent(before + insertion + after);
+        // Restore cursor position after React re-render
+        requestAnimationFrame(() => {
+          textarea.selectionStart = textarea.selectionEnd = start + insertion.length;
+          textarea.focus();
+        });
+      } else {
+        // Fallback: append at end
+        setTemplateContent((prev) => prev + `{{${variableKey}}}`);
+      }
+    };
 
     if (loading) {
       return (
@@ -2569,36 +2589,54 @@ const SystemConfigPage = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <SmartRichEditor
-              value={templateContent}
-              onChange={setTemplateContent}
-              placeholder="Introduza o texto do template RGPD..."
-              readOnly={!isAdminOrCEO}
-              minHeight={300}
-              advanced
-            />
-
-            {/* Variáveis disponíveis */}
-            <div className="bg-muted/50 rounded-lg p-3">
-              <p className="text-sm font-medium mb-2">Variáveis disponíveis:</p>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  "{{NOME_CLIENTE}}",
-                  "{{NOME_EMPRESA}}",
-                  "{{CONTRIBUINTE}}",
-                  "{{MORADA}}",
-                  "{{CODIGO_POSTAL}}",
-                  "{{TIPO_DOCUMENTO}}",
-                  "{{NUMERO_DOCUMENTO}}",
-                  "{{VALIDADE_DOCUMENTO}}",
-                  "{{DATA_ASSINATURA}}",
-                ].map((variable) => (
-                  <Badge key={variable} variant="secondary" className="font-mono text-xs">
-                    {variable}
-                  </Badge>
-                ))}
+            {/* Variable chips — click to insert at cursor position */}
+            {isAdminOrCEO && (
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground font-medium">
+                  Clique numa variável para inserir no texto:
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { key: "NOME_CLIENTE", label: "Nome Cliente" },
+                    { key: "NOME", label: "Nome" },
+                    { key: "NOME_EMPRESA", label: "Empresa" },
+                    { key: "CONTRIBUINTE", label: "NIF" },
+                    { key: "MORADA", label: "Morada" },
+                    { key: "LOCALIDADE", label: "Localidade" },
+                    { key: "CODIGO_POSTAL", label: "C. Postal" },
+                    { key: "TIPO_DOCUMENTO", label: "Tipo Doc." },
+                    { key: "NUMERO_DOCUMENTO", label: "Nº Doc." },
+                    { key: "VALIDADE_DOCUMENTO", label: "Validade" },
+                    { key: "DATA_ASSINATURA", label: "Data Assinatura" },
+                  ].map(({ key, label }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => insertVariable(key)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-muted/40 hover:bg-muted text-xs font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Textarea editor — plain text, no WYSIWYG corruption of {{variables}} */}
+            <textarea
+              value={templateContent}
+              onChange={(e) => setTemplateContent(e.target.value)}
+              disabled={!isAdminOrCEO}
+              placeholder="Introduza o texto do template RGPD... Use {{NOME_CLIENTE}} para variáveis dinâmicas."
+              spellCheck={false}
+              className="rgpd-editor-textarea w-full rounded-lg border border-input bg-background p-4 font-mono text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 text-foreground placeholder:text-muted-foreground"
+              style={{ minHeight: "380px" }}
+            />
+            {isAdminOrCEO && (
+              <p className="text-[11px] text-muted-foreground">
+                Use as variáveis acima para personalizar o documento. Não edite as chavetas {{ }} manualmente — use os botões.
+              </p>
+            )}
 
             {/* Changelog input */}
             {isAdminOrCEO && hasChanges && (
@@ -2678,6 +2716,7 @@ const SystemConfigPage = () => {
                     .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate</span>')
                     .replace(/\{\{CONTRIBUINTE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">123456789</span>')
                     .replace(/\{\{MORADA\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Rua Example, 123, Lisboa</span>')
+                    .replace(/\{\{LOCALIDADE\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Lisboa</span>')
                     .replace(/\{\{CODIGO_POSTAL\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">1000-001</span>')
                     .replace(/\{\{TIPO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">Cartão de Cidadão</span>')
                     .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">CC 00000000</span>')
