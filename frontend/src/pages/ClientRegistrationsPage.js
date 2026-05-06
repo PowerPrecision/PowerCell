@@ -60,6 +60,7 @@ import {
   Clock,
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
+import { safeString } from "../utils/safeString";
 import CreateProcessModal from "../components/CreateProcessModal";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -487,19 +488,19 @@ const ClientRegistrationsPage = () => {
                             ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' 
                             : 'bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300'
                         }`}>
-                          {client.nome?.charAt(0)?.toUpperCase() || "?"}
+                          {safeString(client.nome).charAt(0)?.toUpperCase() || "?"}
                         </div>
                         <div className="min-w-0 flex-1 overflow-hidden">
                           <button
                             onClick={() => handleViewClientDetails(client.id)}
                             className="font-semibold text-left hover:text-primary transition-colors cursor-pointer block truncate w-full"
-                            title={client.nome}
+                            title={safeString(client.nome)}
                           >
-                            {client.nome}
+                            {safeString(client.nome)}
                           </button>
                           {client.fonte && (
                             <Badge variant="outline" className="text-[10px] mt-1 px-1.5 py-0">
-                              {client.fonte}
+                              {safeString(client.fonte)}
                             </Badge>
                           )}
                         </div>
@@ -510,13 +511,13 @@ const ClientRegistrationsPage = () => {
                       {client.contacto?.email && (
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground min-w-0">
                           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span className="truncate" title={client.contacto.email}>{client.contacto.email}</span>
+                          <span className="truncate" title={safeString(client.contacto.email)}>{safeString(client.contacto.email)}</span>
                         </div>
                       )}
                       {client.contacto?.telefone && (
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                           <Phone className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span className="whitespace-nowrap">{client.contacto.telefone}</span>
+                          <span className="whitespace-nowrap">{safeString(client.contacto.telefone)}</span>
                         </div>
                       )}
                     </div>
@@ -525,7 +526,7 @@ const ClientRegistrationsPage = () => {
                       {client.nif ? (
                         <div className="flex items-center gap-1.5 px-2 py-1 bg-muted/50 rounded-md w-fit">
                           <Hash className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="font-mono text-sm font-medium">{client.nif}</span>
+                          <span className="font-mono text-sm font-medium">{safeString(client.nif)}</span>
                         </div>
                       ) : (
                         <span className="text-muted-foreground text-sm italic">Não preenchido</span>
@@ -541,7 +542,7 @@ const ClientRegistrationsPage = () => {
                           </Badge>
                           {client.processes?.length > 0 && (
                             <span className="text-xs text-muted-foreground font-mono">
-                              #{client.processes[0].process_number}
+                              #{safeString(client.processes[0].process_number)}
                             </span>
                           )}
                         </div>
@@ -561,7 +562,7 @@ const ClientRegistrationsPage = () => {
                       {client.assigned_to_name && (
                         <div className="text-xs mt-1.5 flex items-center gap-1 text-primary">
                           <User className="h-3 w-3" />
-                          {client.assigned_to_name}
+                          {safeString(client.assigned_to_name)}
                         </div>
                       )}
                     </div>
@@ -609,7 +610,7 @@ const ClientRegistrationsPage = () => {
               Atribuir Cliente
             </DialogTitle>
             <DialogDescription>
-              Atribuir {assignDialog.client?.nome} a si próprio e criar um novo processo.
+              Atribuir {safeString(assignDialog.client?.nome)} a si próprio e criar um novo processo.
             </DialogDescription>
           </DialogHeader>
 
@@ -619,13 +620,13 @@ const ClientRegistrationsPage = () => {
                 <p className="text-sm font-medium">Dados do Cliente:</p>
                 <div className="mt-2 space-y-1 text-sm text-muted-foreground">
                   {assignDialog.client?.contacto?.email && (
-                    <p>Email: {assignDialog.client.contacto.email}</p>
+                    <p>Email: {safeString(assignDialog.client.contacto?.email)}</p>
                   )}
                   {assignDialog.client?.contacto?.telefone && (
-                    <p>Telefone: {assignDialog.client.contacto.telefone}</p>
+                    <p>Telefone: {safeString(assignDialog.client.contacto?.telefone)}</p>
                   )}
                   {assignDialog.client?.nif && (
-                    <p>NIF: {assignDialog.client.nif}</p>
+                    <p>NIF: {safeString(assignDialog.client.nif)}</p>
                   )}
                 </div>
               </div>
@@ -681,18 +682,18 @@ const ClientRegistrationsPage = () => {
               <div className="flex items-center gap-4 pb-4 border-b">
                 <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
                   <span className="text-2xl font-bold text-primary">
-                    {detailsDialog.client.nome?.charAt(0)?.toUpperCase() || "?"}
+                    {safeString(detailsDialog.client.nome).charAt(0)?.toUpperCase() || "?"}
                   </span>
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold">{detailsDialog.client.nome}</h3>
+                  <h3 className="text-xl font-bold">{safeString(detailsDialog.client.nome)}</h3>
                   <div className="flex items-center gap-2 mt-1">
                     {detailsDialog.client.fonte && (
-                      <Badge variant="outline">{detailsDialog.client.fonte}</Badge>
+                      <Badge variant="outline">{safeString(detailsDialog.client.fonte)}</Badge>
                     )}
                     {detailsDialog.client.nif && (
                       <Badge variant="secondary" className="font-mono">
-                        NIF: {detailsDialog.client.nif}
+                        NIF: {safeString(detailsDialog.client.nif)}
                       </Badge>
                     )}
                   </div>
@@ -709,25 +710,25 @@ const ClientRegistrationsPage = () => {
                   {detailsDialog.client.contacto?.email && (
                     <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                       <Mail className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{detailsDialog.client.contacto.email}</span>
+                      <span className="text-sm">{safeString(detailsDialog.client.contacto.email)}</span>
                     </div>
                   )}
                   {detailsDialog.client.contacto?.telefone && (
                     <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                       <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{detailsDialog.client.contacto.telefone}</span>
+                      <span className="text-sm">{safeString(detailsDialog.client.contacto.telefone)}</span>
                     </div>
                   )}
                   {detailsDialog.client.contacto?.email_secundario && (
                     <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                       <Mail className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{detailsDialog.client.contacto.email_secundario}</span>
+                      <span className="text-sm">{safeString(detailsDialog.client.contacto.email_secundario)}</span>
                     </div>
                   )}
                   {detailsDialog.client.contacto?.telefone_secundario && (
                     <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                       <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{detailsDialog.client.contacto.telefone_secundario}</span>
+                      <span className="text-sm">{safeString(detailsDialog.client.contacto.telefone_secundario)}</span>
                     </div>
                   )}
                   {!detailsDialog.client.contacto?.email && !detailsDialog.client.contacto?.telefone && (
@@ -747,56 +748,56 @@ const ClientRegistrationsPage = () => {
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Data de Nascimento</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.data_nascimento ? formatDateOnly(detailsDialog.client.dados_pessoais.data_nascimento) : <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.data_nascimento ? formatDateOnly(safeString(detailsDialog.client.dados_pessoais.data_nascimento)) : <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Naturalidade</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.naturalidade || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_pessoais?.naturalidade) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Nacionalidade</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.nacionalidade || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_pessoais?.nacionalidade) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <Heart className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Estado Civil</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.estado_civil || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_pessoais?.estado_civil) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <Briefcase className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Profissão</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.profissao || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_pessoais?.profissao) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <FileText className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Documento ID</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.documento_id || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_pessoais?.documento_id) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <Hash className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">NIF</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.nif || detailsDialog.client.nif || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_pessoais?.nif) || safeString(detailsDialog.client.nif) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-2 p-2 bg-muted/50 rounded-lg">
                     <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
                     <div>
                       <p className="text-xs text-muted-foreground">Morada Fiscal</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.morada_fiscal || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_pessoais?.morada_fiscal) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                 </div>
@@ -815,7 +816,7 @@ const ClientRegistrationsPage = () => {
                       <p className="text-xs text-muted-foreground">Rendimento Mensal</p>
                       <p className="text-sm font-medium">
                         {detailsDialog.client.dados_financeiros?.rendimento_mensal
-                          ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.rendimento_mensal)
+                          ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(safeString(detailsDialog.client.dados_financeiros.rendimento_mensal))
                           : <span className="text-muted-foreground italic">Não preenchido</span>}
                       </p>
                     </div>
@@ -826,7 +827,7 @@ const ClientRegistrationsPage = () => {
                       <p className="text-xs text-muted-foreground">Rendimento Anual</p>
                       <p className="text-sm font-medium">
                         {detailsDialog.client.dados_financeiros?.rendimento_anual
-                          ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(detailsDialog.client.dados_financeiros.rendimento_anual)
+                          ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(safeString(detailsDialog.client.dados_financeiros.rendimento_anual))
                           : <span className="text-muted-foreground italic">Não preenchido</span>}
                       </p>
                     </div>
@@ -835,28 +836,28 @@ const ClientRegistrationsPage = () => {
                     <FileText className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Tipo de Contrato</p>
-                      <p className="text-sm">{detailsDialog.client.dados_financeiros?.tipo_contrato || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_financeiros?.tipo_contrato) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <Building className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Empresa</p>
-                      <p className="text-sm">{detailsDialog.client.dados_financeiros?.empresa || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_financeiros?.empresa) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <Clock className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Antiguidade no Emprego</p>
-                      <p className="text-sm">{detailsDialog.client.dados_financeiros?.antiguidade_emprego || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_financeiros?.antiguidade_emprego) || <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Trabalha no Estrangeiro</p>
-                      <p className="text-sm">{detailsDialog.client.dados_financeiros?.trabalha_estrangeiro === "sim" ? "Sim" : detailsDialog.client.dados_financeiros?.trabalha_estrangeiro === "nao" ? "Não" : <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{safeString(detailsDialog.client.dados_financeiros?.trabalha_estrangeiro) === "sim" ? "Sim" : safeString(detailsDialog.client.dados_financeiros?.trabalha_estrangeiro) === "nao" ? "Não" : <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg col-span-2">
@@ -867,7 +868,7 @@ const ClientRegistrationsPage = () => {
                         {Array.isArray(detailsDialog.client.dados_financeiros?.tem_creditos_activos) && detailsDialog.client.dados_financeiros.tem_creditos_activos.length > 0
                           ? detailsDialog.client.dados_financeiros.tem_creditos_activos.map((banco, idx) => (
                               <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
-                                {banco}
+                                {safeString(banco)}
                               </span>
                             ))
                           : detailsDialog.client.dados_financeiros?.tem_creditos_activos === true
@@ -897,7 +898,7 @@ const ClientRegistrationsPage = () => {
                             <FileText className="h-4 w-4 text-muted-foreground" />
                             <div>
                               <p className="text-xs text-muted-foreground capitalize">{key.replace(/_/g, " ")}</p>
-                              <p className="text-sm">{typeof value === "boolean" ? (value ? "Sim" : "Não") : Array.isArray(value) ? value.join(", ") : String(value)}</p>
+                              <p className="text-sm">{typeof value === "boolean" ? (value ? "Sim" : "Não") : Array.isArray(value) ? value.map(v => safeString(v)).join(", ") : safeString(value)}</p>
                             </div>
                           </div>
                         )
@@ -920,7 +921,7 @@ const ClientRegistrationsPage = () => {
                             <User className="h-4 w-4 text-muted-foreground" />
                             <div>
                               <p className="text-xs text-muted-foreground capitalize">{key.replace(/_/g, " ")}</p>
-                              <p className="text-sm">{String(value)}</p>
+                              <p className="text-sm">{safeString(value)}</p>
                             </div>
                           </div>
                         )
@@ -948,7 +949,7 @@ const ClientRegistrationsPage = () => {
                     <FileText className="h-4 w-4 text-yellow-600" />
                     Notas
                   </h4>
-                  <p className="text-sm whitespace-pre-wrap">{detailsDialog.client.notas}</p>
+                  <p className="text-sm whitespace-pre-wrap">{safeString(detailsDialog.client.notas)}</p>
                 </div>
               )}
             </div>
@@ -977,10 +978,10 @@ const ClientRegistrationsPage = () => {
                 onClick={() => {
                   setPreSelectedClient({
                     id: detailsDialog.client.id,
-                    name: detailsDialog.client.nome,
-                    nif: detailsDialog.client.nif || detailsDialog.client.dados_pessoais?.nif || "",
-                    email: detailsDialog.client.contacto?.email || "",
-                    phone: detailsDialog.client.contacto?.telefone || "",
+                    name: safeString(detailsDialog.client.nome),
+                    nif: safeString(detailsDialog.client.nif) || safeString(detailsDialog.client.dados_pessoais?.nif) || "",
+                    email: safeString(detailsDialog.client.contacto?.email) || "",
+                    phone: safeString(detailsDialog.client.contacto?.telefone) || "",
                   });
                   setDetailsDialog({ open: false, client: null });
                   setShowCreateProcess(true);
