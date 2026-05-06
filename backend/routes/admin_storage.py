@@ -528,19 +528,19 @@ async def batch_update_process_s3_mappings(
 @router.get("/s3-folder-contents")
 async def get_s3_folder_contents(
     folder_path: str = Query("", description="Caminho da pasta S3 (vazio = raiz)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.INDEXACAO]))
 ):
-    """Lista conteúdo de uma pasta S3. Se folder_path vazio, lista a raiz do bucket."""
+    """Lista conteúdo de uma pasta S3. Se folder_path vazio, lista a raiz do bucket (Documentação Clientes/)."""
     from services.s3_storage import s3_service
     
     if not s3_service.is_configured():
         raise HTTPException(status_code=503, detail="S3 não configurado")
     
-    # Se folder_path vazio, tentar prefixar com a pasta principal configurada
+    # Se folder_path vazio, usar a pasta principal "Documentação Clientes/" como raiz
     prefix = folder_path.strip()
     if not prefix:
-        # Tentar listar a raiz — pode estar vazia, mostrar conteúdo útil
-        prefix = ""
+        # Listar "Documentação Clientes/" como pasta raiz do explorador
+        prefix = "Documentação Clientes"
     
     try:
         list_prefix = prefix if prefix.endswith("/") else f"{prefix}/"

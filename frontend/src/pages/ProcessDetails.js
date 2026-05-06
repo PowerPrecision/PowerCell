@@ -4250,7 +4250,9 @@ const ProcessDetails = () => {
                     </CardHeader>
                     <CardContent>
                       <pre className="text-xs whitespace-pre-wrap text-gray-700 bg-white p-3 rounded border max-h-[200px] overflow-y-auto">
-                        {process.ai_extracted_notes}
+                        {typeof process.ai_extracted_notes === 'string'
+                          ? process.ai_extracted_notes
+                          : JSON.stringify(process.ai_extracted_notes, null, 2)}
                       </pre>
                     </CardContent>
                   </Card>

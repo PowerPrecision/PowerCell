@@ -237,13 +237,22 @@ async def get_portal_status(
 
     async for doc in requested_cursor:
         cat = doc.get("category", "Outros")
+        # Ensure cat is a string (backend may have stored objects)
+        if isinstance(cat, dict):
+            cat = cat.get("value", cat.get("label", "Outros"))
         cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
+        # Ensure notes is a string (may have been stored as an object)
+        raw_notes = doc.get("notes", "")
+        if isinstance(raw_notes, dict):
+            raw_notes = raw_notes.get("label", raw_notes.get("value", str(raw_notes)))
+        notes_str = str(raw_notes) if raw_notes is not None else ""
+
         requested_docs.append({
             "id": doc.get("id"),
             "category": cat,
             "label": cat_info["label"],
             "icon": cat_info["icon"],
-            "notes": doc.get("notes", ""),
+            "notes": notes_str,
             "requested_at": doc.get("created_at", doc.get("uploaded_at", "")),
         })
 
@@ -259,6 +268,9 @@ async def get_portal_status(
 
     async for doc in uploaded_cursor:
         cat = doc.get("category", "Outros")
+        # Ensure cat is a string (backend may have stored objects)
+        if isinstance(cat, dict):
+            cat = cat.get("value", cat.get("label", "Outros"))
         cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
         # Show custom_label for "Outros" category, otherwise use category label
         display_label = doc.get("custom_label") if cat == "Outros" and doc.get("custom_label") else cat_info["label"]
@@ -285,6 +297,9 @@ async def get_portal_status(
 
     async for doc in received_cursor:
         cat = doc.get("category", "Outros")
+        # Ensure cat is a string (backend may have stored objects)
+        if isinstance(cat, dict):
+            cat = cat.get("value", cat.get("label", "Outros"))
         cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
         received_docs.append({
             "id": doc.get("id"),

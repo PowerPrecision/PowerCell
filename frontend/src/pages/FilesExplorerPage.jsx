@@ -12,9 +12,10 @@
  * - Barra de pesquisa em tempo real.
  * - Vista de tabela com colunas: Ícone, Nome, Tamanho, Data, Ações.
  *
- * RESTRIÇÕES:
- * - Apenas Admin/CEO podem aceder ao explorador S3 global.
- * - Consultores/Intermediários veem uma mensagem a redirecioná-los para os processos.
+ * ACESSO:
+ * - Todos os utilizadores autenticados podem aceder ao explorador S3.
+ * - Consultores/Intermediários têm acesso de leitura e download.
+ * - Admin/CEO/Diretor/Administrativo têm acesso total (upload, rename, delete).
  */
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -129,7 +130,8 @@ const FilesExplorerPage = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
 
-  const isAdmin = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo"]);
+  const isFullAccess = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo"]);
+  const canViewExplorer = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "mediador", "consultor_intermediario", "indexacao"]);
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [currentPath, setCurrentPath] = useState("");
@@ -522,10 +524,10 @@ const FilesExplorerPage = () => {
             </Button>
             <Button
               variant="ghost"
-              onClick={() => navigate("/definicoes")}
+              onClick={() => navigate("/configuracoes")}
               className="gap-2"
             >
-              Ir para Definições Gerais
+              Ir para Configurações
             </Button>
           </div>
         </div>
@@ -533,8 +535,8 @@ const FilesExplorerPage = () => {
     </Card>
   );
 
-  // ── Restricted access for non-admins ─────────────────────────────────────
-  if (!isAdmin) {
+  // ── Restricted access for non-staff ─────────────────────────────────────
+  if (!canViewExplorer) {
     return (
       <DashboardLayout title="Ficheiros">
         <div className="space-y-6 max-w-lg">
@@ -557,7 +559,7 @@ const FilesExplorerPage = () => {
                     Acesso Restrito
                   </p>
                   <p className="text-sm text-amber-700 dark:text-amber-300">
-                    O Explorador de Ficheiros está disponível para Administradores, Diretores e Staff Administrativo.
+                    Não tem permissões para aceder ao Explorador de Ficheiros.
                     Para gerir os ficheiros dos seus processos, aceda à página de detalhes do processo.
                   </p>
                   <Button
@@ -593,7 +595,7 @@ const FilesExplorerPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {isAdmin && (
+            {isFullAccess && (
               <Button
                 variant="outline"
                 size="sm"
@@ -650,29 +652,33 @@ const FilesExplorerPage = () => {
 
               {/* Actions */}
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setNewFolderDialog({ open: true, name: "" })}
-                >
-                  <FolderPlus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Nova Pasta</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                >
-                  {uploading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Upload className="h-4 w-4" />
-                  )}
-                  <span className="hidden sm:inline">{uploading ? "A enviar..." : "Upload"}</span>
-                </Button>
+                {isFullAccess && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setNewFolderDialog({ open: true, name: "" })}
+                  >
+                    <FolderPlus className="h-4 w-4" />
+                    <span className="hidden sm:inline">Nova Pasta</span>
+                  </Button>
+                )}
+                {isFullAccess && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    <span className="hidden sm:inline">{uploading ? "A enviar..." : "Upload"}</span>
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -740,7 +746,7 @@ const FilesExplorerPage = () => {
                     <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
                     Tentar Novamente
                   </Button>
-                  {isAdmin && (
+                  {isFullAccess && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -831,20 +837,24 @@ const FilesExplorerPage = () => {
                                   <ChevronRight className="h-4 w-4 mr-2" />
                                   Abrir
                                 </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => openRenameDialog({ ...folder, isFolder: true })}
-                                >
-                                  <Pencil className="h-4 w-4 mr-2" />
-                                  Renomear
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => openDeleteDialog({ ...folder, isFolder: true })}
-                                  className="text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Eliminar
-                                </DropdownMenuItem>
+                                {isFullAccess && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => openRenameDialog({ ...folder, isFolder: true })}
+                                    >
+                                      <Pencil className="h-4 w-4 mr-2" />
+                                      Renomear
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => openDeleteDialog({ ...folder, isFolder: true })}
+                                      className="text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Eliminar
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>
@@ -881,18 +891,22 @@ const FilesExplorerPage = () => {
                                   <Download className="h-4 w-4 mr-2" />
                                   Download
                                 </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => openRenameDialog(file)}>
-                                  <Pencil className="h-4 w-4 mr-2" />
-                                  Renomear
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => openDeleteDialog(file)}
-                                  className="text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Eliminar
-                                </DropdownMenuItem>
+                                {isFullAccess && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => openRenameDialog(file)}>
+                                      <Pencil className="h-4 w-4 mr-2" />
+                                      Renomear
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => openDeleteDialog(file)}
+                                      className="text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Eliminar
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>

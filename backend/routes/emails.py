@@ -2244,25 +2244,21 @@ async def webmail_list(
                     "$or": [ownership_only, ownership_with_to]
                 })
             elif folder == "sent":
-                # Mesma lógica para sent: synced_for_user é suficiente
+                # Sent emails: synced_for_user match, OR created_by match, OR from_email match
                 ownership_only = {
                     "$or": [
                         {"synced_for_user": user_id},
                         {"synced_for_user": user_email},
+                        {"created_by": user_id},
                     ]
                 }
                 ownership_with_from = {
-                    "$and": [
-                        {"$or": [
-                            {"created_by": user_id},
-                        ]},
-                        {"$or": [
-                            {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
-                        ]},
+                    "$or": [
+                        {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
                     ]
                 }
                 if account_email and account_email != user_email:
-                    ownership_with_from["$and"][1]["$or"].append(
+                    ownership_with_from["$or"].append(
                         {"from_email": {"$regex": re.escape(account_email), "$options": "i"}}
                     )
                 and_conditions.append({
@@ -2271,14 +2267,18 @@ async def webmail_list(
             elif folder == "drafts":
                 and_conditions.append({"created_by": user_id})
             elif folder in ("starred", "trash", "custom"):
+                # For starred/trash/custom: show emails owned by user OR where user's email appears
                 shared_or = [
                     {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
                     {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                    {"created_by": user_id},
                 ]
                 if account_email and account_email != user_email:
                     shared_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
                     shared_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
-                and_conditions.append({"$and": [ownership_filter, {"$or": shared_or}]})
+                and_conditions.append({
+                    "$or": [ownership_filter, {"$or": shared_or}]
+                })
         elif box == "general":
             # Emails com shared_role=geral (caixa geral) OU is_general=True
             # (sync global via IMAP que marca is_general=True)
@@ -2332,10 +2332,11 @@ async def webmail_list(
         elif folder == "sent":
             sent_or = [
                 {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+                {"created_by": user_id_isolation},
             ]
             if account_email and account_email != user_email:
                 sent_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
-            and_conditions.append({"$and": [ownership_filter, {"$or": sent_or}]})
+            and_conditions.append({"$or": [ownership_filter, {"$or": sent_or}]})
         elif folder == "drafts":
             # Rascunhos: criados pelo utilizador
             and_conditions.append({"created_by": user_id_isolation})

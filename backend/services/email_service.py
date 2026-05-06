@@ -790,6 +790,7 @@ async def send_email(
                 "sent_at": datetime.now(timezone.utc).isoformat(),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "created_by": created_by,
+                "synced_for_user": created_by,
                 "notes": f"Enviado via {account.name}" + (f" com {len(attachment_records)} anexo(s)" if attachment_records else ""),
                 "synced": False,
                 "account": account.name

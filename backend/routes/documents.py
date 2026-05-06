@@ -3656,16 +3656,25 @@ async def create_portal_document_request(
         if not process:
             raise HTTPException(status_code=404, detail="Processo não encontrado")
 
+        # Ensure category is a string (defensive: handle object values from client)
         category = data.category
+        if isinstance(category, dict):
+            category = category.get("value", category.get("label", "Outros"))
+        if not isinstance(category, str):
+            category = str(category) if category is not None else "Outros"
         if category not in DOCUMENT_CATEGORY_MAP:
             category = "Outros"
 
         # ── Duplicate check: prevent requesting same category twice ──
         # Include source filter to avoid confusion with auto_default docs
+        # Also check for object-valued categories that may match
         existing = await db.documents.find_one(
             {
                 "process_id": process_id,
-                "category": category,
+                "$or": [
+                    {"category": category},
+                    {"category.value": category},
+                ],
                 "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
             }
         )
@@ -3679,8 +3688,19 @@ async def create_portal_document_request(
         doc_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
-        user_id = user.get("id", "")
-        user_name = user.get("name", "")
+        user_id = user.get("id", "") or ""
+        user_name = user.get("name", "") or ""
+
+        # Ensure notes is always a string (never an object)
+        notes_val = data.notes
+        if isinstance(notes_val, dict):
+            notes_val = notes_val.get("label", notes_val.get("value", str(notes_val)))
+        notes_val = str(notes_val) if notes_val is not None else ""
+
+        # Ensure custom_label is always a string or None (never an object)
+        custom_label_val = data.custom_label
+        if isinstance(custom_label_val, dict):
+            custom_label_val = custom_label_val.get("label", custom_label_val.get("value", str(custom_label_val)))
 
         doc = {
             "id": doc_id,
@@ -3689,16 +3709,23 @@ async def create_portal_document_request(
             "filename": None,
             "original_filename": None,
             "status": "REQUESTED",
-            "notes": data.notes or "",
-            "custom_label": data.custom_label,
+            "notes": notes_val,
+            "custom_label": custom_label_val,
             "requested_by": user_id,
             "requested_by_name": user_name,
             "source": "admin_request",
+            "file_size": None,
+            "content_type": None,
+            "uploaded_at": None,
             "created_at": now,
             "updated_at": now,
         }
 
-        insert_result = await db.documents.insert_one(doc.copy())
+        try:
+            insert_result = await db.documents.insert_one(doc.copy())
+        except Exception as insert_err:
+            logger.error(f"[PORTAL-REQUESTS] MongoDB insert failed for process {process_id}: {type(insert_err).__name__}: {insert_err}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Erro ao inserir documento: {type(insert_err).__name__}")
         if not insert_result.inserted_id:
             raise HTTPException(status_code=500, detail="Erro ao inserir documento na base de dados")
 
