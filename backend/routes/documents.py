@@ -3642,6 +3642,7 @@ async def create_portal_document_request(
             category = "Outros"
 
         # ── Duplicate check: prevent requesting same category twice ──
+        # Include source filter to avoid confusion with auto_default docs
         existing = await db.documents.find_one(
             {
                 "process_id": process_id,
@@ -3650,7 +3651,7 @@ async def create_portal_document_request(
             }
         )
         if existing:
-            cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category})
+            cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
             raise HTTPException(
                 status_code=409,
                 detail=f"Já existe um pedido de '{cat_info['label']}' pendente para este processo."
@@ -3678,7 +3679,7 @@ async def create_portal_document_request(
             "updated_at": now,
         }
 
-        insert_result = await db.documents.insert_one(doc)
+        insert_result = await db.documents.insert_one(doc.copy())
         if not insert_result.inserted_id:
             raise HTTPException(status_code=500, detail="Erro ao inserir documento na base de dados")
 
@@ -3711,7 +3712,7 @@ async def create_portal_document_request(
     except HTTPException:
         raise
     except Exception as e:
-        logging.getLogger(__name__).error(f"Error creating portal request: {e}", exc_info=True)
+        logger.error(f"[PORTAL-REQUESTS] Error creating portal request for process {process_id}: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro ao criar pedido: {str(e)}")
 
 

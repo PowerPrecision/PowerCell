@@ -409,6 +409,15 @@ async def general_exception_handler(request: Request, exc: Exception):
     # Obter origin do request para CORS
     origin = request.headers.get("origin", "*")
     
+    # Construir detalhe do erro com info de debug (sem expor stack trace)
+    error_detail = "Erro interno do servidor"
+    exception_type = type(exc).__name__
+    
+    # Incluir tipo de excepção para facilitar diagnóstico
+    # (não incluímos str(exc) para evitar leak de info sensível)
+    if exception_type not in ("HTTPException", "ValidationError", "RequestValidationError"):
+        error_detail = f"Erro interno do servidor [{exception_type}]"
+    
     # Verificar se a origin é permitida
     allowed_origin = None
     if origin in CORS_ORIGINS:
@@ -429,7 +438,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     
     return JSONResponse(
         status_code=500,
-        content={"detail": "Erro interno do servidor"},
+        content={"detail": error_detail},
         headers=headers
     )
 
