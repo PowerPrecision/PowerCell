@@ -374,7 +374,7 @@ const ProcessDetails = () => {
         setRgpdStatus(data);
       }
     } catch (error) {
-      console.error("Erro ao verificar RGPD:", error);
+      // RGPD status check failed silently — not critical
     } finally {
       setRgpdLoading(false);
     }
@@ -424,7 +424,6 @@ const ProcessDetails = () => {
         toast.error(data.detail || "Erro ao enviar RGPD");
       }
     } catch (error) {
-      console.error("Erro ao solicitar RGPD:", error);
       toast.error("Erro ao enviar RGPD");
     } finally {
       setRgpdSending(false);

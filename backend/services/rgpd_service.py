@@ -486,6 +486,7 @@ Equipa PowerCell
             body=body_text,
             body_html=body_html,
             created_by=user_email,
+            force_system=True,
             system_purpose="RGPD"
         )
         
@@ -575,7 +576,9 @@ Sistema CRM
             to_emails=[to_email],
             subject=subject,
             body=body_text,
-            body_html=body_html
+            body_html=body_html,
+            force_system=True,
+            system_purpose="RGPD"
         )
         
         logger.info(f"RGPD signed notification sent to {to_email}")
@@ -1169,6 +1172,7 @@ Mais uma vez, obrigado(a) pela sua colaboracao."""
         body_html=body_html,
         attachments=attachments,
         force_system=True,
+        created_by="rgpd_system",
         system_purpose="RGPD",
     )
     
