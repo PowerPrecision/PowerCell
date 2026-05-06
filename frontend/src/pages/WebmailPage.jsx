@@ -159,6 +159,7 @@ const WebmailPage = () => {
   // Tab-based mailbox state
   const [activeBox, setActiveBox] = useState("personal"); // "personal", "general", or "shared_indexacao"
   const [unreadByBox, setUnreadByBox] = useState({ personal: 0, general: 0 });
+  const [folderCountsData, setFolderCountsData] = useState({ inbox: 0, sent: 0, starred: 0, drafts: 0, trash: 0 });
 
   // Composer state
   const [composerOpen, setComposerOpen] = useState(false);
@@ -297,6 +298,16 @@ const WebmailPage = () => {
         const pData = personalRes.ok ? await personalRes.json() : {};
         const gData = generalRes.ok ? await generalRes.json() : {};
         setUnreadByBox({ personal: pData.unread_count || 0, general: gData.unread_count || 0 });
+        // Save folder counts from the active box stats
+        const folderCounts = pData.folder_counts || {};
+        setFolderCountsData(prev => ({
+          ...prev,
+          inbox: folderCounts.inbox || 0,
+          sent: folderCounts.sent || 0,
+          starred: folderCounts.starred || 0,
+          drafts: folderCounts.drafts || 0,
+          trash: folderCounts.trash || 0,
+        }));
       } catch {
         // Silently fail
       }
@@ -306,12 +317,40 @@ const WebmailPage = () => {
         if (res.ok) {
           const data = await res.json();
           setUnreadByBox({ personal: 0, general: 0, shared_indexacao: data.unread_count || 0 });
+          const folderCounts = data.folder_counts || {};
+          setFolderCountsData(prev => ({
+            ...prev,
+            inbox: folderCounts.inbox || 0,
+            sent: folderCounts.sent || 0,
+            starred: folderCounts.starred || 0,
+            drafts: folderCounts.drafts || 0,
+            trash: folderCounts.trash || 0,
+          }));
+        }
+      } catch {
+        // Silently fail
+      }
+    } else {
+      // For consultor/intermediario, fetch personal stats
+      try {
+        const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=personal`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          const data = await res.json();
+          setUnreadCount(data.unread_count || 0);
+          const folderCounts = data.folder_counts || {};
+          setFolderCountsData(prev => ({
+            ...prev,
+            inbox: folderCounts.inbox || 0,
+            sent: folderCounts.sent || 0,
+            starred: folderCounts.starred || 0,
+            drafts: folderCounts.drafts || 0,
+            trash: folderCounts.trash || 0,
+          }));
         }
       } catch {
         // Silently fail
       }
     }
-    // For consultor, the regular unreadCount from fetchEmails is sufficient
   }, [token, user?.role]);
 
   useEffect(() => {
@@ -1073,15 +1112,17 @@ const WebmailPage = () => {
   }, [selectedEmails, selectedEmail, token, customFolders, handleRefresh, fetchCustomFolders]);
 
   // ============================================================
-  // FOLDER COUNTS (derived from email list data)
+  // FOLDER COUNTS (derived from webmail-stats API)
   // ============================================================
   const folderCounts = useMemo(() => {
-    const counts = { inbox: 0, sent: 0, starred: 0, drafts: 0, trash: 0 };
-    // unreadCount vem da API para inbox
-    counts.inbox = unreadCount;
-    // Contar starred localmente (approx)
-    return counts;
-  }, [unreadCount]);
+    return {
+      inbox: folderCountsData.inbox || unreadCount,
+      sent: folderCountsData.sent || 0,
+      starred: folderCountsData.starred || 0,
+      drafts: folderCountsData.drafts || 0,
+      trash: folderCountsData.trash || 0,
+    };
+  }, [folderCountsData, unreadCount]);
 
   // Sanitized HTML body
   const sanitizedBodyHtml = useMemo(() => {
@@ -1283,12 +1324,14 @@ const WebmailPage = () => {
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     <span className="flex-1 truncate">{folderLabel}</span>
-                    {folder.id === "inbox" && unreadCount > 0 && (
+                    {folderCounts[folder.id] > 0 && (
                       <Badge
-                        variant="secondary"
-                        className="h-5 min-w-[20px] flex items-center justify-center text-[10px] px-1.5"
+                        variant={folder.id === "inbox" ? "default" : "secondary"}
+                        className={`h-5 min-w-[20px] flex items-center justify-center text-[10px] px-1.5 ${
+                          folder.id === "inbox" ? "bg-primary text-primary-foreground" : ""
+                        }`}
                       >
-                        {unreadCount}
+                        {folder.id === "inbox" ? unreadCount || folderCounts[folder.id] : folderCounts[folder.id]}
                       </Badge>
                     )}
                   </button>

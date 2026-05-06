@@ -127,7 +127,10 @@ export default function PortalDocumentRequests({ processId }) {
 
   // Compute already-requested categories to filter from dropdown
   const requestedCategoryKeys = documents
-    .filter(d => ["REQUESTED", "PENDING", "requested", "pending", "UPLOADED", "SUBMITTED", "uploaded", "submitted"].includes(d.status?.toUpperCase()))
+    .filter(d => {
+      const s = safeString(d.status, '').toUpperCase();
+      return ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED"].includes(s);
+    })
     .map(d => safeString(d.category, d.category));
 
   const availableCategories = DOCUMENT_CATEGORIES.filter(
@@ -206,15 +209,18 @@ export default function PortalDocumentRequests({ processId }) {
   };
 
   // Group documents by status
-  const pendingDocs = documents.filter(d =>
-    ["REQUESTED", "PENDING", "requested", "pending"].includes(d.status?.toUpperCase())
-  );
-  const uploadedDocs = documents.filter(d =>
-    ["UPLOADED", "SUBMITTED", "uploaded", "submitted"].includes(d.status?.toUpperCase())
-  );
-  const receivedDocs = documents.filter(d =>
-    ["RECEIVED", "received"].includes(d.status?.toUpperCase())
-  );
+  const pendingDocs = documents.filter(d => {
+    const s = safeString(d.status, '').toUpperCase();
+    return ["REQUESTED", "PENDING"].includes(s);
+  });
+  const uploadedDocs = documents.filter(d => {
+    const s = safeString(d.status, '').toUpperCase();
+    return ["UPLOADED", "SUBMITTED"].includes(s);
+  });
+  const receivedDocs = documents.filter(d => {
+    const s = safeString(d.status, '').toUpperCase();
+    return s === "RECEIVED";
+  });
 
   const pendingCount = pendingDocs.length;
   const uploadedCount = uploadedDocs.length;
@@ -441,10 +447,12 @@ export default function PortalDocumentRequests({ processId }) {
 function DocItem({ doc, loading, onMarkReceived, onMarkPending, onDelete, isReceived }) {
   const catInfo = getCategoryInfo(doc.category);
   const statusKey = safeString(doc.status, 'REQUESTED').toUpperCase();
-  const statusCfg = STATUS_CONFIG[statusKey] || STATUS_CONFIG[doc.status] || STATUS_CONFIG.REQUESTED;
+  const statusCfg = STATUS_CONFIG[statusKey] || STATUS_CONFIG[safeString(doc.status)] || STATUS_CONFIG.REQUESTED;
   const StatusIcon = statusCfg.icon;
 
   const displayName = safeString(doc.custom_label) || catInfo.label;
+  // Ensure doc.id is always a string for React key usage
+  const docId = safeString(doc.id, String(doc.id || Math.random()));
 
   return (
     <div className={`flex items-center gap-2.5 p-2.5 rounded-lg border transition-colors ${

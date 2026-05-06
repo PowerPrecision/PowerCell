@@ -3,6 +3,29 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-05] — Correções de Bugs e Funcionalidades Pendentes
+
+### Corrigido
+- **Rota /definicoes → /configuracoes no File Explorer** (`fix`): Ao clicar "Definições Gerais" ou "Ir para Definições Gerais" no FilesExplorerPage, o utilizador era redirecionado para `/definicoes` (SettingsPage pessoal) em vez de `/configuracoes` (SystemConfigPage). Corrigido para `/configuracoes`.
+- **React Minified Error #31 em PortalDocumentRequests** (`fix`): Adicionados helpers `safeString()` defensivos para garantir que campos `category`, `status`, `notes`, `custom_label`, `original_filename` e `id` (usado como `key`) são sempre strings antes de serem renderizados como React children ou usados em comparações. Agrupamentos de documentos por status agora usam `safeString(d.status)` em vez de `d.status?.toUpperCase()`.
+- **500 error em POST /api/documents/portal-requests/{processId}** (`fix`): Adicionado `try/except` à volta da query de verificação de duplicados no MongoDB (previne crash se a query `$or` falhar). Adicionado `model_validator` no Pydantic `DocumentRequestCreate` para coagir automaticamente objetos `{value, label}` em strings antes da validação.
+
+### Adicionado
+- **Contadores de pastas no Webmail** (`feat`): O endpoint `/api/emails/webmail-stats` agora retorna `folder_counts` com contadores para todas as pastas (inbox, sent, starred, drafts, trash). O WebmailPage mostra badges com contadores para todas as pastas na sidebar, não apenas para a Inbox.
+- **Endpoints S3 para o Explorador de Ficheiros** (`feat`): Adicionados 5 novos endpoints no backend (`admin_storage.py`):
+  - `POST /api/admin/s3-rename` — Renomear ficheiros e pastas (copy + delete para ficheiros, recursivo para pastas)
+  - `POST /api/admin/s3-delete` — Eliminar ficheiros e pastas (com recursão para pastas, paginação para pastas grandes)
+  - `POST /api/admin/s3-create-folder` — Criar pastas (cria marcador `.keep` vazio)
+  - `POST /api/admin/s3-upload` — Upload de ficheiros para qualquer pasta S3
+  - `GET /api/admin/s3-download` — Download de ficheiros (streaming response com Content-Disposition)
+  - Frontend atualizado: upload usa `/api/admin/s3-upload`, download usa `/api/admin/s3-download`
+  - Acesso: Consultores/intermediários podem ver e descarregar; Operações de escrita restritas a admin/CEO/diretor/administrativo.
+
+### Verificado (já implementado)
+- **RGPD assinado no portal**: O portal do cliente já mostra card verde "RGPD Assinado" com data, e card amarelo "RGPD Pendente" quando aguarda assinatura.
+- **Filtro de documentos já solicitados**: Ao solicitar documentos, categorias já pedidas (REQUESTED/PENDING/UPLOADED/SUBMITTED) são filtradas da lista de seleção.
+- **Multi-seleção de documentos**: O dialog permite selecionar múltiplas categorias simultaneamente com checkboxes, criando um pedido por categoria.
+
 ## [2026-07-04] — Atualização de Documentação e Issues Conhecidos
 
 ### Alterado

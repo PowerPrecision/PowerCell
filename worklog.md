@@ -1,6 +1,37 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: 1
+Agent: Main Agent
+Task: Implementar funcionalidades pendentes — correções de bugs e novas funcionalidades
+
+Work Log:
+- Clonado repositório PowerCell, checkout branch `dev`
+- Explorada a estrutura do projeto para identificar todos os ficheiros relevantes
+- **Fix 1: Rota /definicoes → /configuracoes**: Corrigido FilesExplorerPage.jsx (2 linhas) — botões "Definições Gerais" agora navegam para `/configuracoes` (SystemConfigPage) em vez de `/definicoes` (SettingsPage pessoal)
+- **Fix 2: React Error #31**: Corrigido PortalDocumentRequests.js — adicionados helpers `safeString()` defensivos para campos `category`, `status`, `notes`, `custom_label`, `original_filename`, `id` (key). Agrupamentos de documentos por status agora usam `safeString(d.status)` em vez de `d.status?.toUpperCase()`. Adicionado `docId = safeString(doc.id, ...)` para React key.
+- **Fix 3: 500 Error POST /api/documents/portal-requests**: Corrigido backend/routes/documents.py — adicionado `try/except` na query de duplicados MongoDB, adicionado `model_validator` no Pydantic `DocumentRequestCreate` para coagir objetos `{value, label}` em strings. Importado `model_validator` de pydantic.
+- **Fix 4: Webmail folder counts**: Corrigido backend/routes/emails.py — estendido endpoint `/webmail-stats` para retornar `folder_counts` (inbox, sent, starred, drafts, trash). Atualizado frontend WebmailPage.jsx — adicionado estado `folderCountsData`, atualizado `fetchUnreadCounts` para guardar folder_counts, atualizado `folderCounts` memo, adicionado badges para todas as pastas na sidebar (não só inbox). Adicionado fetch de stats para consultores/intermediários.
+- **Fix 5: Missing S3 backend endpoints**: Criados 5 novos endpoints em backend/routes/admin_storage.py:
+  - `POST /api/admin/s3-rename` — Renomear ficheiros e pastas (copy + delete, recursivo para pastas)
+  - `POST /api/admin/s3-delete` — Eliminar ficheiros e pastas (com paginação para pastas grandes)
+  - `POST /api/admin/s3-create-folder` — Criar pastas (marcador `.keep`)
+  - `POST /api/admin/s3-upload` — Upload de ficheiros para qualquer pasta S3
+  - `GET /api/admin/s3-download` — Download de ficheiros (streaming response)
+  - Adicionados modelos Pydantic: `S3RenameRequest`, `S3DeleteRequest`, `S3CreateFolderRequest`
+  - Acesso: consultores/intermediários podem ver/download; escrita restrita a admin/CEO/diretor/administrativo
+- **Fix 6: Frontend upload/download endpoints**: Atualizado FilesExplorerPage.jsx — upload usa `/api/admin/s3-upload`, download usa `/api/admin/s3-download?path=...`, removido fallback para endpoint inexistente
+- **Verificado**: RGPD status no portal (já implementado), filtro de docs já solicitados (já implementado), multi-seleção de docs (já implementado)
+- **Documentação**: Atualizado README.md (novos endpoints, secção "Histórico de Correções Recentes"), CHANGELOG.md (nova entrada [2026-07-05])
+
+Stage Summary:
+- 6 ficheiros alterados: FilesExplorerPage.jsx, PortalDocumentRequests.js, documents.py, emails.py, admin_storage.py, WebmailPage.jsx
+- 2 ficheiros de documentação atualizados: README.md, CHANGELOG.md
+- 5 novos endpoints backend criados
+- 3 bugs corrigidos (rota errada, React error #31, 500 portal-requests)
+- 2 funcionalidades melhoradas (webmail folder counts, file explorer completo)
+
+---
 Task ID: sidebar-workflow-estados
 Agent: Main Agent
 Task: Adicionar item "Estados do Workflow" ao menu lateral — utilizador não encontrava a gestão de fases

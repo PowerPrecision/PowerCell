@@ -2599,10 +2599,61 @@ async def webmail_stats(
     # Drafts count
     drafts_count = await db.emails.count_documents(drafts_base)
     
+    # Full folder counts for sidebar badges
+    inbox_count = await db.emails.count_documents(inbox_base)
+    sent_count = await db.emails.count_documents(sent_base)
+    
+    # Starred count
+    starred_base = {"is_starred": True, "is_archived": False}
+    if box == "personal":
+        starred_base["$or"] = [
+            {"created_by": user_id},
+            {"synced_for_user": user_id},
+            {"synced_for_user": user_email},
+        ]
+    elif box == "general":
+        starred_base["$or"] = [{"shared_role": "geral"}, {"is_general": True}]
+    elif box == "shared_indexacao":
+        starred_base["shared_role"] = "indexacao"
+    elif not can_see_all and user_email:
+        starred_base["$or"] = [
+            {"created_by": user_id},
+            {"synced_for_user": user_id},
+            {"synced_for_user": user_email},
+        ]
+    starred_count = await db.emails.count_documents(starred_base)
+    
+    # Trash count
+    trash_base = {"is_archived": True}
+    if box == "personal":
+        trash_base["$or"] = [
+            {"created_by": user_id},
+            {"synced_for_user": user_id},
+            {"synced_for_user": user_email},
+        ]
+    elif box == "general":
+        trash_base["$or"] = [{"shared_role": "geral"}, {"is_general": True}]
+    elif box == "shared_indexacao":
+        trash_base["shared_role"] = "indexacao"
+    elif not can_see_all and user_email:
+        trash_base["$or"] = [
+            {"created_by": user_id},
+            {"synced_for_user": user_id},
+            {"synced_for_user": user_email},
+        ]
+    trash_count = await db.emails.count_documents(trash_base)
+    
     return {
         "unread_count": unread_count,
         "sent_today_count": sent_today_count,
         "drafts_count": drafts_count,
+        "folder_counts": {
+            "inbox": inbox_count,
+            "sent": sent_count,
+            "starred": starred_count,
+            "drafts": drafts_count,
+            "trash": trash_count,
+        }
     }
 
 

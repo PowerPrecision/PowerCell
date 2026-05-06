@@ -262,7 +262,7 @@ const FilesExplorerPage = () => {
 
       try {
         const res = await fetch(
-          `${API_URL}/api/documents/client/_global/upload`,
+          `${API_URL}/api/admin/s3-upload`,
           {
             method: "POST",
             headers: { Authorization: `Bearer ${token}` },
@@ -274,12 +274,6 @@ const FilesExplorerPage = () => {
           successCount++;
         } else {
           const err = await res.json().catch(() => ({}));
-          // If global upload doesn't exist, try a fallback approach
-          if (res.status === 404) {
-            // Fallback: use S3 folder contents approach — inform user
-            toast.info("Upload global: use o gestor de ficheiros nos processos.");
-            break;
-          }
           toast.error(`${file.name}: ${err.detail || "Erro"}`);
           errorCount++;
         }
@@ -295,9 +289,8 @@ const FilesExplorerPage = () => {
       toast.success(`${successCount} ficheiro(s) enviado(s)`);
       fetchContents(currentPath);
     }
-    if (errorCount === 0 && successCount === 0) {
-      // Likely the global upload endpoint doesn't exist - use a helpful message
-      toast.info("Para enviar ficheiros, aceda a um processo e use o gestor de documentos na página de detalhes.");
+    if (errorCount > 0) {
+      toast.error(`${errorCount} ficheiro(s) com erro`);
     }
 
     setUploading(false);
@@ -309,7 +302,7 @@ const FilesExplorerPage = () => {
   const handleDownload = async (file) => {
     try {
       const res = await fetch(
-        `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
+        `${API_URL}/api/admin/s3-download?path=${encodeURIComponent(file.path)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
@@ -1015,7 +1008,7 @@ const FilesExplorerPage = () => {
               <p className="text-sm text-muted-foreground">
                 As credenciais S3 também podem ser configuradas na página de{" "}
                 <button
-                  onClick={() => { setConfigDialog({ open: false }); navigate("/definicoes"); }}
+                  onClick={() => { setConfigDialog({ open: false }); navigate("/configuracoes"); }}
                   className="text-primary underline hover:no-underline"
                 >
                   Definições Gerais
@@ -1047,7 +1040,7 @@ const FilesExplorerPage = () => {
             <Button variant="outline" onClick={() => setConfigDialog({ open: false })}>
               Cancelar
             </Button>
-            <Button onClick={() => navigate("/definicoes")} className="gap-2">
+            <Button onClick={() => navigate("/configuracoes")} className="gap-2">
               <Settings className="h-4 w-4" />
               Ir para Definições Gerais
             </Button>

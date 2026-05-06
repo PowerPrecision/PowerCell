@@ -617,10 +617,27 @@ npm run build
 - **Render cold start**: O backend pode levar ~30s a responder no primeiro request após inatividade
 - **Vercel preview CSP**: Headers CSP são configurados via vercel.json — mudanças requerem novo deploy
 - **S3 CORS**: Configuração automática via endpoint, mas pode requerer verificação manual no bucket
-- **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretas, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Definições Gerais.
-- **Rota /definicoes vs /configuracoes**: A rota `/definicoes` carrega a SettingsPage (definições pessoais), enquanto `/configuracoes` carrega a SystemConfigPage (configurações do sistema). Alguns elementos da UI referenciam incorretamente `/definicoes` quando o destino pretendido é `/configuracoes`.
-- **React Minified Error #31**: Em ProcessDetails, objetos `{value, label}` podem ser renderizados como React children, causando erro. Já corrigido em FormManagementPage (helpers `optStr()` e `optVal()`), mas pode ocorrer noutros componentes.
-- **500 error em POST /api/documents/portal-requests/{processId}**: O endpoint de pedido de documentos via portal pode retornar 500 em determinados cenários.
+- **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretas, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Configurações do Sistema (`/configuracoes`).
+
+## Histórico de Correções Recentes (dev)
+
+### Correções de Bugs
+- **Rota /definicoes vs /configuracoes**: Corrigido — o File Explorer agora navega para `/configuracoes` (SystemConfigPage) em vez de `/definicoes` (SettingsPage pessoal) quando o utilizador clica em "Definições Gerais" ou "Ir para Definições Gerais".
+- **React Minified Error #31**: Corrigido — adicionados helpers `safeString()` defensivos em PortalDocumentRequests.js para garantir que campos `category`, `status`, `notes`, `custom_label`, `original_filename` e `id` (usado como `key`) são sempre strings antes de serem renderizados como React children ou usados em comparações. Também adicionado `model_validator` no Pydantic `DocumentRequestCreate` para coagir objetos `{value, label}` em strings no backend.
+- **500 error em POST /api/documents/portal-requests/{processId}**: Corrigido — adicionado `try/except` à volta da query de verificação de duplicados no MongoDB (previne crash se a query `$or` falhar), e adicionado `model_validator` no Pydantic para coagir automaticamente objetos em strings antes da validação.
+
+### Funcionalidades Implementadas
+- **RGPD assinado no portal**: O portal do cliente já mostra um card verde "RGPD Assinado" com a data quando o consentimento está assinado, e um card amarelo "RGPD Pendente" quando aguarda assinatura.
+- **Filtro de documentos já solicitados**: Ao solicitar documentos ao cliente, as categorias já pedidas (REQUESTED/PENDING/UPLOADED/SUBMITTED) são filtradas da lista de seleção, impedindo duplicados.
+- **Multi-seleção de documentos**: O dialog de solicitação de documentos permite selecionar múltiplas categorias simultaneamente com checkboxes, criando um pedido por categoria.
+- **Contadores de pastas no Webmail**: Adicionados contadores para todas as pastas (Inbox, Enviados, Destacados, Rascunhos, Lixo) na sidebar do Webmail, obtidos via endpoint `/api/emails/webmail-stats` que agora retorna `folder_counts`.
+- **Endpoints S3 para o Explorador de Ficheiros**: Adicionados 5 novos endpoints no backend:
+  - `POST /api/admin/s3-rename` — Renomear ficheiros e pastas (copy + delete)
+  - `POST /api/admin/s3-delete` — Eliminar ficheiros e pastas (com recursão)
+  - `POST /api/admin/s3-create-folder` — Criar pastas (cria marcador `.keep`)
+  - `POST /api/admin/s3-upload` — Upload de ficheiros para qualquer pasta S3
+  - `GET /api/admin/s3-download` — Download de ficheiros (streaming response)
+  - Acesso a consultores/intermediários: Leitura e download permitidos; Operações de escrita (upload, rename, delete, create folder) restritas a admin/CEO/diretor/administrativo.
 
 ## Licença
 

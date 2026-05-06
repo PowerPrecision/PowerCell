@@ -21,7 +21,7 @@ from io import BytesIO
 # Adicionados UploadFile, File, Form para o S3
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response, Body
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from database import db
 from models.auth import UserRole
@@ -3635,9 +3635,28 @@ async def get_portal_document_requests(
 
 
 class DocumentRequestCreate(BaseModel):
-    category: str
+    category: str  # Will be coerced from object if needed in the handler
     notes: Optional[str] = None
     custom_label: Optional[str] = None  # For "Outros" category
+
+    @model_validator(mode='before')
+    @classmethod
+    def coerce_category_to_str(cls, values):
+        """Coerce category from object {value, label} to string if needed."""
+        if isinstance(values, dict):
+            cat = values.get('category')
+            if isinstance(cat, dict):
+                values['category'] = cat.get('value', cat.get('label', str(cat)))
+            elif cat is not None and not isinstance(cat, str):
+                values['category'] = str(cat)
+            # Also coerce notes and custom_label if they come as objects
+            for field in ['notes', 'custom_label']:
+                val = values.get(field)
+                if isinstance(val, dict):
+                    values[field] = val.get('value', val.get('label', str(val)))
+                elif val is not None and not isinstance(val, str):
+                    values[field] = str(val)
+        return values
 
 
 @router.post("/portal-requests/{process_id}")
@@ -3668,16 +3687,21 @@ async def create_portal_document_request(
         # ── Duplicate check: prevent requesting same category twice ──
         # Include source filter to avoid confusion with auto_default docs
         # Also check for object-valued categories that may match
-        existing = await db.documents.find_one(
-            {
-                "process_id": process_id,
-                "$or": [
-                    {"category": category},
-                    {"category.value": category},
-                ],
-                "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
-            }
-        )
+        try:
+            existing = await db.documents.find_one(
+                {
+                    "process_id": process_id,
+                    "$or": [
+                        {"category": category},
+                        {"category.value": category},
+                    ],
+                    "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
+                }
+            )
+        except Exception as db_err:
+            logger.warning(f"[PORTAL-REQUESTS] Duplicate check query failed, proceeding without check: {db_err}")
+            existing = None
+
         if existing:
             cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
             raise HTTPException(
