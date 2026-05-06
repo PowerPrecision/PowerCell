@@ -1125,13 +1125,13 @@ async def _send_client_confirmation_email(
     # Email body text (exactly as specified by the user)
     body_text = f"""Estimado(a) {client_name},
 
-Gostariamos de confirmar que recebemos a sua assinatura do Regulamento Geral sobre a Protecao de Dados (RGPD). Agradecemos a sua colaboracao no cumprimento deste importante requisito legal.
+Gostaríamos de confirmar que recebemos a sua assinatura do Regulamento Geral sobre a Proteção de Dados (RGPD). Agradecemos a sua colaboração no cumprimento deste importante requisito legal.
 
-A sua confianca e seguranca sao fundamentais para nos. Assim, gostariamos de assegurar que os seus dados pessoais estao a ser tratados de acordo com as diretrizes estabelecidas no RGPD. Esta assinatura permite-nos continuar a oferecer-lhe os nossos servicos de forma segura e transparente.
+A sua confiança e segurança são fundamentais para nós. Assim, gostaríamos de assegurar que os seus dados pessoais estão a ser tratados de acordo com as diretrizes estabelecidas no RGPD. Esta assinatura permite-nos continuar a oferecer-lhe os nossos serviços de forma segura e transparente.
 
-Caso tenha alguma duvida ou necessite de mais informacoes, nao hesite em contactar-nos.
+Caso tenha alguma dúvida ou necessite de mais informações, não hesite em contactar-nos.
 
-Mais uma vez, obrigado(a) pela sua colaboracao."""
+Mais uma vez, obrigado(a) pela sua colaboração."""
     
     # HTML body
     body_html = f"""
@@ -1143,7 +1143,7 @@ Mais uma vez, obrigado(a) pela sua colaboracao."""
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
     <p>Estimado(a) <strong>{client_name}</strong>,</p>
     
-    <p>Gostariamos de confirmar que recebemos a sua assinatura do <strong>Regulamento Geral sobre a Proteção de Dados (RGPD)</strong>. Agradecemos a sua colaboração no cumprimento deste importante requisito legal.</p>
+    <p>Gostaríamos de confirmar que recebemos a sua assinatura do <strong>Regulamento Geral sobre a Proteção de Dados (RGPD)</strong>. Agradecemos a sua colaboração no cumprimento deste importante requisito legal.</p>
     
     <p>A sua confiança e segurança são fundamentais para nós. Assim, gostaríamos de assegurar que os seus dados pessoais estão a ser tratados de acordo com as diretrizes estabelecidas no RGPD. Esta assinatura permite-nos continuar a oferecer-lhe os nossos serviços de forma segura e transparente.</p>
     
@@ -1167,7 +1167,7 @@ Mais uma vez, obrigado(a) pela sua colaboracao."""
     result = await send_email(
         account_name="precision",
         to_emails=[client_email],
-        subject="RGPD - Assinatura Confirmada",
+        subject="Confirmação de Assinatura RGPD - Cópia dos Documentos",
         body=body_text,
         body_html=body_html,
         attachments=attachments,
@@ -1177,9 +1177,18 @@ Mais uma vez, obrigado(a) pela sua colaboracao."""
     )
     
     if result.get("success"):
-        logger.info(f"Email de confirmacao enviado para {client_email} com {len(attachments)} anexo(s)")
+        logger.info(f"Email de confirmação enviado para {client_email} com {len(attachments)} anexo(s)")
+        # Audit trail — regista o envio do email no histórico do processo
+        try:
+            await log_history(
+                process_id=process_id,
+                user={"id": "rgpd_system", "name": "Sistema"},
+                action="Email de confirmação com cópia do RGPD enviado ao cliente com sucesso."
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao registar audit trail do email RGPD: {e}")
     else:
-        logger.error(f"Falha ao enviar email de confirmacao para {client_email}: {result.get('error')}")
+        logger.error(f"Falha ao enviar email de confirmação para {client_email}: {result.get('error')}")
 
 
 # Keep backward compatibility with old function
