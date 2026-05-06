@@ -896,47 +896,93 @@ const WebmailPage = () => {
 
   const handleDeleteSelected = useCallback(async () => {
     if (selectedEmails.size === 0) return;
-    try {
-      const ids = Array.from(selectedEmails);
-      await Promise.all(
-        ids.map((id) =>
-          fetch(`${API_URL}/api/emails/${id}`, {
-            method: "DELETE",
-            headers: { Authorization: `Bearer ${token}` },
-          })
-        )
-      );
-      toast.success(`${ids.length} email${ids.length !== 1 ? "s" : ""} eliminado${ids.length !== 1 ? "s" : ""}`);
-      setSelectedEmails(new Set());
-      setMultiSelectMode(false);
-      if (selectedEmail && ids.includes(selectedEmail.id)) {
-        setSelectedEmail(null);
-        setEmailDetail(null);
+    // If in trash folder, permanently delete; otherwise move to trash (soft delete)
+    if (activeFolder === "trash") {
+      if (!confirm(`Tem a certeza que deseja eliminar ${selectedEmails.size} email${selectedEmails.size !== 1 ? "s" : ""} permanentemente? Esta ação não pode ser desfeita.`)) return;
+      try {
+        const ids = Array.from(selectedEmails);
+        await Promise.all(
+          ids.map((id) =>
+            fetch(`${API_URL}/api/emails/${id}/permanent`, {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${token}` },
+            })
+          )
+        );
+        toast.success(`${ids.length} email${ids.length !== 1 ? "s" : ""} eliminado${ids.length !== 1 ? "s" : ""} permanentemente`);
+        setSelectedEmails(new Set());
+        setMultiSelectMode(false);
+        if (selectedEmail && ids.includes(selectedEmail.id)) {
+          setSelectedEmail(null);
+          setEmailDetail(null);
+        }
+        handleRefresh();
+      } catch {
+        toast.error("Erro ao eliminar emails permanentemente");
       }
-      handleRefresh();
-    } catch {
-      toast.error("Erro ao eliminar emails");
+    } else {
+      if (!confirm(`Tem a certeza que deseja mover ${selectedEmails.size} email${selectedEmails.size !== 1 ? "s" : ""} para o Lixo?`)) return;
+      try {
+        const ids = Array.from(selectedEmails);
+        await Promise.all(
+          ids.map((id) =>
+            fetch(`${API_URL}/api/emails/${id}`, {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${token}` },
+            })
+          )
+        );
+        toast.success(`${ids.length} email${ids.length !== 1 ? "s" : ""} movido${ids.length !== 1 ? "s" : ""} para o Lixo`);
+        setSelectedEmails(new Set());
+        setMultiSelectMode(false);
+        if (selectedEmail && ids.includes(selectedEmail.id)) {
+          setSelectedEmail(null);
+          setEmailDetail(null);
+        }
+        handleRefresh();
+      } catch {
+        toast.error("Erro ao mover emails para o Lixo");
+      }
     }
-  }, [selectedEmails, token, selectedEmail, handleRefresh]);
+  }, [selectedEmails, token, selectedEmail, handleRefresh, activeFolder]);
 
   const handleDeleteSingle = useCallback(async () => {
     if (!selectedEmail) return;
-    if (!confirm("Tem a certeza que deseja eliminar este email?")) return;
-    try {
-      const response = await fetch(`${API_URL}/api/emails/${selectedEmail.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error("Erro ao eliminar");
-      toast.success("Email eliminado");
-      setSelectedEmail(null);
-      setEmailDetail(null);
-      setShowMobileReading(false);
-      handleRefresh();
-    } catch {
-      toast.error("Erro ao eliminar email");
+    // If in trash folder, permanently delete; otherwise move to trash (soft delete)
+    if (activeFolder === "trash") {
+      if (!confirm("Tem a certeza que deseja eliminar este email permanentemente? Esta ação não pode ser desfeita.")) return;
+      try {
+        const response = await fetch(`${API_URL}/api/emails/${selectedEmail.id}/permanent`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) throw new Error("Erro ao eliminar permanentemente");
+        toast.success("Email eliminado permanentemente");
+        setSelectedEmail(null);
+        setEmailDetail(null);
+        setShowMobileReading(false);
+        handleRefresh();
+      } catch {
+        toast.error("Erro ao eliminar email permanentemente");
+      }
+    } else {
+      if (!confirm("Tem a certeza que deseja mover este email para o Lixo?")) return;
+      try {
+        const response = await fetch(`${API_URL}/api/emails/${selectedEmail.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) throw new Error("Erro ao mover para o lixo");
+        toast.success("Email movido para o Lixo");
+        setSelectedEmail(null);
+        setEmailDetail(null);
+        setShowMobileReading(false);
+        handleRefresh();
+      } catch {
+        toast.error("Erro ao mover email para o Lixo");
+      }
     }
-  }, [selectedEmail, token, handleRefresh]);
+  }, [selectedEmail, token, handleRefresh, activeFolder]);
 
   // ============================================================
   // FILE UPLOAD (Composer)

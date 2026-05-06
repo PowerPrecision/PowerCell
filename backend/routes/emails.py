@@ -3719,10 +3719,34 @@ async def delete_email(
         except Exception as imap_err:
             logger.warning(f"[IMAP Sync] Erro ao mover email para Trash: {imap_err}")
     
-    await db.emails.delete_one({"id": email_id})
-    logger.info(f"Email {email_id} eliminado por {current_user['name']}")
+    # Soft-delete — mark as archived (appears in Trash folder)
+    await db.emails.update_one(
+        {"id": email_id},
+        {"$set": {"is_archived": True, "archived_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    logger.info(f"Email {email_id} movido para o Lixo por {current_user['name']}")
     
-    return {"success": True, "message": "Email eliminado"}
+    return {"success": True, "message": "Email movido para o Lixo"}
+
+
+@router.delete("/{email_id}/permanent")
+async def permanently_delete_email(
+    email_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Elimina permanentemente um email (apenas da pasta Lixo)."""
+    email = await db.emails.find_one({"id": email_id}, {"_id": 0})
+    
+    if not email:
+        raise HTTPException(status_code=404, detail="Email não encontrado")
+    
+    if not email.get("is_archived"):
+        raise HTTPException(status_code=400, detail="Apenas emails no Lixo podem ser eliminados permanentemente")
+    
+    await db.emails.delete_one({"id": email_id})
+    logger.info(f"Email {email_id} permanentemente eliminado por {current_user['name']}")
+    
+    return {"success": True, "message": "Email permanentemente eliminado"}
 
 
 # ==== GESTÃO DE EMAILS MONITORIZADOS ====

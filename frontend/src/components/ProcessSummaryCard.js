@@ -10,17 +10,18 @@ import {
 } from "lucide-react";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeString, safeStringArray } from "../utils/safeString";
 
 const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, consultorNames, mediadorNames }) => {
   if (!process) return null;
 
   // Usar arrays se disponíveis, senão usar nomes únicos
-  const consultoresDisplay = consultorNames?.length > 0 
-    ? consultorNames 
-    : (consultorName ? [consultorName] : []);
-  const mediadoresDisplay = mediadorNames?.length > 0 
-    ? mediadorNames 
-    : (mediadorName ? [mediadorName] : []);
+  const consultoresDisplay = safeStringArray(
+    consultorNames?.length > 0 ? consultorNames : (consultorName ? [consultorName] : [])
+  );
+  const mediadoresDisplay = safeStringArray(
+    mediadorNames?.length > 0 ? mediadorNames : (mediadorName ? [mediadorName] : [])
+  );
 
   // Calcular dias no sistema
   const createdDate = process.created_at ? parseISO(process.created_at) : null;

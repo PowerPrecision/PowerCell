@@ -1317,3 +1317,97 @@ Stage Summary:
 - Commit: `24cd0b8` on dev branch
 - O CORS será aplicado ao bucket S3 no próximo restart do backend (Render)
 - Após restart, uploads do portal (PUT presigned URL) funcionarão de qualquer origin
+
+---
+Task ID: 2
+Agent: General-purpose Agent
+Task: Fix React Error #31 — objects rendered as React children in ProcessDetails/ProcessSummaryCard
+
+Work Log:
+- **Problem**: Backend stores MongoDB document fields as objects `{value, label}` instead of plain strings. When the frontend renders these directly in JSX, React throws Error #31 ("Objects are not valid as a React child")
+- **Created `frontend/src/utils/safeString.js`**: New shared utility with two exports:
+  - `safeString(val, fallback)` — extracts a plain string from any value, handling `{value, label}` objects, `{name}` objects, numbers, booleans, null/undefined. Falls back to JSON.stringify for unknown object shapes.
+  - `safeStringArray(arr, fallback)` — maps an array through safeString, ensuring all elements are renderable strings.
+- **Modified `frontend/src/pages/ProcessDetails.js`**:
+  - Added import: `import { safeString, safeStringArray } from "../utils/safeString";`
+  - ProcessSummaryCard props (line 1779-1780): Wrapped `process.consultor_names` and `process.mediador_names` with `safeStringArray()` before passing to component
+  - Co-buyers fields: Applied `safeString()` to `buyer.estado_civil`, `buyer.nome`, `buyer.nif`, `buyer.email`, `buyer.telefone` (5 fields)
+  - Co-applicants fields: Applied `safeString()` to `applicant.rendimento_mensal`, `applicant.nome`, `applicant.nif`, `applicant.data_nascimento`, `applicant.entidade_patronal` (5 fields)
+- **Modified `frontend/src/components/ProcessSummaryCard.js`**:
+  - Added import: `import { safeString, safeStringArray } from "../utils/safeString";`
+  - `consultoresDisplay` and `mediadoresDisplay` arrays now wrapped with `safeStringArray()` to guarantee all elements are strings before `.split(' ')` and `.join()` calls
+- **Vite build**: ✅ OK (11.62s, no errors)
+
+Stage Summary:
+- 3 ficheiros alterados/criados: `safeString.js` (new), `ProcessDetails.js`, `ProcessSummaryCard.js`
+- 1 new shared utility (`safeString` + `safeStringArray`) reusable across the codebase
+- 12 field renderings protected from React Error #31 (2 array props + 5 co-buyer fields + 5 co-applicant fields)
+- ProcessSummaryCard guaranteed to receive string arrays for team display
+
+---
+Task ID: 3
+Agent: General-purpose Agent
+Task: Fix portal-requests 500 error — duplicate check $or clause and missing source filter
+
+Work Log:
+- Read worklog.md for project context
+- Read `backend/routes/documents.py` lines 3680-3760 to identify the target code
+- **Fix 1: $or clause missing category.label match** (line 3694-3698): Added `{"category.label": category}` to the `$or` array in the duplicate check query. When stored category is an object like `{label: "BI/CC", value: "bi_cc"}`, the `{"category": category}` clause fails (comparing string to object). The new clause ensures label-based objects are matched correctly.
+- **Fix 2: Missing source filter** (line 3700): Added `"source": {"$in": ["admin_request", "client_portal"]}` to the duplicate check query. Without this, an `auto_default` document could cause a false 409 conflict with a new `admin_request`, preventing legitimate requests.
+- **Fix 3: Unnecessary .copy()** (line 3751): Changed `db.documents.insert_one(doc.copy())` to `db.documents.insert_one(doc)`. The `.copy()` was redundant — PyMongo does not mutate the input document on insert.
+
+Stage Summary:
+- 1 ficheiro alterado: `backend/routes/documents.py` (+2 lines in $or, +1 line source filter, -1 .copy())
+- Duplicate check now matches category stored as `{label, value}` objects
+- Duplicate check no longer triggers false 409 on auto_default documents
+- Insert no longer creates unnecessary dict copy
+
+---
+Task ID: 4
+Agent: General-purpose Agent
+Task: Fix RGPD Status in Client Portal — add 'none' state + consolidate conditionals
+
+Work Log:
+- Read `frontend/src/pages/ClientPortal.jsx` to identify the RGPD section (lines 662-695)
+- **Problem**: Only 'signed' and 'pending' RGPD states had display cards. The 'none' state (RGPD not yet requested) was invisible to clients.
+- **Change**: Consolidated three separate conditionals (`rgpd && rgpd.status === 'signed'`, `rgpd && rgpd.status === 'pending'`) into a single `{rgpd && (<>...</>)}` block with three inner conditionals for 'signed', 'pending', and 'none' states.
+- **Added**: New 'none' card with gray styling (bg-gray-50, border-gray-200), Shield icon (text-gray-500), "RGPD Não Solicitado" heading, and helper text explaining the team will request consent soon.
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/src/pages/ClientPortal.jsx`
+- RGPD section now shows for all three statuses: signed (green), pending (amber), none (gray)
+- Consolidated into single conditional wrapper for cleaner JSX
+
+---
+Task ID: 5
+Agent: General-purpose Agent
+Task: Webmail Soft-Delete for Trash — backend + frontend
+
+Work Log:
+- **Backend `backend/routes/emails.py`**:
+  - Changed `delete_email` (line 3722): Replaced `await db.emails.delete_one({"id": email_id})` with soft-delete via `update_one` setting `is_archived: True` and `archived_at` timestamp. Updated log message and return message to reflect "movido para o Lixo".
+  - Added new endpoint `DELETE /{email_id}/permanent`: Permanently deletes an email from MongoDB, but only if `is_archived` is True (i.e., email is already in Trash). Returns 400 if attempting to permanently delete a non-archived email.
+- **Frontend `frontend/src/pages/WebmailPage.jsx`**:
+  - Updated `handleDeleteSingle`: Now checks `activeFolder === "trash"`. If in trash, calls `/permanent` endpoint with stronger confirmation message. Otherwise calls standard DELETE (soft-delete) with "mover para o Lixo" confirmation.
+  - Updated `handleDeleteSelected`: Same trash-aware logic for multi-select deletion. Uses `/permanent` endpoint when in trash folder, standard DELETE otherwise. Both paths have appropriate Portuguese confirmation messages and toast notifications.
+
+Stage Summary:
+- 2 ficheiros alterados: `backend/routes/emails.py`, `frontend/src/pages/WebmailPage.jsx`
+- Backend: soft-delete (is_archived) instead of permanent delete on standard DELETE; new /permanent endpoint
+- Frontend: trash-aware delete with different confirmation messages and endpoints per folder context
+
+---
+Task ID: 6
+Agent: General-purpose Agent
+Task: Fix File Explorer Navigation — role-aware routing + hide config for non-admins
+
+Work Log:
+- **Problem 1**: "Ir para Configurações" button in S3NotConfiguredBanner navigated to `/configuracoes` (admin-only). Non-admin users clicking it got 403.
+- **Fix**: Changed `onClick={() => navigate("/configuracoes")}` to `onClick={() => navigate(isFullAccess ? "/configuracoes" : "/definicoes")}` so non-admins go to `/definicoes` (personal settings) instead.
+- **Problem 2**: "Configurar Agora" button in S3NotConfiguredBanner opened S3 config dialog that non-admins can't save, causing confusion.
+- **Fix**: Wrapped "Configurar Agora" button in `{isFullAccess && (...)}` conditional so it's hidden for non-admin users.
+
+Stage Summary:
+- 1 ficheiro alterado: `frontend/src/pages/FilesExplorerPage.jsx`
+- "Ir para Configurações" now routes based on user role (admin→/configuracoes, non-admin→/definicoes)
+- "Configurar Agora" button hidden for non-admin users in S3NotConfiguredBanner

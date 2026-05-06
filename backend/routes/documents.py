@@ -3694,8 +3694,10 @@ async def create_portal_document_request(
                     "$or": [
                         {"category": category},
                         {"category.value": category},
+                        {"category.label": category},
                     ],
                     "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
+                    "source": {"$in": ["admin_request", "client_portal"]},
                 }
             )
         except Exception as db_err:
@@ -3746,7 +3748,7 @@ async def create_portal_document_request(
         }
 
         try:
-            insert_result = await db.documents.insert_one(doc.copy())
+            insert_result = await db.documents.insert_one(doc)
         except Exception as insert_err:
             logger.error(f"[PORTAL-REQUESTS] MongoDB insert failed for process {process_id}: {type(insert_err).__name__}: {insert_err}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Erro ao inserir documento: {type(insert_err).__name__}")

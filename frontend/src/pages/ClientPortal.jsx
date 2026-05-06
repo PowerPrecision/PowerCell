@@ -660,38 +660,57 @@ export default function ClientPortal() {
             </div>
 
             {/* RGPD Status */}
-            {rgpd && rgpd.status === 'signed' && (
-              <div className="bg-emerald-50 rounded-2xl shadow-sm border border-emerald-200 p-5 sm:p-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <Shield className="w-5 h-5 text-emerald-600" />
+            {rgpd && (
+              <>
+                {rgpd.status === 'signed' && (
+                  <div className="bg-emerald-50 rounded-2xl shadow-sm border border-emerald-200 p-5 sm:p-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
+                        <Shield className="w-5 h-5 text-emerald-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-emerald-800">RGPD Assinado</h3>
+                        <p className="text-xs text-emerald-600 mt-0.5">
+                          O consentimento para tratamento de dados pessoais foi assinado
+                          {rgpd.signed_at && (
+                            <> a <strong>{new Date(rgpd.signed_at).toLocaleDateString('pt-PT')}</strong></>
+                          )}.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-emerald-800">RGPD Assinado</h3>
-                    <p className="text-xs text-emerald-600 mt-0.5">
-                      O consentimento para tratamento de dados pessoais foi assinado
-                      {rgpd.signed_at && (
-                        <> a <strong>{new Date(rgpd.signed_at).toLocaleDateString('pt-PT')}</strong></>
-                      )}.
-                    </p>
+                )}
+                {rgpd.status === 'pending' && (
+                  <div className="bg-amber-50 rounded-2xl shadow-sm border border-amber-200 p-5 sm:p-6">
+                    <div className="flex items-center gap-3">
+                      <div className='w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0'>
+                        <Clock className="w-5 h-5 text-amber-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-amber-800">RGPD Pendente</h3>
+                        <p className="text-xs text-amber-600 mt-0.5">
+                          O consentimento RGPD ainda não foi assinado. Verifique o seu email.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
-            {rgpd && rgpd.status === 'pending' && (
-              <div className="bg-amber-50 rounded-2xl shadow-sm border border-amber-200 p-5 sm:p-6">
-                <div className="flex items-center gap-3">
-                  <div className='w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0'>
-                    <Clock className="w-5 h-5 text-amber-600" />
+                )}
+                {rgpd.status === 'none' && (
+                  <div className="bg-gray-50 rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-6">
+                    <div className="flex items-center gap-3">
+                      <div className='w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0'>
+                        <Shield className="w-5 h-5 text-gray-500" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-gray-600">RGPD Não Solicitado</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          O consentimento RGPD ainda não foi solicitado. A equipa solicitará em breve.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-amber-800">RGPD Pendente</h3>
-                    <p className="text-xs text-amber-600 mt-0.5">
-                      O consentimento RGPD ainda não foi assinado. Verifique o seu email.
-                    </p>
-                  </div>
-                </div>
-              </div>
+                )}
+              </>
             )}
 
             {/* Team (mobile) */}

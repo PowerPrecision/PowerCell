@@ -507,17 +507,19 @@ const FilesExplorerPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              onClick={() => setConfigDialog({ open: true })}
-              className="gap-2"
-            >
-              <Settings className="h-4 w-4" />
-              Configurar Agora
-            </Button>
+            {isFullAccess && (
+              <Button
+                variant="outline"
+                onClick={() => setConfigDialog({ open: true })}
+                className="gap-2"
+              >
+                <Settings className="h-4 w-4" />
+                Configurar Agora
+              </Button>
+            )}
             <Button
               variant="ghost"
-              onClick={() => navigate("/configuracoes")}
+              onClick={() => navigate(isFullAccess ? "/configuracoes" : "/definicoes")}
               className="gap-2"
             >
               Ir para Configurações

@@ -3,6 +3,19 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-06] — Correções de Bugs e Funcionalidades Pendentes (Ronda 2)
+
+### Corrigido
+- **Flake8 F821: Form import em falta** (`fix`): O endpoint `POST /api/admin/s3-upload` em `admin_storage.py` usava `Form(...)` sem importar `Form` do FastAPI, causando falha no CI.
+- **React Minified Error #31 em ProcessDetails** (`fix`): Criada utilidade partilhada `safeString()` e `safeStringArray()` em `utils/safeString.js`. Aplicado a `consultor_names`, `mediador_names`, campos de co-buyers e co-applicants em ProcessDetails.js e ProcessSummaryCard.js. Previne crash quando o MongoDB devolve objetos `{value, label}` em vez de strings.
+- **500 error em POST /api/documents/portal-requests/{processId}** (`fix`): (1) Adicionado `{"category.label": category}` ao `$or` na verificação de duplicados — agora deteta categorias armazenadas como objetos `{label, value}`. (2) Adicionado filtro `"source": {"$in": ["admin_request", "client_portal"]}` para evitar falsos conflitos com documentos `auto_default`. (3) Removido `.copy()` desnecessário no insert MongoDB.
+- **File Explorer: navegação para não-admins** (`fix`): Botão "Ir para Configurações" no S3NotConfiguredBanner agora redireciona para `/definicoes` (pessoal) em vez de `/configuracoes` (admin-only) quando o utilizador não é admin. Botão "Configurar Agora" escondido para não-admins que não podem guardar a config.
+- **Webmail: eliminação permanente vs soft-delete** (`fix`): (1) Backend: `DELETE /api/emails/{id}` agora faz soft-delete (marca `is_archived=True` em vez de remover da BD). (2) Novo endpoint `DELETE /api/emails/{id}/permanent` para eliminação permanente de emails no Lixo. (3) Frontend: ao eliminar emails na pasta Lixo, chama endpoint permanente com confirmação mais forte; nas restantes pastas, faz soft-delete com mensagem "movido para o Lixo".
+
+### Adicionado
+- **RGPD "Não Solicitado" no Portal do Cliente** (`feat`): Adicionado card cinza "RGPD Não Solicitado" quando o estado é `none` — o cliente agora vê sempre o estado RGPD (assinado/pendente/não solicitado), em vez de não ver nada quando o RGPD ainda não foi pedido.
+- **Utilitário safeString partilhado** (`feat`): `frontend/src/utils/safeString.js` com `safeString(val, fallback)` e `safeStringArray(arr, fallback)`. Extrai strings de objetos `{value, label}` de forma segura, evitando React Error #31 em toda a aplicação.
+
 ## [2026-07-05] — Correções de Bugs e Funcionalidades Pendentes
 
 ### Corrigido
@@ -37,16 +50,16 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
   - Pastas do webmail documentadas (inbox, sent, starred, drafts, trash + custom)
   - Explorador de Ficheiros documentado na secção de Documentos
 
-### Problemas Conhecidos (Pendentes)
-- **Explorador de Ficheiros não mostra ficheiros**: Quando o S3 está configurado, o explorador pode não mostrar ficheiros se o Base Path ou as credenciais estiverem incorretas. A UI atual mostra "Nenhum ficheiro encontrado" sem detalhes do erro.
-- **Rota /definicoes incorreta**: Ao clicar "Definições Gerais" nalgumas partes da UI, o utilizador é redirecionado para `/definicoes` (SettingsPage pessoal) em vez de `/configuracoes` (SystemConfigPage). Estes são menus diferentes com propósitos distintos.
-- **React Minified Error #31**: Objetos `{value, label}` renderizados como React children em ProcessDetails (corrige com helpers `optStr()`/`optVal()`, já aplicado em FormManagementPage).
-- **500 Internal Server Error em POST /api/documents/portal-requests/{processId}**: Endpoint de pedidos de documentos via portal pode falhar em certos cenários.
+### Problemas Conhecidos — RESOLVIDOS em [2026-07-06]
+- ~~**Explorador de Ficheiros não mostra ficheiros**~~: Mantido — depende da configuração S3. UI agora mostra mensagens mais úteis e navegação role-aware.
+- ~~**Rota /definicoes incorreta**~~: Corrigido — botão "Configurações" agora navega para `/configuracoes` (admin) ou `/definicoes` (não-admin) conforme o role.
+- ~~**React Minified Error #31**~~: Corrigido — utilitário `safeString()` aplicado em ProcessDetails, ProcessSummaryCard e PortalDocumentRequests.
+- ~~**500 Internal Server Error em POST /api/documents/portal-requests/{processId}**~~: Corrigido — duplicate check melhorado com `category.label` e filtro por source.
 
-### Funcionalidades Pendentes (Pedidos do Utilizador)
-- **Filtro de documentos já solicitados**: Quando se solicitam documentos ao cliente, os tipos de documento já pedidos devem ser filtrados da lista de seleção (evitar duplicados).
-- **Multi-seleção de documentos**: Permitir selecionar múltiplos tipos de documento ao mesmo tempo quando se pedem documentos ao cliente via portal.
-- **Pastas do Webmail (Enviados, Rascunhos, Lixo)**: Garantir que as pastas Enviados, Rascunhos e Lixo são corretamente sincronizadas e exibidas no webmail.
+### Funcionalidades Pendentes — RESOLVIDAS em [2026-07-06]
+- ~~**Filtro de documentos já solicitados**~~: Já implementado — categorias já pedidas são filtradas da lista de seleção.
+- ~~**Multi-seleção de documentos**~~: Já implementado — dialog com checkboxes, cria um pedido por categoria.
+- ~~**Pastas do Webmail (Enviados, Rascunhos, Lixo)**~~: Corrigido — soft-delete implementado, emails movem para Lixo em vez de eliminação permanente.
 
 ## [2026-07-03] — Correções de CSP, Impersonate e Gestão de Fases
 

@@ -151,6 +151,7 @@ import { format, parseISO, isAfter } from "date-fns";
 import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
+import { safeString, safeStringArray } from "../utils/safeString";
 
 // eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -1775,8 +1776,8 @@ const ProcessDetails = () => {
         <ProcessSummaryCard 
           process={process}
           statusInfo={currentStatusInfo}
-          consultorNames={process.consultor_names}
-          mediadorNames={process.mediador_names}
+          consultorNames={safeStringArray(process.consultor_names)}
+          mediadorNames={safeStringArray(process.mediador_names)}
           consultorName={process.consultor_name || process.assigned_consultor_name}
           mediadorName={process.mediador_name || process.assigned_mediador_name}
         />
@@ -2568,7 +2569,7 @@ const ProcessDetails = () => {
                                     </Badge>
                                     {buyer.estado_civil && (
                                       <Badge variant="secondary" className="text-xs">
-                                        {buyer.estado_civil}
+                                        {safeString(buyer.estado_civil)}
                                       </Badge>
                                     )}
                                   </div>
@@ -2576,25 +2577,25 @@ const ProcessDetails = () => {
                                     {buyer.nome && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">Nome:</span>
-                                        <p className="font-medium">{buyer.nome}</p>
+                                        <p className="font-medium">{safeString(buyer.nome)}</p>
                                       </div>
                                     )}
                                     {buyer.nif && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">NIF:</span>
-                                        <p className="font-medium">{buyer.nif}</p>
+                                        <p className="font-medium">{safeString(buyer.nif)}</p>
                                       </div>
                                     )}
                                     {buyer.email && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">Email:</span>
-                                        <p className="font-medium">{buyer.email}</p>
+                                        <p className="font-medium">{safeString(buyer.email)}</p>
                                       </div>
                                     )}
                                     {buyer.telefone && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">Telefone:</span>
-                                        <p className="font-medium">{buyer.telefone}</p>
+                                        <p className="font-medium">{safeString(buyer.telefone)}</p>
                                       </div>
                                     )}
                                   </div>
@@ -2610,7 +2611,7 @@ const ProcessDetails = () => {
                                     </Badge>
                                     {applicant.rendimento_mensal && (
                                       <Badge variant="secondary" className="text-xs">
-                                        {applicant.rendimento_mensal}€/mês
+                                        {safeString(applicant.rendimento_mensal)}€/mês
                                       </Badge>
                                     )}
                                   </div>
@@ -2618,25 +2619,25 @@ const ProcessDetails = () => {
                                     {applicant.nome && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">Nome:</span>
-                                        <p className="font-medium">{applicant.nome}</p>
+                                        <p className="font-medium">{safeString(applicant.nome)}</p>
                                       </div>
                                     )}
                                     {applicant.nif && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">NIF:</span>
-                                        <p className="font-medium">{applicant.nif}</p>
+                                        <p className="font-medium">{safeString(applicant.nif)}</p>
                                       </div>
                                     )}
                                     {applicant.data_nascimento && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">Data Nascimento:</span>
-                                        <p className="font-medium">{applicant.data_nascimento}</p>
+                                        <p className="font-medium">{safeString(applicant.data_nascimento)}</p>
                                       </div>
                                     )}
                                     {applicant.entidade_patronal && (
                                       <div>
                                         <span className="text-muted-foreground text-xs">Empresa:</span>
-                                        <p className="font-medium">{applicant.entidade_patronal}</p>
+                                        <p className="font-medium">{safeString(applicant.entidade_patronal)}</p>
                                       </div>
                                     )}
                                   </div>

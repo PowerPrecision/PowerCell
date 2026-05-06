@@ -10,7 +10,7 @@ Inclui: Operações de ficheiros S3 (upload, rename, delete, create folder, down
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import io
