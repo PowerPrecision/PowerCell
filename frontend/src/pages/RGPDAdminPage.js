@@ -31,6 +31,7 @@ import { Textarea } from "../components/ui/textarea";
 import SmartRichEditor from "../components/ui/SmartRichEditor";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
+import { safeString } from "../utils/safeString";
 import { getRGPDTemplate, updateRGPDTemplate, getMinutaTemplate, updateMinutaTemplate } from "../services/api";
 import {
   FileText,
@@ -138,7 +139,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
               <Label htmlFor="nome">Nome Completo</Label>
               <Input
                 id="nome"
-                value={formData.nome || ""}
+                value={safeString(formData.nome)}
                 onChange={(e) => handleChange("nome", e.target.value)}
               />
             </div>
@@ -146,7 +147,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
               <Label htmlFor="contribuinte">Contribuinte (NIF)</Label>
               <Input
                 id="contribuinte"
-                value={formData.contribuinte || ""}
+                value={safeString(formData.contribuinte)}
                 onChange={(e) => handleChange("contribuinte", e.target.value)}
                 maxLength={9}
               />
@@ -157,7 +158,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
             <div className="space-y-2">
               <Label htmlFor="tipo_documento">Tipo de Documento</Label>
               <Select
-                value={formData.tipo_documento || ""}
+                value={safeString(formData.tipo_documento)}
                 onValueChange={(v) => handleChange("tipo_documento", v)}
               >
                 <SelectTrigger>
@@ -176,7 +177,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
               <Label htmlFor="numero_documento">Número do Documento</Label>
               <Input
                 id="numero_documento"
-                value={formData.numero_documento || ""}
+                value={safeString(formData.numero_documento)}
                 onChange={(e) => handleChange("numero_documento", e.target.value)}
               />
             </div>
@@ -187,7 +188,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
               <Label htmlFor="validade_documento">Validade do Documento</Label>
               <Input
                 id="validade_documento"
-                value={formData.validade_documento || ""}
+                value={safeString(formData.validade_documento)}
                 onChange={(e) => handleChange("validade_documento", e.target.value)}
                 placeholder="DD/MM/AAAA"
               />
@@ -196,7 +197,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
               <Label htmlFor="codigo_postal">Código Postal</Label>
               <Input
                 id="codigo_postal"
-                value={formData.codigo_postal || ""}
+                value={safeString(formData.codigo_postal)}
                 onChange={(e) => handleChange("codigo_postal", e.target.value)}
                 placeholder="0000-000"
               />
@@ -207,7 +208,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
             <Label htmlFor="morada">Morada</Label>
             <Textarea
               id="morada"
-              value={formData.morada || ""}
+              value={safeString(formData.morada)}
               onChange={(e) => handleChange("morada", e.target.value)}
               rows={2}
             />
@@ -217,7 +218,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
             <Label htmlFor="concelho">Concelho</Label>
             <Input
               id="concelho"
-              value={formData.concelho || ""}
+              value={safeString(formData.concelho)}
               onChange={(e) => handleChange("concelho", e.target.value)}
             />
           </div>
@@ -236,9 +237,9 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
           )}
 
           <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded-lg text-sm">
-            <p><strong>Data de Assinatura:</strong> {formData.data_assinatura || "N/A"}</p>
-            <p><strong>Processo:</strong> {rgpd.process_id}</p>
-            <p><strong>Email do Cliente:</strong> {rgpd.client_email}</p>
+            <p><strong>Data de Assinatura:</strong> {safeString(formData.data_assinatura, "N/A")}</p>
+            <p><strong>Processo:</strong> {safeString(rgpd.process_id)}</p>
+            <p><strong>Email do Cliente:</strong> {safeString(rgpd.client_email)}</p>
           </div>
         </div>
 
@@ -279,7 +280,7 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Cliente</p>
-              <p className="font-medium">{rgpd.client_name}</p>
+              <p className="font-medium">{safeString(rgpd.client_name)}</p>
             </div>
             <StatusBadge status={rgpd.status} />
           </div>
@@ -294,37 +295,37 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-muted-foreground">Nome</p>
-                    <p className="font-medium">{rgpd.consent_data.nome}</p>
+                    <p className="font-medium">{safeString(rgpd.consent_data.nome)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Contribuinte</p>
-                    <p className="font-medium">{rgpd.consent_data.contribuinte}</p>
+                    <p className="font-medium">{safeString(rgpd.consent_data.contribuinte)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Tipo Documento</p>
-                    <p className="font-medium">{rgpd.consent_data.tipo_documento?.replace(/_/g, " ")}</p>
+                    <p className="font-medium">{safeString(rgpd.consent_data.tipo_documento).replace(/_/g, " ")}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Nº Documento</p>
-                    <p className="font-medium">{rgpd.consent_data.numero_documento}</p>
+                    <p className="font-medium">{safeString(rgpd.consent_data.numero_documento)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Validade</p>
-                    <p className="font-medium">{rgpd.consent_data.validade_documento || "N/A"}</p>
+                    <p className="font-medium">{safeString(rgpd.consent_data.validade_documento, "N/A")}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Código Postal</p>
-                    <p className="font-medium">{rgpd.consent_data.codigo_postal || "N/A"}</p>
+                    <p className="font-medium">{safeString(rgpd.consent_data.codigo_postal, "N/A")}</p>
                   </div>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Morada</p>
-                  <p className="font-medium">{rgpd.consent_data.morada}</p>
+                  <p className="font-medium">{safeString(rgpd.consent_data.morada)}</p>
                 </div>
                 {rgpd.consent_data.concelho && (
                   <div>
                     <p className="text-muted-foreground">Concelho</p>
-                    <p className="font-medium">{rgpd.consent_data.concelho}</p>
+                    <p className="font-medium">{safeString(rgpd.consent_data.concelho)}</p>
                   </div>
                 )}
                 {rgpd.consent_data.assinatura && (
@@ -340,7 +341,7 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
                 {rgpd.consent_data.data_assinatura && (
                   <div>
                     <p className="text-muted-foreground">Data da Assinatura</p>
-                    <p className="font-medium">{rgpd.consent_data.data_assinatura}</p>
+                    <p className="font-medium">{safeString(rgpd.consent_data.data_assinatura)}</p>
                   </div>
                 )}
               </CardContent>
@@ -355,15 +356,15 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
             <CardContent className="text-sm space-y-2">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">ID do Pedido</span>
-                <span className="font-mono text-xs">{rgpd.id}</span>
+                <span className="font-mono text-xs">{safeString(rgpd.id)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Processo</span>
-                <span>{process?.process_number || rgpd.process_id}</span>
+                <span>{safeString(process?.process_number || rgpd.process_id)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Email do Cliente</span>
-                <span>{rgpd.client_email}</span>
+                <span>{safeString(rgpd.client_email)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Criado em</span>
@@ -371,7 +372,7 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Criado por</span>
-                <span>{rgpd.created_by_name}</span>
+                <span>{safeString(rgpd.created_by_name)}</span>
               </div>
               {rgpd.signed_at && (
                 <div className="flex justify-between">
@@ -890,11 +891,11 @@ const RGPDPedidosTab = () => {
                   className="grid grid-cols-12 gap-2 px-3 py-3 items-center hover:bg-muted/50 rounded-lg"
                 >
                   <div className="col-span-3">
-                    <p className="font-medium truncate">{rgpd.client_name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{rgpd.client_email}</p>
+                    <p className="font-medium truncate">{safeString(rgpd.client_name)}</p>
+                    <p className="text-xs text-muted-foreground truncate">{safeString(rgpd.client_email)}</p>
                   </div>
                   <div className="col-span-2 text-sm">
-                    {rgpd.consent_data?.contribuinte || "-"}
+                    {safeString(rgpd.consent_data?.contribuinte, "-")}
                   </div>
                   <div className="col-span-2">
                     <StatusBadge status={rgpd.status} />
