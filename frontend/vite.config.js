@@ -95,7 +95,7 @@ export default defineConfig(({ mode }) => {
       // Source Maps: 'hidden' gera os .map mas NÃO os referencia no JS final.
       // O ficheiro .map é gerado e enviado ao Sentry, mas o browser nunca o descarrega.
       sourcemap: isProduction ? 'hidden' : true,
-      minify: 'esbuild',
+      minify: false,
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
