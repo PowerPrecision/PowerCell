@@ -71,8 +71,21 @@ const DOCUMENT_CATEGORIES = [
   { value: "Outros", label: "Outro Documento", icon: "📎" },
 ];
 
+/**
+ * Safely extracts a string from a value that may be an object {value, label}.
+ * The backend sometimes returns values as objects instead of strings,
+ * which causes React error #31 when rendered directly as a child.
+ */
+function safeString(val, fallback = "") {
+  if (val == null) return fallback;
+  if (typeof val === "string") return val;
+  if (typeof val === "object") return val.label || val.value || String(val);
+  return String(val);
+}
+
 function getCategoryInfo(categoryKey) {
-  return DOCUMENT_CATEGORIES.find(c => c.value === categoryKey) || { value: categoryKey, label: categoryKey, icon: "📎" };
+  const key = safeString(categoryKey, categoryKey);
+  return DOCUMENT_CATEGORIES.find(c => c.value === key) || { value: key, label: key, icon: "📎" };
 }
 
 const STATUS_CONFIG = {
@@ -93,7 +106,7 @@ export default function PortalDocumentRequests({ processId }) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null); // track which action is loading
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newDoc, setNewDoc] = useState({ category: "", notes: "", custom_label: "" });
+  const [newDoc, setNewDoc] = useState({ categories: [], notes: "", custom_label: "" });
 
   const fetchDocuments = useCallback(async () => {
     if (!processId) return;
@@ -112,20 +125,37 @@ export default function PortalDocumentRequests({ processId }) {
     fetchDocuments();
   }, [fetchDocuments]);
 
+  // Compute already-requested categories to filter from dropdown
+  const requestedCategoryKeys = documents
+    .filter(d => ["REQUESTED", "PENDING", "requested", "pending", "UPLOADED", "SUBMITTED", "uploaded", "submitted"].includes(d.status?.toUpperCase()))
+    .map(d => safeString(d.category, d.category));
+
+  const availableCategories = DOCUMENT_CATEGORIES.filter(
+    cat => !requestedCategoryKeys.includes(cat.value)
+  );
+
   const handleAddDocument = async () => {
-    if (!newDoc.category) {
-      toast.error("Selecione uma categoria");
+    if (newDoc.categories.length === 0) {
+      toast.error("Selecione pelo menos uma categoria");
       return;
     }
     setActionLoading("add");
     try {
-      await createPortalDocRequest(processId, {
-        category: newDoc.category,
-        notes: newDoc.notes || undefined,
-        custom_label: newDoc.custom_label || undefined,
-      });
-      toast.success("Documento solicitado com sucesso!");
-      setNewDoc({ category: "", notes: "", custom_label: "" });
+      // Create a request for each selected category
+      const promises = newDoc.categories.map(category =>
+        createPortalDocRequest(processId, {
+          category,
+          notes: newDoc.notes || undefined,
+          custom_label: category === "Outros" ? (newDoc.custom_label || undefined) : undefined,
+        })
+      );
+      await Promise.all(promises);
+      toast.success(
+        newDoc.categories.length === 1
+          ? "Documento solicitado com sucesso!"
+          : `${newDoc.categories.length} documentos solicitados com sucesso!`
+      );
+      setNewDoc({ categories: [], notes: "", custom_label: "" });
       setShowAddDialog(false);
       fetchDocuments();
     } catch (err) {
@@ -245,27 +275,49 @@ export default function PortalDocumentRequests({ processId }) {
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-2">
-                <Label>Categoria *</Label>
-                <Select
-                  value={newDoc.category}
-                  onValueChange={(val) => setNewDoc(prev => ({ ...prev, category: val }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione o tipo de documento..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DOCUMENT_CATEGORIES.map(cat => (
-                      <SelectItem key={cat.value} value={cat.value}>
-                        <span className="flex items-center gap-2">
-                          <span>{cat.icon}</span>
-                          <span>{cat.label}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Categorias * <span className="text-muted-foreground font-normal">(selecione uma ou mais)</span></Label>
+                <div className="border rounded-md max-h-64 overflow-y-auto p-2 space-y-1">
+                  {availableCategories.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Todos os documentos já foram solicitados.
+                    </p>
+                  ) : (
+                    availableCategories.map(cat => {
+                      const isSelected = newDoc.categories.includes(cat.value);
+                      return (
+                        <label
+                          key={cat.value}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
+                            isSelected ? 'bg-teal-50 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              setNewDoc(prev => ({
+                                ...prev,
+                                categories: e.target.checked
+                                  ? [...prev.categories, cat.value]
+                                  : prev.categories.filter(c => c !== cat.value),
+                              }));
+                            }}
+                            className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                          />
+                          <span className="text-lg">{cat.icon}</span>
+                          <span className="text-sm">{cat.label}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+                {newDoc.categories.length > 0 && (
+                  <p className="text-xs text-teal-600">
+                    {newDoc.categories.length} documento{newDoc.categories.length !== 1 ? 's' : ''} selecionado{newDoc.categories.length !== 1 ? 's' : ''}
+                  </p>
+                )}
               </div>
-              {newDoc.category === "Outros" && (
+              {newDoc.categories.includes("Outros") && (
                 <div className="space-y-2">
                   <Label>Descrição do documento</Label>
                   <Input
@@ -291,13 +343,13 @@ export default function PortalDocumentRequests({ processId }) {
               </Button>
               <Button
                 onClick={handleAddDocument}
-                disabled={!newDoc.category || actionLoading === "add"}
+                disabled={newDoc.categories.length === 0 || actionLoading === "add"}
                 className="bg-teal-600 hover:bg-teal-700 text-white"
               >
                 {actionLoading === "add" ? (
                   <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> A criar...</>
                 ) : (
-                  <><Plus className="h-4 w-4 mr-1" /> Solicitar</>
+                  <><Plus className="h-4 w-4 mr-1" /> Solicitar{newDoc.categories.length > 1 ? ` (${newDoc.categories.length})` : ''}</>
                 )}
               </Button>
             </DialogFooter>
@@ -388,10 +440,11 @@ export default function PortalDocumentRequests({ processId }) {
 // ── Individual document item ──────────────────────────────────────
 function DocItem({ doc, loading, onMarkReceived, onMarkPending, onDelete, isReceived }) {
   const catInfo = getCategoryInfo(doc.category);
-  const statusCfg = STATUS_CONFIG[doc.status] || STATUS_CONFIG.REQUESTED;
+  const statusKey = safeString(doc.status, 'REQUESTED').toUpperCase();
+  const statusCfg = STATUS_CONFIG[statusKey] || STATUS_CONFIG[doc.status] || STATUS_CONFIG.REQUESTED;
   const StatusIcon = statusCfg.icon;
 
-  const displayName = doc.custom_label || catInfo.label;
+  const displayName = safeString(doc.custom_label) || catInfo.label;
 
   return (
     <div className={`flex items-center gap-2.5 p-2.5 rounded-lg border transition-colors ${
@@ -408,10 +461,10 @@ function DocItem({ doc, loading, onMarkReceived, onMarkPending, onDelete, isRece
             {statusCfg.label}
           </span>
           {doc.notes && (
-            <span className="text-[10px] text-gray-400 truncate">{doc.notes}</span>
+            <span className="text-[10px] text-gray-400 truncate">{safeString(doc.notes)}</span>
           )}
           {doc.original_filename && (
-            <span className="text-[10px] text-blue-500 truncate">📎 {doc.original_filename}</span>
+            <span className="text-[10px] text-blue-500 truncate">📎 {safeString(doc.original_filename)}</span>
           )}
         </div>
       </div>

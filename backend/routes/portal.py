@@ -325,6 +325,9 @@ async def get_portal_status(
     # ── Equipa atribuída (consultores + mediadores) ──
     team_info = await _get_team_info(process)
 
+    # ── RGPD Status ──
+    rgpd_info = await _get_rgpd_status(process_id)
+
     return {
         "process": {
             "id": process_id,
@@ -348,6 +351,7 @@ async def get_portal_status(
             "received": received_docs,
             "has_pending": has_pending,
         },
+        "rgpd": rgpd_info,
         "team": team_info,
         "consultor": team_info["consultores"][0] if team_info["consultores"] else None,
     }
@@ -373,6 +377,42 @@ async def _get_user_contact_info(user_id: str) -> dict:
         "phone": user.get("phone", ""),
         "role": user.get("role", ""),
     }
+
+
+async def _get_rgpd_status(process_id: str) -> dict:
+    """Obtém o estado do RGPD para o processo.
+    
+    Returns info about RGPD consent status for the client portal.
+    - signed: RGPD was signed by the client
+    - pending: RGPD was requested but not yet signed
+    - none: No RGPD request exists
+    """
+    try:
+        rgpd = await db.rgpd_requests.find_one(
+            {"process_id": process_id},
+            {"_id": 0, "token": 0}
+        )
+        if not rgpd:
+            return {"status": "none", "has_rgpd": False}
+        
+        status = rgpd.get("status", "pending")
+        if status == "signed":
+            return {
+                "status": "signed",
+                "has_rgpd": True,
+                "signed_at": rgpd.get("signed_at"),
+            }
+        elif status == "pending":
+            return {
+                "status": "pending",
+                "has_rgpd": True,
+                "expires_at": rgpd.get("token_expires_at"),
+            }
+        else:
+            return {"status": status, "has_rgpd": False}
+    except Exception as e:
+        logger.warning(f"Erro ao obter estado RGPD para portal: {e}")
+        return {"status": "none", "has_rgpd": False}
 
 
 async def _get_team_info(process: dict) -> dict:

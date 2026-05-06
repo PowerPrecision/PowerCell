@@ -1066,6 +1066,7 @@ async def sync_webmail_emails(
                     continue
             
             # Buscar da pasta de Rascunhos (tentar vários nomes)
+            drafts_folder_found = None
             for drafts_folder in ["Drafts", "INBOX.Drafts", "Rascunhos", "INBOX.Rascunhos", "[Gmail]/Drafts", "[Gmail]/Rascunhos"]:
                 try:
                     drafts_result = await loop.run_in_executor(
@@ -1077,7 +1078,25 @@ async def sync_webmail_emails(
                         # Mark as drafts for proper categorization
                         for em in drafts_list:
                             em["direction"] = "sent"  # Drafts are treated as sent for display
+                            em["_is_draft"] = True  # Flag to set status=draft when saving
                         all_emails.extend(drafts_list)
+                        drafts_folder_found = drafts_folder
+                        break
+                except Exception:
+                    continue
+            
+            # Buscar da pasta de Lixo (tentar vários nomes)
+            for trash_folder in ["Trash", "INBOX.Trash", "[Gmail]/Trash", "[Gmail]/Lixo", "Lixo", "INBOX.Lixo", "Deleted Items", "INBOX.Deleted"]:
+                try:
+                    trash_result = await loop.run_in_executor(
+                        _email_executor,
+                        lambda f=trash_folder: _fetch_all_from_folder_sync(account, f, days, max_emails)
+                    )
+                    trash_list = trash_result.get("emails", []) if trash_result else []
+                    if trash_list:
+                        for em in trash_list:
+                            em["_is_trash"] = True  # Flag to set is_archived=True when saving
+                        all_emails.extend(trash_list)
                         break
                 except Exception:
                     continue
@@ -1164,7 +1183,7 @@ async def sync_webmail_emails(
                         "body": em.get("body", ""),
                         "body_html": em.get("body_html", ""),
                         "attachments": em.get("attachments", []),
-                        "status": "synced",
+                        "status": "draft" if em.get("_is_draft") else "synced",
                         "sent_at": sent_at,
                         "created_at": datetime.now(timezone.utc).isoformat(),
                         "created_by": None,
@@ -1172,9 +1191,9 @@ async def sync_webmail_emails(
                         "synced": True,
                         "account": account.name,
                         "message_id": msg_id,
-                        "is_read": em.get("direction") == "sent",
+                        "is_read": em.get("direction") == "sent" or em.get("_is_draft", False),
                         "is_starred": False,
-                        "is_archived": False,
+                        "is_archived": em.get("_is_trash", False),
                         "source": "webmail_sync",
                         "in_reply_to": in_reply_to or None,
                         "references": references or [],
@@ -1312,12 +1331,30 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
                 if drafts_list:
                     for em in drafts_list:
                         em["direction"] = "sent"
+                        em["_is_draft"] = True
                     drafts_emails = drafts_list
                     break
             except Exception:
                 continue
         
-        all_emails = inbox_emails + sent_emails + drafts_emails
+        # Buscar da pasta de Lixo
+        trash_emails = []
+        for trash_folder in ["Trash", "INBOX.Trash", "[Gmail]/Trash", "[Gmail]/Lixo", "Lixo", "INBOX.Lixo", "Deleted Items", "INBOX.Deleted"]:
+            try:
+                trash_result = await loop.run_in_executor(
+                    _email_executor,
+                    lambda f=trash_folder: _fetch_all_from_folder_sync(account, f, days, max_emails)
+                )
+                trash_list = trash_result.get("emails", []) if trash_result else []
+                if trash_list:
+                    for em in trash_list:
+                        em["_is_trash"] = True
+                    trash_emails = trash_list
+                    break
+            except Exception:
+                continue
+        
+        all_emails = inbox_emails + sent_emails + drafts_emails + trash_emails
         
         for em in all_emails:
             try:
@@ -1394,7 +1431,7 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
                     "body": em.get("body", ""),
                     "body_html": em.get("body_html", ""),
                     "attachments": em.get("attachments", []),
-                    "status": "synced",
+                    "status": "draft" if em.get("_is_draft") else "synced",
                     "sent_at": sent_at,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "created_by": user_id,
@@ -1403,9 +1440,9 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
                     "account": config.get("email_address", ""),
                     "synced_for_user": user_id,
                     "message_id": msg_id,
-                    "is_read": em.get("direction") == "sent",
+                    "is_read": em.get("direction") == "sent" or em.get("_is_draft", False),
                     "is_starred": False,
-                    "is_archived": False,
+                    "is_archived": em.get("_is_trash", False),
                     "source": "user_webmail_sync",
                     "in_reply_to": in_reply_to or None,
                     "references": references or [],

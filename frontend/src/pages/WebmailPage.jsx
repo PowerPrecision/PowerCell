@@ -84,7 +84,7 @@ const FOLDERS = [
   { id: "sent", label: "Enviados", icon: Send },
   { id: "starred", label: "Destacados", icon: Star },
   { id: "drafts", label: "Rascunhos", icon: FileText },
-  { id: "trash", label: "Lixo", icon: Archive },
+  { id: "trash", label: "Lixo", icon: Trash2 },
 ];
 
 // Formatar data relativa ou absoluta

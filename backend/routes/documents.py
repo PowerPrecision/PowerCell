@@ -3605,11 +3605,30 @@ async def get_portal_document_requests(
 
     async for doc in cursor:
         cat = doc.get("category", "Outros")
+        # Ensure cat is a string (backend may have stored objects)
+        if isinstance(cat, dict):
+            cat = cat.get("value", cat.get("label", "Outros"))
         cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
         docs.append({
-            **doc,
+            "id": doc.get("id"),
+            "process_id": doc.get("process_id"),
+            "category": cat,
             "category_label": cat_info["label"],
             "category_icon": cat_info["icon"],
+            "custom_label": doc.get("custom_label"),
+            "status": doc.get("status", "REQUESTED"),
+            "notes": doc.get("notes", ""),
+            "filename": doc.get("filename"),
+            "original_filename": doc.get("original_filename"),
+            "file_size": doc.get("file_size"),
+            "content_type": doc.get("content_type"),
+            "source": doc.get("source"),
+            "requested_by": doc.get("requested_by"),
+            "requested_by_name": doc.get("requested_by_name"),
+            "created_at": doc.get("created_at"),
+            "updated_at": doc.get("updated_at"),
+            "uploaded_at": doc.get("uploaded_at"),
+            "reviewed_at": doc.get("reviewed_at"),
         })
 
     return {"success": True, "documents": docs}
@@ -3713,7 +3732,7 @@ async def create_portal_document_request(
         raise
     except Exception as e:
         logger.error(f"[PORTAL-REQUESTS] Error creating portal request for process {process_id}: {type(e).__name__}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Erro ao criar pedido: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 
 class DocumentStatusUpdate(BaseModel):
