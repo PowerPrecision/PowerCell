@@ -32,6 +32,7 @@ import SmartRichEditor from "../components/ui/SmartRichEditor";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
 import { safeString } from "../utils/safeString";
+import { safeNumber } from "../components/dashboard/DashboardShared";
 import { getRGPDTemplate, updateRGPDTemplate, getMinutaTemplate, updateMinutaTemplate } from "../services/api";
 import {
   FileText,
@@ -228,7 +229,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
               <Label>Assinatura Guardada</Label>
               <div className="border rounded p-2 bg-muted/30">
                 <img
-                  src={formData.assinatura}
+                  src={safeString(formData.assinatura)}
                   alt="Assinatura"
                   className="max-h-24 mx-auto"
                 />
@@ -537,7 +538,7 @@ const RGPDTemplateTab = () => {
                       templateMeta.updated_at
                         ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
                         : "N/A"
-                    } ${templateMeta.updated_by ? `por ${templateMeta.updated_by}` : ""}`}
+                    } ${templateMeta.updated_by ? `por ${safeString(templateMeta.updated_by)}` : ""}`}
               </span>
             </div>
             {templateMeta.is_default && (
@@ -845,11 +846,11 @@ const RGPDPedidosTab = () => {
       {/* Estatísticas */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard title="Total" value={stats.total} icon={FileText} color="text-blue-600" />
-          <StatCard title="Assinados" value={stats.signed} icon={CheckCircle} color="text-green-600" />
-          <StatCard title="Pendentes" value={stats.pending} icon={Clock} color="text-yellow-600" />
-          <StatCard title="Expirados" value={stats.expired} icon={XCircle} color="text-red-600" />
-          <StatCard title="Assinados Hoje" value={stats.signed_today} icon={Users} color="text-purple-600" />
+          <StatCard title="Total" value={safeNumber(stats?.total)} icon={FileText} color="text-blue-600" />
+          <StatCard title="Assinados" value={safeNumber(stats?.signed)} icon={CheckCircle} color="text-green-600" />
+          <StatCard title="Pendentes" value={safeNumber(stats?.pending)} icon={Clock} color="text-yellow-600" />
+          <StatCard title="Expirados" value={safeNumber(stats?.expired)} icon={XCircle} color="text-red-600" />
+          <StatCard title="Assinados Hoje" value={safeNumber(stats?.signed_today)} icon={Users} color="text-purple-600" />
         </div>
       )}
 
@@ -1096,7 +1097,7 @@ const MinutaTemplateTab = () => {
                       templateMeta.updated_at
                         ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
                         : "N/A"
-                    } ${templateMeta.updated_by ? `por ${templateMeta.updated_by}` : ""}`}
+                    } ${templateMeta.updated_by ? `por ${safeString(templateMeta.updated_by)}` : ""}`}
               </span>
             </div>
             {templateMeta.is_default && (
