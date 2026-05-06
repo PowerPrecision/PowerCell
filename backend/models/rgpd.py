@@ -102,6 +102,7 @@ class RGPDCreate(BaseModel):
     process_id: str = Field(..., description="ID do processo associado")
     client_name: str = Field(..., description="Nome do cliente")
     client_email: EmailStr = Field(..., description="Email do cliente para envio")
+    custom_message: Optional[str] = Field(None, description="Mensagem personalizada a incluir no email")
 
 
 class RGPDRequest(BaseModel):

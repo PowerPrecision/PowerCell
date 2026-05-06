@@ -152,7 +152,8 @@ async def request_rgpd(
             client_name=data.client_name,
             token=result["token"],
             request_id=result["request_id"],
-            user_email=user["email"]
+            user_email=user["email"],
+            custom_message=data.custom_message
         )
         
         if not email_sent:

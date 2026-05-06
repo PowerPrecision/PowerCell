@@ -386,6 +386,7 @@ async def send_rgpd_email(
     token: str,
     request_id: str,
     user_email: str,
+    custom_message: str = None,
     base_url: str = None
 ) -> bool:
     """
@@ -397,6 +398,7 @@ async def send_rgpd_email(
         token: Token de validação
         request_id: ID do pedido
         user_email: Email do utilizador que solicitou
+        custom_message: Mensagem personalizada a incluir no email
         base_url: URL base para o link (default: variável de ambiente ou www.powercell.pt)
     
     Returns:
@@ -411,22 +413,32 @@ async def send_rgpd_email(
     rgpd_link = f"{base_url}/rgpd/{token}"
     
     # Template do email
-    subject = "RGPD - Regulamento Geral sobre a Proteção de Dados"
+    subject = "Solicitação de Assinatura RGPD - PowerCell"
+    
+    # Custom message from staff
+    custom_section = ""
+    if custom_message:
+        custom_section = f"\n{custom_message}\n"
     
     body_text = f"""Estimado(a) {client_name},
 
-Gostaríamos de solicitar a sua assinatura do documento Regulamento Geral de Proteção de Dados (RGPD), que é um requisito legal para a prestação dos nossos serviços enquanto Intermediários de Crédito.
-
-O documento RGPD explica como recolhemos, utilizamos e partilhamos os seus dados pessoais. Ele também descreve os seus direitos como titular dos dados.
-
-Para assinar o documento, basta clicar no link abaixo e preencher os campos com as suas informações.
-
-Atenção: Deverá assinar o RGPD num espaço máximo de 24h por motivos de segurança.
+Gostaríamos de solicitar a sua assinatura do documento RGPD.
+{custom_section}
+Atenção: deverá assinar num máximo de 24h.
 
 PREENCHER RGPD: {rgpd_link}
 
 Atenciosamente,
-Equipa Precision Crédito
+Equipa PowerCell
+"""
+    
+    # Custom message section for HTML
+    custom_section_html = ""
+    if custom_message:
+        custom_section_html = f"""
+    <div style="background-color: #e8f4fd; border-left: 4px solid #2563eb; padding: 15px; margin: 20px 0; border-radius: 0 5px 5px 0;">
+        <p style="margin: 0;">{custom_message}</p>
+    </div>
 """
     
     body_html = f"""
@@ -442,14 +454,10 @@ Equipa Precision Crédito
     
     <p>Estimado(a) <strong>{client_name}</strong>,</p>
     
-    <p>Gostaríamos de solicitar a sua assinatura do documento <strong>Regulamento Geral de Proteção de Dados (RGPD)</strong>, que é um requisito legal para a prestação dos nossos serviços enquanto Intermediários de Crédito.</p>
-    
-    <p>O documento RGPD explica como recolhemos, utilizamos e partilhamos os seus dados pessoais. Ele também descreve os seus direitos como titular dos dados.</p>
-    
-    <p>Para assinar o documento, basta clicar no link abaixo e preencher os campos com as suas informações.</p>
-    
+    <p>Gostaríamos de solicitar a sua assinatura do documento <strong>RGPD</strong>.</p>
+    {custom_section_html}
     <div style="background-color: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; margin: 20px 0;">
-        <strong>⚠️ Atenção:</strong> Deverá assinar o RGPD num espaço máximo de 24h por motivos de segurança.
+        <strong>⚠️ Atenção:</strong> Deverá assinar num máximo de 24h.
     </div>
     
     <div style="text-align: center; margin: 30px 0;">
@@ -462,7 +470,7 @@ Equipa Precision Crédito
     <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
     
     <p>Atenciosamente,<br>
-    <strong>Equipa Precision Crédito</strong></p>
+    <strong>Equipa PowerCell</strong></p>
 </body>
 </html>
 """
@@ -477,7 +485,8 @@ Equipa Precision Crédito
             subject=subject,
             body=body_text,
             body_html=body_html,
-            created_by=user_email
+            created_by=user_email,
+            system_purpose="RGPD"
         )
         
         logger.info(f"RGPD email sent to {client_email}")

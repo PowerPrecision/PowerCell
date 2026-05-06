@@ -325,6 +325,8 @@ const ProcessDetails = () => {
   const [rgpdStatus, setRgpdStatus] = useState(null);
   const [rgpdLoading, setRgpdLoading] = useState(false);
   const [rgpdSending, setRgpdSending] = useState(false);
+  const [rgpdDialogOpen, setRgpdDialogOpen] = useState(false);
+  const [rgpdCustomMessage, setRgpdCustomMessage] = useState("");
   
   // Estado para o modal CPCV
   const [showCPCVModal, setShowCPCVModal] = useState(false);
@@ -378,17 +380,19 @@ const ProcessDetails = () => {
     }
   };
 
-  // Solicitar RGPD
-  const handleRequestRgpd = async () => {
+  // Solicitar RGPD - abre o dialog
+  const handleRequestRgpd = () => {
     if (!process?.client_email) {
       toast.error("O cliente não tem email definido");
       return;
     }
+    setRgpdCustomMessage("");
+    setRgpdDialogOpen(true);
+  };
 
-    if (!window.confirm("Tem a certeza que deseja enviar o email de RGPD para este cliente?")) {
-      return;
-    }
-    
+  // Confirmar envio de RGPD com mensagem customizada
+  const handleConfirmRgpd = async () => {
+    setRgpdDialogOpen(false);
     setRgpdSending(true);
     try {
       const response = await fetch(`${API_URL}/api/rgpd/request`, {
@@ -401,6 +405,7 @@ const ProcessDetails = () => {
           process_id: id,
           client_name: process.client_name,
           client_email: process.client_email,
+          custom_message: rgpdCustomMessage || undefined,
         }),
       });
       
@@ -1525,6 +1530,40 @@ const ProcessDetails = () => {
               </Button>
             )}
             
+            {/* Dialog RGPD */}
+            <Dialog open={rgpdDialogOpen} onOpenChange={setRgpdDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Solicitar Consentimento RGPD</DialogTitle>
+                  <DialogDescription>
+                    Envie um pedido de consentimento RGPD para <strong>{process?.client_name}</strong> ({process?.client_email}).
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                  <label className="text-sm font-medium text-foreground mb-2 block">
+                    Mensagem personalizada <span className="text-muted-foreground font-normal">(opcional)</span>
+                  </label>
+                  <Textarea
+                    placeholder="Adicione uma mensagem personalizada para o cliente..."
+                    value={rgpdCustomMessage}
+                    onChange={(e) => setRgpdCustomMessage(e.target.value)}
+                    rows={3}
+                  />
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setRgpdDialogOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button onClick={handleConfirmRgpd} disabled={rgpdSending}>
+                    {rgpdSending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    Solicitar RGPD
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             {/* Botão RGPD */}
             {userRole !== "indexacao" && (
               <Button

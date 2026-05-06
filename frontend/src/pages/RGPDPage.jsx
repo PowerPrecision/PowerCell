@@ -662,17 +662,11 @@ export default function RGPDPage() {
                 <CheckCircle className="h-10 w-10 text-green-600 dark:text-green-400" />
               </div>
               <h2 className="mt-2 text-xl font-semibold text-foreground">
-                Documento Assinado com Sucesso!
+                Assinatura de Consentimento RGPD enviada com sucesso
               </h2>
               <p className="mt-3 text-muted-foreground">
-                O seu documento RGPD foi assinado e registado com sucesso. Uma
-                cópia foi enviada para o seu intermediário de crédito.
+                Obrigado pela sua confiança!
               </p>
-              <div className="mt-6 pt-4 border-t border-border">
-                <p className="text-sm text-muted-foreground">
-                  Obrigado pela sua confiança.
-                </p>
-              </div>
             </div>
           </CardContent>
         </Card>
