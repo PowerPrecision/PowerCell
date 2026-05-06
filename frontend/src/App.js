@@ -145,8 +145,14 @@ class LazyChunkErrorBoundary extends Component {
       if (typeof window !== "undefined" && window.__vite__ && window.__vite__.clearCache) {
         window.__vite__.clearCache();
       }
-      // Força reload limpo
-      window.location.reload();
+      // Força reload limpo com cache-busting para evitar ciclo infinito
+      // (CDN/browser podem servir index.html em cache com hashes antigos)
+      window.location.replace(
+        window.location.pathname +
+        window.location.search +
+        (window.location.search.includes('?') ? '&' : '?') +
+        '_t=' + Date.now()
+      );
       return { hasError: true, error };
     }
 
