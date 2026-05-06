@@ -11,6 +11,7 @@ import { Checkbox } from "../ui/checkbox";
 import { Badge } from "../ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Loader2 } from "lucide-react";
+import { safeString } from "../../utils/safeString";
 
 const roleLabels = { 
   admin: "Administrador", 
@@ -146,7 +147,7 @@ const CreateEventDialog = ({
                 <SelectItem value="none">Nenhum (Evento Geral)</SelectItem>
                 {(processes || []).slice(0, 50).map((process) => (
                   <SelectItem key={process.id} value={process.id}>
-                    {process.client_name}
+                    {safeString(process.client_name)}
                   </SelectItem>
                 ))}
               </SelectContent>

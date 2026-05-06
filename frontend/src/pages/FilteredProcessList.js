@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../services/api";
+import { safeString } from "../utils/safeString";
 
 const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
 
@@ -271,8 +272,8 @@ const FilteredProcessList = () => {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="font-medium text-sm truncate">{process.client_name}</p>
-                          <p className="text-xs text-muted-foreground">{process.client_phone || process.client_email || "-"}</p>
+                          <p className="font-medium text-sm truncate">{safeString(process.client_name)}</p>
+                          <p className="text-xs text-muted-foreground">{safeString(process.client_phone) || safeString(process.client_email) || "-"}</p>
                         </div>
                         <Badge 
                           variant="outline"
@@ -325,7 +326,7 @@ const FilteredProcessList = () => {
                         >
                           <TableCell>
                             <div>
-                              <p className="font-medium">{process.client_name}</p>
+                              <p className="font-medium">{safeString(process.client_name)}</p>
                               {process.under_35 && (
                                 <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 mt-1">
                                   &lt;35 anos
@@ -335,9 +336,9 @@ const FilteredProcessList = () => {
                           </TableCell>
                           <TableCell>
                             <div className="text-sm">
-                              <p>{process.client_phone || "-"}</p>
+                              <p>{safeString(process.client_phone) || "-"}</p>
                               <p className="text-muted-foreground text-xs truncate max-w-[150px]">
-                                {process.client_email}
+                                {safeString(process.client_email)}
                               </p>
                             </div>
                           </TableCell>

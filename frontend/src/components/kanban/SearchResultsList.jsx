@@ -14,6 +14,7 @@ import { ScrollArea } from '../ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Search, Phone, Eye } from 'lucide-react';
 import { statusColors } from './constants';
+import { safeString } from '../../utils/safeString';
 
 const SearchResultsList = memo(({
   processes,
@@ -70,7 +71,7 @@ const SearchResultsList = memo(({
                     >
                       <TableCell>
                         <div>
-                          <p className="font-medium">{process.client_name}</p>
+                          <p className="font-medium">{safeString(process.client_name)}</p>
                           <p className="text-xs text-muted-foreground font-semibold">
                             #{process.process_number || '—'}
                           </p>
@@ -88,7 +89,7 @@ const SearchResultsList = memo(({
                             {process.client_phone || '-'}
                           </p>
                           <p className="text-muted-foreground text-xs truncate max-w-[150px]">
-                            {process.client_email}
+                            {safeString(process.client_email)}
                           </p>
                         </div>
                       </TableCell>
@@ -96,7 +97,7 @@ const SearchResultsList = memo(({
                         <Badge 
                           className={`${statusColors[process.columnColor]} border text-xs`}
                         >
-                          {process.columnLabel}
+                          {safeString(process.columnLabel)}
                         </Badge>
                       </TableCell>
                       <TableCell className="font-medium">

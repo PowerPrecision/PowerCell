@@ -68,6 +68,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../services/api";
+import { safeString } from "../utils/safeString";
 
 // Mapeamento de nomes de campos para português
 const fieldLabels = {
@@ -531,7 +532,7 @@ const AIDataReviewPage = () => {
                             <TableCell>
                               <div className="flex items-center gap-2">
                                 <User className="h-4 w-4 text-muted-foreground" />
-                                <span className="font-medium">{process.client_name}</span>
+                                <span className="font-medium">{safeString(process.client_name)}</span>
                               </div>
                             </TableCell>
                             <TableCell>
@@ -837,7 +838,7 @@ const AIDataReviewPage = () => {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileSearch className="h-5 w-5 text-amber-500" />
-                Revisão de Dados - {selectedProcess?.client_name}
+                Revisão de Dados - {safeString(selectedProcess?.client_name)}
               </DialogTitle>
               <DialogDescription>
                 Compare os dados actuais com os dados extraídos pela IA e escolha quais aplicar

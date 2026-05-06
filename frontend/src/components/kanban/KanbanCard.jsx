@@ -20,6 +20,7 @@ import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { GripVertical, Eye, User, Phone, Mail, Lock, Users } from 'lucide-react';
+import { safeString } from '../../utils/safeString';
 
 // Comparador customizado para React.memo
 // Só re-renderiza se o processo ou estado de drag mudar
@@ -127,7 +128,7 @@ const KanbanCard = memo(({
             style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
             title={process.client_name}
           >
-            {process.client_name}
+            {safeString(process.client_name)}
           </p>
           
           {/* Linha 3: Consultor (se existir) */}
@@ -135,7 +136,7 @@ const KanbanCard = memo(({
             <div className="flex items-center gap-1">
               <User className="h-3 w-3 text-muted-foreground" />
               <span className="text-[10px] text-muted-foreground truncate">
-                {process.consultor_name}
+                {safeString(process.consultor_name)}
               </span>
             </div>
           )}
@@ -145,7 +146,7 @@ const KanbanCard = memo(({
             <div className="flex items-center gap-1">
               <User className="h-3 w-3 text-muted-foreground" />
               <span className="text-[10px] text-muted-foreground truncate">
-                {process.mediador_name}
+                {safeString(process.mediador_name)}
               </span>
             </div>
           )}
@@ -175,13 +176,13 @@ const KanbanCard = memo(({
               {process.client_phone && (
                 <span className="flex items-center gap-0.5 truncate">
                   <Phone className="h-2.5 w-2.5" />
-                  {process.client_phone}
+                  {safeString(process.client_phone)}
                 </span>
               )}
               {process.client_email && !process.client_phone && (
                 <span className="flex items-center gap-0.5 truncate">
                   <Mail className="h-2.5 w-2.5" />
-                  {process.client_email}
+                  {safeString(process.client_email)}
                 </span>
               )}
             </div>

@@ -67,6 +67,7 @@ import {
 import { toast } from "sonner";
 import { RichTextViewer } from "./ui/RichTextEditor";
 import SmartRichEditor from "./ui/SmartRichEditor";
+import { safeString } from "../utils/safeString";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -381,7 +382,7 @@ const SendDocumentationModal = ({
             Envie a documentação do cliente para os balcões/bancos selecionados.
             {process && (
               <span className="block mt-1 font-medium text-foreground">
-                Cliente: {process.client_name} • Processo #{process.process_number || "N/A"}
+                Cliente: {safeString(process.client_name)} • Processo #{safeString(process.process_number) || "N/A"}
               </span>
             )}
           </DialogDescription>
@@ -627,7 +628,7 @@ const SendDocumentationModal = ({
               {/* Info sobre o email */}
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>
-                  <strong>Assunto:</strong> {emailSubject || `Documentação - ${process?.client_name || "N/A"} (Processo #${process?.process_number || "N/A"})`}
+                  <strong>Assunto:</strong> {emailSubject || `Documentação - ${safeString(process?.client_name) || "N/A"} (Processo #${safeString(process?.process_number) || "N/A"})`}
                 </p>
                 <p>
                   <strong>Nota:</strong> {canEditTemplate

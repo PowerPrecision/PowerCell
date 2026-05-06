@@ -40,6 +40,7 @@ import {
 import TasksPanel from "../components/TasksPanel";
 import TeamMural from "../components/TeamMural";
 import { getWebmailStats, getCalendarDeadlines } from "../services/api";
+import { safeString } from "../utils/safeString";
 
 const roleLabels = {
   admin: "Administrador",
@@ -129,8 +130,8 @@ const ConsultorDashboard = () => {
   // Row renderer
   const renderRow = (process) => (
     <tr key={process.id} className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
-      <td className="p-2 sm:p-3 lg:p-4 align-middle font-medium">{process.client_name}</td>
-      <td className="p-2 sm:p-3 lg:p-4 align-middle">{process.client_email}</td>
+      <td className="p-2 sm:p-3 lg:p-4 align-middle font-medium">{safeString(process.client_name)}</td>
+      <td className="p-2 sm:p-3 lg:p-4 align-middle">{safeString(process.client_email)}</td>
       <td className="p-2 sm:p-3 lg:p-4 align-middle">
         <Badge variant="outline">{TYPE_LABELS[process.process_type] || (typeof process.process_type === 'string' ? process.process_type : '')}</Badge>
       </td>

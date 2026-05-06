@@ -27,6 +27,7 @@ import { getProcesses } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
 import { useAuth } from "../contexts/AuthContext";
+import { safeString } from "../utils/safeString";
 
 const roleLabels = {
   consultor: "Consultor",
@@ -481,9 +482,9 @@ const ProcessesPage = () => {
                         >
                           <TableCell className="font-medium">
                             <div>
-                              <p>{process.client_name}</p>
+                              <p>{safeString(process.client_name)}</p>
                               {process.client_nif && (
-                                <p className="text-xs text-muted-foreground">NIF: {process.client_nif}</p>
+                                <p className="text-xs text-muted-foreground">NIF: {safeString(process.client_nif)}</p>
                               )}
                             </div>
                           </TableCell>
@@ -492,13 +493,13 @@ const ProcessesPage = () => {
                               {process.client_email && (
                                 <div className="flex items-center gap-1">
                                   <Mail className="h-3 w-3 text-muted-foreground" />
-                                  <span className="text-xs">{process.client_email}</span>
+                                  <span className="text-xs">{safeString(process.client_email)}</span>
                                 </div>
                               )}
                               {process.client_phone && (
                                 <div className="flex items-center gap-1">
                                   <Phone className="h-3 w-3 text-muted-foreground" />
-                                  <span className="text-xs">{process.client_phone}</span>
+                                  <span className="text-xs">{safeString(process.client_phone)}</span>
                                 </div>
                               )}
                             </div>
@@ -507,7 +508,7 @@ const ProcessesPage = () => {
                             {process.property_location ? (
                               <div className="flex items-center gap-1">
                                 <MapPin className="h-3 w-3 text-muted-foreground" />
-                                <span className="text-sm">{process.property_location}</span>
+                                <span className="text-sm">{safeString(process.property_location)}</span>
                               </div>
                             ) : (
                               "-"

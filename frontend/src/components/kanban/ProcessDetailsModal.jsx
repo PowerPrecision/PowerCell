@@ -24,6 +24,7 @@ import {
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { User, Mail, Phone, Home, MapPin, Euro, Calendar, Users, AlertTriangle } from 'lucide-react';
+import { safeString } from '../../utils/safeString';
 
 const ProcessDetailsModal = memo(({
   open,
@@ -81,14 +82,14 @@ const ProcessDetailsModal = memo(({
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-muted-foreground">Nome</p>
-                <p className="font-medium">{process.client_name}</p>
+                <p className="font-medium">{safeString(process.client_name)}</p>
               </div>
               {process.client_email && (
                 <div>
                   <p className="text-muted-foreground">Email</p>
                   <p className="font-medium flex items-center gap-1">
                     <Mail className="h-3 w-3" />
-                    {process.client_email}
+                    {safeString(process.client_email)}
                   </p>
                 </div>
               )}
@@ -97,14 +98,14 @@ const ProcessDetailsModal = memo(({
                   <p className="text-muted-foreground">Telefone</p>
                   <p className="font-medium flex items-center gap-1">
                     <Phone className="h-3 w-3" />
-                    {process.client_phone}
+                    {safeString(process.client_phone)}
                   </p>
                 </div>
               )}
               {process.client_nif && (
                 <div>
                   <p className="text-muted-foreground">NIF</p>
-                  <p className="font-medium">{process.client_nif}</p>
+                  <p className="font-medium">{safeString(process.client_nif)}</p>
                 </div>
               )}
             </div>
@@ -120,7 +121,7 @@ const ProcessDetailsModal = memo(({
               {process.property_type && (
                 <div>
                   <p className="text-muted-foreground">Tipo</p>
-                  <p className="font-medium capitalize">{process.property_type}</p>
+                  <p className="font-medium capitalize">{safeString(process.property_type)}</p>
                 </div>
               )}
               {process.property_location && (
@@ -128,7 +129,7 @@ const ProcessDetailsModal = memo(({
                   <p className="text-muted-foreground">Localização</p>
                   <p className="font-medium flex items-center gap-1">
                     <MapPin className="h-3 w-3" />
-                    {process.property_location}
+                    {safeString(process.property_location)}
                   </p>
                 </div>
               )}
@@ -187,13 +188,13 @@ const ProcessDetailsModal = memo(({
                 {process.assigned_consultor_name && (
                   <div>
                     <p className="text-muted-foreground">Consultor</p>
-                    <p className="font-medium">{process.assigned_consultor_name}</p>
+                    <p className="font-medium">{safeString(process.assigned_consultor_name)}</p>
                   </div>
                 )}
                 {process.assigned_intermediario_name && (
                   <div>
                     <p className="text-muted-foreground">Intermediário</p>
-                    <p className="font-medium">{process.assigned_intermediario_name}</p>
+                    <p className="font-medium">{safeString(process.assigned_intermediario_name)}</p>
                   </div>
                 )}
               </div>
@@ -204,7 +205,7 @@ const ProcessDetailsModal = memo(({
           {process.notes && (
             <div className="space-y-3">
               <h3 className="font-semibold text-lg">Notas</h3>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{process.notes}</p>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{safeString(process.notes)}</p>
             </div>
           )}
 

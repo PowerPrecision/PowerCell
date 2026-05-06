@@ -14,6 +14,7 @@ import { Badge } from "../ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Search, Eye, Loader2 } from "lucide-react";
 import { safeLabel } from "../dashboard/DashboardShared";
+import { safeString } from "../../utils/safeString";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -134,7 +135,7 @@ const ClientSearchTab = ({ workflowStatuses }) => {
                               className="cursor-pointer hover:bg-muted/50"
                               onClick={() => navigate(`/processo/${process.id}`)}
                             >
-                              <TableCell className="font-medium">{process.client_name}</TableCell>
+                              <TableCell className="font-medium">{safeString(process.client_name)}</TableCell>
                               <TableCell>
                                 <Badge variant="outline" className="text-xs">
                                   {process.process_type || "—"}
@@ -192,7 +193,7 @@ const ClientSearchTab = ({ workflowStatuses }) => {
                               className="cursor-pointer hover:bg-muted/50"
                               onClick={() => firstProcessId && navigate(`/processo/${firstProcessId}`)}
                             >
-                              <TableCell className="font-medium">{client.nome}</TableCell>
+                              <TableCell className="font-medium">{safeString(client.nome)}</TableCell>
                               <TableCell>{client.contacto?.email || "—"}</TableCell>
                               <TableCell>{client.contacto?.telefone || "—"}</TableCell>
                               <TableCell className="text-xs font-mono">

@@ -33,6 +33,7 @@ import {
 import { Loader2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { filterByAnyRole, excludeRoles } from '../../utils/roleUtils';
+import { safeString } from '../../utils/safeString';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -132,7 +133,7 @@ const AssignUsersModal = memo(({
         
         <div className="space-y-4">
           <div className="p-3 bg-gray-50 rounded-lg">
-            <p className="font-medium">{process.client_name}</p>
+            <p className="font-medium">{safeString(process.client_name)}</p>
             <p className="text-sm text-muted-foreground">
               #{process.process_number || '—'}
             </p>
