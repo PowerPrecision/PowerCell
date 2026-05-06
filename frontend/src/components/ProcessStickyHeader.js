@@ -11,7 +11,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { safeLabel } from "./dashboard/DashboardShared";
+import { safeLabel, safeString, safeNumber } from "./dashboard/DashboardShared";
 import {
   Phone,
   Mail,
@@ -108,11 +108,11 @@ const ProcessStickyHeader = ({
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4 text-gray-500" />
                 <span className="font-semibold text-sm truncate max-w-[200px]">
-                  {process?.client_name}
+                  {safeString(process?.client_name)}
                 </span>
                 {process?.process_number && (
                   <span className="text-xs text-gray-500 font-mono">
-                    #{process.process_number}
+                    #{safeString(process?.process_number)}
                   </span>
                 )}
               </div>
@@ -123,22 +123,22 @@ const ProcessStickyHeader = ({
                   <div className="hidden md:flex items-center gap-3 text-xs text-gray-600 min-w-0">
                     {process?.client_phone && (
                       <a
-                        href={`tel:${process.client_phone}`}
+                        href={`tel:${safeString(process.client_phone)}`}
                         className="flex items-center gap-1 hover:text-blue-600 flex-shrink-0"
                       >
                         <Phone className="h-3 w-3" />
-                        {process.client_phone}
+                        {safeString(process.client_phone)}
                       </a>
                     )}
                     {process?.client_email && (
                       <a
-                        href={`mailto:${process.client_email}`}
+                        href={`mailto:${safeString(process.client_email)}`}
                         className="flex items-center gap-1 hover:text-blue-600 flex-shrink-0"
-                        title={process.client_email}
+                        title={safeString(process.client_email)}
                       >
                         <Mail className="h-3 w-3" />
                         <span className="truncate max-w-[180px]">
-                          {process.client_email}
+                          {safeString(process.client_email)}
                         </span>
                       </a>
                     )}
@@ -148,12 +148,12 @@ const ProcessStickyHeader = ({
                   <div className="hidden lg:flex items-center gap-3 text-xs flex-shrink-0">
                     {personalData?.nif && (
                       <span className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
-                        NIF: {personalData.nif}
+                        NIF: {safeString(personalData.nif)}
                       </span>
                     )}
                     {(financialData?.monthly_income || financialData?.salario_liquido) && (
                       <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 px-2 py-0.5 rounded">
-                        Rendimento: {(financialData.monthly_income || financialData.salario_liquido).toLocaleString('pt-PT')}€
+                        Rendimento: {safeNumber(financialData.monthly_income || financialData.salario_liquido).toLocaleString('pt-PT')}€
                       </span>
                     )}
                   </div>
@@ -236,7 +236,7 @@ const ProcessStickyHeader = ({
                 {(financialData?.valor_pretendido || financialData?.valor_financiado) && (
                   <div className="flex items-center gap-1 text-gray-600">
                     <CreditCard className="h-3 w-3" />
-                    <span>Valor: {(financialData.valor_pretendido || financialData.valor_financiado).toLocaleString('pt-PT')}€</span>
+                    <span>Valor: {safeNumber(financialData.valor_pretendido || financialData.valor_financiado).toLocaleString('pt-PT')}€</span>
                   </div>
                 )}
 
@@ -244,7 +244,7 @@ const ProcessStickyHeader = ({
                 {financialData?.capital_proprio && (
                   <div className="flex items-center gap-1">
                     <span className="text-gray-500">Entrada:</span>
-                    <span className="font-medium">{financialData.capital_proprio.toLocaleString('pt-PT')}€</span>
+                    <span className="font-medium">{safeNumber(financialData.capital_proprio).toLocaleString('pt-PT')}€</span>
                   </div>
                 )}
 
@@ -252,7 +252,7 @@ const ProcessStickyHeader = ({
                 {financialData?.employment_type && (
                   <div className="flex items-center gap-1">
                     <span className="text-gray-500">Emprego:</span>
-                    <span className="font-medium capitalize">{financialData.employment_type.replace('_', ' ')}</span>
+                    <span className="font-medium capitalize">{safeString(financialData.employment_type).replace('_', ' ')}</span>
                   </div>
                 )}
 
@@ -262,7 +262,7 @@ const ProcessStickyHeader = ({
                   <div className="flex items-center gap-1">
                     <span className="text-gray-500">Consultores:</span>
                     <span className="font-medium">
-                      {process.consultor_names?.join(", ") || process.assigned_consultor_name}
+                      {process.consultor_names?.map(n => safeString(n)).join(", ") || safeString(process.assigned_consultor_name)}
                     </span>
                   </div>
                 )}
@@ -271,7 +271,7 @@ const ProcessStickyHeader = ({
                   <div className="flex items-center gap-1">
                     <span className="text-gray-500">Intermediários:</span>
                     <span className="font-medium">
-                      {process.mediador_names?.join(", ") || process.assigned_mediador_name}
+                      {process.mediador_names?.map(n => safeString(n)).join(", ") || safeString(process.assigned_mediador_name)}
                     </span>
                   </div>
                 )}
@@ -281,7 +281,7 @@ const ProcessStickyHeader = ({
                   <div className="flex items-center gap-1">
                     <span className="text-gray-500">Indexação:</span>
                     <span className="font-medium text-indigo-600 dark:text-indigo-400">
-                      {process.indexacao_name}
+                      {safeString(process.indexacao_name)}
                     </span>
                   </div>
                 )}
@@ -291,7 +291,7 @@ const ProcessStickyHeader = ({
                   <div className="flex items-center gap-1">
                     <span className="text-gray-500">Parceiro:</span>
                     <span className="font-medium text-violet-600 dark:text-violet-400">
-                      {process.parceiro_name}
+                      {safeString(process.parceiro_name)}
                     </span>
                   </div>
                 )}

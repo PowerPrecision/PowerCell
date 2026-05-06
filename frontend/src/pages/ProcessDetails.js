@@ -33,7 +33,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { safeLabel } from "../components/dashboard/DashboardShared";
+import { safeLabel, safeString, safeNumber } from "../components/dashboard/DashboardShared";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -1498,16 +1498,16 @@ const ProcessDetails = () => {
             </Button>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-xl font-semibold truncate">{process.client_name}</h2>
+                <h2 className="text-xl font-semibold truncate">{safeString(process?.client_name, 'Cliente')}</h2>
                 <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
                   {safeLabel(currentStatusInfo.label)}
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
-                #{process.process_number || '—'} • {typeLabels[process.process_type]}
+                #{safeString(process?.process_number, '—')} • {typeLabels[process.process_type]}
                 {process.id && (
                   <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono" title="ID único do cliente">
-                    ID: {process.id.slice(0, 8)}
+                    ID: {safeString(process?.id).slice(0, 8)}
                   </span>
                 )}
               </p>
@@ -1536,7 +1536,7 @@ const ProcessDetails = () => {
                 <DialogHeader>
                   <DialogTitle>Solicitar Consentimento RGPD</DialogTitle>
                   <DialogDescription>
-                    Envie um pedido de consentimento RGPD para <strong>{process?.client_name}</strong> ({process?.client_email}).
+                    Envie um pedido de consentimento RGPD para <strong>{safeString(process?.client_name)}</strong> ({safeString(process?.client_email)}).
                   </DialogDescription>
                 </DialogHeader>
                 <div className="py-4">
@@ -1934,7 +1934,7 @@ const ProcessDetails = () => {
                 <div className="flex flex-wrap gap-1.5 mb-1.5 min-h-[36px] items-center">
                   {(process?.labels || []).map((label, idx) => (
                     <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
-                      {label}
+                      {safeString(label)}
                       {canEditPersonal && (
                         <button
                           onClick={() => setProcess(prev => ({
@@ -2611,7 +2611,7 @@ const ProcessDetails = () => {
                                     </Badge>
                                     {applicant.rendimento_mensal && (
                                       <Badge variant="secondary" className="text-xs">
-                                        {safeString(applicant.rendimento_mensal)}€/mês
+                                        {safeNumber(applicant.rendimento_mensal).toLocaleString('pt-PT')}€/mês
                                       </Badge>
                                     )}
                                   </div>
@@ -2648,7 +2648,7 @@ const ProcessDetails = () => {
                               {financialData?.rendimento_agregado && (
                                 <div className="mt-3 p-2 bg-green-50 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800">
                                   <p className="text-sm font-medium text-green-700 dark:text-green-400">
-                                    Rendimento Agregado: {financialData.rendimento_agregado.toLocaleString('pt-PT')}€/mês
+                                    Rendimento Agregado: {safeNumber(financialData.rendimento_agregado).toLocaleString('pt-PT')}€/mês
                                   </p>
                                 </div>
                               )}
@@ -3115,7 +3115,7 @@ const ProcessDetails = () => {
                                     const valor = typeof item === 'object' ? item.valor : null;
                                     return (
                                       <div key={idx} className="flex items-center gap-2">
-                                        <Badge className={getBankColor(banco)}>{banco}</Badge>
+                                        <Badge className={getBankColor(banco)}>{safeString(banco)}</Badge>
                                         {valor != null && valor > 0 && (
                                           <span className="text-xs font-medium text-muted-foreground">
                                             {valor.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}
@@ -3203,7 +3203,7 @@ const ProcessDetails = () => {
                             <div className="flex flex-wrap gap-2">
                               {(financialData?.tem_creditos_activos || []).length > 0 ? (
                                 financialData.tem_creditos_activos.map((banco, idx) => (
-                                  <Badge key={idx} className={getBankColor(banco)}>{banco}</Badge>
+                                  <Badge key={idx} className={getBankColor(banco)}>{safeString(banco)}</Badge>
                                 ))
                               ) : (
                                 <span className="text-xs text-muted-foreground">Nenhuma conta registada</span>
@@ -3271,7 +3271,7 @@ const ProcessDetails = () => {
                             <div className="flex flex-wrap gap-2">
                               {(financialData.bancos_simulacoes || []).length > 0 ? (
                                 financialData.bancos_simulacoes.map((banco, idx) => (
-                                  <Badge key={idx} variant="outline" className="border-blue-300 text-blue-700">{banco}</Badge>
+                                  <Badge key={idx} variant="outline" className="border-blue-300 text-blue-700">{safeString(banco)}</Badge>
                                 ))
                               ) : (
                                 <span className="text-xs text-muted-foreground">Nenhuma simulação registada</span>
@@ -4082,7 +4082,7 @@ const ProcessDetails = () => {
                             <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-2">
                               <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
                               <p className="text-xs text-red-700 dark:text-red-300">
-                                Valor da avaliação ({creditData.valuation_value.toLocaleString('pt-PT')}€) é inferior ao valor do imóvel ({realEstateData.valor_imovel.toLocaleString('pt-PT')}€). Diferença de {Math.abs(realEstateData.valor_imovel - creditData.valuation_value).toLocaleString('pt-PT')}€.
+                                Valor da avaliação ({safeNumber(creditData.valuation_value).toLocaleString('pt-PT')}€) é inferior ao valor do imóvel ({safeNumber(realEstateData.valor_imovel).toLocaleString('pt-PT')}€). Diferença de {safeNumber(Math.abs(realEstateData.valor_imovel - creditData.valuation_value)).toLocaleString('pt-PT')}€.
                               </p>
                             </div>
                           )}
@@ -4337,9 +4337,9 @@ const ProcessDetails = () => {
                         <div className="bg-white p-2 rounded border col-span-2 md:col-span-3">
                           <div className="font-medium mb-1">Resumo</div>
                           <div className="flex gap-4 text-muted-foreground">
-                            <span>Criado: <strong>{process.created_by || "Sistema"}</strong></span>
-                            <span>Fonte: <strong>{process.lead_source || "Manual"}</strong></span>
-                            {process.updated_by && <span>Últ. edição: <strong>{process.updated_by}</strong></span>}
+                            <span>Criado: <strong>{safeString(process?.created_by, "Sistema")}</strong></span>
+                            <span>Fonte: <strong>{safeString(process?.lead_source, "Manual")}</strong></span>
+                            {process.updated_by && <span>Últ. edição: <strong>{safeString(process?.updated_by)}</strong></span>}
                           </div>
                         </div>
                       </div>
@@ -4638,9 +4638,9 @@ const ProcessDetails = () => {
           
           <div className="space-y-4 py-4">
             <div className="p-3 bg-gray-50 rounded-lg">
-              <p className="font-medium">{process?.client_name}</p>
+              <p className="font-medium">{safeString(process?.client_name)}</p>
               <p className="text-sm text-muted-foreground">
-                #{process?.process_number || '—'}
+                #{safeString(process?.process_number, '—')}
               </p>
             </div>
             
@@ -4841,7 +4841,7 @@ const ProcessDetails = () => {
                     onClick={() => resolveAIConflict(conflict.field, conflict.existing_value)}
                   >
                     <div className="text-xs text-muted-foreground mb-1">Valor Existente</div>
-                    <div className="font-medium">{conflict.existing_value || "-"}</div>
+                    <div className="font-medium">{safeString(conflict.existing_value, "-")}</div>
                   </div>
                   
                   <div 
@@ -4852,9 +4852,9 @@ const ProcessDetails = () => {
                       <Sparkles className="h-3 w-3" />
                       Valor Extraído (IA)
                     </div>
-                    <div className="font-medium text-green-700 dark:text-green-400">{conflict.new_value || "-"}</div>
+                    <div className="font-medium text-green-700 dark:text-green-400">{safeString(conflict.new_value, "-")}</div>
                     {conflict.source && (
-                      <div className="text-xs text-muted-foreground mt-1">Fonte: {conflict.source}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Fonte: {safeString(conflict.source)}</div>
                     )}
                   </div>
                 </div>

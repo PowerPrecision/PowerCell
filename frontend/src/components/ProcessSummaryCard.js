@@ -4,6 +4,7 @@
  */
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
+import { safeString, safeNumber } from "./dashboard/DashboardShared";
 import { 
   User, Phone, Mail, MapPin, Euro, Building2, 
   Calendar, Clock, Users, Percent
@@ -34,7 +35,7 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, 
       style: 'currency', 
       currency: 'EUR',
       maximumFractionDigits: 0 
-    }).format(value);
+    }).format(safeNumber(value));
   };
 
   return (
@@ -47,7 +48,7 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, 
               <User className="h-3 w-3" />
               Cliente
             </div>
-            <p className="font-semibold text-sm truncate">{process.client_name}</p>
+            <p className="font-semibold text-sm truncate">{safeString(process?.client_name)}</p>
             {process.under_35 && (
               <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">
                 &lt;35 anos
@@ -61,8 +62,8 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, 
               <Phone className="h-3 w-3" />
               Contacto
             </div>
-            <p className="font-medium text-sm">{process.client_phone || "N/D"}</p>
-            <p className="text-xs text-muted-foreground truncate">{process.client_email || "N/D"}</p>
+            <p className="font-medium text-sm">{safeString(process?.client_phone, "N/D")}</p>
+            <p className="text-xs text-muted-foreground truncate">{safeString(process?.client_email, "N/D")}</p>
           </div>
 
           {/* Valor do Imóvel */}
@@ -77,13 +78,13 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, 
             <div className="flex items-center gap-1 flex-wrap">
               {process.real_estate_data?.num_quartos && (
                 <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
-                  {process.real_estate_data.num_quartos}
+                  {safeString(process.real_estate_data.num_quartos)}
                 </Badge>
               )}
               {process.real_estate_data?.district && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   <MapPin className="h-3 w-3" />
-                  {process.real_estate_data.district}
+                  {safeString(process.real_estate_data.district)}
                 </p>
               )}
             </div>
@@ -101,7 +102,7 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, 
             {process.credit_data?.interest_rate && (
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <Percent className="h-3 w-3" />
-                {process.credit_data.interest_rate}%
+                {safeNumber(process.credit_data.interest_rate)}%
               </p>
             )}
           </div>

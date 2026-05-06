@@ -384,7 +384,7 @@ const DashboardLayout = ({ children, title }) => {
         {
           label: "Definições Gerais",
           icon: Settings,
-          href: "/configuracoes",
+          href: "/definicoes",
         },
         {
           label: "Utilizadores e Equipas",
@@ -410,6 +410,11 @@ const DashboardLayout = ({ children, title }) => {
           label: "Estados do Workflow",
           icon: Activity,
           href: "/workflow-estados",
+        },
+        {
+          label: "Configuração do Sistema",
+          icon: Cog,
+          href: "/configuracoes",
         },
       ],
     };

@@ -44,6 +44,27 @@ export const safeLabel = (label, fallback = "") => {
   return String(label);
 };
 
+/**
+ * Safely converts any value to a string for React rendering.
+ * Handles objects like {value: "x", label: "Y"} that the backend sometimes returns.
+ * Prevents React error #31 (objects as React children).
+ */
+export const safeString = (val, fallback = "") => {
+  if (val == null) return fallback;
+  if (typeof val === "string") return val;
+  if (typeof val === "object") return val.label || val.value || String(val);
+  return String(val);
+};
+
+/**
+ * Safely converts any value to a valid number.
+ * Returns fallback (default 0) for NaN results.
+ */
+export const safeNumber = (val, fallback = 0) => {
+  const n = Number(val);
+  return isNaN(n) ? fallback : n;
+};
+
 // ====================================================================
 // CONSTANTES PARTILHADAS
 // ====================================================================

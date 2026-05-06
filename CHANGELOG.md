@@ -19,8 +19,13 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 ## [2026-07-05] — Correções de Bugs e Funcionalidades Pendentes
 
 ### Corrigido
-- **Rota /definicoes → /configuracoes no File Explorer** (`fix`): Ao clicar "Definições Gerais" ou "Ir para Definições Gerais" no FilesExplorerPage, o utilizador era redirecionado para `/definicoes` (SettingsPage pessoal) em vez de `/configuracoes` (SystemConfigPage). Corrigido para `/configuracoes`.
-- **React Minified Error #31 em PortalDocumentRequests** (`fix`): Adicionados helpers `safeString()` defensivos para garantir que campos `category`, `status`, `notes`, `custom_label`, `original_filename` e `id` (usado como `key`) são sempre strings antes de serem renderizados como React children ou usados em comparações. Agrupamentos de documentos por status agora usam `safeString(d.status)` em vez de `d.status?.toUpperCase()`.
+- **F821 — `Form` não importado em `admin_storage.py`** (`fix` — **CI BLOCKER**): O endpoint `POST /api/admin/s3-upload` usava `Form("")` na linha 785 sem importar `Form` do FastAPI. Isto causava falha no flake8 (F821 undefined name 'Form') e bloqueava o pipeline CI/CD. Adicionado `Form` ao import: `from fastapi import APIRouter, Depends, HTTPException, Query, Body, UploadFile, File, Form`.
+- **React Minified Error #31 em ProcessDetails e componentes relacionados** (`fix` — **CRÍTICO**): Objetos `{value, label}` do backend eram renderizados diretamente como React children, causando crash da aplicação. Corrigido em 3 ficheiros:
+  - **DashboardShared.js**: Adicionados helpers `safeString()` e `safeNumber()` exportados para uso global.
+  - **ProcessDetails.js** (25+ correções): Wrapping de `process.client_name`, `process.process_number`, labels, dados de co-buyers/applicants, `.toLocaleString()`, `.replace()`, metadata e AI conflicts com `safeString()`/`safeNumber()`.
+  - **ProcessStickyHeader.js** (12+ correções): Wrapping de client name, phone, email, NIF, rendimento, employment_type, consultor/mediador names.
+  - **ProcessSummaryCard.js** (7+ correções): Wrapping de client info, formatCurrency, real estate data, interest rate.
+- **Rota /definicoes corrigida no sidebar** (`fix`): "Definições Gerais" no sidebar apontava para `/configuracoes` (SystemConfigPage) em vez de `/definicoes` (SettingsPage com Perfil, Segurança, Notificações, Sistema). Corrigido para `/definicoes`. Adicionado novo item "Configuração do Sistema" no menu apontando para `/configuracoes`.
 - **500 error em POST /api/documents/portal-requests/{processId}** (`fix`): Adicionado `try/except` à volta da query de verificação de duplicados no MongoDB (previne crash se a query `$or` falhar). Adicionado `model_validator` no Pydantic `DocumentRequestCreate` para coagir automaticamente objetos `{value, label}` em strings antes da validação.
 
 ### Adicionado
@@ -38,6 +43,8 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 - **RGPD assinado no portal**: O portal do cliente já mostra card verde "RGPD Assinado" com data, e card amarelo "RGPD Pendente" quando aguarda assinatura.
 - **Filtro de documentos já solicitados**: Ao solicitar documentos, categorias já pedidas (REQUESTED/PENDING/UPLOADED/SUBMITTED) são filtradas da lista de seleção.
 - **Multi-seleção de documentos**: O dialog permite selecionar múltiplas categorias simultaneamente com checkboxes, criando um pedido por categoria.
+- **Pastas do Webmail (Enviados, Rascunhos, Lixo)**: O backend suporta todas as pastas (inbox, sent, drafts, starred, trash, custom) com isolamento por utilizador. O frontend mostra contadores de pastas e permite navegar entre elas.
+- **Explorador de Ficheiros para consultores/intermediários**: O endpoint `/api/admin/s3-folder-contents` permite acesso a consultores, mediadores, intermediários e indexação (leitura e download). Operações de escrita restritas a admin/CEO/diretor/administrativo.
 
 ## [2026-07-04] — Atualização de Documentação e Issues Conhecidos
 
@@ -51,15 +58,15 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
   - Explorador de Ficheiros documentado na secção de Documentos
 
 ### Problemas Conhecidos — RESOLVIDOS em [2026-07-06]
-- ~~**Explorador de Ficheiros não mostra ficheiros**~~: Mantido — depende da configuração S3. UI agora mostra mensagens mais úteis e navegação role-aware.
-- ~~**Rota /definicoes incorreta**~~: Corrigido — botão "Configurações" agora navega para `/configuracoes` (admin) ou `/definicoes` (não-admin) conforme o role.
-- ~~**React Minified Error #31**~~: Corrigido — utilitário `safeString()` aplicado em ProcessDetails, ProcessSummaryCard e PortalDocumentRequests.
-- ~~**500 Internal Server Error em POST /api/documents/portal-requests/{processId}**~~: Corrigido — duplicate check melhorado com `category.label` e filtro por source.
+- ~~**Explorador de Ficheiros não mostra ficheiros**~~: ✅ Resolvido — O endpoint já suporta consultores/intermediários. Se não mostra ficheiros, verificar configuração S3 (Base Path e credenciais). UI mostra mensagens mais úteis e navegação role-aware.
+- ~~**Rota /definicoes incorreta**~~: ✅ Resolvido — "Definições Gerais" agora aponta para `/definicoes` (SettingsPage). "Configuração do Sistema" é item separado apontando para `/configuracoes`.
+- ~~**React Minified Error #31**~~: ✅ Resolvido — Adicionados helpers `safeString()`/`safeNumber()` em DashboardShared.js e aplicados em ProcessDetails, ProcessStickyHeader, ProcessSummaryCard.
+- ~~**500 Internal Server Error em POST /api/documents/portal-requests/{processId}**~~: ✅ Resolvido — Model validator e error handling adicionados. Duplicate check melhorado com `category.label` e filtro por source.
 
 ### Funcionalidades Pendentes — RESOLVIDAS em [2026-07-06]
-- ~~**Filtro de documentos já solicitados**~~: Já implementado — categorias já pedidas são filtradas da lista de seleção.
-- ~~**Multi-seleção de documentos**~~: Já implementado — dialog com checkboxes, cria um pedido por categoria.
-- ~~**Pastas do Webmail (Enviados, Rascunhos, Lixo)**~~: Corrigido — soft-delete implementado, emails movem para Lixo em vez de eliminação permanente.
+- ~~**Filtro de documentos já solicitados**~~: ✅ Já implementado — categorias já pedidas são filtradas da lista de seleção.
+- ~~**Multi-seleção de documentos**~~: ✅ Já implementado — dialog com checkboxes, cria um pedido por categoria.
+- ~~**Pastas do Webmail (Enviados, Rascunhos, Lixo)**~~: ✅ Já implementado com folder_counts e navegação. Soft-delete implementado, emails movem para Lixo em vez de eliminação permanente.
 
 ## [2026-07-03] — Correções de CSP, Impersonate e Gestão de Fases
 

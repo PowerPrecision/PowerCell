@@ -591,7 +591,7 @@ const SettingsPage = () => {
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                       <div className="p-4 bg-muted/30 rounded-lg">
                         <p className="text-sm text-muted-foreground">Versão</p>
-                        <p className="font-semibold text-lg">2.1.0</p>
+                        <p className="font-semibold text-lg">2.2.0</p>
                       </div>
                       <div className="p-4 bg-muted/30 rounded-lg">
                         <p className="text-sm text-muted-foreground">Ambiente</p>
