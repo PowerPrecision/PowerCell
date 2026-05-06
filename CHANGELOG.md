@@ -3,6 +3,11 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-06] — Correções de Bugs e Funcionalidades Pendentes (Ronda 3)
+
+### Corrigido
+- **Build error: duplicate safeString import** (`fix` — **BUILD BLOCKER**): `safeString` era importado simultaneamente de `DashboardShared` e de `utils/safeString` em 3 ficheiros (ProcessDetails.js, ProcessSummaryCard.js, ProcessStickyHeader.js), causando `ERROR: The symbol "safeString" has already been declared` e impedindo o build. Corrigido removendo `safeString` dos imports de `DashboardShared` em todos os ficheiros — todos usam agora exclusivamente a versão robusta de `utils/safeString.js` que lida corretamente com objetos `{value, label}` e previne React Error #31.
+
 ## [2026-07-06] — Correções de Bugs e Funcionalidades Pendentes (Ronda 2)
 
 ### Corrigido
