@@ -126,10 +126,11 @@ export default function PortalDocumentRequests({ processId }) {
   }, [fetchDocuments]);
 
   // Compute already-requested categories to filter from dropdown
+  // Include RECEIVED — if a doc was already received, no need to request it again
   const requestedCategoryKeys = documents
     .filter(d => {
       const s = safeString(d.status, '').toUpperCase();
-      return ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED"].includes(s);
+      return ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED"].includes(s);
     })
     .map(d => safeString(d.category, d.category));
 

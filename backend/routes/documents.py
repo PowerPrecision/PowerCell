@@ -3687,6 +3687,8 @@ async def create_portal_document_request(
         # ── Duplicate check: prevent requesting same category twice ──
         # Include source filter to avoid confusion with auto_default docs
         # Also check for object-valued categories that may match
+        # Include all active statuses (REQUESTED, PENDING, UPLOADED, SUBMITTED, RECEIVED)
+        # — if a doc was already received, no need to request it again
         try:
             existing = await db.documents.find_one(
                 {
@@ -3696,7 +3698,7 @@ async def create_portal_document_request(
                         {"category.value": category},
                         {"category.label": category},
                     ],
-                    "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
+                    "status": {"$in": ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED", "requested", "pending", "uploaded", "submitted", "received"]},
                     "source": {"$in": ["admin_request", "client_portal"]},
                 }
             )
