@@ -74,6 +74,7 @@ import { format, parseISO, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { sanitizeEmailHtml } from "../utils/sanitize";
+import { safeString } from "../utils/safeString";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -1639,7 +1640,7 @@ const WebmailPage = () => {
                               >
                                 {email.direction === "sent"
                                   ? email.to_emails?.[0] || "Destinatário"
-                                  : email.client_name || email.from_email || "Remetente"}
+                                  : safeString(email.client_name) || safeString(email.from_email) || "Remetente"}
                               </span>
                               <span className="text-[11px] text-muted-foreground whitespace-nowrap shrink-0">
                                 {formatEmailDate(email.sent_at)}
@@ -1652,13 +1653,13 @@ const WebmailPage = () => {
                                 !email.is_read ? "font-medium" : ""
                               }`}
                             >
-                              {email.subject || "(Sem assunto)"}
+                              {safeString(email.subject, "(Sem assunto)")}
                             </p>
 
                             {/* Preview + indicators */}
                             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                               <p className="text-xs text-muted-foreground truncate flex-1 min-w-0">
-                                {email.preview || ""}
+                                {safeString(email.preview)}
                               </p>
                               {/* Label badges */}
                               {email.labels?.length > 0 && (
@@ -1672,7 +1673,7 @@ const WebmailPage = () => {
                                         fontSize: "10px",
                                       }}
                                     >
-                                      {lbl.name}
+                                      {safeString(lbl.name)}
                                     </span>
                                   ))}
                                   {email.labels.length > 2 && (
@@ -1772,7 +1773,7 @@ const WebmailPage = () => {
                 <div className="px-5 py-4 border-b shrink-0">
                   {/* Subject */}
                   <h2 className="text-lg font-semibold leading-snug break-words">
-                    {emailDetail.subject || "(Sem assunto)"}
+                    {safeString(emailDetail.subject, "(Sem assunto)")}
                   </h2>
 
                   {/* Meta info */}
@@ -1780,7 +1781,7 @@ const WebmailPage = () => {
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-muted-foreground shrink-0">De:</span>
                       <span className="font-medium truncate">
-                        {emailDetail.from_email || "-"}
+                        {safeString(emailDetail.from_email, "-")}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 min-w-0">
@@ -1813,7 +1814,7 @@ const WebmailPage = () => {
                               fontSize: "11px",
                             }}
                           >
-                            {lbl.name}
+                            {safeString(lbl.name)}
                           </span>
                         ))}
                       </div>
@@ -1870,7 +1871,7 @@ const WebmailPage = () => {
                         onClick={() => navigate(`/processo/${emailDetail.process_id}`)}
                       >
                         <Link2 className="h-3.5 w-3.5" />
-                        {emailDetail.client_name || emailDetail.process_id} Associado
+                        {safeString(emailDetail.client_name) || safeString(emailDetail.process_id)} Associado
                       </Badge>
                     ) : (
                       <Tooltip>

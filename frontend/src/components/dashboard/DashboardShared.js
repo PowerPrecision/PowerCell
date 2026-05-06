@@ -249,11 +249,11 @@ export const ExpiringDocumentsList = ({ expiries, onNavigate }) => {
           <div key={doc.id} className={`flex items-center justify-between p-4 rounded-lg ${urgency.color}`}>
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <p className="font-medium">{doc.document_name}</p>
-                <Badge variant="outline" className="text-xs">{doc.document_type}</Badge>
+                <p className="font-medium">{safeString(doc.document_name)}</p>
+                <Badge variant="outline" className="text-xs">{safeString(doc.document_type)}</Badge>
               </div>
               <p className="text-sm">
-                Cliente: {doc.client_name} • {doc.client_email}
+                Cliente: {safeString(doc.client_name)} • {safeString(doc.client_email)}
               </p>
               <p className="text-sm">
                 Expira: {formatDate(doc.expiry_date)}
@@ -381,7 +381,7 @@ export const AIAnalysisTab = ({
               </SelectTrigger>
               <SelectContent>
                 {processes.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>{p.client_name}</SelectItem>
+                  <SelectItem key={p.id} value={p.id}>{safeString(p.client_name)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -389,8 +389,8 @@ export const AIAnalysisTab = ({
 
           {selectedClient && (
             <div className="p-4 bg-muted/50 rounded-lg">
-              <p className="font-medium mb-2">Cliente: {selectedClient.client_name}</p>
-              <p className="text-sm text-muted-foreground">Pasta Drive: {selectedClient.client_name}</p>
+              <p className="font-medium mb-2">Cliente: {safeString(selectedClient.client_name)}</p>
+              <p className="text-sm text-muted-foreground">Pasta Drive: {safeString(selectedClient.client_name)}</p>
             </div>
           )}
 
@@ -402,15 +402,15 @@ export const AIAnalysisTab = ({
               <div className="text-sm space-y-1">
                 {analysisResult.mapped?.financial_data && (
                   <>
-                    <p><strong>Salário Líquido:</strong> €{analysisResult.mapped.financial_data.monthly_income || "N/D"}</p>
-                    <p><strong>Empresa:</strong> {analysisResult.mapped.financial_data.employer_name || "N/D"}</p>
-                    <p><strong>Tipo Contrato:</strong> {analysisResult.mapped.financial_data.employment_type || "N/D"}</p>
+                    <p><strong>Salário Líquido:</strong> €{safeString(analysisResult.mapped.financial_data.monthly_income, "N/D")}</p>
+                    <p><strong>Empresa:</strong> {safeString(analysisResult.mapped.financial_data.employer_name, "N/D")}</p>
+                    <p><strong>Tipo Contrato:</strong> {safeString(analysisResult.mapped.financial_data.employment_type, "N/D")}</p>
                   </>
                 )}
                 {analysisResult.mapped?.personal_data && (
                   <>
-                    <p><strong>NIF:</strong> {analysisResult.mapped.personal_data.nif || "N/D"}</p>
-                    <p><strong>Data Nascimento:</strong> {analysisResult.mapped.personal_data.birth_date || "N/D"}</p>
+                    <p><strong>NIF:</strong> {safeString(analysisResult.mapped.personal_data.nif, "N/D")}</p>
+                    <p><strong>Data Nascimento:</strong> {safeString(analysisResult.mapped.personal_data.birth_date, "N/D")}</p>
                   </>
                 )}
               </div>
