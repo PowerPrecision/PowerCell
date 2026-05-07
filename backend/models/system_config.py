@@ -169,6 +169,8 @@ class SystemSettings(BaseModel):
     """Configurações gerais do sistema"""
     company_name: str = "Power Real Estate"
     company_subtitle: str = "& Precision Crédito"
+    company_address: Optional[str] = None
+    company_phone: Optional[str] = None
     logo_url: Optional[str] = None
     primary_color: str = "#0F766E"
     secondary_color: str = "#FCD34D"

@@ -418,21 +418,31 @@ async def get_rgpd_form_data(token: str):
         rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", str(numero_documento or ""))
         rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", str(response_data.get("validade_documento") or ""))
         rendered = rendered.replace("{{DATA_ASSINATURA}}", str(data_assinatura or ""))
+        rendered = rendered.replace("{{MORADA_EMPRESA}}", str(empresa_morada or ""))
+        rendered = rendered.replace("{{CONTACTO_EMPRESA}}", str(empresa_contacto or ""))
         return rendered
 
-    # Tentar obter nome da empresa da configuração do sistema
+    # Tentar obter dados da empresa da configuração do sistema
     empresa_nome = "Power Real Estate, Lda."
+    empresa_morada = ""
+    empresa_contacto = ""
     try:
         config = await db.system_config.find_one(
             {"_id": "main"},
-            {"_id": 0, "settings.empresa_nome": 1}
+            {"_id": 0, "settings.empresa_nome": 1, "settings.company_address": 1, "settings.company_phone": 1, "settings.company_name": 1}
         )
         if config:
             settings = config.get("settings", {})
             if settings.get("empresa_nome"):
                 empresa_nome = settings["empresa_nome"]
+            if settings.get("company_name"):
+                empresa_nome = settings["company_name"]
+            if settings.get("company_address"):
+                empresa_morada = settings["company_address"]
+            if settings.get("company_phone"):
+                empresa_contacto = settings["company_phone"]
     except Exception:
-        pass  # Usar nome padrão
+        pass  # Usar valores padrão
 
     # Data atual formatada como DD/MM/YYYY
     data_assinatura = datetime.now(timezone.utc).strftime("%d/%m/%Y")
@@ -605,8 +615,8 @@ Nos termos do Regulamento (UE) 2016/679 do Parlamento Europeu e do Conselho (Reg
 1. RESPONSÁVEL PELO TRATAMENTO
 Empresa: Power Real Estate, Lda.
 NIF: 516 123 456
-Morada: [Morada da Empresa]
-Contacto: [Email/Tel da Empresa]
+Morada: {{MORADA_EMPRESA}}
+Contacto: {{CONTACTO_EMPRESA}}
 
 2. TITULAR DOS DADOS
 Nome Completo: {{NOME}}

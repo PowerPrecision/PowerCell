@@ -683,17 +683,28 @@ async def _get_rendered_minuta_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
-    # Obter nome da empresa
+    # Obter dados da empresa
     empresa_nome = "Power Real Estate, Lda."
+    empresa_morada = ""
+    empresa_contacto = ""
     try:
-        config = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "settings.empresa_nome": 1})
+        config = await db.system_config.find_one(
+            {"_id": "main"},
+            {"_id": 0, "settings.empresa_nome": 1, "settings.company_name": 1, "settings.company_address": 1, "settings.company_phone": 1}
+        )
         if config:
             settings = config.get("settings", {})
             if settings.get("empresa_nome"):
                 empresa_nome = settings["empresa_nome"]
+            if settings.get("company_name"):
+                empresa_nome = settings["company_name"]
+            if settings.get("company_address"):
+                empresa_morada = settings["company_address"]
+            if settings.get("company_phone"):
+                empresa_contacto = settings["company_phone"]
     except Exception:
         pass
-    
+
     rendered = rendered.replace("{{NOME_CLIENTE}}", client_name)
     rendered = rendered.replace("{{NOME}}", client_name)
     rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
@@ -705,6 +716,8 @@ async def _get_rendered_minuta_text(
     rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", consent_data.get("numero_documento", ""))
     rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", consent_data.get("validade_documento", personal_data.get("data_validade_cc", "")))
     rendered = rendered.replace("{{DATA_ASSINATURA}}", consent_data.get("data_assinatura", ""))
+    rendered = rendered.replace("{{MORADA_EMPRESA}}", empresa_morada)
+    rendered = rendered.replace("{{CONTACTO_EMPRESA}}", empresa_contacto)
     
     return rendered
 

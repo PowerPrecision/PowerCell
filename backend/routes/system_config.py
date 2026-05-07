@@ -429,6 +429,18 @@ CONFIG_FIELDS = {
                 type="text",
             ),
             ConfigField(
+                key="company_address",
+                label="Morada da Empresa",
+                type="text",
+                help_text="Usada no template RGPD como {{MORADA_EMPRESA}}",
+            ),
+            ConfigField(
+                key="company_phone",
+                label="Telefone/Email da Empresa",
+                type="text",
+                help_text="Usada no template RGPD como {{CONTACTO_EMPRESA}}",
+            ),
+            ConfigField(
                 key="primary_color",
                 label="Cor Principal",
                 type="text",

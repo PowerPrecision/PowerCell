@@ -2601,6 +2601,8 @@ const SystemConfigPage = () => {
                     { key: "NOME_CLIENTE", label: "Nome Cliente" },
                     { key: "NOME", label: "Nome" },
                     { key: "NOME_EMPRESA", label: "Empresa" },
+                    { key: "MORADA_EMPRESA", label: "Morada Empresa" },
+                    { key: "CONTACTO_EMPRESA", label: "Contacto Empresa" },
                     { key: "CONTRIBUINTE", label: "NIF" },
                     { key: "MORADA", label: "Morada" },
                     { key: "LOCALIDADE", label: "Localidade" },
@@ -2723,7 +2725,9 @@ const SystemConfigPage = () => {
                     .replace(/\{\{NUMERO_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">CC 00000000</span>')
                     .replace(/\{\{VALIDADE_DOCUMENTO\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">01/01/2030</span>')
                     .replace(/\{\{DATA_ASSINATURA\}\}/g, '<span class="bg-green-100 dark:bg-green-900/60 px-1.5 py-0.5 rounded font-medium text-green-800 dark:text-green-200">' + new Date().toLocaleDateString("pt-PT") + '</span>')
-                    .replace(/\{\{NOME\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>');
+                    .replace(/\{\{NOME\}\}/g, '<span class="bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">João Silva</span>')
+                    .replace(/\{\{MORADA_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Rua da Empresa, 1, Lisboa</span>')
+                    .replace(/\{\{CONTACTO_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">info@empresa.pt / 210000000</span>');
                   // 3. Convert newlines
                   safe = safe.replace(/\n/g, '<br/>');
                   return safe;
