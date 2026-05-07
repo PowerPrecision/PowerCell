@@ -1519,7 +1519,8 @@ const ProcessDetails = () => {
     } finally {
       setPropertySearchLoading(false);
     }
-  }, [token, visitasProperties]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const handleAssociateProperty = useCallback(async (propertyId) => {
     setAssociatingProperty(true);
