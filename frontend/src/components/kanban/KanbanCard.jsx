@@ -19,7 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { GripVertical, Eye, User, Phone, Mail, Lock, Users } from 'lucide-react';
+import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 
 // Comparador customizado para React.memo
@@ -33,6 +33,7 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.mediador_name === nextProps.process.mediador_name &&
     prevProps.process.prioridade === nextProps.process.prioridade &&
     prevProps.process.under_35 === nextProps.process.under_35 &&
+    prevProps.process.labels === nextProps.process.labels &&
     prevProps.isDragging === nextProps.isDragging &&
     prevProps.isLocked === nextProps.isLocked &&
     prevProps.lockedBy === nextProps.lockedBy
@@ -77,11 +78,18 @@ const KanbanCard = memo(({
 
   const isCurrentlyDragging = isDragging || draggingCard?.process?.id === process.id;
 
+  // Compute priority-based left border classes
+  const getPriorityBorderClass = () => {
+    if (process.prioridade === 'alta') return 'border-l-4 border-l-red-500';
+    if (process.prioridade === 'media') return 'border-l-4 border-l-amber-400';
+    return hasSecondProponent ? 'border-l-4 border-blue-600' : '';
+  };
+
   return (
     <Card
       className={`cursor-pointer hover:shadow-md transition-shadow relative ${
         isCurrentlyDragging ? "opacity-50" : ""
-      } ${hasSecondProponent ? "border-l-4 border-blue-600" : ""}`}
+      } ${getPriorityBorderClass()}`}
       draggable
       onDragStart={handleDragStart}
       onClick={handleClick}
@@ -106,8 +114,20 @@ const KanbanCard = memo(({
               <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                 #{process.process_number || '—'}
               </span>
-              {process.prioridade && (
-                <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4">!</Badge>
+              {process.prioridade === 'alta' && (
+                <Badge className="bg-red-100 text-red-700 border-red-300 text-[9px] px-1.5 py-0 h-4 gap-0.5">
+                  <Flame className="h-2.5 w-2.5" /> Alta
+                </Badge>
+              )}
+              {process.prioridade === 'media' && (
+                <Badge className="bg-amber-100 text-amber-700 border-amber-300 text-[9px] px-1.5 py-0 h-4">
+                  Média
+                </Badge>
+              )}
+              {process.prioridade === 'baixa' && (
+                <Badge className="bg-green-100 text-green-700 border-green-300 text-[9px] px-1.5 py-0 h-4">
+                  Baixa
+                </Badge>
               )}
             </div>
             <Button
@@ -169,6 +189,17 @@ const KanbanCard = memo(({
               </Badge>
             )}
           </div>
+          
+          {/* Linha 5b: Tags/Labels pills */}
+          {process.labels && process.labels.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {process.labels.map((label, idx) => (
+                <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-normal bg-muted/50">
+                  {safeString(label)}
+                </Badge>
+              ))}
+            </div>
+          )}
           
           {/* Linha 6: Contacto rápido */}
           {(process.client_phone || process.client_email) && (

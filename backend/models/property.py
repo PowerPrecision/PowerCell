@@ -109,6 +109,7 @@ class PropertyCreate(BaseModel):
     property_type: PropertyType = PropertyType.APARTAMENTO
     title: str  # Título para listagem
     description: Optional[str] = None
+    source_url: Optional[str] = None  # URL de origem (ex: Idealista)
     
     # Localização
     address: PropertyAddress
@@ -136,6 +137,9 @@ class PropertyCreate(BaseModel):
     
     # Associações
     assigned_agent_id: Optional[str] = None  # Consultor responsável
+    process_id: Optional[str] = None  # Processo associado
+    client_id: Optional[str] = None  # Cliente associado
+    client_name: Optional[str] = None  # Nome do cliente (denormalizado)
     
     # Notas
     notes: Optional[str] = None
@@ -148,6 +152,7 @@ class PropertyUpdate(BaseModel):
     property_type: Optional[PropertyType] = None
     title: Optional[str] = None
     description: Optional[str] = None
+    source_url: Optional[str] = None
     address: Optional[PropertyAddress] = None
     features: Optional[PropertyFeatures] = None
     condition: Optional[PropertyCondition] = None
@@ -159,6 +164,9 @@ class PropertyUpdate(BaseModel):
     documents: Optional[List[str]] = None
     status: Optional[PropertyStatus] = None
     assigned_agent_id: Optional[str] = None
+    process_id: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
     notes: Optional[str] = None
     private_notes: Optional[str] = None
 
@@ -170,6 +178,7 @@ class Property(BaseModel):
     property_type: PropertyType
     title: str
     description: Optional[str] = None
+    source_url: Optional[str] = None  # URL de origem (ex: Idealista)
     
     address: PropertyAddress
     features: Optional[PropertyFeatures] = None
@@ -185,6 +194,11 @@ class Property(BaseModel):
     status: PropertyStatus
     assigned_agent_id: Optional[str] = None
     assigned_agent_name: Optional[str] = None  # Preenchido ao buscar
+    
+    # Associações a processo/cliente
+    process_id: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
     
     notes: Optional[str] = None
     private_notes: Optional[str] = None
@@ -220,4 +234,8 @@ class PropertyListItem(BaseModel):
     useful_area: Optional[float] = None
     photo_url: Optional[str] = None
     assigned_agent_name: Optional[str] = None
+    source_url: Optional[str] = None
+    process_id: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
     created_at: str

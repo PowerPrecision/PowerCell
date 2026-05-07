@@ -96,6 +96,10 @@ async def list_properties(
             useful_area=p.get("features", {}).get("useful_area") if p.get("features") else None,
             photo_url=p["photos"][0] if p.get("photos") else None,
             assigned_agent_name=p.get("assigned_agent_name"),
+            source_url=p.get("source_url"),
+            process_id=p.get("process_id"),
+            client_id=p.get("client_id"),
+            client_name=p.get("client_name"),
             created_at=p["created_at"]
         ))
     
@@ -128,6 +132,45 @@ async def get_property_stats(user: dict = Depends(get_current_user)):
         "reservado": status_stats.get("reservado", {"count": 0, "total_value": 0}),
         "vendido": status_stats.get("vendido", {"count": 0, "total_value": 0}),
     }
+
+
+@router.get("/by-process/{process_id}", response_model=List[PropertyListItem])
+async def get_properties_by_process(
+    process_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Obter imóveis associados a um processo específico."""
+    properties = await db.properties.find(
+        {"$or": [
+            {"process_id": process_id},
+            {"interested_clients": process_id}
+        ]},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    result = []
+    for p in properties:
+        result.append(PropertyListItem(
+            id=p["id"],
+            internal_reference=p.get("internal_reference"),
+            title=p["title"],
+            property_type=p["property_type"],
+            status=p["status"],
+            asking_price=p["financials"]["asking_price"],
+            municipality=p["address"]["municipality"],
+            district=p["address"]["district"],
+            bedrooms=p.get("features", {}).get("bedrooms") if p.get("features") else None,
+            useful_area=p.get("features", {}).get("useful_area") if p.get("features") else None,
+            photo_url=p["photos"][0] if p.get("photos") else None,
+            assigned_agent_name=p.get("assigned_agent_name"),
+            source_url=p.get("source_url"),
+            process_id=p.get("process_id"),
+            client_id=p.get("client_id"),
+            client_name=p.get("client_name"),
+            created_at=p["created_at"]
+        ))
+    
+    return result
 
 
 @router.post("", response_model=Property)
@@ -166,12 +209,25 @@ async def create_property(
         if agent:
             agent_name = agent["name"]
     
+    # Verificar URL duplicado (não bloqueia, apenas avisa)
+    warning = None
+    if data.source_url:
+        existing = await db.properties.find_one(
+            {"source_url": data.source_url},
+            {"id": 1, "title": 1, "client_name": 1, "status": 1}
+        )
+        if existing:
+            warning = f"Este URL já foi utilizado no imóvel '{existing.get('title', '')}' (status: {existing.get('status', '')})"
+            if existing.get("client_name"):
+                warning += f" para o cliente {existing['client_name']}"
+    
     property_doc = Property(
         id=str(uuid.uuid4()),
         internal_reference=internal_ref,
         property_type=data.property_type,
         title=sanitized_title,
         description=sanitized_description,
+        source_url=data.source_url,
         address=data.address,
         features=data.features,
         condition=data.condition,
@@ -184,6 +240,9 @@ async def create_property(
         status=data.status,
         assigned_agent_id=data.assigned_agent_id,
         assigned_agent_name=agent_name,
+        process_id=data.process_id,
+        client_id=data.client_id,
+        client_name=data.client_name,
         notes=sanitized_notes,
         private_notes=sanitized_private_notes,
         history=[
@@ -205,7 +264,12 @@ async def create_property(
     # Verificar matches em background (não bloqueia resposta)
     asyncio.create_task(check_and_notify_matches_for_new_property(property_doc.id))
     
-    return property_doc
+    # Incluir warning na resposta se URL duplicado
+    response = property_doc.model_dump()
+    if warning:
+        response["warning"] = warning
+    
+    return response
 
 
 @router.get("/{property_id}", response_model=Property)

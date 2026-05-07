@@ -3,7 +3,8 @@
  * Lista, cria e edita imóveis listados pela agência
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, MapPin, Home, Ruler, User, Building2, MoreHorizontal, Trash2, Edit, Upload, FileSpreadsheet, Loader2, ExternalLink } from 'lucide-react';
+import { Plus, Search, MapPin, Home, Ruler, User, Building2, MoreHorizontal, Trash2, Edit, Upload, FileSpreadsheet, Loader2, ExternalLink, AlertTriangle, Link as LinkIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import DashboardLayout from '../layouts/DashboardLayout';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -26,6 +27,7 @@ import {
 } from '../components/ui/dropdown-menu';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
+import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert';
 import { toast } from 'sonner';
 import { hasAnyRole } from '../utils/roleUtils';
 
@@ -149,6 +151,21 @@ const PropertyCard = ({ property, onEdit, onDelete, onStatusChange }) => {
             {property.assigned_agent_name}
           </div>
         )}
+        
+        {property.client_name && (
+          <div className="flex items-center text-xs text-gray-500 pt-1">
+            <User size={12} className="mr-1" />
+            <span>{property.client_name}</span>
+            {property.process_id && (
+              <Link
+                to={`/process/${property.process_id}`}
+                className="ml-1 inline-flex items-center text-primary hover:underline"
+              >
+                → Processo <ExternalLink size={10} className="ml-0.5" />
+              </Link>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -192,6 +209,8 @@ const PropertyForm = ({ property, onSave, onCancel, users }) => {
     private_notes: property?.private_notes || '',
     // Fotos
     photos: property?.photos || [],
+    // Source URL
+    source_url: property?.source_url || '',
   });
 
   const [photoUrl, setPhotoUrl] = useState('');
@@ -233,6 +252,7 @@ const PropertyForm = ({ property, onSave, onCancel, users }) => {
         condition: formData.condition,
         status: formData.status,
         description: formData.description || null,
+        source_url: formData.source_url || null,
         address: {
           district: formData.district,
           municipality: formData.municipality,
@@ -266,7 +286,11 @@ const PropertyForm = ({ property, onSave, onCancel, users }) => {
         photos: formData.photos,
       };
 
-      await onSave(payload);
+      await onSave(payload, (warning) => {
+        if (warning) {
+          toast.warning(warning);
+        }
+      });
     } catch (error) {
       console.error('Erro ao guardar:', error);
       toast.error('Erro ao guardar imóvel');
@@ -344,6 +368,16 @@ const PropertyForm = ({ property, onSave, onCancel, users }) => {
             onChange={(e) => handleChange('description', e.target.value)}
             placeholder="Descrição detalhada do imóvel..."
             rows={3}
+          />
+        </div>
+
+        <div>
+          <Label>URL de Origem</Label>
+          <Input
+            value={formData.source_url}
+            onChange={(e) => handleChange('source_url', e.target.value)}
+            placeholder="https://www.exemplo.pt/imovel/123"
+            data-testid="property-source-url-input"
           />
         </div>
       </div>
@@ -690,6 +724,7 @@ const PropertiesPage = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProperty, setEditingProperty] = useState(null);
+  const [urlWarning, setUrlWarning] = useState(null);
   
   // Estado para importação Excel
   const [importing, setImporting] = useState(false);
@@ -763,7 +798,7 @@ const PropertiesPage = () => {
     loadData();
   }, [fetchProperties]);
 
-  const handleSaveProperty = async (payload) => {
+  const handleSaveProperty = async (payload, onWarning) => {
     try {
       const url = editingProperty 
         ? `${API_URL}/api/properties/${editingProperty.id}`
@@ -778,7 +813,17 @@ const PropertiesPage = () => {
       });
 
       if (response.ok) {
+        const data = await response.json();
         toast.success(editingProperty ? 'Imóvel actualizado!' : 'Imóvel criado!');
+        
+        // Handle duplicate URL warning from backend
+        if (data.warning) {
+          setUrlWarning(data.warning);
+          if (onWarning) onWarning(data.warning);
+        } else {
+          setUrlWarning(null);
+        }
+        
         setDialogOpen(false);
         setEditingProperty(null);
         fetchProperties();
@@ -1021,6 +1066,17 @@ const PropertiesPage = () => {
             </div>
           )}
         </div>
+
+        {/* URL Duplicate Warning */}
+        {urlWarning && (
+          <Alert className="mb-4 border-yellow-300 bg-yellow-50">
+            <AlertTriangle className="h-4 w-4 text-yellow-600" />
+            <AlertTitle className="text-yellow-800">URL Duplicada</AlertTitle>
+            <AlertDescription className="text-yellow-700">
+              {urlWarning}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Filters */}
         <div className="flex gap-4 mb-6">
