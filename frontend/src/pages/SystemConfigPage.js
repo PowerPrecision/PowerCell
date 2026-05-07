@@ -164,7 +164,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
   if (field.key?.startsWith("_divider")) {
     return (
       <div className="pt-6 pb-2 border-t mt-4">
-        <h4 className="font-medium text-sm text-muted-foreground">{field.label}</h4>
+        <h4 className="font-medium text-sm text-muted-foreground">{safeString(field.label)}</h4>
       </div>
     );
   }
@@ -175,7 +175,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
     case "select":
       return (
         <div className="space-y-2">
-          <Label htmlFor={field.key}>{field.label}</Label>
+          <Label htmlFor={field.key}>{safeString(field.label)}</Label>
           <Select
             value={value || ""}
             onValueChange={(v) => onChange(field.key, v)}
@@ -192,7 +192,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
             </SelectContent>
           </Select>
           {field.help_text && (
-            <p className="text-xs text-muted-foreground">{field.help_text}</p>
+            <p className="text-xs text-muted-foreground">{safeString(field.help_text)}</p>
           )}
         </div>
       );
@@ -201,9 +201,9 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
       return (
         <div className="flex items-center justify-between py-2">
           <div>
-            <Label htmlFor={field.key}>{field.label}</Label>
+            <Label htmlFor={field.key}>{safeString(field.label)}</Label>
             {field.help_text && (
-              <p className="text-xs text-muted-foreground">{field.help_text}</p>
+              <p className="text-xs text-muted-foreground">{safeString(field.help_text)}</p>
             )}
           </div>
           <Switch
@@ -217,7 +217,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
     case "password":
       return (
         <div className="space-y-2">
-          <Label htmlFor={field.key}>{field.label}</Label>
+          <Label htmlFor={field.key}>{safeString(field.label)}</Label>
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Input
@@ -247,7 +247,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
             </div>
           </div>
           {field.help_text && (
-            <p className="text-xs text-muted-foreground">{field.help_text}</p>
+            <p className="text-xs text-muted-foreground">{safeString(field.help_text)}</p>
           )}
         </div>
       );
@@ -255,7 +255,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
     case "number":
       return (
         <div className="space-y-2">
-          <Label htmlFor={field.key}>{field.label}</Label>
+          <Label htmlFor={field.key}>{safeString(field.label)}</Label>
           <Input
             id={field.key}
             type="number"
@@ -264,7 +264,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
             placeholder={field.placeholder}
           />
           {field.help_text && (
-            <p className="text-xs text-muted-foreground">{field.help_text}</p>
+            <p className="text-xs text-muted-foreground">{safeString(field.help_text)}</p>
           )}
         </div>
       );
@@ -272,7 +272,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
     case "textarea":
       return (
         <div className="space-y-2">
-          <Label htmlFor={field.key}>{field.label}</Label>
+          <Label htmlFor={field.key}>{safeString(field.label)}</Label>
           <RichTextEditor
             value={value || ""}
             onChange={(val) => onChange(field.key, val)}
@@ -282,7 +282,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
             className="min-h-[200px]"
           />
           {field.help_text && (
-            <p className="text-xs text-muted-foreground">{field.help_text}</p>
+            <p className="text-xs text-muted-foreground">{safeString(field.help_text)}</p>
           )}
         </div>
       );
@@ -290,7 +290,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
     default:
       return (
         <div className="space-y-2">
-          <Label htmlFor={field.key}>{field.label}</Label>
+          <Label htmlFor={field.key}>{safeString(field.label)}</Label>
           <Input
             id={field.key}
             type="text"
@@ -299,7 +299,7 @@ const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) =>
             placeholder={field.placeholder}
           />
           {field.help_text && (
-            <p className="text-xs text-muted-foreground">{field.help_text}</p>
+            <p className="text-xs text-muted-foreground">{safeString(field.help_text)}</p>
           )}
         </div>
       );
@@ -364,8 +364,8 @@ const ConfigSection = ({ section, sectionKey, config, fields, onSave, onTest }) 
           <div className="flex items-center gap-2">
             <Icon className="h-5 w-5 text-primary" />
             <div>
-              <CardTitle className="text-lg">{section.title}</CardTitle>
-              <CardDescription>{section.description}</CardDescription>
+              <CardTitle className="text-lg">{safeString(section.title)}</CardTitle>
+              <CardDescription>{safeString(section.description)}</CardDescription>
             </div>
           </div>
           {hasChanges && (
@@ -2159,15 +2159,15 @@ const SystemConfigPage = () => {
                     {/* Estatísticas */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
                       <div className="bg-white dark:bg-gray-900 rounded p-3 border text-center">
-                        <p className="text-2xl font-bold text-purple-600">{s3MappingData.stats?.total || 0}</p>
+                        <p className="text-2xl font-bold text-purple-600">{safeString(s3MappingData.stats?.total ?? 0)}</p>
                         <p className="text-xs text-muted-foreground">Total de Clientes</p>
                       </div>
                       <div className="bg-white dark:bg-gray-900 rounded p-3 border text-center">
-                        <p className="text-2xl font-bold text-green-600">{s3MappingData.stats?.mapped || 0}</p>
+                        <p className="text-2xl font-bold text-green-600">{safeString(s3MappingData.stats?.mapped ?? 0)}</p>
                         <p className="text-xs text-muted-foreground">Com Mapeamento</p>
                       </div>
                       <div className="bg-white dark:bg-gray-900 rounded p-3 border text-center">
-                        <p className="text-2xl font-bold text-orange-600">{s3MappingData.stats?.unmapped || 0}</p>
+                        <p className="text-2xl font-bold text-orange-600">{safeString(s3MappingData.stats?.unmapped ?? 0)}</p>
                         <p className="text-xs text-muted-foreground">Sem Mapeamento</p>
                       </div>
                     </div>
@@ -2635,7 +2635,7 @@ const SystemConfigPage = () => {
             />
             {isAdminOrCEO && (
               <p className="text-[11px] text-muted-foreground">
-                Use as variáveis acima para personalizar o documento. Não edite as chavetas {{ }} manualmente — use os botões.
+                Use as variáveis acima para personalizar o documento. Não edite as chavetas {'{{ }}'} manualmente — use os botões.
               </p>
             )}
 
@@ -3207,8 +3207,8 @@ const SystemEmailsSection = ({ token }) => {
                       <Icon className="h-4 w-4" />
                     </div>
                     <div>
-                      <CardTitle className="text-base">{purpose.label}</CardTitle>
-                      <p className="text-xs text-muted-foreground mt-0.5">{purpose.description}</p>
+                      <CardTitle className="text-base">{safeString(purpose.label)}</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-0.5">{safeString(purpose.description)}</p>
                     </div>
                   </div>
                   {config?.is_active ? (

@@ -41,8 +41,7 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src'),
       },
       dedupe: ['react', 'react-dom', 'react-router-dom', 'react-is'],
-      // Force React development build for unminified error messages
-      conditions: ['development'],
+      // conditions: ['development'], // Disabled — was for debugging React Error #31
     },
 
     // Tratar ficheiros .js como JSX (compatibilidade CRA)
@@ -97,7 +96,7 @@ export default defineConfig(({ mode }) => {
       // Source Maps: 'hidden' gera os .map mas NÃO os referencia no JS final.
       // O ficheiro .map é gerado e enviado ao Sentry, mas o browser nunca o descarrega.
       sourcemap: isProduction ? 'hidden' : true,
-      minify: false,
+      minify: true,
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
@@ -135,11 +134,7 @@ export default defineConfig(({ mode }) => {
         process.env.REACT_APP_BACKEND_URL ||
         'https://powercell.onrender.com'
       ),
-      // Disable React production mode to get unminified error messages
-      'process.env.NODE_ENV': JSON.stringify('development'),
-      // Force React to use development build (unminified errors)
-      'import.meta.env.PROD': false,
-      'import.meta.env.DEV': true,
+      // Note: NODE_ENV is set by Vite automatically based on mode
     },
 
     // CSS configuration
