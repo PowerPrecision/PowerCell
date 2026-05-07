@@ -50,6 +50,7 @@ import {
 } from "../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
+import { safeString } from "../utils/safeString";
 import { toast } from "sonner";
 import {
   Settings,
@@ -2557,11 +2558,11 @@ const SystemConfigPage = () => {
                 <span className="text-sm text-muted-foreground">
                   {templateMeta.is_default
                     ? "A utilizar o template padrão. Edite para personalizar."
-                    : `Versão ${templateMeta.version || "1.0"} — Última atualização: ${
+                    : `Versão ${safeString(templateMeta.version) || "1.0"} — Última atualização: ${
                         templateMeta.updated_at
                           ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
                           : "N/A"
-                      } ${templateMeta.updated_by ? `por ${templateMeta.updated_by}` : ""}`}
+                      } ${templateMeta.updated_by ? `por ${safeString(templateMeta.updated_by)}` : ""}`}
                 </span>
               </div>
               {templateMeta.is_default ? (
@@ -2570,7 +2571,7 @@ const SystemConfigPage = () => {
                 </Badge>
               ) : (
                 <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                  v{templateMeta.version || "1.0"}
+                  v{safeString(templateMeta.version) || "1.0"}
                 </Badge>
               )}
             </div>
@@ -2624,7 +2625,7 @@ const SystemConfigPage = () => {
 
             {/* Textarea editor — plain text, no WYSIWYG corruption of {{variables}} */}
             <textarea
-              value={templateContent}
+              value={safeString(templateContent)}
               onChange={(e) => setTemplateContent(e.target.value)}
               disabled={!isAdminOrCEO}
               placeholder="Introduza o texto do template RGPD... Use {{NOME_CLIENTE}} para variáveis dinâmicas."
@@ -2778,7 +2779,7 @@ const SystemConfigPage = () => {
                       {v.is_active && <CheckCircle className="h-4 w-4 text-green-600" />}
                       <div>
                         <p className="text-sm font-medium">
-                          Versão {v.version}
+                          Versão {safeString(v.version)}
                           {v.is_active && (
                             <Badge variant="outline" className="ml-2 text-xs bg-green-100 text-green-700 border-green-300">
                               Ativa
@@ -2789,11 +2790,11 @@ const SystemConfigPage = () => {
                           {v.created_at
                             ? new Date(v.created_at).toLocaleString("pt-PT")
                             : "N/A"}
-                          {v.created_by ? ` — ${v.created_by}` : ""}
+                          {v.created_by ? ` — ${safeString(v.created_by)}` : ""}
                         </p>
                         {v.changelog && (
                           <p className="text-xs text-muted-foreground italic mt-0.5">
-                            {v.changelog}
+                            {safeString(v.changelog)}
                           </p>
                         )}
                       </div>
