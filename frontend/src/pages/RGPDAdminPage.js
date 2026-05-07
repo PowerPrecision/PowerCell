@@ -565,7 +565,7 @@ const RGPDTemplateTab = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <SmartRichEditor
-              value={templateContent}
+              value={safeString(templateContent)}
               onChange={(html) => setTemplateContent(html)}
               placeholder="Introduza o texto do template RGPD..."
               minHeight={400}
@@ -1124,7 +1124,7 @@ const MinutaTemplateTab = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <SmartRichEditor
-              value={templateContent}
+              value={safeString(templateContent)}
               onChange={(html) => setTemplateContent(html)}
               placeholder="Introduza o texto da minuta de exclusividade..."
               minHeight={400}
