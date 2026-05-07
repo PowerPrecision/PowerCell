@@ -760,6 +760,99 @@ const ProcessDetails = () => {
     return () => clearTimeout(timeoutId);
   }, [status]);
 
+  // ── VisitasTab: Hooks para gerir imóveis associados ao processo ──
+  // IMPORTANT: These hooks MUST be before any early returns (Rules of Hooks)
+  const fetchVisitasProperties = useCallback(async () => {
+    if (!id) return;
+    setVisitasLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/properties/by-process/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setVisitasProperties(data);
+      } else {
+        console.error("Erro ao carregar imóveis do processo");
+      }
+    } catch (error) {
+      console.error("Erro ao carregar imóveis:", error);
+    } finally {
+      setVisitasLoading(false);
+    }
+  }, [id, token]);
+
+  const searchProperties = useCallback(async (query) => {
+    if (!query || query.length < 2) {
+      setPropertySearchResults([]);
+      return;
+    }
+    setPropertySearchLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/properties?search=${encodeURIComponent(query)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        // Filtrar imóveis que já estão associados a este processo
+        const associatedIds = visitasProperties.map((p) => p.id);
+        setPropertySearchResults(data.filter((p) => !associatedIds.includes(p.id)));
+      }
+    } catch (error) {
+      console.error("Erro ao pesquisar imóveis:", error);
+    } finally {
+      setPropertySearchLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const handleAssociateProperty = useCallback(async (propertyId) => {
+    setAssociatingProperty(true);
+    try {
+      const response = await fetch(
+        `${API_URL}/api/properties/${propertyId}/interested-client?client_id=${id}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (response.ok) {
+        toast.success("Imóvel associado ao processo com sucesso");
+        setShowAssociatePropertyDialog(false);
+        setPropertySearch("");
+        setPropertySearchResults([]);
+        fetchVisitasProperties();
+      } else {
+        const data = await response.json();
+        toast.error(data.detail || "Erro ao associar imóvel");
+      }
+    } catch (error) {
+      console.error("Erro ao associar imóvel:", error);
+      toast.error("Erro ao associar imóvel ao processo");
+    } finally {
+      setAssociatingProperty(false);
+    }
+  }, [id, token, fetchVisitasProperties]);
+
+  // Buscar imóveis quando o tab Visitas fica activo
+  useEffect(() => {
+    if (activeTab === "visitas") {
+      fetchVisitasProperties();
+    }
+  }, [activeTab, fetchVisitasProperties]);
+
+  // Debounce para pesquisa de imóveis
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (propertySearch.length >= 2) {
+        searchProperties(propertySearch);
+      } else {
+        setPropertySearchResults([]);
+      }
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [propertySearch, searchProperties]);
+
   const fetchData = async () => {
     try {
       // Use Promise.allSettled so that a failure in one request (e.g. history/activities)
@@ -1476,98 +1569,6 @@ const ProcessDetails = () => {
 
   const deadlineDates = deadlines.map((d) => parseISO(d.due_date));
   const currentStatusInfo = getStatusInfo(process.status);
-
-  // ── VisitasTab: Componente inline para gerir imóveis associados ao processo ──
-  const fetchVisitasProperties = useCallback(async () => {
-    if (!id) return;
-    setVisitasLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/properties/by-process/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setVisitasProperties(data);
-      } else {
-        console.error("Erro ao carregar imóveis do processo");
-      }
-    } catch (error) {
-      console.error("Erro ao carregar imóveis:", error);
-    } finally {
-      setVisitasLoading(false);
-    }
-  }, [id, token]);
-
-  const searchProperties = useCallback(async (query) => {
-    if (!query || query.length < 2) {
-      setPropertySearchResults([]);
-      return;
-    }
-    setPropertySearchLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/properties?search=${encodeURIComponent(query)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        // Filtrar imóveis que já estão associados a este processo
-        const associatedIds = visitasProperties.map((p) => p.id);
-        setPropertySearchResults(data.filter((p) => !associatedIds.includes(p.id)));
-      }
-    } catch (error) {
-      console.error("Erro ao pesquisar imóveis:", error);
-    } finally {
-      setPropertySearchLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  const handleAssociateProperty = useCallback(async (propertyId) => {
-    setAssociatingProperty(true);
-    try {
-      const response = await fetch(
-        `${API_URL}/api/properties/${propertyId}/interested-client?client_id=${id}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (response.ok) {
-        toast.success("Imóvel associado ao processo com sucesso");
-        setShowAssociatePropertyDialog(false);
-        setPropertySearch("");
-        setPropertySearchResults([]);
-        fetchVisitasProperties();
-      } else {
-        const data = await response.json();
-        toast.error(data.detail || "Erro ao associar imóvel");
-      }
-    } catch (error) {
-      console.error("Erro ao associar imóvel:", error);
-      toast.error("Erro ao associar imóvel ao processo");
-    } finally {
-      setAssociatingProperty(false);
-    }
-  }, [id, token, fetchVisitasProperties]);
-
-  // Buscar imóveis quando o tab Visitas fica activo
-  useEffect(() => {
-    if (activeTab === "visitas") {
-      fetchVisitasProperties();
-    }
-  }, [activeTab, fetchVisitasProperties]);
-
-  // Debounce para pesquisa de imóveis
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (propertySearch.length >= 2) {
-        searchProperties(propertySearch);
-      } else {
-        setPropertySearchResults([]);
-      }
-    }, 400);
-    return () => clearTimeout(timeout);
-  }, [propertySearch, searchProperties]);
 
   const propertyStatusColors = {
     disponivel: "bg-emerald-100 text-emerald-800 border-emerald-200",
