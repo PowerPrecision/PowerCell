@@ -29,6 +29,7 @@ import {
   BarChart3,
   Send,
 } from 'lucide-react';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
 
@@ -438,7 +439,7 @@ function ContactCard({ contact }) {
 // ====================================================================
 // PORTAL MESSAGES — Chat interface for client ↔ staff communication
 // ====================================================================
-function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, sending, unreadCount }) {
+function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, sending, unreadCount, isInSheet }) {
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to bottom when messages change
@@ -465,20 +466,27 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
     return date.toLocaleDateString('pt-PT');
   };
 
+  // In Sheet mode: no card wrapper, fill full height, hide header (Sheet provides it)
+  const containerClass = isInSheet
+    ? 'flex flex-col h-full px-5 pb-5'
+    : 'bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col min-h-[400px] lg:h-[650px]';
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col min-h-[400px] lg:h-[650px]">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
-          <MessageCircle className="w-5 h-5 text-emerald-500" />
-          Mensagens
-        </h3>
-        {unreadCount > 0 && (
-          <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-emerald-500 text-white text-xs font-bold">
-            {unreadCount}
-          </span>
-        )}
-      </div>
+    <div className={containerClass}>
+      {/* Header — hidden in Sheet (Sheet has its own) */}
+      {!isInSheet && (
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+            <MessageCircle className="w-5 h-5 text-emerald-500" />
+            Mensagens
+          </h3>
+          {unreadCount > 0 && (
+            <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-emerald-500 text-white text-xs font-bold">
+              {unreadCount}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto space-y-3 min-h-0 mb-3 pr-1" style={{ scrollbarWidth: 'thin' }}>
@@ -647,6 +655,7 @@ export default function ClientPortal() {
   const [newMessage, setNewMessage] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
 
   const fetchMessages = useCallback(async () => {
     const token = sessionStorage.getItem('portal_token');
@@ -913,8 +922,8 @@ export default function ClientPortal() {
             <TeamCard team={team} consultor={consultor} />
           </div>
 
-          {/* ═══ RIGHT COLUMN: Mensagens / Chat ═══ */}
-          <div className="lg:col-span-5">
+          {/* ═══ RIGHT COLUMN: Mensagens / Chat (Desktop only) ═══ */}
+          <div className="hidden lg:block lg:col-span-5">
             <PortalMessages
               messages={messages}
               loading={messagesLoading}
@@ -928,6 +937,50 @@ export default function ClientPortal() {
 
         </div>
       </main>
+
+      {/* ═══ MOBILE: Floating Chat Button + Sheet ═══ */}
+      <div className="lg:hidden">
+        {/* FAB — Floating Action Button */}
+        <button
+          onClick={() => setIsMobileChatOpen(true)}
+          className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full bg-emerald-600 text-white shadow-2xl flex items-center justify-center hover:bg-emerald-700 active:scale-95 transition-all"
+          aria-label="Abrir chat"
+        >
+          <MessageCircle className="w-6 h-6" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold shadow-sm">
+              {unreadCount}
+            </span>
+          )}
+        </button>
+
+        {/* Sheet — Sliding chat panel */}
+        <Sheet open={isMobileChatOpen} onOpenChange={setIsMobileChatOpen}>
+          <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
+            <SheetHeader className="px-5 pt-5 pb-2">
+              <SheetTitle className="flex items-center gap-2 text-base">
+                <MessageCircle className="w-5 h-5 text-emerald-500" />
+                Mensagens
+              </SheetTitle>
+              <SheetDescription className="text-xs text-gray-400">
+                Converse com a sua equipa de consultores
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <PortalMessages
+                messages={messages}
+                loading={messagesLoading}
+                newMessage={newMessage}
+                setNewMessage={setNewMessage}
+                onSend={sendMessage}
+                sending={sendingMessage}
+                unreadCount={unreadCount}
+                isInSheet
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
 
       {/* Footer */}
       <footer className="mt-auto bg-white border-t border-gray-100 py-3">
