@@ -60,6 +60,8 @@ import {
   Filter,
   CheckCircle,
   XCircle,
+  Flame,
+  AlertTriangle,
 } from "lucide-react";
 import {
   Select,
@@ -592,21 +594,25 @@ export default function ClientsPage() {
               <>
               {/* O9 - Mobile: Card view */}
               <div className="md:hidden space-y-3 p-3">
-                {filteredClients.map((client, idx) => (
-                  <div key={`mobile-${client.id}-${idx}`} className="border rounded-lg p-3 bg-card space-y-2" data-testid={`client-card-${client.id}`}>
+                {filteredClients.map((client, idx) => {
+                  const clientPriority = (client.prioridade || '').toLowerCase();
+                  const isAlta = clientPriority === 'alta' || clientPriority === 'high';
+                  return (
+                  <div key={`mobile-${client.id}-${idx}`} className={`border rounded-lg p-3 space-y-2 ${isAlta ? 'border-l-[4px] border-l-red-500 bg-red-50/60 dark:bg-red-950/20' : 'bg-card'}`} data-testid={`client-card-${client.id}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                          <span className="text-xs font-medium text-primary">
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${isAlta ? 'bg-red-100 dark:bg-red-900/30' : 'bg-primary/10'}`}>
+                          <span className={`text-xs font-medium ${isAlta ? 'text-red-600 dark:text-red-400' : 'text-primary'}`}>
                             {client.nome?.charAt(0)?.toUpperCase() || "?"}
                           </span>
                         </div>
                         <div className="min-w-0">
                           <button
-                            className="font-medium text-sm text-left hover:text-primary truncate block max-w-full"
+                            className={`text-sm text-left hover:text-primary truncate block max-w-full ${isAlta ? 'font-bold' : 'font-medium'}`}
                             onClick={() => client.process_ids?.[0] && navigate(`/process/${client.process_ids[0]}`)}
                             disabled={!client.process_ids?.length}
                           >
+                            {isAlta && <span className="mr-1">🔥</span>}
                             {client.nome}
                           </button>
                           {client.contacto?.email && (
@@ -614,17 +620,24 @@ export default function ClientsPage() {
                           )}
                         </div>
                       </div>
-                      {client.fase_principal ? (
-                        <Badge 
-                          className="shrink-0 text-[10px]"
-                          style={{ 
-                            backgroundColor: client.fase_principal.status_color || '#6B7280',
-                            color: getContrastColor(client.fase_principal.status_color),
-                          }}
-                        >
-                          {client.fase_principal.status_label}
-                        </Badge>
-                      ) : null}
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        {isAlta && (
+                          <Badge className="bg-red-500 text-white border-red-600 text-[9px] px-1.5 py-0 h-4 gap-0.5 animate-pulse shadow-sm shadow-red-300/50">
+                            <Flame className="h-2.5 w-2.5" /> Alta
+                          </Badge>
+                        )}
+                        {client.fase_principal ? (
+                          <Badge 
+                            className="text-[10px]"
+                            style={{ 
+                              backgroundColor: client.fase_principal.status_color || '#6B7280',
+                              color: getContrastColor(client.fase_principal.status_color),
+                            }}
+                          >
+                            {client.fase_principal.status_label}
+                          </Badge>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <div className="flex items-center gap-3">
@@ -665,7 +678,8 @@ export default function ClientsPage() {
                       </DropdownMenu>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* O9 - Desktop: Table */}
@@ -713,24 +727,39 @@ export default function ClientsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                  {filteredClients.map((client, idx) => (
-                    <TableRow key={`${client.id}-${idx}`} data-testid={`client-row-${client.id}`}>
+                  {filteredClients.map((client, idx) => {
+                    const clientPriority = (client.prioridade || '').toLowerCase();
+                    const isAlta = clientPriority === 'alta' || clientPriority === 'high';
+                    return (
+                    <TableRow 
+                      key={`${client.id}-${idx}`} 
+                      data-testid={`client-row-${client.id}`}
+                      className={isAlta ? 'bg-red-50/60 dark:bg-red-950/10 border-l-[4px] border-l-red-500' : ''}
+                    >
                       <TableCell>
                         <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
-                            <span className="text-sm font-medium text-primary">
+                          <div className={`h-9 w-9 rounded-full flex items-center justify-center ${isAlta ? 'bg-red-100 dark:bg-red-900/30' : 'bg-primary/10'}`}>
+                            <span className={`text-sm font-medium ${isAlta ? 'text-red-600 dark:text-red-400' : 'text-primary'}`}>
                               {client.nome?.charAt(0)?.toUpperCase() || "?"}
                             </span>
                           </div>
                           <div>
-                            <button
-                              className="font-medium text-left hover:text-primary hover:underline transition-colors cursor-pointer"
-                              onClick={() => client.process_ids?.[0] && navigate(`/process/${client.process_ids[0]}`)}
-                              disabled={!client.process_ids?.length}
-                              data-testid={`client-name-${client.id}`}
-                            >
-                              {client.nome}
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                className={`text-left hover:text-primary hover:underline transition-colors cursor-pointer ${isAlta ? 'font-bold' : 'font-medium'}`}
+                                onClick={() => client.process_ids?.[0] && navigate(`/process/${client.process_ids[0]}`)}
+                                disabled={!client.process_ids?.length}
+                                data-testid={`client-name-${client.id}`}
+                              >
+                                {isAlta && <span className="mr-1">🔥</span>}
+                                {client.nome}
+                              </button>
+                              {isAlta && (
+                                <Badge className="bg-red-500 text-white border-red-600 text-[10px] px-2 py-0 h-5 gap-0.5 shadow-sm shadow-red-300/50">
+                                  <Flame className="h-3 w-3" /> Prioridade Alta
+                                </Badge>
+                              )}
+                            </div>
                             {client.fonte && (
                               <Badge variant="outline" className="text-xs mt-1">
                                 {client.fonte}
@@ -828,7 +857,8 @@ export default function ClientsPage() {
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
               </div>

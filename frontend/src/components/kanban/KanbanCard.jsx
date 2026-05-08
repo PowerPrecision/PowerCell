@@ -8,6 +8,11 @@
  * - Só re-renderiza quando as props exatas mudam
  * - Isola estado do formulário do estado do board
  * 
+ * DESTAQUE DE PRIORIDADE:
+ * - Alta: Borda esquerda grossa vermelha, fundo subtil, ícone 🔥 no título
+ * - Média: Borda esquerda amarela
+ * - Baixa: Sem destaque especial
+ * 
  * @param {Object} process - Dados do processo
  * @param {boolean} isDragging - Se o cartão está a ser arrastado
  * @param {Function} onDragStart - Handler de início de drag
@@ -79,24 +84,35 @@ const KanbanCard = memo(({
 
   const isCurrentlyDragging = isDragging || draggingCard?.process?.id === process.id;
 
+  // Compute priority level (normalised)
+  const prioridade = (process.prioridade || process.priority || '').toLowerCase();
+  const isAlta = prioridade === 'alta' || prioridade === 'high';
+  const isMedia = prioridade === 'media' || prioridade === 'medium';
+  const isBaixa = prioridade === 'baixa' || prioridade === 'low';
+
   // Compute priority-based styling
+  // Alta: Gross left border (4px red-500), subtle red bg tint, 🔥 icon
+  // Media: Left border amber-400
+  // Baixa / none: No special border (except 2nd proponent indicator)
   const getPriorityStyles = () => {
-    const prioridade = process.prioridade || process.priority;
-    if (prioridade === 'alta' || prioridade === 'high') {
+    if (isAlta) {
       return {
-        borderClass: 'border-t-4 border-t-red-500 border-l-4 border-l-red-500',
-        bgClass: 'bg-red-50/50 dark:bg-red-950/20',
+        borderClass: 'border-l-[4px] border-l-red-500',
+        bgClass: 'bg-red-50/60 dark:bg-red-950/20',
+        shadowClass: 'shadow-red-200/50 dark:shadow-red-900/20',
       };
     }
-    if (prioridade === 'media' || prioridade === 'medium') {
+    if (isMedia) {
       return {
-        borderClass: 'border-l-4 border-l-amber-400',
-        bgClass: '',
+        borderClass: 'border-l-[3px] border-l-amber-400',
+        bgClass: 'bg-amber-50/30 dark:bg-amber-950/10',
+        shadowClass: '',
       };
     }
     return {
-      borderClass: hasSecondProponent ? 'border-l-4 border-blue-600' : '',
+      borderClass: hasSecondProponent ? 'border-l-[3px] border-l-blue-600' : '',
       bgClass: '',
+      shadowClass: '',
     };
   };
 
@@ -104,9 +120,9 @@ const KanbanCard = memo(({
 
   return (
     <Card
-      className={`cursor-pointer hover:shadow-md transition-shadow relative ${
+      className={`cursor-pointer hover:shadow-md transition-all duration-200 relative ${
         isCurrentlyDragging ? "opacity-50" : ""
-      } ${priorityStyles.borderClass} ${priorityStyles.bgClass}`}
+      } ${priorityStyles.borderClass} ${priorityStyles.bgClass} ${priorityStyles.shadowClass}`}
       draggable
       onDragStart={handleDragStart}
       onClick={handleClick}
@@ -131,17 +147,17 @@ const KanbanCard = memo(({
               <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                 #{process.process_number || '—'}
               </span>
-              {(process.prioridade === 'alta' || process.priority === 'high') && (
-                <Badge className="bg-red-100 text-red-700 border-red-300 text-[9px] px-1.5 py-0 h-4 gap-0.5 animate-pulse">
-                  <AlertTriangle className="h-2.5 w-2.5" /> Alta
+              {isAlta && (
+                <Badge className="bg-red-500 text-white border-red-600 text-[9px] px-1.5 py-0 h-4 gap-0.5 animate-pulse shadow-sm shadow-red-300/50">
+                  <Flame className="h-2.5 w-2.5" /> Alta
                 </Badge>
               )}
-              {(process.prioridade === 'media' || process.priority === 'medium') && (
+              {isMedia && (
                 <Badge className="bg-amber-100 text-amber-700 border-amber-300 text-[9px] px-1.5 py-0 h-4">
                   Média
                 </Badge>
               )}
-              {(process.prioridade === 'baixa' || process.priority === 'low') && (
+              {isBaixa && (
                 <Badge className="bg-green-100 text-green-700 border-green-300 text-[9px] px-1.5 py-0 h-4">
                   Baixa
                 </Badge>
@@ -159,12 +175,15 @@ const KanbanCard = memo(({
             </Button>
           </div>
           
-          {/* Linha 2: Nome do cliente - SEMPRE VISÍVEL */}
+          {/* Linha 2: Nome do cliente - SEMPRE VISÍVEL, com 🔥 para Alta */}
           <p 
-            className="font-semibold text-sm leading-snug break-words whitespace-normal min-w-0" 
+            className={`text-sm leading-snug break-words whitespace-normal min-w-0 ${
+              isAlta ? 'font-bold text-red-900 dark:text-red-100' : 'font-semibold'
+            }`} 
             style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
             title={process.client_name}
           >
+            {isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
             {safeString(process.client_name)}
           </p>
           

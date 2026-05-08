@@ -1457,3 +1457,27 @@ Stage Summary:
 - Backend no longer blocks saves on NIF checksum failure — validates format only (9 digits, valid prefix)
 - Type coercion validators prevent 422 errors from stale data with wrong types (string where float expected)
 - All changes compiled and pushed successfully to dev branch
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix Kanban 500 Internal Server Error + Recharts chart dimension warning
+
+Work Log:
+- Investigated 500 error on GET /api/processes/kanban?view_mode=active_only&show_all=true
+- Root cause: TypeError "bad operand type for unary -: 'str'" in priority sorting code
+  - The code used -(p.get("updated_at") or "") to sort descending, but updated_at is an ISO string
+  - Python cannot negate a string with unary minus operator
+- Fixed with two-step stable sort in both routes/processes.py and services/process_kanban.py:
+  1. Sort by updated_at DESC (reverse=True) - strings sort correctly in reverse
+  2. Sort by priority DESC (-weight) - integers can be negated
+  - Python's sort is stable, so step 2 preserves step 1's order within equal priorities
+- Recharts warning: Already mitigated by SafeChartContainer wrapper (all charts use it)
+  - The -1 dimension warning is a cosmetic Recharts race condition during initial render
+  - SafeChartContainer handles it correctly with ResizeObserver + stabilization delay
+- Pushed fix as commit e82848a
+
+Stage Summary:
+- Kanban 500 error fixed - sorting now uses two-step stable sort instead of single tuple sort
+- Recharts warning is cosmetic and already handled by SafeChartContainer
+- All changes pushed to dev branch

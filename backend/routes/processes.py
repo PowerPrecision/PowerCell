@@ -1451,6 +1451,9 @@ async def get_kanban_board(
         "updated_at": 1,
         "notes": 1,
         "tags": 1,
+        "labels": 1,
+        "co_buyers": 1,
+        "compradores": 1,
     }
     processes = await db.processes.find(query, kanban_projection).to_list(1000)
     

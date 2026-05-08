@@ -818,7 +818,8 @@ async def list_clients(
             {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
              "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
              "assigned_consultor_id": 1, "assigned_mediador_id": 1,
-             "consultor_name": 1, "mediador_name": 1, "is_active": 1, "created_at": 1}
+             "consultor_name": 1, "mediador_name": 1, "is_active": 1, "created_at": 1,
+             "prioridade": 1, "priority": 1}
         ).sort("client_name", 1).to_list(length=None)
         
         # Agrupar por cliente
@@ -827,6 +828,9 @@ async def list_clients(
             key = proc.get("client_id") or proc.get("client_name", "").lower().strip()
             if not key:
                 continue
+            
+            # Determinar prioridade do processo (suporta campo PT e EN)
+            proc_priority = proc.get("prioridade") or proc.get("priority") or ""
             
             if key not in clients_map:
                 clients_map[key] = {
@@ -841,7 +845,8 @@ async def list_clients(
                     "process_ids": [],
                     "active_processes_count": 0,
                     "processes": [],  # Lista de processos com fase
-                    "created_at": proc.get("created_at")  # For sorting by date
+                    "created_at": proc.get("created_at"),  # For sorting by date
+                    "prioridade": proc_priority,  # Prioridade mais alta dos processos
                 }
             
             # Update created_at to earliest process date
@@ -859,7 +864,8 @@ async def list_clients(
                 "status_color": status_info.get("color", "#6B7280"),
                 "is_active": proc.get("is_active", True),
                 "consultor_name": proc.get("consultor_name"),
-                "mediador_name": proc.get("mediador_name")
+                "mediador_name": proc.get("mediador_name"),
+                "prioridade": proc_priority,
             }
             clients_map[key]["processes"].append(process_info)
             clients_map[key]["process_ids"].append(proc.get("id"))
@@ -867,6 +873,13 @@ async def list_clients(
             # Determinar fase principal (primeiro processo ativo ou primeiro processo)
             if not clients_map[key].get("fase_principal"):
                 clients_map[key]["fase_principal"] = process_info
+            
+            # Atualizar prioridade do cliente para a mais alta entre os seus processos
+            PRIORITY_WEIGHT = {"alta": 3, "media": 2, "baixa": 1}
+            current_weight = PRIORITY_WEIGHT.get(clients_map[key].get("prioridade", ""), 0)
+            new_weight = PRIORITY_WEIGHT.get(proc_priority, 0)
+            if new_weight > current_weight:
+                clients_map[key]["prioridade"] = proc_priority
             
             if proc.get("is_active", True) and proc.get("status") not in ["desistencias", "concluidos", "arquivado", "perdido", "concluido"]:
                 clients_map[key]["active_processes_count"] += 1
@@ -952,7 +965,8 @@ async def list_clients(
     processes = await db.processes.find(
         process_query,
         {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
-         "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1, "created_at": 1}
+         "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1, "created_at": 1,
+         "prioridade": 1, "priority": 1}
     ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
     
     # Agrupar por cliente (usando client_id ou client_name como chave)
@@ -963,6 +977,9 @@ async def list_clients(
             continue
         
         if key not in clients_map:
+            # Determinar prioridade do processo (suporta campo PT e EN)
+            proc_priority = proc.get("prioridade") or proc.get("priority") or ""
+            
             clients_map[key] = {
                 "id": proc.get("client_id") or f"process_{proc.get('id')}",
                 "nome": proc.get("client_name"),
@@ -974,7 +991,8 @@ async def list_clients(
                 "nif": proc.get("personal_data", {}).get("nif"),
                 "process_ids": [],
                 "active_processes_count": 0,
-                "created_at": proc.get("created_at")
+                "created_at": proc.get("created_at"),
+                "prioridade": proc_priority,
             }
         
         # Update created_at to earliest process date
@@ -983,6 +1001,14 @@ async def list_clients(
             clients_map[key]["created_at"] = proc_date
         
         clients_map[key]["process_ids"].append(proc.get("id"))
+        
+        # Atualizar prioridade do cliente para a mais alta
+        proc_priority = proc.get("prioridade") or proc.get("priority") or ""
+        PRIORITY_WEIGHT = {"alta": 3, "media": 2, "baixa": 1}
+        current_weight = PRIORITY_WEIGHT.get(clients_map[key].get("prioridade", ""), 0)
+        new_weight = PRIORITY_WEIGHT.get(proc_priority, 0)
+        if new_weight > current_weight:
+            clients_map[key]["prioridade"] = proc_priority
         
         if proc.get("status") not in ["arquivado", "perdido", "concluido"]:
             clients_map[key]["active_processes_count"] += 1
