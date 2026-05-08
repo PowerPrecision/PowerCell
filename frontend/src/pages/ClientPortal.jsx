@@ -1,9 +1,10 @@
 /**
  * ClientPortal — Portal do Cliente (Magic Link, passwordless).
  *
- * Layout: responsivo — grid 2 colunas em desktop, stack em mobile.
- * - Coluna Esquerda: Estado do processo + Stepper + Consultor
- * - Coluna Direita: Documentos (pendentes + upload + entregues)
+ * Layout: Dashboard profissional full-width — grid 3 colunas em desktop, stack em mobile.
+ * - Coluna Esquerda (lg:col-span-3): Resumo + Timeline + Equipa
+ * - Coluna Central (lg:col-span-5): Gestão de Documentos
+ * - Coluna Direita (lg:col-span-4): Mensagens / Chat
  *
  * Fluxo de autenticação:
  *   short_id → resolve → JWT (sessionStorage) → status + upload
@@ -485,7 +486,7 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col" style={{ minHeight: 360, maxHeight: 520 }}>
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col h-[600px]">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
@@ -777,7 +778,7 @@ export default function ClientPortal() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center gap-3">
           <img
             src="/PowerCell-default.png"
             alt="PowerCell"
@@ -794,11 +795,11 @@ export default function ClientPortal() {
         </div>
       </header>
 
-      {/* Main Content — 2 column grid */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 pb-28">
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      {/* Main Content — 3 column dashboard grid */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-          {/* ═══ LEFT COLUMN: Process Status ═══ */}
+          {/* ═══ LEFT COLUMN: Resumo + Timeline ═══ */}
           <div className="lg:col-span-3 space-y-5">
 
             {/* Greeting + Status */}
@@ -924,17 +925,16 @@ export default function ClientPortal() {
               </>
             )}
 
-            {/* Team (mobile) */}
-            <div className="lg:hidden">
-              <TeamCard team={team} consultor={consultor} />
-            </div>
+            <TeamCard team={team} consultor={consultor} />
           </div>
 
-          {/* ═══ RIGHT COLUMN: Documents + Messages ═══ */}
-          <div className="lg:col-span-2 space-y-5">
+          {/* ═══ CENTER COLUMN: Documentos ═══ */}
+          <div className="lg:col-span-5">
             <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
+          </div>
 
-            {/* Messages */}
+          {/* ═══ RIGHT COLUMN: Mensagens / Chat ═══ */}
+          <div className="lg:col-span-4">
             <PortalMessages
               messages={messages}
               loading={messagesLoading}
@@ -944,11 +944,6 @@ export default function ClientPortal() {
               sending={sendingMessage}
               unreadCount={unreadCount}
             />
-
-            {/* Team (desktop) */}
-            <div className="hidden lg:block">
-              <TeamCard team={team} consultor={consultor} />
-            </div>
           </div>
 
         </div>
@@ -956,7 +951,7 @@ export default function ClientPortal() {
 
       {/* Footer */}
       <footer className="mt-auto bg-white border-t border-gray-100 py-3">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 text-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <p className="text-xs text-gray-400">© {new Date().getFullYear()} Power Precision · Crédito Habitação</p>
           <p className="text-[10px] text-gray-300 mt-0.5">Acesso seguro via Magic Link · Válido por 90 dias</p>
         </div>
