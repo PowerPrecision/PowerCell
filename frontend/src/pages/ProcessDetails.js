@@ -884,7 +884,7 @@ const ProcessDetails = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setPortalMessages(Array.isArray(data) ? data : []);
+        setPortalMessages(Array.isArray(data) ? data : (data.messages || []));
       }
     } catch (error) {
       console.error("Erro ao carregar mensagens do portal:", error);

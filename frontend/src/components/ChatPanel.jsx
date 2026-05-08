@@ -128,7 +128,11 @@ const ChatPanel = ({ open, onOpenChange }) => {
       });
       if (response.ok) {
         const data = await response.json();
-        setUnreadCount(data);
+        setUnreadCount({
+          total: data.unread_count || 0,
+          direct: data.direct_unread || 0,
+          group: data.group_unread || 0,
+        });
       }
     } catch {
       // Error handled silently in production
