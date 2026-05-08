@@ -886,9 +886,11 @@ async def list_clients(
         
         clients = list(clients_map.values())
         
-        # Ordenação composta: 1ª por fase do workflow (da fase principal), 2ª por nome
+        # Ordenação composta: 1ª por prioridade (alta primeiro), 2ª por fase do workflow, 3ª por nome
         status_order = {s["name"]: idx for idx, s in enumerate(workflow_statuses)}
+        PRIORITY_SORT = {"alta": 3, "high": 3, "media": 2, "medium": 2, "baixa": 1, "low": 1}
         clients.sort(key=lambda c: (
+            -PRIORITY_SORT.get(c.get("prioridade", ""), 0),
             status_order.get(c.get("fase_principal", {}).get("status"), 999),
             (c.get("nome") or "").lower()
         ))
@@ -1015,8 +1017,12 @@ async def list_clients(
     
     clients = list(clients_map.values())
     
-    # M5 - Ordenar por nome alfabeticamente (padrão)
-    clients.sort(key=lambda c: (c.get("nome") or "").lower())
+    # M5 - Ordenar: 1ª por prioridade (alta primeiro), 2ª por nome
+    PRIORITY_SORT = {"alta": 3, "high": 3, "media": 2, "medium": 2, "baixa": 1, "low": 1}
+    clients.sort(key=lambda c: (
+        -PRIORITY_SORT.get(c.get("prioridade", ""), 0),
+        (c.get("nome") or "").lower()
+    ))
     
     # Filtrar por ter processo activo
     if has_active_process is not None:

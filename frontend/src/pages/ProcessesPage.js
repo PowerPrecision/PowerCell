@@ -214,10 +214,27 @@ const ProcessesPage = () => {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Sorting is handled server-side — sortedProcesses mirrors processes directly
+  // Peso de prioridade para ordenação (alta=3, media=2, baixa=1, sem=0)
+  const getPriorityWeight = useCallback((process) => {
+    const raw = (process.prioridade || process.priority || "").toLowerCase();
+    if (raw === "alta" || raw === "high") return 3;
+    if (raw === "media" || raw === "medium") return 2;
+    if (raw === "baixa" || raw === "low") return 1;
+    return 0;
+  }, []);
+
+  // Sorting: prioridade alta SEMPRE no topo, depois pelo campo seleccionado
   useEffect(() => {
-    setSortedProcesses(processes);
-  }, [processes]);
+    const sorted = [...processes].sort((a, b) => {
+      // 1ª chave: prioridade (descendente — alta primeiro)
+      const pa = getPriorityWeight(a);
+      const pb = getPriorityWeight(b);
+      if (pa !== pb) return pb - pa;
+      // 2ª chave: manter ordem original do backend (created_at desc)
+      return 0;
+    });
+    setSortedProcesses(sorted);
+  }, [processes, getPriorityWeight]);
 
   // Re-fetch when search, sort, view mode, or role filter changes
   useEffect(() => {

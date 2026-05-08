@@ -222,6 +222,15 @@ export default function ClientsPage() {
   const filteredClients = useMemo(() => {
     let result = [...clients];
 
+    // Peso de prioridade (alta=3, media=2, baixa=1, sem=0)
+    const getPriorityWeight = (c) => {
+      const raw = (c.prioridade || c.priority || "").toLowerCase();
+      if (raw === "alta" || raw === "high") return 3;
+      if (raw === "media" || raw === "medium") return 2;
+      if (raw === "baixa" || raw === "low") return 1;
+      return 0;
+    };
+
     // Determinar valores de ordenação para cada item
     const getSortValue = (c) => {
       if (sortField === "contacto") {
@@ -248,6 +257,12 @@ export default function ClientsPage() {
     };
 
     result.sort((a, b) => {
+      // 1ª chave: prioridade SEMPRE no topo (descendente — alta primeiro)
+      const pa = getPriorityWeight(a);
+      const pb = getPriorityWeight(b);
+      if (pa !== pb) return pb - pa;
+
+      // 2ª chave: campo de ordenação seleccionado pelo utilizador
       const aVal = getSortValue(a);
       const bVal = getSortValue(b);
 
@@ -266,7 +281,6 @@ export default function ClientsPage() {
       return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
     });
 
-    console.log(`[Clientes] sort: ${sortField} ${sortOrder}, items: ${result.length}`);
     return result;
   }, [clients, sortField, sortOrder]);
 
