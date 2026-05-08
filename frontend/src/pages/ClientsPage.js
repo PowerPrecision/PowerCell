@@ -222,7 +222,7 @@ export default function ClientsPage() {
   const filteredClients = useMemo(() => {
     let result = [...clients];
 
-    // Peso de prioridade (alta=3, media=2, baixa=1, sem=0)
+    // Peso de prioridade (alta=3, urgente tag=3, media=2, baixa=1, sem=0)
     const getPriorityWeight = (c) => {
       const raw = (c.prioridade || c.priority || "").toLowerCase();
       if (raw === "alta" || raw === "high") return 3;

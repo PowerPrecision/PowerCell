@@ -57,16 +57,29 @@ import CreateClientModal from './kanban/CreateClientModal';
 import AssignUsersModal from './kanban/AssignUsersModal';
 
 // ====================================================================
-// ORDENAÇÃO POR PRIORIDADE
-// Peso: Alta=3, Média=2, Baixa=1, undefined=0
+// ORDENAÇÃO POR PRIORIDADE + TAGS URGENTES
+// Peso: Alta=3, Urgente tag=3, Média=2, Baixa=1, undefined=0
 // Ordenação primária por peso (desc), secundária por updated_at (desc)
 // ====================================================================
 const PRIORITY_WEIGHT = { alta: 3, media: 2, baixa: 1, high: 3, medium: 2, low: 1 };
 
+const hasUrgentTag = (process) => {
+  const tags = process.tags || process.labels || [];
+  if (!Array.isArray(tags) || tags.length === 0) return false;
+  return tags.some(t => {
+    const label = (typeof t === 'string' ? t : (t?.label || t?.name || '')).toLowerCase();
+    return label.includes('urgente') || label.includes('urgent');
+  });
+};
+
 const sortProcessesByPriority = (processes) => {
   return [...processes].sort((a, b) => {
-    const weightA = PRIORITY_WEIGHT[a.prioridade || a.priority] || 0;
-    const weightB = PRIORITY_WEIGHT[b.prioridade || b.priority] || 0;
+    // Peso de prioridade (campo prioridade/priority)
+    let weightA = PRIORITY_WEIGHT[(a.prioridade || a.priority || '').toLowerCase()] || 0;
+    let weightB = PRIORITY_WEIGHT[(b.prioridade || b.priority || '').toLowerCase()] || 0;
+    // Tags urgentes contam como prioridade Alta
+    if (hasUrgentTag(a)) weightA = Math.max(weightA, 3);
+    if (hasUrgentTag(b)) weightB = Math.max(weightB, 3);
     if (weightB !== weightA) return weightB - weightA;
     // Secondary sort: most recently updated first
     const dateA = a.updated_at || a.created_at || '';

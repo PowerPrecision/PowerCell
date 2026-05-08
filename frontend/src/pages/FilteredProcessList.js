@@ -164,12 +164,21 @@ const FilteredProcessList = () => {
       );
     }
 
-    // Ordenação: prioridade alta SEMPRE no topo
+    // Ordenação: prioridade alta + tags urgentes SEMPRE no topo
+    const hasUrgentTag = (p) => {
+      const tags = p.tags || p.labels || [];
+      if (!Array.isArray(tags) || tags.length === 0) return false;
+      return tags.some(t => {
+        const label = (typeof t === 'string' ? t : (t?.label || t?.name || '')).toLowerCase();
+        return label.includes('urgente') || label.includes('urgent');
+      });
+    };
     const priorityWeight = (p) => {
       const raw = (p.prioridade || p.priority || "").toLowerCase();
       if (raw === "alta" || raw === "high") return 3;
       if (raw === "media" || raw === "medium") return 2;
       if (raw === "baixa" || raw === "low") return 1;
+      if (hasUrgentTag(p)) return 3;
       return 0;
     };
     filtered.sort((a, b) => priorityWeight(b) - priorityWeight(a));

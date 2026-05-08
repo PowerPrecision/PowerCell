@@ -260,8 +260,10 @@ const ProcessDetails = () => {
   // ── WebSocket: juntar-se à room do processo para mensagens em tempo real ──
   const { joinProcessRoom, leaveProcessRoom, on, off } = useWebSocket({
     onPortalMessage: (data) => {
-      // Quando chega uma nova mensagem do portal, refrescar a lista
-      if (data?.process_id === id && activeTab === "mensagens") {
+      // Quando chega uma nova mensagem do portal, refrescar a lista SEMPRE
+      // (independentemente do tab ativo, para que o unread count e as mensagens
+      // estejam atualizados quando o utilizador mudar de tab)
+      if (data?.process_id === id) {
         fetchPortalMessages();
         fetchPortalUnreadCount();
       }
@@ -884,7 +886,12 @@ const ProcessDetails = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setPortalMessages(Array.isArray(data) ? data : (data.messages || []));
+        // Backend returns { messages: [...], total: N, process_id: "..." }
+        // Support both array and wrapped object formats
+        const msgs = Array.isArray(data) ? data : (data.messages || []);
+        setPortalMessages(msgs);
+      } else {
+        console.error(`[PortalMessages] API returned ${response.status}`);
       }
     } catch (error) {
       console.error("Erro ao carregar mensagens do portal:", error);

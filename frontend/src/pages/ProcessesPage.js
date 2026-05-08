@@ -214,16 +214,27 @@ const ProcessesPage = () => {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Peso de prioridade para ordenação (alta=3, media=2, baixa=1, sem=0)
+  // Peso de prioridade para ordenação (alta=3, urgente tag=3, media=2, baixa=1, sem=0)
+  const hasUrgentTag = useCallback((process) => {
+    const tags = process.tags || process.labels || [];
+    if (!Array.isArray(tags) || tags.length === 0) return false;
+    return tags.some(t => {
+      const label = (typeof t === 'string' ? t : (t?.label || t?.name || '')).toLowerCase();
+      return label.includes('urgente') || label.includes('urgent');
+    });
+  }, []);
+
   const getPriorityWeight = useCallback((process) => {
     const raw = (process.prioridade || process.priority || "").toLowerCase();
     if (raw === "alta" || raw === "high") return 3;
     if (raw === "media" || raw === "medium") return 2;
     if (raw === "baixa" || raw === "low") return 1;
+    // Tags urgentes contam como prioridade Alta
+    if (hasUrgentTag(process)) return 3;
     return 0;
-  }, []);
+  }, [hasUrgentTag]);
 
-  // Sorting: prioridade alta SEMPRE no topo, depois pelo campo seleccionado
+  // Sorting: prioridade alta + tags urgentes SEMPRE no topo, depois pelo campo seleccionado
   useEffect(() => {
     const sorted = [...processes].sort((a, b) => {
       // 1ª chave: prioridade (descendente — alta primeiro)
