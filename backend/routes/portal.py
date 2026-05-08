@@ -30,6 +30,7 @@ from services.portal_security import get_current_client, PORTAL_ROLE
 from services.s3_storage import s3_service
 from services.redis_cache import invalidate_stats_cache
 from services.notification_service import send_notification_with_preference_check
+from services.websocket_manager import manager, WSEventType, create_ws_message
 
 logger = logging.getLogger(__name__)
 
@@ -683,7 +684,7 @@ async def confirm_portal_upload(
     temporary_url = s3_service.get_presigned_url(file_key) or ""
 
     # ── Notificar consultor ──
-    await _notify_consultor_upload(process, original_filename, category)
+    await _notify_assigned_team_upload(process, original_filename, category)
 
     logger.info(
         f"[PORTAL] Upload confirmado: {original_filename} "
@@ -730,26 +731,36 @@ async def _create_document_record(
     await db.documents.insert_one(document)
 
 
-async def _notify_consultor_upload(process: dict, filename: str, category: str):
-    """Notifica o consultor sobre um novo upload do cliente."""
-    assigned_consultor_id = process.get("assigned_consultor_id")
-    if not assigned_consultor_id:
-        return
-
-    try:
-        consultor = await db.users.find_one(
-            {"id": assigned_consultor_id}, {"name": 1, "email": 1}
-        )
-        if consultor:
-            client_name = process.get("client_name", "Cliente")
-            await send_notification_with_preference_check(
-                consultor.get("email"),
-                "Novo Documento Submetido",
-                f"O cliente {client_name} submeteu '{filename}' ({category}) via Portal.",
-                notification_type="document_upload"
-            )
-    except Exception as e:
-        logger.warning(f"Erro ao notificar consultor: {e}")
+async def _notify_assigned_team_upload(process: dict, filename: str, category: str):
+    """Notifica TODOS os utilizadores atribuídos ao processo sobre um novo upload do cliente."""
+    assigned_ids = set()
+    
+    consultor_ids = process.get("assigned_consultor_ids") or []
+    if process.get("assigned_consultor_id"):
+        consultor_ids.append(process["assigned_consultor_id"])
+    assigned_ids.update(cid for cid in consultor_ids if cid)
+    
+    mediador_ids = process.get("assigned_mediador_ids") or []
+    if process.get("assigned_mediador_id"):
+        mediador_ids.append(process["assigned_mediador_id"])
+    assigned_ids.update(mid for mid in mediador_ids if mid)
+    
+    client_name = process.get("client_name", "Cliente")
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else ""
+    
+    for uid in assigned_ids:
+        try:
+            user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
+            if user:
+                await send_notification_with_preference_check(
+                    user.get("email"),
+                    "Novo Documento Submetido",
+                    f"O cliente {client_name} submeteu '{filename}' ({category}) via Portal. {process_ref}",
+                    notification_type="document_upload"
+                )
+        except Exception as e:
+            logger.warning(f"Erro ao notificar utilizador {uid} sobre upload: {e}")
 
 
 # ====================================================================
@@ -872,7 +883,7 @@ async def send_portal_message(
         )
 
     # Notificar consultor sobre a nova mensagem do cliente
-    await _notify_consultor_message(process, client_name)
+    await _notify_assigned_team_message(process, process_id, client_name, message_doc)
 
     # Return without MongoDB _id
     return {
@@ -888,22 +899,86 @@ async def send_portal_message(
     }
 
 
-async def _notify_consultor_message(process: dict, client_name: str):
-    """Notifica o consultor sobre uma nova mensagem do cliente."""
-    assigned_consultor_id = process.get("assigned_consultor_id")
-    if not assigned_consultor_id:
-        return
-
-    try:
-        consultor = await db.users.find_one(
-            {"id": assigned_consultor_id}, {"name": 1, "email": 1}
-        )
-        if consultor:
+async def _notify_assigned_team_message(process: dict, process_id: str, client_name: str, message_doc: dict):
+    """Notifica TODOS os utilizadores atribuídos ao processo sobre uma nova mensagem do cliente.
+    
+    Também faz broadcast da mensagem para a sala WebSocket do processo (process_{process_id})
+    para que qualquer membro da equipa com o processo aberto veja a mensagem em tempo real.
+    """
+    # ── Recolher TODOS os IDs de utilizadores atribuídos ──
+    assigned_ids = set()
+    
+    # Consultores (lista plural + singular legacy)
+    consultor_ids = process.get("assigned_consultor_ids") or []
+    if process.get("assigned_consultor_id"):
+        consultor_ids.append(process["assigned_consultor_id"])
+    assigned_ids.update(cid for cid in consultor_ids if cid)
+    
+    # Mediadores (lista plural + singular legacy)
+    mediador_ids = process.get("assigned_mediador_ids") or []
+    if process.get("assigned_mediador_id"):
+        mediador_ids.append(process["assigned_mediador_id"])
+    assigned_ids.update(mid for mid in mediador_ids if mid)
+    
+    # Indexação
+    if process.get("assigned_indexacao_id"):
+        assigned_ids.add(process["assigned_indexacao_id"])
+    
+    # Parceiro
+    if process.get("assigned_parceiro_id"):
+        assigned_ids.add(process["assigned_parceiro_id"])
+    
+    # ── Notificar cada utilizador atribuído (email + in-app notification) ──
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else process_id[:8]
+    
+    for uid in assigned_ids:
+        try:
+            user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
+            if not user:
+                continue
+            
+            # Email notification (com verificação de preferências)
             await send_notification_with_preference_check(
-                consultor.get("email"),
+                user.get("email"),
                 "Nova Mensagem do Cliente",
-                f"O cliente {client_name} enviou uma mensagem via Portal.",
+                f"O cliente {client_name} enviou uma mensagem no processo {process_ref}.",
                 notification_type="portal_message"
             )
-    except Exception as e:
-        logger.warning(f"Erro ao notificar consultor sobre mensagem: {e}")
+            
+            # In-app notification (em tempo real via WebSocket)
+            try:
+                from services.realtime_notifications import send_realtime_notification
+                await send_realtime_notification(
+                    user_id=uid,
+                    title="Nova Mensagem do Cliente",
+                    message=f"O cliente {client_name} enviou uma mensagem no processo {process_ref}.",
+                    notification_type="portal_message",
+                    link=f"/processes/{process_id}",
+                    process_id=process_id,
+                )
+            except Exception as notif_err:
+                logger.debug(f"Erro ao enviar notificação in-app para {uid}: {notif_err}")
+                
+        except Exception as e:
+            logger.warning(f"Erro ao notificar utilizador {uid} sobre mensagem do portal: {e}")
+    
+    # ── Broadcast para a sala WebSocket do processo ──
+    try:
+        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
+            "id": message_doc.get("id"),
+            "process_id": process_id,
+            "sender_type": "client",
+            "sender_id": "client",
+            "sender_name": client_name,
+            "content": message_doc.get("content", "")[:200],
+            "created_at": message_doc.get("created_at"),
+        })
+        await manager.broadcast_to_room(f"process_{process_id}", ws_message)
+    except Exception as ws_err:
+        logger.debug(f"Erro ao broadcast mensagem do portal via WebSocket: {ws_err}")
+    
+    logger.info(
+        f"[PORTAL] Notificados {len(assigned_ids)} utilizadores sobre mensagem "
+        f"do cliente {client_name} no processo {process_ref}"
+    )

@@ -9,6 +9,7 @@ Funcionalidades:
 - Broadcast de notificações
 - Reconexão automática
 - Heartbeat para manter conexões activas
+- Salas (Rooms) para chat baseado em processos
 ====================================================================
 """
 
@@ -29,6 +30,8 @@ class ConnectionManager:
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         # Mapeamento de WebSocket para user_id
         self.websocket_to_user: Dict[WebSocket, str] = {}
+        # Salas (rooms) para chat baseado em processos
+        self.rooms: Dict[str, Set[str]] = {}  # room_id → Set of user_ids
     
     async def connect(self, websocket: WebSocket, user_id: str):
         """Aceitar uma nova ligação WebSocket."""
@@ -49,9 +52,14 @@ class ConnectionManager:
         if user_id and user_id in self.active_connections:
             self.active_connections[user_id].discard(websocket)
             
-            # Remover o set se estiver vazio
+            # Remover o set se estiver vazio (user fully disconnected)
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
+                # Auto-cleanup: remover utilizador de todas as salas
+                for room_id in list(self.rooms.keys()):
+                    self.rooms[room_id].discard(user_id)
+                    if not self.rooms[room_id]:
+                        del self.rooms[room_id]
         
         if websocket in self.websocket_to_user:
             del self.websocket_to_user[websocket]
@@ -112,6 +120,29 @@ class ConnectionManager:
         """Verificar se um utilizador está conectado."""
         return user_id in self.active_connections and len(self.active_connections[user_id]) > 0
 
+    async def join_room(self, room_id: str, user_id: str):
+        """Adiciona um utilizador a uma sala (room)."""
+        if room_id not in self.rooms:
+            self.rooms[room_id] = set()
+        self.rooms[room_id].add(user_id)
+        logger.debug(f"User {user_id} joined room {room_id}")
+
+    async def leave_room(self, room_id: str, user_id: str):
+        """Remove um utilizador de uma sala (room)."""
+        if room_id in self.rooms:
+            self.rooms[room_id].discard(user_id)
+            if not self.rooms[room_id]:
+                del self.rooms[room_id]
+        logger.debug(f"User {user_id} left room {room_id}")
+
+    async def broadcast_to_room(self, room_id: str, message: dict, exclude_user: Optional[str] = None):
+        """Envia mensagem para todos os utilizadores numa sala (room)."""
+        user_ids = self.rooms.get(room_id, set())
+        for user_id in user_ids:
+            if exclude_user and user_id == exclude_user:
+                continue
+            await self.send_personal_message(message, user_id)
+
 
 # Instância global do gestor de ligações
 manager = ConnectionManager()
@@ -132,6 +163,7 @@ class WSEventType:
         - Documentos (DOCUMENT_EXPIRING, DOCUMENT_UPLOADED)
         - Prazos (DEADLINE_CREATED, DEADLINE_UPDATED, DEADLINE_REMINDER)
         - Sistema (HEARTBEAT, CONNECTION_STATUS, USER_ONLINE, USER_OFFLINE)
+        - Chat / Rooms (PORTAL_MESSAGE, NEW_CHAT_MESSAGE, CHAT_TYPING)
     """
     # Notificações
     NEW_NOTIFICATION = "new_notification"
@@ -163,6 +195,11 @@ class WSEventType:
     CONNECTION_STATUS = "connection_status"
     USER_ONLINE = "user_online"
     USER_OFFLINE = "user_offline"
+
+    # Chat / Rooms
+    PORTAL_MESSAGE = "portal_message"
+    NEW_CHAT_MESSAGE = "new_chat_message"
+    CHAT_TYPING = "chat_typing"
 
 
 def create_ws_message(event_type: str, data: dict, timestamp: Optional[str] = None) -> dict:
