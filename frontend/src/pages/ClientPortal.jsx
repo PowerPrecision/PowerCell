@@ -1,10 +1,10 @@
 /**
  * ClientPortal — Portal do Cliente (Magic Link, passwordless).
  *
- * Layout: Dashboard profissional full-width — grid 3 colunas em desktop, stack em mobile.
- * - Coluna Esquerda (lg:col-span-3): Resumo + Timeline + Equipa
- * - Coluna Central (lg:col-span-5): Gestão de Documentos
- * - Coluna Direita (lg:col-span-4): Mensagens / Chat
+ * Layout: Dashboard profissional full-width — horizontal stepper + 2 colunas.
+ * - Topo (lg:col-span-12): Resumo + Timeline Horizontal (Stepper)
+ * - Esquerda (lg:col-span-7): Gestão de Documentos + RGPD + Equipa
+ * - Direita (lg:col-span-5): Mensagens / Chat
  *
  * Fluxo de autenticação:
  *   short_id → resolve → JWT (sessionStorage) → status + upload
@@ -48,84 +48,64 @@ function stepColor(colorStr) {
 }
 
 // ====================================================================
-// PROGRESS STEPPER — Vertical timeline (desktop) / Horizontal (mobile)
+// PROGRESS STEPPER — Horizontal stepper (full-width, top of page)
+// Mobile: scrollable horizontal; Desktop: fits naturally
 // ====================================================================
 function WorkflowStepper({ stepper }) {
   if (!stepper || stepper.length === 0) return null;
 
-  return (
-    <>
-      {/* Mobile: horizontal stepper */}
-      <div className="lg:hidden">
-        <div className="flex items-center relative">
-          <div className="absolute top-5 left-5 right-5 h-1 bg-gray-200 rounded-full" />
-          <div
-            className="absolute top-5 left-5 h-1 bg-emerald-500 rounded-full transition-all duration-500"
-            style={{
-              width: stepper.length > 1
-                ? `${((stepper.filter(s => s.is_completed || s.is_current).length - 1) / (stepper.length - 1)) * (100 - 6)}%`
-                : '0%',
-            }}
-          />
-          {stepper.map((step, i) => {
-            const colors = step.is_completed ? stepColor('green') : step.is_current ? stepColor(step.color) : null;
-            return (
-              <div key={step.id} className="flex flex-col items-center relative z-10" style={{ flex: 1 }}>
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
-                  colors
-                    ? `${colors.bg} ${colors.border} ${colors.text}`
-                    : 'bg-white border-gray-300 text-gray-400'
-                } ${step.is_current ? 'scale-110 shadow-lg ring-4 ring-white' : ''}`}>
-                  {step.is_completed ? <Check className="w-5 h-5" /> : <span>{i + 1}</span>}
-                </div>
-                <span className={`mt-1.5 text-center text-[10px] leading-tight max-w-[64px] ${
-                  step.is_current ? 'font-semibold text-gray-800' : step.is_completed ? 'text-emerald-600' : 'text-gray-400'
-                }`}>
-                  {step.label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+  const completedCount = stepper.filter(s => s.is_completed || s.is_current).length;
 
-      {/* Desktop: vertical timeline */}
-      <div className="hidden lg:block space-y-1">
+  return (
+    <div className="w-full overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+      <style>{`div[data-stepper-scroll]::-webkit-scrollbar { display: none; }`}</style>
+      <div data-stepper-scroll className="flex items-start w-min min-w-full py-2" style={{ scrollbarWidth: 'none' }}>
         {stepper.map((step, i) => {
           const colors = stepColor(step.color);
           const isActive = step.is_current;
           const isDone = step.is_completed;
+
           return (
-            <div key={step.id} className={`flex gap-3 items-start rounded-lg p-2 -mx-2 transition-colors ${isActive ? 'bg-gray-50' : ''}`}>
-              {/* Line + circle */}
-              <div className="flex flex-col items-center flex-shrink-0 pt-0.5">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
-                  isDone
-                    ? 'bg-emerald-500 border-emerald-500 text-white'
-                    : isActive
-                    ? `${colors.bg} ${colors.border} ${colors.text} scale-110 shadow-lg ${colors.ring}`
-                    : 'bg-white border-gray-300 text-gray-400'
-                }`}>
-                  {isDone ? <Check className="w-4 h-4" /> : <span>{i + 1}</span>}
-                </div>
-                {i < stepper.length - 1 && (
-                  <div className={`w-0.5 h-8 mt-1 rounded-full ${isDone ? 'bg-emerald-500' : 'bg-gray-200'}`} />
-                )}
+            <div key={step.id} className="flex flex-col items-center relative" style={{ minWidth: '80px', flex: '1 1 0%' }}>
+              {/* Connection line (between circles) */}
+              {i < stepper.length - 1 && (
+                <div
+                  className={`absolute top-[18px] h-0.5 z-0 transition-colors duration-500 ${
+                    isDone ? 'bg-emerald-500' : 'bg-gray-200'
+                  }`}
+                  style={{ left: 'calc(50% + 18px)', right: 'calc(-50% + 18px)' }}
+                />
+              )}
+
+              {/* Circle */}
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all z-10 ${
+                isDone
+                  ? 'bg-emerald-500 border-emerald-500 text-white'
+                  : isActive
+                  ? `${colors.bg} ${colors.border} ${colors.text} scale-110 shadow-lg ring-4 ring-white`
+                  : 'bg-white border-gray-300 text-gray-400'
+              }`}>
+                {isDone ? <Check className="w-4 h-4" /> : <span>{i + 1}</span>}
               </div>
-              {/* Label */}
-              <div className="pt-1">
-                <p className={`text-sm font-medium ${isDone ? 'text-emerald-700' : isActive ? 'text-gray-900' : 'text-gray-400'}`}>
-                  {step.label}
-                </p>
-                {isActive && step.description && (
-                  <p className="text-xs text-gray-500 mt-0.5">{step.description}</p>
-                )}
-              </div>
+
+              {/* Label below */}
+              <span className={`mt-2 text-[11px] font-medium text-center leading-tight max-w-[90px] ${
+                isActive ? 'text-gray-900' : isDone ? 'text-emerald-600' : 'text-gray-400'
+              }`}>
+                {step.label}
+              </span>
+
+              {/* Description for active step */}
+              {isActive && step.description && (
+                <span className="mt-0.5 text-[10px] text-gray-400 text-center max-w-[100px] leading-tight">
+                  {step.description}
+                </span>
+              )}
             </div>
           );
         })}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -795,14 +775,14 @@ export default function ClientPortal() {
         </div>
       </header>
 
-      {/* Main Content — 3 column dashboard grid */}
+      {/* Main Content — Top summary + stepper + 2-column body */}
       <main className="flex-1 w-full px-4 sm:px-6 lg:px-10 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 
-          {/* ═══ LEFT COLUMN: Resumo + Timeline ═══ */}
-          <div className="lg:col-span-3 space-y-5">
+          {/* ═══ TOP SECTION: Greeting + Horizontal Stepper (full width) ═══ */}
+          <div className="lg:col-span-12 space-y-4">
 
-            {/* Greeting + Status */}
+            {/* Greeting + Status + Progress */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
                 <div>
@@ -835,11 +815,16 @@ export default function ClientPortal() {
               </div>
             </div>
 
-            {/* Workflow Stepper */}
+            {/* Horizontal Stepper (full-width card) */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
-              <h3 className="text-base font-bold text-gray-800 mb-4">Etapas do Processo</h3>
+              <h3 className="text-base font-bold text-gray-800 mb-3">Etapas do Processo</h3>
               <WorkflowStepper stepper={stepper} />
             </div>
+          </div>
+
+          {/* ═══ LEFT COLUMN: Documentos + RGPD + Equipa ═══ */}
+          <div className="lg:col-span-7 space-y-5">
+            <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
 
             {/* RGPD Status */}
             {rgpd && (
@@ -928,13 +913,8 @@ export default function ClientPortal() {
             <TeamCard team={team} consultor={consultor} />
           </div>
 
-          {/* ═══ CENTER COLUMN: Documentos ═══ */}
-          <div className="lg:col-span-5">
-            <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
-          </div>
-
           {/* ═══ RIGHT COLUMN: Mensagens / Chat ═══ */}
-          <div className="lg:col-span-4">
+          <div className="lg:col-span-5">
             <PortalMessages
               messages={messages}
               loading={messagesLoading}
