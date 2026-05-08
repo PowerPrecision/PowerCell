@@ -378,8 +378,9 @@ const ProcessDetails = () => {
       });
       if (response.ok) {
         const users = await response.json();
-        // Filtrar: ativos, não admin, não ceo
-        const activeUsers = excludeRoles(users.filter(u => u.is_active !== false), ["admin", "ceo"]);
+        // Filtrar: ativos, não admin, não ceo — garantir que é array
+        const usersArray = Array.isArray(users) ? users : [];
+        const activeUsers = excludeRoles(usersArray.filter(u => u.is_active !== false), ["admin", "ceo"]);
         setAppUsers(activeUsers);
         return activeUsers;
       }
@@ -465,14 +466,14 @@ const ProcessDetails = () => {
   const openAssignDialog = async () => {
     if (process) {
       // Suporte a múltiplos consultores - converter para array
-      const consultorIds = process.assigned_consultor_ids || 
+      const rawConsultorIds = process.assigned_consultor_ids || 
         (process.assigned_consultor_id ? [process.assigned_consultor_id] : []);
-      setSelectedConsultores(consultorIds);
+      setSelectedConsultores(Array.isArray(rawConsultorIds) ? rawConsultorIds : []);
       
       // Suporte a múltiplos intermediários - converter para array
-      const mediadorIds = process.assigned_mediador_ids || 
+      const rawMediadorIds = process.assigned_mediador_ids || 
         (process.assigned_mediador_id ? [process.assigned_mediador_id] : []);
-      setSelectedMediadores(mediadorIds);
+      setSelectedMediadores(Array.isArray(rawMediadorIds) ? rawMediadorIds : []);
       
       setSelectedIndexacao(process.assigned_indexacao_id || "");
       setSelectedParceiro(process.assigned_parceiro_id || "");  // Carregar parceiro atual
@@ -791,7 +792,7 @@ const ProcessDetails = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setVisitasProperties(data);
+        setVisitasProperties(Array.isArray(data) ? data : []);
       } else {
         console.error("Erro ao carregar imóveis do processo");
       }
@@ -883,7 +884,7 @@ const ProcessDetails = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setPortalMessages(data);
+        setPortalMessages(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error("Erro ao carregar mensagens do portal:", error);
@@ -977,10 +978,10 @@ const ProcessDetails = () => {
       const processData = processRes.data;
       setProcess(processData);
       savedProcessRef.current = processData;
-      setDeadlines(deadlinesRes.data);
-      setActivities(activitiesRes.data);
-      setHistory(historyRes.data);
-      setWorkflowStatuses(statusesRes.data);
+      setDeadlines(Array.isArray(deadlinesRes.data) ? deadlinesRes.data : []);
+      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
+      setHistory(Array.isArray(historyRes.data) ? historyRes.data : []);
+      setWorkflowStatuses(Array.isArray(statusesRes.data) ? statusesRes.data : []);
       setStatus(processData.status);
       // Clean nif_hash from personal_data and titular2_data before setting state
       // (these are internal blind-index fields that should never be displayed)
@@ -1458,7 +1459,7 @@ const ProcessDetails = () => {
       await createActivity({ process_id: id, comment: newComment });
       setNewComment("");
       const activitiesRes = await getActivities(id);
-      setActivities(activitiesRes.data);
+      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
       toast.success("Comentário adicionado");
     } catch (error) {
       toast.error("Erro ao adicionar comentário");
@@ -1471,7 +1472,7 @@ const ProcessDetails = () => {
     try {
       await deleteActivity(activityId);
       const activitiesRes = await getActivities(id);
-      setActivities(activitiesRes.data);
+      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
       toast.success("Comentário eliminado");
     } catch (error) {
       toast.error("Erro ao eliminar comentário");
@@ -2417,7 +2418,7 @@ const ProcessDetails = () => {
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Etiquetas</Label>
                 <div className="flex flex-wrap gap-1.5 mb-1.5 min-h-[36px] items-center">
-                  {(process?.labels || []).map((label, idx) => (
+                  {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
                     <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
                       {safeString(label)}
                       {canEditPersonal && (
@@ -2460,7 +2461,7 @@ const ProcessDetails = () => {
                         <PopoverContent className="w-48 p-2" align="start">
                           <div className="space-y-1">
                             <p className="text-xs font-medium text-muted-foreground px-1 mb-1">Predefinidas</p>
-                            {LABEL_PRESETS.filter(l => !(process?.labels || []).includes(l)).map((label) => (
+                            {LABEL_PRESETS.filter(l => !(Array.isArray(process?.labels) ? process.labels : []).includes(l)).map((label) => (
                               <button
                                 key={label}
                                 onClick={() => setProcess(prev => ({
@@ -3059,7 +3060,7 @@ const ProcessDetails = () => {
                             </h4>
                             <div className="space-y-3">
                               {/* Co-Buyers (do CPCV) */}
-                              {process?.co_buyers?.map((buyer, index) => (
+                              {Array.isArray(process?.co_buyers) && process.co_buyers.map((buyer, index) => (
                                 <div key={`buyer-${index}`} className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
                                   <div className="flex items-center gap-2 mb-2">
                                     <Badge variant="outline" className="text-xs">
@@ -3101,7 +3102,7 @@ const ProcessDetails = () => {
                               ))}
                               
                               {/* Co-Applicants (do IRS/Simulação) */}
-                              {process?.co_applicants?.map((applicant, index) => (
+                              {Array.isArray(process?.co_applicants) && process.co_applicants.map((applicant, index) => (
                                 <div key={`applicant-${index}`} className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
                                   <div className="flex items-center gap-2 mb-2">
                                     <Badge variant="outline" className="text-xs">
@@ -3607,7 +3608,7 @@ const ProcessDetails = () => {
                                 return null;
                               })()}
                               <div className="space-y-2">
-                                {(financialData.bancos_creditos || []).length > 0 ? (
+                                {Array.isArray(financialData.bancos_creditos) && financialData.bancos_creditos.length > 0 ? (
                                   financialData.bancos_creditos.map((item, idx) => {
                                     const banco = typeof item === 'object' ? item.banco : item;
                                     const valor = typeof item === 'object' ? item.valor : null;
@@ -3699,7 +3700,7 @@ const ProcessDetails = () => {
                             </div>
                           ) : (
                             <div className="flex flex-wrap gap-2">
-                              {(financialData?.tem_creditos_activos || []).length > 0 ? (
+                              {Array.isArray(financialData?.tem_creditos_activos) && financialData.tem_creditos_activos.length > 0 ? (
                                 financialData.tem_creditos_activos.map((banco, idx) => (
                                   <Badge key={idx} className={getBankColor(banco)}>{safeString(banco)}</Badge>
                                 ))
@@ -3767,7 +3768,7 @@ const ProcessDetails = () => {
                             </div>
                           ) : (
                             <div className="flex flex-wrap gap-2">
-                              {(financialData.bancos_simulacoes || []).length > 0 ? (
+                              {Array.isArray(financialData.bancos_simulacoes) && financialData.bancos_simulacoes.length > 0 ? (
                                 financialData.bancos_simulacoes.map((banco, idx) => (
                                   <Badge key={idx} variant="outline" className="border-blue-300 text-blue-700">{safeString(banco)}</Badge>
                                 ))
