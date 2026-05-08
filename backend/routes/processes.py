@@ -2290,7 +2290,21 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 )
     
     # Encriptar campos sensíveis antes de guardar
-    update_data = encrypt_sensitive_data(update_data)
+    try:
+        update_data = encrypt_sensitive_data(update_data)
+    except TypeError as e:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"TypeError em encrypt_sensitive_data para processo {process_id}: {e}\n{tb}")
+        # Diagnóstico: log das chaves/tipos em update_data que podem causar o erro
+        for k, v in update_data.items():
+            if isinstance(v, dict):
+                for sk, sv in v.items():
+                    if not isinstance(sv, (str, int, float, bool, type(None), list)):
+                        logger.error(f"  Suspeito: update_data[{k}][{sk}] = {type(sv).__name__}: {repr(sv)[:100]}")
+            elif not isinstance(v, (str, int, float, bool, type(None), list, dict)):
+                logger.error(f"  Suspeito root: update_data[{k}] = {type(v).__name__}: {repr(v)[:100]}")
+        raise HTTPException(status_code=500, detail=f"TypeError em encrypt: {e} | {tb.split(chr(10))[-3] if tb else 'no traceback'}")
     inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})

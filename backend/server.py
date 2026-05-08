@@ -418,6 +418,19 @@ async def general_exception_handler(request: Request, exc: Exception):
     if exception_type not in ("HTTPException", "ValidationError", "RequestValidationError"):
         error_detail = f"Erro interno do servidor [{exception_type}]"
     
+    # === DIAGNÓSTICO TEMPORÁRIO: Para TypeErrors, incluir traceback e linha exata ===
+    if exception_type == "TypeError":
+        import traceback as _tb
+        full_tb = _tb.format_exc()
+        logger.error(f"!!! TypeError DETALHADO:\n{full_tb}")
+        # Extrair a linha relevante do traceback
+        error_line = ""
+        for line in full_tb.split('\n'):
+            if '.py"' in line or '.py' in line:
+                error_line = line.strip()
+        # Incluir traceback parcial na resposta para diagnóstico
+        error_detail = f"TypeError: {str(exc)} | Linha: {error_line} | TB: {full_tb[-800:]}"
+    
     # Verificar se a origin é permitida
     allowed_origin = None
     if origin in CORS_ORIGINS:
