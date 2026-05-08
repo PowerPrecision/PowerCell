@@ -1184,6 +1184,29 @@ const ProcessDetails = () => {
     delete cleaned.telefone_hash;
     delete cleaned.marital_status; // phantom field, usar estado_civil
     
+    // Garantir que campos numéricos que o backend espera como string não sejam enviados como número
+    // Isto previne erros 422 quando dados antigos na BD têm tipos inesperados
+    const stringFields = ['nif', 'niss', 'documento_id', 'altura', 'codigo_postal', 'phone'];
+    for (const field of stringFields) {
+      if (cleaned[field] !== undefined && cleaned[field] !== null && cleaned[field] !== '') {
+        cleaned[field] = String(cleaned[field]);
+      }
+    }
+    
+    // Garantir que campos booleanos não são strings
+    if (cleaned.menor_35_anos !== undefined && cleaned.menor_35_anos !== null) {
+      cleaned.menor_35_anos = Boolean(cleaned.menor_35_anos);
+    }
+    
+    // Limpar NIF: remover espaços e caracteres não numéricos
+    if (cleaned.nif) {
+      cleaned.nif = cleaned.nif.replace(/[^\d]/g, '');
+      // Se após limpeza não tem 9 dígitos, não enviar (evita 422)
+      if (cleaned.nif.length !== 9) {
+        delete cleaned.nif;
+      }
+    }
+    
     // Remover campos undefined ou vazios que podem causar problemas
     Object.keys(cleaned).forEach(key => {
       if (cleaned[key] === undefined || cleaned[key] === '') {
@@ -1203,6 +1226,14 @@ const ProcessDetails = () => {
     }
     // Remover campos internos que não devem ser guardados no processo
     delete cleaned.nif_hash;
+    
+    // Garantir que NIF é string limpa
+    if (cleaned.nif) {
+      cleaned.nif = String(cleaned.nif).replace(/[^\d]/g, '');
+      if (cleaned.nif.length !== 9) {
+        delete cleaned.nif;
+      }
+    }
     
     // Remover campos undefined ou vazios
     Object.keys(cleaned).forEach(key => {
@@ -1427,6 +1458,33 @@ const ProcessDetails = () => {
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Guardar apenas os dados da Organização do Processo (notas, prioridade, etiquetas)
+  const [savingOrg, setSavingOrg] = useState(false);
+  const handleSaveOrganization = async () => {
+    if (isProcessLocked) {
+      toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
+      return;
+    }
+    setSavingOrg(true);
+    try {
+      const orgData = {
+        notes: process?.notes || "",
+        prioridade: process?.prioridade || "media",
+        labels: Array.isArray(process?.labels) ? process.labels : [],
+      };
+      await updateProcess(id, orgData);
+      toast.success("Organização do processo guardada com sucesso!");
+      fetchData();
+    } catch (error) {
+      console.error("Error saving organization:", error);
+      const detail = error.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : "Erro ao guardar organização do processo";
+      toast.error(errorMessage);
+    } finally {
+      setSavingOrg(false);
     }
   };
 
@@ -2489,6 +2547,23 @@ const ProcessDetails = () => {
                   : "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800"
               }`}>
                 {process.prioridade === "alta" ? "⚠ Prioridade Alta — Ação requerida" : "✓ Prioridade Baixa — Sem urgência"}
+              </div>
+            )}
+            {/* Botão dedicado para guardar apenas a organização */}
+            {canEditPersonal && !isProcessLocked && (
+              <div className="mt-4 flex justify-end">
+                <Button
+                  onClick={handleSaveOrganization}
+                  disabled={savingOrg}
+                  size="sm"
+                  className="gap-1.5"
+                >
+                  {savingOrg ? (
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />A guardar...</>
+                  ) : (
+                    <><Check className="h-3.5 w-3.5" />Guardar Organização</>
+                  )}
+                </Button>
               </div>
             )}
           </CardContent>

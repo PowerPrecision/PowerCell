@@ -145,7 +145,18 @@ class PersonalData(BaseModel):
         # Converter para string se for número
         if isinstance(v, (int, float)):
             v = str(int(v))
-        return validate_nif(v)
+        # Validar formato básico (9 dígitos, prefixo válido) sem bloquear por checksum
+        # O checksum é verificado no frontend (aviso) mas não impede a gravação
+        # para evitar perda de dados quando o utilizador insere um NIF válido
+        # que o algoritmo não reconhece (ex: NIFs estrangeiros com formato PT)
+        try:
+            return validate_nif(v, validate_checksum=False)
+        except ValueError:
+            # Se mesmo sem checksum falhar (formato inválido), limpar o campo
+            # para não bloquear a gravação dos restantes dados
+            import logging
+            logging.getLogger(__name__).warning(f"NIF inválido ignorado em PersonalData: {v}")
+            return None
     
     @field_validator('nome_completo', 'nome', 'naturalidade', 'nacionalidade', 'nome_pai', 'nome_mae', mode='before')
     @classmethod
@@ -221,7 +232,13 @@ class Titular2Data(BaseModel):
         # Converter para string se for número
         if isinstance(v, (int, float)):
             v = str(int(v))
-        return validate_nif(v)
+        # Validar formato básico sem bloquear por checksum (mesma lógica que PersonalData)
+        try:
+            return validate_nif(v, validate_checksum=False)
+        except ValueError:
+            import logging
+            logging.getLogger(__name__).warning(f"NIF inválido ignorado em Titular2Data: {v}")
+            return None
 
 
 class RealEstateData(BaseModel):
@@ -283,6 +300,57 @@ class RealEstateData(BaseModel):
     # Condições
     condicao_suspensiva: Optional[str] = None
     observacoes_cpcv: Optional[str] = None
+
+    @field_validator('valor_imovel', 'valor_patrimonial', 'area_pretendida',
+                     'valor_maximo_imovel', mode='before')
+    @classmethod
+    def coerce_float_fields(cls, v):
+        """Converte strings para float graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v.replace(',', '.').strip())
+            except (ValueError, TypeError):
+                return None
+        return v
+
+    @field_validator('prazo_escritura_dias', mode='before')
+    @classmethod
+    def coerce_int_fields(cls, v):
+        """Converte strings para int graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return int(v)
+        if isinstance(v, str):
+            try:
+                return int(float(v))
+            except (ValueError, TypeError):
+                return None
+        return v
+
+    @field_validator('ja_tem_imovel', 'has_property', 'ja_tem_casa_escolhida', mode='before')
+    @classmethod
+    def coerce_bool_fields(cls, v):
+        """Converte strings para bool graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            if v.lower() in ('true', '1', 'yes', 'sim'):
+                return True
+            if v.lower() in ('false', '0', 'no', 'nao', 'não'):
+                return False
+            return None
+        if isinstance(v, (int, float)):
+            return bool(v)
+        return None
 
 
 class FinancialData(BaseModel):
@@ -348,6 +416,51 @@ class FinancialData(BaseModel):
     # Contas abertas (Créditos e Capital) — bancos com contas de crédito abertas
     tem_creditos_activos: Optional[List[str]] = None  # Bancos com contas abertas (mesmo formato que bancos_creditos)
     valor_creditos_activos: Optional[float] = None     # [Deprecated] Valor total — mantido para backward compat
+    # Outros rendimentos e despesas (aliases portugueses para compatibilidade)
+    outros_rendimentos: Optional[float] = None
+    despesas_mensais: Optional[float] = None
+    rendimento_anual: Optional[float] = None
+    antiguidade_emprego: Optional[str] = None
+
+    @field_validator('renda_habitacao_atual', 'capital_proprio', 'monthly_income',
+                     'valor_pretendido', 'valor_entrada', 'reforco_sinal', 'comissao_mediacao',
+                     'rendimento_mensal', 'rendimento_bruto', 'rendimento_agregado',
+                     'salario_liquido', 'salario_bruto', 'subsidiario_alimentacao',
+                     'rendimento_co_titular', 'creditos_existentes', 'prestacao_creditos_mensal',
+                     'valor_creditos_activos', 'outros_rendimentos', 'despesas_mensais',
+                     'rendimento_anual', mode='before')
+    @classmethod
+    def coerce_float_fields(cls, v):
+        """Converte strings para float e trata valores inválidos graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                # Tentar converter string para float (ex: "1500.50" → 1500.5)
+                cleaned = v.replace(',', '.').strip()
+                return float(cleaned)
+            except (ValueError, TypeError):
+                return None
+        return v
+
+    @field_validator('nr_dependentes', 'number_of_dependents', mode='before')
+    @classmethod
+    def coerce_int_fields(cls, v):
+        """Converte strings para int e trata valores inválidos graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return int(v)
+        if isinstance(v, str):
+            try:
+                return int(float(v))
+            except (ValueError, TypeError):
+                return None
+        return v
 
 
 class CreditData(BaseModel):
@@ -372,6 +485,39 @@ class CreditData(BaseModel):
     valuation_date: Optional[str] = None           # Data da avaliação
     valuation_bank: Optional[str] = None           # Banco que fez a avaliação
     valuation_notes: Optional[str] = None          # Observações da avaliação
+
+    @field_validator('requested_amount', 'interest_rate', 'monthly_payment',
+                     'valuation_value', mode='before')
+    @classmethod
+    def coerce_float_fields(cls, v):
+        """Converte strings para float graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v.replace(',', '.').strip())
+            except (ValueError, TypeError):
+                return None
+        return v
+
+    @field_validator('loan_term_years', mode='before')
+    @classmethod
+    def coerce_int_fields(cls, v):
+        """Converte strings para int graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return int(v)
+        if isinstance(v, str):
+            try:
+                return int(float(v))
+            except (ValueError, TypeError):
+                return None
+        return v
     
     # Campo calculado para alerta
     @property
