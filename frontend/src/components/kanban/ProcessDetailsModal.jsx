@@ -102,10 +102,10 @@ const ProcessDetailsModal = memo(({
                   </p>
                 </div>
               )}
-              {process.client_nif && (
+              {(process.client_nif || process.personal_data?.nif) && (
                 <div>
                   <p className="text-muted-foreground">NIF</p>
-                  <p className="font-medium">{safeString(process.client_nif)}</p>
+                  <p className="font-medium">{safeString(process.client_nif || process.personal_data?.nif)}</p>
                 </div>
               )}
             </div>

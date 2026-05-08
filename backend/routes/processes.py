@@ -2211,6 +2211,13 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 sanitized_new_email = sanitize_email(new_email)
                 if sanitized_new_email:
                     update_data["client_email"] = sanitized_new_email
+
+            # Sincronizar personal_data.nif → client_nif para manter consistência
+            new_nif = personal_dict.get("nif")
+            if new_nif:
+                sanitized_nif = sanitize_nif(new_nif)
+                if sanitized_nif:
+                    update_data["client_nif"] = sanitized_nif
         elif not data.personal_data and not is_indexacao:
             logger.debug(f"No personal_data in update for process {process_id} by {user.get('email')} (role={role})")
         
@@ -2329,9 +2336,10 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
-    # === SYNC CLIENT DATA: Email/Phone changes must propagate to clients collection ===
+    # === SYNC CLIENT DATA: Email/Phone/NIF changes must propagate to clients collection ===
     client_id = process.get("client_id")
-    if client_id and (data.client_email is not None or data.client_phone is not None):
+    if client_id and (data.client_email is not None or data.client_phone is not None or
+                      (update_data.get("client_nif") is not None)):
         client_update = {}
         if data.client_email is not None:
             sanitized_email = sanitize_email(data.client_email)
@@ -2340,6 +2348,26 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             client_update["contacto.email_hash"] = generate_email_hash(sanitized_email)
         if data.client_phone is not None:
             client_update["contacto.telefone"] = sanitize_phone(data.client_phone)
+        # NIF sync: se client_nif foi atualizado (via personal_data.nif), propagar para clients
+        if update_data.get("client_nif") is not None:
+            # Obter valor desencriptado (update_data já pode estar encriptado neste ponto,
+            # mas client_nif no update vem de sanitize_nif que retorna plaintext)
+            # O client_nif em update_data ainda é plaintext aqui porque encrypt_sensitive_data
+            # já foi chamado, mas vamos usar o valor que sabemos estar correto
+            nif_val = update_data.get("client_nif")
+            # Se está encriptado, desencriptar; caso contrário usar diretamente
+            if isinstance(nif_val, str) and nif_val.startswith("ENC:"):
+                from services.encryption import encryption_service
+                try:
+                    nif_val = encryption_service.decrypt(nif_val)
+                except Exception:
+                    nif_val = None
+            if nif_val:
+                client_update["dados_pessoais.nif"] = nif_val
+                from services.encryption import generate_nif_hash
+                nif_hash = generate_nif_hash(nif_val)
+                if nif_hash:
+                    client_update["dados_pessoais.nif_hash"] = nif_hash
         
         if client_update:
             await db.clients.update_one(

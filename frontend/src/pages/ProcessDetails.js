@@ -2279,7 +2279,7 @@ const ProcessDetails = () => {
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">NIF do Cliente</Label>
                 <Input
-                  value={process?.client_nif || personalData?.nif || ""}
+                  value={personalData?.nif || process?.client_nif || ""}
                   onChange={(e) => {
                     const val = e.target.value.replace(/\D/g, '').slice(0, 9);
                     setPersonalData(prev => ({ ...prev, nif: val }));
