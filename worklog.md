@@ -1411,3 +1411,24 @@ Stage Summary:
 - 1 ficheiro alterado: `frontend/src/pages/FilesExplorerPage.jsx`
 - "Ir para Configurações" now routes based on user role (admin→/configuracoes, non-admin→/definicoes)
 - "Configurar Agora" button hidden for non-admin users in S3NotConfiguredBanner
+
+---
+Task ID: fix-put-typeerror
+Agent: Main Agent
+Task: Corrigir TypeError no PUT /processes/:id — dict merge com sub-campos não-dict
+
+Work Log:
+- **Diagnóstico**: O endpoint PUT /processes/:id crashava com `TypeError` (Erro interno do servidor [TypeError]) ao guardar alterações num processo
+- **Causa raiz**: O padrão `{**existing, **incoming}` falhava quando sub-campos do MongoDB (`personal_data`, `financial_data`, etc.) estavam armazenados como tipo não-dict (string, lista, etc.). O fallback `or {}` só ativa para valores falsy — um valor truthy não-dict como `"null"` passava, causando `{**"null", **dict}` → TypeError
+- **Fix 1 — isinstance checks** (`backend/routes/processes.py`): Substituídos todos os `process.get("field") or {}` por `_v = process.get("field"); _v if isinstance(_v, dict) else {}` em 7 sub-campos: `personal_data` (cliente + staff), `financial_data` (cliente + staff), `real_estate_data`, `credit_data`, `titular2_data`, `vendedor`. Também corrigido `log_data_changes` para usar `existing_*` em vez de `process.get()` para auditoria consistente
+- **Fix 2 — deepcopy em encrypt** (`backend/services/process_service.py`): `encrypt_sensitive_data()` usava `data.copy()` (shallow) em vez de `copy.deepcopy(data)`, causando mutação silenciosa dos dicts aninhados do `update_data` original. Corrigido para `copy.deepcopy()`, consistente com `decrypt_sensitive_data()`
+- **Fix 3 — try/except na primeira desencriptação** (`backend/routes/processes.py`): Adicionado try/except à volta de `decrypt_sensitive_data(process)` no PUT endpoint, com mensagem de erro descritiva incluindo `type(e).__name__`
+- **Documentação**: Atualizado CHANGELOG.md com nova entrada [2026-07-07]
+
+Stage Summary:
+- 2 ficheiros de código alterados: `backend/routes/processes.py`, `backend/services/process_service.py`
+- 2 ficheiros de documentação alterados: `CHANGELOG.md`, `worklog.md`
+- Commit: `8f9cc39` pushed to `dev`
+- 7 sub-campos protegidos contra TypeError no dict merge
+- encrypt_sensitive_data agora usa deepcopy (previne mutação do original)
+- Primeira desencriptação no PUT agora tem error handling

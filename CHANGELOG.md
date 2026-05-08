@@ -3,6 +3,13 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-07] — Correção de TypeError no PUT /processes/:id
+
+### Corrigido
+- **TypeError em PUT /processes/:id — dict merge com sub-campos não-dict** (`fix` — **CRÍTICO**): O endpoint `PUT /processes/:id` crashava com `TypeError` ao fazer merge `{**existing, **incoming}` quando um sub-campo do MongoDB (ex: `personal_data`, `financial_data`) estava armazenado como tipo não-dict (string, lista, etc.). O fallback `or {}` não protege contra valores truthy não-dict (ex: string `"null"` → `{**"null", **dict}` → TypeError). Corrigido substituindo todos os `process.get("field") or {}` por `isinstance(field, dict)` checks em 7 sub-campos: `personal_data`, `financial_data`, `real_estate_data`, `credit_data`, `titular2_data`, `vendedor` (cliente e staff paths).
+- **Shallow copy em encrypt_sensitive_data** (`fix`): `encrypt_sensitive_data()` usava `data.copy()` (shallow) em vez de `copy.deepcopy(data)`, causando mutação silenciosa dos dicts aninhados do `update_data` original quando blind indexes e encriptação eram adicionados in-place. Corrigido para `copy.deepcopy()`, consistente com `decrypt_sensitive_data()`.
+- **Try/except em falta na primeira desencriptação do PUT** (`fix`): A primeira chamada `decrypt_sensitive_data(process)` no PUT endpoint não tinha try/except — se `deepcopy` ou a desencriptação falhasse com TypeError, o erro subia sem contexto. Adicionado try/except com mensagem de erro descritiva.
+
 ## [2026-07-06] — Correções de Bugs e Funcionalidades Pendentes (Ronda 3)
 
 ### Corrigido
