@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { ScrollArea } from "../components/ui/scroll-area";
 import { 
   ArrowLeft, Search, Eye, Loader2, Users, CheckCircle, 
-  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText
+  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";
@@ -200,6 +200,33 @@ const FilteredProcessList = () => {
     }).format(value);
   };
 
+  /**
+   * Resolve a prioridade de um processo (suporta campo PT e EN).
+   * Retorna objecto com nivel normalizado, label, classes CSS e se é Alta.
+   */
+  const resolvePriority = (process) => {
+    const raw = (process.prioridade || process.priority || "").toLowerCase();
+    const isAlta = raw === "alta" || raw === "high";
+    const isMedia = raw === "media" || raw === "medium";
+    const isBaixa = raw === "baixa" || raw === "low";
+
+    let label, badgeColor;
+    if (isAlta) {
+      label = "Alta";
+      badgeColor = "bg-red-500 text-white border-red-600";
+    } else if (isMedia) {
+      label = "Média";
+      badgeColor = "bg-amber-100 text-amber-800 border-amber-300";
+    } else if (isBaixa) {
+      label = "Baixa";
+      badgeColor = "bg-green-100 text-green-800 border-green-300";
+    } else {
+      return { isAlta: false, label: raw || null, badgeColor: "", raw };
+    }
+
+    return { isAlta, isMedia, isBaixa, label, badgeColor, raw };
+  };
+
   if (loading) {
     return (
       <DashboardLayout title="Processos">
@@ -263,24 +290,37 @@ const FilteredProcessList = () => {
                 {filteredProcesses.map((process) => {
                   const statusInfo = getStatusInfo(process.status);
                   const deadlineInfo = config.showDeadlineInfo ? getDeadlineInfo(process.id) : null;
+                  const prio = resolvePriority(process);
                   return (
                     <div
                       key={`mobile-${process.id}`}
-                      className="border rounded-lg p-3 bg-card space-y-2 cursor-pointer hover:bg-muted/50 transition-colors"
+                      className={`border rounded-lg p-3 space-y-2 cursor-pointer hover:bg-muted/50 transition-colors ${
+                        prio.isAlta ? 'border-l-[4px] border-l-red-500 bg-red-50/60 dark:bg-red-950/20' : 'bg-card'
+                      }`}
                       onClick={() => navigate(`/process/${process.id}`)}
                       data-testid={`process-card-${process.id}`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="font-medium text-sm truncate">{safeString(process.client_name)}</p>
+                          <p className={`text-sm truncate ${prio.isAlta ? 'font-bold' : 'font-medium'}`}>
+                            {prio.isAlta && <span className="mr-1">🔥</span>}
+                            {safeString(process.client_name)}
+                          </p>
                           <p className="text-xs text-muted-foreground">{safeString(process.client_phone) || safeString(process.client_email) || "-"}</p>
                         </div>
-                        <Badge 
-                          variant="outline"
-                          className={`shrink-0 text-[10px] bg-${statusInfo.color}-50 text-${statusInfo.color}-700 border-${statusInfo.color}-200`}
-                        >
-                          {statusInfo.order || ''} - {typeof statusInfo.label === 'object' ? (statusInfo.label?.label || statusInfo.label?.value || '') : (statusInfo.label || '')}
-                        </Badge>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          {prio.isAlta && (
+                            <Badge className="bg-red-500 text-white border-red-600 text-[9px] px-1.5 py-0 h-4 gap-0.5 shadow-sm shadow-red-300/50">
+                              <Flame className="h-2.5 w-2.5" /> Alta
+                            </Badge>
+                          )}
+                          <Badge 
+                            variant="outline"
+                            className={`shrink-0 text-[10px] bg-${statusInfo.color}-50 text-${statusInfo.color}-700 border-${statusInfo.color}-200`}
+                          >
+                            {statusInfo.order || ''} - {typeof statusInfo.label === 'object' ? (statusInfo.label?.label || statusInfo.label?.value || '') : (statusInfo.label || '')}
+                          </Badge>
+                        </div>
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
                         <span className="font-medium text-foreground">{formatCurrency(process.property_value)}</span>
@@ -317,16 +357,31 @@ const FilteredProcessList = () => {
                   {filteredProcesses.map((process) => {
                       const statusInfo = getStatusInfo(process.status);
                       const deadlineInfo = config.showDeadlineInfo ? getDeadlineInfo(process.id) : null;
+                      const prio = resolvePriority(process);
                       
                       return (
                         <TableRow
                           key={process.id}
-                          className="cursor-pointer hover:bg-muted/50"
+                          className={`cursor-pointer hover:bg-muted/50 ${
+                            prio.isAlta 
+                              ? 'bg-red-50/50 dark:bg-red-950/10 border-l-[4px] border-l-red-500' 
+                              : ''
+                          }`}
                           onClick={() => navigate(`/process/${process.id}`)}
                         >
                           <TableCell>
                             <div>
-                              <p className="font-medium">{safeString(process.client_name)}</p>
+                              <div className="flex items-center gap-2">
+                                <p className={prio.isAlta ? 'font-bold' : 'font-medium'}>
+                                  {prio.isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
+                                  {safeString(process.client_name)}
+                                </p>
+                                {prio.isAlta && (
+                                  <Badge className="bg-red-500 text-white border-red-600 text-[10px] px-1.5 py-0 h-4 gap-0.5 shadow-sm shadow-red-300/50">
+                                    <Flame className="h-3 w-3" /> Alta
+                                  </Badge>
+                                )}
+                              </div>
                               {process.under_35 && (
                                 <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 mt-1">
                                   &lt;35 anos

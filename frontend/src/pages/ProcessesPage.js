@@ -20,7 +20,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { 
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
-  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield
+  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
+  Flame
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
@@ -241,18 +242,31 @@ const ProcessesPage = () => {
     }, { replace: true });
   }, [setSearchParams]);
 
-  const getPriorityBadge = (priority) => {
-    const colors = {
-      high: "bg-red-100 text-red-800",
-      medium: "bg-yellow-100 text-yellow-800",
-      low: "bg-green-100 text-green-800",
-    };
-    const labels = {
-      high: "Alta",
-      medium: "Média",
-      low: "Baixa",
-    };
-    return { color: colors[priority] || colors.medium, label: labels[priority] || priority };
+  /**
+   * Resolve a prioridade de um processo (suporta campo PT e EN).
+   * Retorna objecto com nivel normalizado, label, classes CSS e se é Alta.
+   */
+  const resolvePriority = (process) => {
+    const raw = (process.prioridade || process.priority || "").toLowerCase();
+    const isAlta = raw === "alta" || raw === "high";
+    const isMedia = raw === "media" || raw === "medium";
+    const isBaixa = raw === "baixa" || raw === "low";
+
+    let label, badgeColor;
+    if (isAlta) {
+      label = "Alta";
+      badgeColor = "bg-red-500 text-white border-red-600";
+    } else if (isMedia) {
+      label = "Média";
+      badgeColor = "bg-amber-100 text-amber-800 border-amber-300";
+    } else if (isBaixa) {
+      label = "Baixa";
+      badgeColor = "bg-green-100 text-green-800 border-green-300";
+    } else {
+      return { isAlta: false, label: raw || null, badgeColor: "", raw };
+    }
+
+    return { isAlta, isMedia, isBaixa, label, badgeColor, raw };
   };
 
   // Componente de paginação
@@ -453,7 +467,7 @@ const ProcessesPage = () => {
                     </TableRow>
                   ) : (
                     sortedProcesses.map((process) => {
-                      const priorityBadge = getPriorityBadge(process.priority);
+                      const prio = resolvePriority(process);
                       
                       // Construir lista de equipa
                       const teamMembers = [];
@@ -477,15 +491,31 @@ const ProcessesPage = () => {
                       return (
                         <TableRow 
                           key={process.id} 
-                          className="cursor-pointer hover:bg-muted/50"
+                          className={`cursor-pointer hover:bg-muted/50 ${
+                            prio.isAlta 
+                              ? 'bg-red-50/50 dark:bg-red-950/10 border-l-[4px] border-l-red-500' 
+                              : ''
+                          }`}
                           onClick={() => navigate(`/process/${process.id}`)}
                         >
-                          <TableCell className="font-medium">
+                          <TableCell>
                             <div>
-                              <p>{safeString(process.client_name)}</p>
-                              {process.client_nif && (
-                                <p className="text-xs text-muted-foreground">NIF: {safeString(process.client_nif)}</p>
-                              )}
+                              <div className="flex items-center gap-2">
+                                <p className={prio.isAlta ? 'font-bold' : 'font-medium'}>
+                                  {prio.isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
+                                  {safeString(process.client_name)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {process.process_number && (
+                                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                                    #{process.process_number}
+                                  </span>
+                                )}
+                                {process.client_nif && (
+                                  <span className="text-xs text-muted-foreground">NIF: {safeString(process.client_nif)}</span>
+                                )}
+                              </div>
                             </div>
                           </TableCell>
                           <TableCell>
@@ -550,9 +580,10 @@ const ProcessesPage = () => {
                             )}
                           </TableCell>
                           <TableCell>
-                            {process.priority && (
-                              <Badge className={priorityBadge.color}>
-                                {priorityBadge.label}
+                            {prio.label && (
+                              <Badge className={`${prio.badgeColor} gap-0.5 ${prio.isAlta ? 'shadow-sm shadow-red-300/50 animate-pulse' : ''}`}>
+                                {prio.isAlta && <Flame className="h-3 w-3" />}
+                                {prio.label}
                               </Badge>
                             )}
                           </TableCell>
