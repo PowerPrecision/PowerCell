@@ -15,7 +15,11 @@ ENDPOINTS:
 - POST /portal/upload-url          → Gera pre-signed URL para upload
 - POST /portal/confirm-upload      → Confirma upload após PUT para S3
 - POST /portal/authenticate        → Valida magic link e retorna info
+- GET  /portal/messages            → Lista mensagens do processo
+- POST /portal/messages            → Envia mensagem do cliente
+- GET  /portal/messages/unread     → Conta mensagens não lidas do staff
 """
+import uuid
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
@@ -401,30 +405,58 @@ async def _get_rgpd_status(process_id: str) -> dict:
     - signed: RGPD was signed by the client
     - pending: RGPD was requested but not yet signed
     - none: No RGPD request exists
+    
+    Enhanced to also return:
+    - requested_at: when the RGPD was requested
+    - requested_by_name: who requested it
+    - For pending status: whether the token is expired or still valid
     """
     try:
+        # Find the most recent RGPD request (signed takes priority)
         rgpd = await db.rgpd_requests.find_one(
-            {"process_id": process_id},
+            {"process_id": process_id, "status": "signed"},
             {"_id": 0, "token": 0}
         )
-        if not rgpd:
-            return {"status": "none", "has_rgpd": False}
-        
-        status = rgpd.get("status", "pending")
-        if status == "signed":
+        if rgpd:
             return {
                 "status": "signed",
                 "has_rgpd": True,
                 "signed_at": rgpd.get("signed_at"),
+                "requested_at": rgpd.get("created_at"),
+                "requested_by_name": rgpd.get("created_by_name", ""),
             }
-        elif status == "pending":
+        
+        # Check for pending
+        rgpd = await db.rgpd_requests.find_one(
+            {"process_id": process_id, "status": "pending"},
+            {"_id": 0, "token": 0}
+        )
+        if rgpd:
+            # Determine if the token is still valid or expired
+            token_expired = False
+            expires_at_str = rgpd.get("token_expires_at")
+            if expires_at_str:
+                try:
+                    if expires_at_str.endswith('Z'):
+                        expires_at_str_clean = expires_at_str[:-1] + '+00:00'
+                    else:
+                        expires_at_str_clean = expires_at_str
+                    expires_at = datetime.fromisoformat(expires_at_str_clean)
+                    token_expired = expires_at < datetime.now(timezone.utc)
+                except (ValueError, TypeError):
+                    token_expired = True
+            
             return {
                 "status": "pending",
                 "has_rgpd": True,
                 "expires_at": rgpd.get("token_expires_at"),
+                "requested_at": rgpd.get("created_at"),
+                "requested_by_name": rgpd.get("created_by_name", ""),
+                "token_expired": token_expired,
+                "token_valid": not token_expired,
             }
-        else:
-            return {"status": status, "has_rgpd": False}
+        
+        return {"status": "none", "has_rgpd": False}
     except Exception as e:
         logger.warning(f"Erro ao obter estado RGPD para portal: {e}")
         return {"status": "none", "has_rgpd": False}
@@ -718,3 +750,160 @@ async def _notify_consultor_upload(process: dict, filename: str, category: str):
             )
     except Exception as e:
         logger.warning(f"Erro ao notificar consultor: {e}")
+
+
+# ====================================================================
+# MESSAGING — Mensagens entre cliente e staff
+# ====================================================================
+
+@router.get("/messages/unread")
+async def get_unread_messages_count(
+    client_data: dict = Depends(get_current_client),
+):
+    """
+    Conta mensagens não lidas do staff para este cliente.
+
+    Retorna o número de mensagens enviadas pelo staff que o cliente
+    ainda não leu (read_by_client=False).
+    """
+    process_id = client_data["process_id"]
+
+    try:
+        count = await db.portal_messages.count_documents({
+            "process_id": process_id,
+            "sender_type": "staff",
+            "read_by_client": False,
+        })
+        return {"unread_count": count}
+    except Exception as e:
+        logger.error(f"[PORTAL] Erro ao contar mensagens não lidas: {e}")
+        return {"unread_count": 0}
+
+
+@router.get("/messages")
+async def get_portal_messages(
+    client_data: dict = Depends(get_current_client),
+):
+    """
+    Lista mensagens do processo para o cliente.
+
+    Retorna as últimas 100 mensagens ordenadas por data de criação
+    ascendente (mais antigas primeiro). Ao listar, marca automaticamente
+    as mensagens do staff como lidas pelo cliente (read_by_client=True).
+    """
+    process_id = client_data["process_id"]
+
+    try:
+        # Buscar últimas 100 mensagens
+        messages = await db.portal_messages.find(
+            {"process_id": process_id},
+            {"_id": 0}
+        ).sort("created_at", 1).limit(100).to_list(100)
+
+        # Marcar mensagens do staff como lidas pelo cliente
+        try:
+            await db.portal_messages.update_many(
+                {
+                    "process_id": process_id,
+                    "sender_type": "staff",
+                    "read_by_client": False,
+                },
+                {"$set": {"read_by_client": True}}
+            )
+        except Exception as e:
+            logger.warning(f"[PORTAL] Erro ao marcar mensagens como lidas: {e}")
+
+        return {
+            "messages": messages,
+            "total": len(messages),
+        }
+    except Exception as e:
+        logger.error(f"[PORTAL] Erro ao listar mensagens: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao carregar mensagens. Tente novamente."
+        )
+
+
+@router.post("/messages")
+async def send_portal_message(
+    data: dict,
+    client_data: dict = Depends(get_current_client),
+):
+    """
+    Envia uma mensagem do cliente para o staff.
+
+    Body:
+    - content: Texto da mensagem (obrigatório)
+    """
+    process = client_data["process"]
+    process_id = client_data["process_id"]
+
+    content = data.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="A mensagem não pode estar vazia.")
+    if len(content) > 5000:
+        raise HTTPException(status_code=400, detail="A mensagem não pode exceder 5000 caracteres.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    message_id = str(uuid.uuid4())
+    client_name = process.get("client_name", "Cliente")
+
+    message_doc = {
+        "id": message_id,
+        "process_id": process_id,
+        "sender_type": "client",
+        "sender_id": "client",
+        "sender_name": client_name,
+        "content": content,
+        "created_at": now,
+        "read_by_client": True,
+        "read_by_staff": False,
+    }
+
+    try:
+        await db.portal_messages.insert_one(message_doc)
+        logger.info(f"[PORTAL] Mensagem enviada pelo cliente para processo {process_id}")
+    except Exception as e:
+        logger.error(f"[PORTAL] Erro ao enviar mensagem: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao enviar mensagem. Tente novamente."
+        )
+
+    # Notificar consultor sobre a nova mensagem do cliente
+    await _notify_consultor_message(process, client_name)
+
+    # Return without MongoDB _id
+    return {
+        "id": message_id,
+        "process_id": process_id,
+        "sender_type": "client",
+        "sender_id": "client",
+        "sender_name": client_name,
+        "content": content,
+        "created_at": now,
+        "read_by_client": True,
+        "read_by_staff": False,
+    }
+
+
+async def _notify_consultor_message(process: dict, client_name: str):
+    """Notifica o consultor sobre uma nova mensagem do cliente."""
+    assigned_consultor_id = process.get("assigned_consultor_id")
+    if not assigned_consultor_id:
+        return
+
+    try:
+        consultor = await db.users.find_one(
+            {"id": assigned_consultor_id}, {"name": 1, "email": 1}
+        )
+        if consultor:
+            await send_notification_with_preference_check(
+                consultor.get("email"),
+                "Nova Mensagem do Cliente",
+                f"O cliente {client_name} enviou uma mensagem via Portal.",
+                notification_type="portal_message"
+            )
+    except Exception as e:
+        logger.warning(f"Erro ao notificar consultor sobre mensagem: {e}")

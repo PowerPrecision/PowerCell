@@ -26,6 +26,7 @@ import {
   ExternalLink,
   Shield,
   BarChart3,
+  Send,
 } from 'lucide-react';
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
@@ -454,6 +455,112 @@ function ContactCard({ contact }) {
 }
 
 // ====================================================================
+// PORTAL MESSAGES — Chat interface for client ↔ staff communication
+// ====================================================================
+function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, sending, unreadCount }) {
+  const messagesEndRef = useRef(null);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Relative timestamp in Portuguese
+  const formatRelativeTime = (isoDate) => {
+    if (!isoDate) return '';
+    const now = new Date();
+    const date = new Date(isoDate);
+    const diffMs = now - date;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffSec < 60) return 'agora mesmo';
+    if (diffMin < 60) return `há ${diffMin} min`;
+    if (diffHour < 24) return `há ${diffHour} hora${diffHour > 1 ? 's' : ''}`;
+    if (diffDay === 1) return 'ontem';
+    if (diffDay < 7) return `há ${diffDay} dias`;
+    return date.toLocaleDateString('pt-PT');
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col" style={{ minHeight: 360, maxHeight: 520 }}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+          <MessageCircle className="w-5 h-5 text-emerald-500" />
+          Mensagens
+        </h3>
+        {unreadCount > 0 && (
+          <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-emerald-500 text-white text-xs font-bold">
+            {unreadCount}
+          </span>
+        )}
+      </div>
+
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto space-y-3 min-h-0 mb-3 pr-1" style={{ scrollbarWidth: 'thin' }}>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 text-emerald-500 animate-spin mr-2" />
+            <span className="text-sm text-gray-500">A carregar mensagens...</span>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <MessageCircle className="w-10 h-10 text-gray-300 mb-2" />
+            <p className="text-sm text-gray-400">Sem mensagens ainda. Envie a primeira!</p>
+          </div>
+        ) : (
+          messages.map((msg) => {
+            const isClient = msg.sender_type === 'client';
+            return (
+              <div key={msg.id} className={`flex ${isClient ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                  isClient
+                    ? 'bg-emerald-50 border border-emerald-200 text-right'
+                    : 'bg-gray-100 border border-gray-200'
+                }`}>
+                  {!isClient && msg.sender_name && (
+                    <p className="text-xs font-semibold text-gray-600 mb-0.5">{msg.sender_name}</p>
+                  )}
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{msg.content}</p>
+                  <p className={`text-[10px] mt-1 ${isClient ? 'text-emerald-500' : 'text-gray-400'}`}>
+                    {formatRelativeTime(msg.created_at)}
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input area */}
+      <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+        <input
+          type="text"
+          value={newMessage}
+          onChange={(e) => setNewMessage(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && newMessage.trim()) { e.preventDefault(); onSend(); } }}
+          placeholder="Escreva uma mensagem..."
+          className="flex-1 px-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all"
+          disabled={sending}
+        />
+        <button
+          onClick={onSend}
+          disabled={sending || !newMessage.trim()}
+          className="p-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+          title="Enviar"
+        >
+          {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
 // IFRAME DETECTOR (non-intrusive)
 // ====================================================================
 function IframeDetector({ children }) {
@@ -552,6 +659,80 @@ export default function ClientPortal() {
   }, [refreshKey]);
 
   const handleUploadSuccess = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  // ── Messaging state ──
+  const [messages, setMessages] = useState([]);
+  const [messagesLoading, setMessagesLoading] = useState(true);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchMessages = useCallback(async () => {
+    const token = sessionStorage.getItem('portal_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/portal/messages`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(Array.isArray(data) ? data : data.messages || []);
+      }
+    } catch {
+      // silently fail — will retry on next poll
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, []);
+
+  const fetchUnreadCount = useCallback(async () => {
+    const token = sessionStorage.getItem('portal_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/portal/messages/unread`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUnreadCount(data.count ?? data.unread ?? 0);
+      }
+    } catch {
+      // silently fail
+    }
+  }, []);
+
+  const sendMessage = useCallback(async () => {
+    if (!newMessage.trim()) return;
+    const token = sessionStorage.getItem('portal_token');
+    if (!token) return;
+    setSendingMessage(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/portal/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content: newMessage.trim() }),
+      });
+      if (res.ok) {
+        setNewMessage('');
+        await fetchMessages();
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setSendingMessage(false);
+    }
+  }, [newMessage, fetchMessages]);
+
+  // Fetch messages on mount and poll every 15s
+  useEffect(() => {
+    fetchMessages();
+    fetchUnreadCount();
+    const interval = setInterval(() => {
+      fetchMessages();
+      fetchUnreadCount();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [fetchMessages, fetchUnreadCount]);
 
   // ── Loading ──
   if (loading) {
@@ -664,11 +845,12 @@ export default function ClientPortal() {
               <>
                 {rgpd.status === 'signed' && (
                   <div className="bg-emerald-50 rounded-2xl shadow-sm border border-emerald-200 p-5 sm:p-6">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
-                        <Shield className="w-5 h-5 text-emerald-600" />
+                    <style>{`@keyframes rgpdCheckIn { 0% { transform: scale(0); opacity: 0; } 60% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }`}</style>
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0" style={{ animation: 'rgpdCheckIn 0.5s ease-out' }}>
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <h3 className="text-sm font-bold text-emerald-800">RGPD Assinado</h3>
                         <p className="text-xs text-emerald-600 mt-0.5">
                           O consentimento para tratamento de dados pessoais foi assinado
@@ -676,35 +858,64 @@ export default function ClientPortal() {
                             <> a <strong>{new Date(rgpd.signed_at).toLocaleDateString('pt-PT')}</strong></>
                           )}.
                         </p>
+                        {rgpd.signed_by && (
+                          <p className="text-xs text-emerald-500 mt-1">
+                            Assinado por: <strong>{rgpd.signed_by}</strong>
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
                 )}
                 {rgpd.status === 'pending' && (
                   <div className="bg-amber-50 rounded-2xl shadow-sm border border-amber-200 p-5 sm:p-6">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-start gap-3">
                       <div className='w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0'>
                         <Clock className="w-5 h-5 text-amber-600" />
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <h3 className="text-sm font-bold text-amber-800">RGPD Pendente</h3>
                         <p className="text-xs text-amber-600 mt-0.5">
-                          O consentimento RGPD ainda não foi assinado. Verifique o seu email.
+                          O consentimento RGPD ainda não foi assinado.
                         </p>
+                        {rgpd.requested_at && (
+                          <p className="text-xs text-amber-500 mt-1">
+                            Pedido enviado a <strong>{new Date(rgpd.requested_at).toLocaleDateString('pt-PT')}</strong>
+                          </p>
+                        )}
+                        {rgpd.requested_by_name && (
+                          <p className="text-xs text-amber-500 mt-0.5">
+                            Solicitado por: <strong>{rgpd.requested_by_name}</strong>
+                          </p>
+                        )}
+                        {rgpd.token_expired ? (
+                          <div className="mt-2 flex items-center gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-2.5 py-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>Link de assinatura expirado. Contacte o seu consultor.</span>
+                          </div>
+                        ) : (
+                          <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 rounded-lg px-2.5 py-1.5">
+                            <Mail className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="font-medium">Verifique o seu email para assinar</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 )}
                 {rgpd.status === 'none' && (
                   <div className="bg-gray-50 rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-6">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-start gap-3">
                       <div className='w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0'>
                         <Shield className="w-5 h-5 text-gray-500" />
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <h3 className="text-sm font-bold text-gray-600">RGPD Não Solicitado</h3>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          O consentimento RGPD ainda não foi solicitado. A equipa solicitará em breve.
+                          O consentimento RGPD ainda não foi solicitado.
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1 italic">
+                          O consentimento será solicitado pela equipa quando necessário.
                         </p>
                       </div>
                     </div>
@@ -719,9 +930,20 @@ export default function ClientPortal() {
             </div>
           </div>
 
-          {/* ═══ RIGHT COLUMN: Documents ═══ */}
-          <div className="lg:col-span-2">
+          {/* ═══ RIGHT COLUMN: Documents + Messages ═══ */}
+          <div className="lg:col-span-2 space-y-5">
             <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
+
+            {/* Messages */}
+            <PortalMessages
+              messages={messages}
+              loading={messagesLoading}
+              newMessage={newMessage}
+              setNewMessage={setNewMessage}
+              onSend={sendMessage}
+              sending={sendingMessage}
+              unreadCount={unreadCount}
+            />
 
             {/* Team (desktop) */}
             <div className="hidden lg:block">

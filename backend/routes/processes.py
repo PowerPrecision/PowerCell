@@ -3121,3 +3121,161 @@ async def get_process_clients(
         "process_number": process.get("process_number")
     }
 
+
+# ====================================================================
+# PORTAL MESSAGES — Mensagens do portal (staff side)
+# ====================================================================
+
+@router.get("/{process_id}/portal-messages/unread")
+async def get_portal_messages_unread_staff(
+    process_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Conta mensagens não lidas do cliente para este processo (vista staff).
+
+    Retorna o número de mensagens enviadas pelo cliente que o staff
+    ainda não leu (read_by_staff=False).
+    """
+    # Validate process exists and user has access
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    try:
+        count = await db.portal_messages.count_documents({
+            "process_id": process_id,
+            "sender_type": "client",
+            "read_by_staff": False,
+        })
+        return {"unread_count": count}
+    except Exception as e:
+        logger.error(f"[PROCESS] Erro ao contar mensagens não lidas do portal: {e}")
+        return {"unread_count": 0}
+
+
+@router.get("/{process_id}/portal-messages")
+async def get_portal_messages_staff(
+    process_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Lista mensagens do portal para este processo (vista staff).
+
+    Retorna as últimas 100 mensagens ordenadas por data de criação
+    ascendente (mais antigas primeiro). Ao listar, marca automaticamente
+    as mensagens do cliente como lidas pelo staff (read_by_staff=True).
+    """
+    # Validate process exists
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    try:
+        # Buscar últimas 100 mensagens
+        messages = await db.portal_messages.find(
+            {"process_id": process_id},
+            {"_id": 0}
+        ).sort("created_at", 1).limit(100).to_list(100)
+
+        # Marcar mensagens do cliente como lidas pelo staff
+        try:
+            await db.portal_messages.update_many(
+                {
+                    "process_id": process_id,
+                    "sender_type": "client",
+                    "read_by_staff": False,
+                },
+                {"$set": {"read_by_staff": True}}
+            )
+        except Exception as e:
+            logger.warning(f"[PROCESS] Erro ao marcar mensagens do portal como lidas: {e}")
+
+        return {
+            "messages": messages,
+            "total": len(messages),
+            "process_id": process_id,
+        }
+    except Exception as e:
+        logger.error(f"[PROCESS] Erro ao listar mensagens do portal: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao carregar mensagens do portal."
+        )
+
+
+@router.post("/{process_id}/portal-messages")
+async def send_portal_message_staff(
+    process_id: str,
+    data: dict,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Envia uma mensagem do staff para o cliente via portal.
+
+    Body:
+    - content: Texto da mensagem (obrigatório)
+    """
+    import uuid as _uuid
+
+    # Validate process exists
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    content = data.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="A mensagem não pode estar vazia.")
+    if len(content) > 5000:
+        raise HTTPException(status_code=400, detail="A mensagem não pode exceder 5000 caracteres.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    message_id = str(_uuid.uuid4())
+
+    message_doc = {
+        "id": message_id,
+        "process_id": process_id,
+        "sender_type": "staff",
+        "sender_id": user.get("id", ""),
+        "sender_name": user.get("name", "Staff"),
+        "content": content,
+        "created_at": now,
+        "read_by_client": False,
+        "read_by_staff": True,
+    }
+
+    try:
+        await db.portal_messages.insert_one(message_doc)
+        logger.info(
+            f"[PROCESS] Mensagem do portal enviada por {user.get('email')} "
+            f"para processo {process_id}"
+        )
+    except Exception as e:
+        logger.error(f"[PROCESS] Erro ao enviar mensagem do portal: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao enviar mensagem. Tente novamente."
+        )
+
+    # Return without MongoDB _id
+    return {
+        "id": message_id,
+        "process_id": process_id,
+        "sender_type": "staff",
+        "sender_id": user.get("id", ""),
+        "sender_name": user.get("name", "Staff"),
+        "content": content,
+        "created_at": now,
+        "read_by_client": False,
+        "read_by_staff": True,
+    }
+

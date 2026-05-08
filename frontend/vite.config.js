@@ -41,7 +41,7 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src'),
       },
       dedupe: ['react', 'react-dom', 'react-router-dom', 'react-is'],
-      conditions: ['development'], // Enabled for debugging React Error #310
+      // conditions: ['development'], // Disabled — production mode
     },
 
     // Tratar ficheiros .js como JSX (compatibilidade CRA)
@@ -96,7 +96,7 @@ export default defineConfig(({ mode }) => {
       // Source Maps: 'hidden' gera os .map mas NÃO os referencia no JS final.
       // O ficheiro .map é gerado e enviado ao Sentry, mas o browser nunca o descarrega.
       sourcemap: isProduction ? 'hidden' : true,
-      minify: false, // Disabled for debugging React Error #310
+      minify: true,
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
