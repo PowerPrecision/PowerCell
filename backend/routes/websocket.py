@@ -224,6 +224,16 @@ async def websocket_notifications(
                         }
                     )
                     await manager.broadcast(unlock_message, exclude_user=str(user.get("id", "")))
+
+                elif msg_type == "join_process_room":
+                    process_id = data.get("process_id")
+                    if process_id:
+                        await manager.join_room(f"process_{process_id}", user_id)
+
+                elif msg_type == "leave_process_room":
+                    process_id = data.get("process_id")
+                    if process_id:
+                        await manager.leave_room(f"process_{process_id}", user_id)
                 
                 elif data.get("type") == "join_process_room":
                     # Juntar-se à room do processo para receber mensagens em tempo real

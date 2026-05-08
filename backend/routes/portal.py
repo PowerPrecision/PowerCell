@@ -732,22 +732,23 @@ async def _create_document_record(
 
 
 async def _notify_assigned_team_upload(process: dict, filename: str, category: str):
-    """Notifica TODOS os utilizadores atribuídos sobre um novo upload do cliente."""
+    """Notifica TODOS os utilizadores atribuídos ao processo sobre um novo upload do cliente."""
     assigned_ids = _get_all_assigned_user_ids(process)
     if not assigned_ids:
         return
 
     client_name = process.get("client_name", "Cliente")
-    process_ref = process.get("process_number", process.get("id", ""))
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else process.get("id", "")[:8]
     
     for uid in assigned_ids:
         try:
             user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
-            if user and user.get("email"):
+            if user:
                 await send_notification_with_preference_check(
-                    user["email"],
+                    user.get("email"),
                     "Novo Documento Submetido",
-                    f"O cliente {client_name} submeteu '{filename}' ({category}) no processo #{process_ref} via Portal.",
+                    f"O cliente {client_name} submeteu '{filename}' ({category}) no processo {process_ref} via Portal.",
                     notification_type="document_upload"
                 )
         except Exception as e:
@@ -874,7 +875,7 @@ async def send_portal_message(
         )
 
     # Notificar TODOS os utilizadores atribuídos sobre a nova mensagem do cliente
-    await _notify_assigned_team_message(process, client_name, process_id)
+    await _notify_assigned_team_message(process, process_id, client_name, message_doc)
 
     # Return without MongoDB _id
     return {
@@ -890,47 +891,71 @@ async def send_portal_message(
     }
 
 
-async def _notify_assigned_team_message(process: dict, client_name: str, process_id: str):
-    """Notifica TODOS os utilizadores atribuídos sobre uma nova mensagem do cliente.
+async def _notify_assigned_team_message(process: dict, process_id: str, client_name: str, message_doc: dict):
+    """Notifica TODOS os utilizadores atribuídos ao processo sobre uma nova mensagem do cliente.
     
-    Também faz broadcast via WebSocket room do processo, para que todos
-    os membros da equipa que tenham o processo aberto recebam a mensagem
-    em tempo real.
+    Também faz broadcast da mensagem para a sala WebSocket do processo (process_{process_id})
+    para que qualquer membro da equipa com o processo aberto veja a mensagem em tempo real.
     """
+    # ── Recolher TODOS os IDs de utilizadores atribuídos ──
     assigned_ids = _get_all_assigned_user_ids(process)
     if not assigned_ids:
         return
 
-    process_ref = process.get("process_number", process_id)
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else process_id[:8]
     
-    # ── Email notification para cada utilizador atribuído ──
+    # ── Notificar cada utilizador atribuído (email + in-app notification) ──
     for uid in assigned_ids:
         try:
             user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
-            if user and user.get("email"):
-                await send_notification_with_preference_check(
-                    user["email"],
-                    "Nova Mensagem do Cliente",
-                    f"O cliente {client_name} enviou uma mensagem no processo #{process_ref} via Portal.",
-                    notification_type="portal_message"
+            if not user:
+                continue
+            
+            # Email notification (com verificação de preferências)
+            await send_notification_with_preference_check(
+                user.get("email"),
+                "Nova Mensagem do Cliente",
+                f"O cliente {client_name} enviou uma mensagem no processo {process_ref}.",
+                notification_type="portal_message"
+            )
+            
+            # In-app notification (em tempo real via WebSocket)
+            try:
+                from services.realtime_notifications import send_realtime_notification
+                await send_realtime_notification(
+                    user_id=uid,
+                    title="Nova Mensagem do Cliente",
+                    message=f"O cliente {client_name} enviou uma mensagem no processo {process_ref}.",
+                    notification_type="portal_message",
+                    link=f"/processes/{process_id}",
+                    process_id=process_id,
                 )
+            except Exception as notif_err:
+                logger.debug(f"Erro ao enviar notificação in-app para {uid}: {notif_err}")
+                
         except Exception as e:
-            logger.warning(f"Erro ao notificar utilizador {uid} sobre mensagem: {e}")
+            logger.warning(f"Erro ao notificar utilizador {uid} sobre mensagem do portal: {e}")
     
-    # ── WebSocket broadcast para a room do processo ──
+    # ── Broadcast para a sala WebSocket do processo ──
     try:
-        room_name = f"process_{process_id}"
-        await manager.broadcast_to_room(
-            room_name,
-            create_ws_message(WSEventType.PORTAL_MESSAGE, {
-                "process_id": process_id,
-                "sender_type": "client",
-                "sender_name": client_name,
-                "message_preview": f"Nova mensagem de {client_name}",
-            })
-        )
-    except Exception as e:
-        logger.warning(f"Erro ao fazer broadcast WS para room do processo {process_id}: {e}")
+        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
+            "id": message_doc.get("id"),
+            "process_id": process_id,
+            "sender_type": "client",
+            "sender_id": "client",
+            "sender_name": client_name,
+            "content": message_doc.get("content", "")[:200],
+            "created_at": message_doc.get("created_at"),
+        })
+        await manager.broadcast_to_room(f"process_{process_id}", ws_message)
+    except Exception as ws_err:
+        logger.debug(f"Erro ao broadcast mensagem do portal via WebSocket: {ws_err}")
+    
+    logger.info(
+        f"[PORTAL] Notificados {len(assigned_ids)} utilizadores sobre mensagem "
+        f"do cliente {client_name} no processo {process_ref}"
+    )
 
 
 def _get_all_assigned_user_ids(process: dict) -> list:

@@ -3345,22 +3345,46 @@ async def send_portal_message_staff(
     # ── Notificar outros membros da equipa (excluindo o remetente) ──
     await _notify_team_portal_message(process, user, process_id)
 
-    # ── Broadcast via WebSocket room do processo ──
+    # ── In-app notification para membros da equipa atribuídos ──
     try:
-        room_name = f"process_{process_id}"
-        await manager.broadcast_to_room(
-            room_name,
-            create_ws_message(WSEventType.PORTAL_MESSAGE, {
-                "process_id": process_id,
-                "sender_type": "staff",
-                "sender_id": user.get("id", ""),
-                "sender_name": user.get("name", "Staff"),
-                "message_preview": content[:100],
-            }),
-            exclude_user=user.get("id")  # Não enviar de volta ao remetente
-        )
+        from routes.portal import _get_all_assigned_user_ids
+        assigned_ids = _get_all_assigned_user_ids(process)
+        sender_id = user.get("id", "")
+        process_number = process.get("process_number", "")
+        process_ref = f"#{process_number}" if process_number else process_id[:8]
+        
+        for uid in assigned_ids:
+            if uid == sender_id:
+                continue  # Não notificar o remetente
+            try:
+                from services.realtime_notifications import send_realtime_notification
+                await send_realtime_notification(
+                    user_id=uid,
+                    title="Nova Mensagem Interna",
+                    message=f"{user.get('name', 'Staff')} enviou uma mensagem no processo {process_ref}.",
+                    notification_type="portal_message",
+                    link=f"/processes/{process_id}",
+                    process_id=process_id,
+                )
+            except Exception as notif_err:
+                logger.debug(f"Erro ao notificar membro {uid} sobre mensagem interna: {notif_err}")
     except Exception as e:
-        logger.warning(f"Erro ao fazer broadcast WS para room do processo {process_id}: {e}")
+        logger.warning(f"Erro ao notificar equipa sobre mensagem do portal: {e}")
+
+    # ── Broadcast para a sala WebSocket do processo ──
+    try:
+        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
+            "id": message_id,
+            "process_id": process_id,
+            "sender_type": "staff",
+            "sender_id": user.get("id", ""),
+            "sender_name": user.get("name", "Staff"),
+            "content": content[:200],
+            "created_at": now,
+        })
+        await manager.broadcast_to_room(f"process_{process_id}", ws_message, exclude_user=user.get("id"))
+    except Exception as ws_err:
+        logger.debug(f"Erro ao broadcast mensagem staff via WebSocket: {ws_err}")
 
     # Return without MongoDB _id
     return {

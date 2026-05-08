@@ -366,15 +366,37 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """
     Handler para erros de validação Pydantic (422).
     Loga os detalhes do erro para debug sem expor dados sensíveis ao cliente.
+
+    NOTA: exc.errors() pode conter 'ctx' com excepções Python (ex: ValueError)
+    que não são JSON-serializáveis. Usamos json.loads(exc.json()) para
+    obter uma representação segura para JSON.
     """
+    import json as _json
+
+    # Usar exc.json() do Pydantic para obter JSON seguro (serializa ctx correctamente)
+    # e depois fazer parse de volta para dict para o JSONResponse
+    try:
+        safe_errors = _json.loads(exc.json())
+    except Exception:
+        # Fallback: extrair campos seguros manualmente
+        safe_errors = []
+        for err in exc.errors():
+            safe_err = {
+                "type": err.get("type"),
+                "loc": err.get("loc"),
+                "msg": err.get("msg"),
+                "input": err.get("input") if isinstance(err.get("input"), (str, int, float, bool, type(None), list, dict)) else str(err.get("input")),
+            }
+            safe_errors.append(safe_err)
+
     logger.warning(
         f"Validation error on {request.method} {request.url.path}: "
-        f"errors={exc.errors()}"
+        f"errors={safe_errors}"
     )
     # Retornar erro formatado ao cliente
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors()},
+        content={"detail": safe_errors},
         headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true"}
     )
 

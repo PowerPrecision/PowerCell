@@ -9,6 +9,7 @@ Funcionalidades:
 - Broadcast de notificações
 - Reconexão automática
 - Heartbeat para manter conexões activas
+- Salas (Rooms) para chat baseado em processos
 ====================================================================
 """
 
@@ -54,7 +55,7 @@ class ConnectionManager:
         if user_id and user_id in self.active_connections:
             self.active_connections[user_id].discard(websocket)
             
-            # Remover o set se estiver vazio
+            # Remover o set se estiver vazio (user fully disconnected)
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
                 
@@ -197,6 +198,7 @@ class WSEventType:
         - Documentos (DOCUMENT_EXPIRING, DOCUMENT_UPLOADED)
         - Prazos (DEADLINE_CREATED, DEADLINE_UPDATED, DEADLINE_REMINDER)
         - Sistema (HEARTBEAT, CONNECTION_STATUS, USER_ONLINE, USER_OFFLINE)
+        - Chat / Rooms (PORTAL_MESSAGE, NEW_CHAT_MESSAGE, CHAT_TYPING)
     """
     # Notificações
     NEW_NOTIFICATION = "new_notification"
