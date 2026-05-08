@@ -164,6 +164,16 @@ const FilteredProcessList = () => {
       );
     }
 
+    // Ordenação: prioridade alta SEMPRE no topo
+    const priorityWeight = (p) => {
+      const raw = (p.prioridade || p.priority || "").toLowerCase();
+      if (raw === "alta" || raw === "high") return 3;
+      if (raw === "media" || raw === "medium") return 2;
+      if (raw === "baixa" || raw === "low") return 1;
+      return 0;
+    };
+    filtered.sort((a, b) => priorityWeight(b) - priorityWeight(a));
+
     return filtered;
   };
 

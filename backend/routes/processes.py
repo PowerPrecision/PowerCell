@@ -1102,26 +1102,40 @@ async def get_processes(
     if sort_field and sort_field in ("client_name", "status", "created_at", "updated_at",
                                        "priority", "property_value", "property_location",
                                        "contacto"):
-        def _sort_key(p):
-            if sort_field == "client_name":
-                return (p.get("client_name") or "").lower()
-            elif sort_field == "status":
-                return (p.get("status") or "").lower()
-            elif sort_field == "priority":
-                return _get_priority_weight(p)
-            elif sort_field in ("created_at", "updated_at"):
-                return p.get(sort_field) or ""
-            elif sort_field == "contacto":
-                return (p.get("client_email") or p.get("client_phone") or "").lower()
-            else:
-                return p.get(sort_field) or ""
-
         reverse = sort_order.lower() == "desc"
-        try:
-            processes.sort(key=_sort_key, reverse=reverse)
-        except TypeError:
-            # Fallback para tipos mistos (ex: strings vs None)
-            processes.sort(key=lambda p: str(_sort_key(p)), reverse=reverse)
+
+        if sort_field == "priority":
+            # Ordenação por prioridade: apenas por peso de prioridade
+            def _sort_key(p):
+                return _get_priority_weight(p)
+            try:
+                processes.sort(key=_sort_key, reverse=reverse)
+            except TypeError:
+                processes.sort(key=lambda p: str(_sort_key(p)), reverse=reverse)
+        else:
+            # Qualquer outro campo: prioridade alta SEMPRE no topo como ordenação secundária
+            # Usa ordenação estável (2 passes): 1º pelo campo principal, 2º por prioridade
+            def _primary_key(p):
+                if sort_field == "client_name":
+                    return (p.get("client_name") or "").lower()
+                elif sort_field == "status":
+                    return (p.get("status") or "").lower()
+                elif sort_field in ("created_at", "updated_at"):
+                    return p.get(sort_field) or ""
+                elif sort_field == "contacto":
+                    return (p.get("client_email") or p.get("client_phone") or "").lower()
+                else:
+                    return p.get(sort_field) or ""
+
+            # Passo 1: ordenar pelo campo principal (sort estável preserva ordem relativa)
+            try:
+                processes.sort(key=_primary_key, reverse=reverse)
+            except TypeError:
+                processes.sort(key=lambda p: str(_primary_key(p)), reverse=reverse)
+
+            # Passo 2: ordenar por prioridade descendente (alta primeiro)
+            # Como sort é estável, processos com mesma prioridade mantêm a ordem do passo 1
+            processes.sort(key=lambda p: -_get_priority_weight(p))
     else:
         # Ordenação padrão: 1ª por prioridade (Alta>Média>Baixa), 2ª por fase do workflow, 3ª por nome
         processes.sort(key=lambda p: (
