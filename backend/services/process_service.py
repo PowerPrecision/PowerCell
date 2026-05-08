@@ -486,11 +486,11 @@ def encrypt_sensitive_data(data: dict) -> dict:
     """
     if not encryption_service.is_available() or not data:
         # Mesmo sem encriptação, gerar blind indexes
-        result = data.copy()
+        result = copy.deepcopy(data)
         _add_process_blind_indexes(result)
         return result
     
-    result = data.copy()
+    result = copy.deepcopy(data)
     
     # Gerar blind indexes ANTES de encriptar (hashes calculados a partir dos valores originais)
     _add_process_blind_indexes(result)
