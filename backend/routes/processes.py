@@ -2102,6 +2102,11 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
     
+    # Desencriptar dados existentes antes de fazer merge com dados novos
+    # (sem isto, campos encriptados do DB seriam misturados com dados em claro e
+    # re-encriptados na guarda, causando dupla encriptação e corrupção de dados)
+    process = decrypt_sensitive_data(process)
+    
     role = user["role"]
     
     # Extrair campos opcionais do body para auditoria (não são parte do modelo ProcessUpdate)
@@ -2310,7 +2315,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         client_name=updated.get("client_name"),
         status=updated.get("status"),
         old_status=process.get("status") if data.status else None,
-        priority=updated.get("priority"),
+        priority=updated.get("prioridade") or updated.get("priority"),
         updated_at=updated.get("updated_at")
     )
     
@@ -2328,12 +2333,20 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             logger.warning(f"Erro ao processar automações: {e}")
     
     # Desencriptar dados para a resposta
-    updated = decrypt_sensitive_data(updated)
+    try:
+        updated = decrypt_sensitive_data(updated)
+    except Exception as e:
+        logger.error(f"Erro ao desencriptar dados do processo {process_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno ao desencriptar dados do processo")
     
     # Sincronizar com Trello (nome e descrição do card)
     await sync_process_to_trello(updated)
     
-    return ProcessResponse(**updated)
+    try:
+        return ProcessResponse(**updated)
+    except Exception as e:
+        logger.error(f"Erro ao serializar resposta do processo {process_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno ao serializar dados do processo: {str(e)[:200]}")
 
 
 @router.post("/{process_id}/assign")
