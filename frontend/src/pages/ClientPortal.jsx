@@ -486,7 +486,7 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col h-[600px]">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col min-h-[400px] lg:h-[650px]">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
@@ -778,7 +778,7 @@ export default function ClientPortal() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center gap-3">
+        <div className="w-full px-4 sm:px-6 lg:px-10 py-3.5 flex items-center gap-3">
           <img
             src="/PowerCell-default.png"
             alt="PowerCell"
@@ -796,8 +796,8 @@ export default function ClientPortal() {
       </header>
 
       {/* Main Content — 3 column dashboard grid */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <main className="flex-1 w-full px-4 sm:px-6 lg:px-10 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 
           {/* ═══ LEFT COLUMN: Resumo + Timeline ═══ */}
           <div className="lg:col-span-3 space-y-5">
@@ -951,7 +951,7 @@ export default function ClientPortal() {
 
       {/* Footer */}
       <footer className="mt-auto bg-white border-t border-gray-100 py-3">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <div className="w-full px-4 sm:px-6 lg:px-10 text-center">
           <p className="text-xs text-gray-400">© {new Date().getFullYear()} Power Precision · Crédito Habitação</p>
           <p className="text-[10px] text-gray-300 mt-0.5">Acesso seguro via Magic Link · Válido por 90 dias</p>
         </div>
