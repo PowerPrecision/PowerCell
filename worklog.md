@@ -1432,3 +1432,28 @@ Stage Summary:
 - 7 sub-campos protegidos contra TypeError no dict merge
 - encrypt_sensitive_data agora usa deepcopy (previne mutação do original)
 - Primeira desencriptação no PUT agora tem error handling
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Add dedicated save button for Organização do Processo + fix 422 error when saving with NIF
+
+Work Log:
+- Added `handleSaveOrganization` function that only sends {notes, prioridade, labels} to backend
+- Added "Guardar Organização" button in the Organização do Processo card section
+- Made NIF validation more lenient on backend: PersonalData and Titular2Data now use `validate_checksum=False`
+  so invalid checksums don't block the entire save operation
+- Added type coercion validators to FinancialData (string→float, string→int)
+- Added type coercion validators to CreditData (string→float, string→int)
+- Added type coercion validators to RealEstateData (string→float, string→int, string→bool)
+- Improved `cleanPersonalDataForSubmit` in frontend: NIF sanitization (remove non-digits, skip if not 9 digits),
+  type coercion for string fields, boolean field cleanup
+- Improved `cleanTitular2DataForSubmit`: NIF sanitization and cleanup
+- Resolved merge conflicts from origin/dev (portal.py, processes.py, websocket_manager.py)
+- Pushed to dev branch (commit a0613e1 + merge 86d6581)
+
+Stage Summary:
+- User can now save just the Organização data (notes, priority, labels) without triggering NIF validation
+- Backend no longer blocks saves on NIF checksum failure — validates format only (9 digits, valid prefix)
+- Type coercion validators prevent 422 errors from stale data with wrong types (string where float expected)
+- All changes compiled and pushed successfully to dev branch

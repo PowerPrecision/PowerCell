@@ -137,10 +137,9 @@ async def get_kanban_data(
     
     # Ordenar processos dentro de cada coluna: 1ª prioridade (Alta>Média>Baixa), 2ª updated_at
     for status_key in kanban_data:
-        kanban_data[status_key].sort(key=lambda p: (
-            -PRIORITY_WEIGHT.get(p.get("prioridade") or p.get("priority"), 0),
-            -(p.get("updated_at") or "")
-        ))
+        # Two-step stable sort: first by updated_at DESC, then by priority DESC
+        kanban_data[status_key].sort(key=lambda p: p.get("updated_at") or "", reverse=True)
+        kanban_data[status_key].sort(key=lambda p: -PRIORITY_WEIGHT.get(p.get("prioridade") or p.get("priority"), 0))
     
     return dict(kanban_data)
 

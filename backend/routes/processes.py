@@ -1490,10 +1490,10 @@ async def get_kanban_board(
     # Ordenar processos dentro de cada coluna: 1ª por prioridade (Alta>Média>Baixa), 2ª por updated_at
     PRIORITY_WEIGHT = {"alta": 3, "media": 2, "baixa": 1}
     for status_key in processes_by_status:
-        processes_by_status[status_key].sort(key=lambda p: (
-            -PRIORITY_WEIGHT.get(p.get("prioridade") or p.get("priority"), 0),
-            -(p.get("updated_at") or "")
-        ))
+        # Two-step stable sort: first by updated_at DESC, then by priority DESC
+        # This ensures processes with same priority are sorted by most recent first
+        processes_by_status[status_key].sort(key=lambda p: p.get("updated_at") or "", reverse=True)
+        processes_by_status[status_key].sort(key=lambda p: -PRIORITY_WEIGHT.get(p.get("prioridade") or p.get("priority"), 0))
     
     kanban = []
     for status in statuses:
