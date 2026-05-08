@@ -20,6 +20,7 @@ DEFAULT_NOTIFICATION_PREFS = {
     "email_status_change": False,
     "email_document_upload": False,
     "email_task_assigned": False,
+    "email_portal_message": True,
     "email_deadline_reminder": True,
     "email_urgent_only": True,
     "email_daily_summary": True,
@@ -29,6 +30,7 @@ DEFAULT_NOTIFICATION_PREFS = {
     "inapp_document_upload": True,
     "inapp_task_assigned": True,
     "inapp_comments": True,
+    "inapp_portal_message": True,
     "is_test_user": False,
 }
 
@@ -38,6 +40,7 @@ NOTIFICATION_TYPE_MAP = {
     "status_change": "email_status_change",
     "document_upload": "email_document_upload",
     "task_assigned": "email_task_assigned",
+    "portal_message": "email_portal_message",
     "deadline_reminder": "email_deadline_reminder",
     "urgent": "email_urgent_only",
     "daily_summary": "email_daily_summary",

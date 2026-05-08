@@ -22,13 +22,18 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
-    """Gestor de ligações WebSocket."""
+    """Gestor de ligações WebSocket com suporte a Rooms (processos)."""
     
     def __init__(self):
         # Mapeamento de user_id para conjunto de ligações WebSocket
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         # Mapeamento de WebSocket para user_id
         self.websocket_to_user: Dict[WebSocket, str] = {}
+        # ── Room support ──
+        # room_name (e.g. "process_abc123") → conjunto de user_ids na room
+        self.rooms: Dict[str, Set[str]] = {}
+        # user_id → conjunto de room_names em que o utilizador está
+        self.user_rooms: Dict[str, Set[str]] = {}
     
     async def connect(self, websocket: WebSocket, user_id: str):
         """Aceitar uma nova ligação WebSocket."""
@@ -43,7 +48,7 @@ class ConnectionManager:
         logger.info(f"WebSocket conectado para utilizador {user_id}. Total conexões: {self.get_total_connections()}")
     
     def disconnect(self, websocket: WebSocket):
-        """Remover uma ligação WebSocket."""
+        """Remover uma ligação WebSocket e limpar rooms automaticamente."""
         user_id = self.websocket_to_user.get(websocket)
         
         if user_id and user_id in self.active_connections:
@@ -52,6 +57,12 @@ class ConnectionManager:
             # Remover o set se estiver vazio
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
+                
+                # ── Auto-cleanup: sair de todas as rooms quando sem conexões ──
+                if user_id in self.user_rooms:
+                    for room_name in list(self.user_rooms[user_id]):
+                        self._leave_room_internal(room_name, user_id)
+                    del self.user_rooms[user_id]
         
         if websocket in self.websocket_to_user:
             del self.websocket_to_user[websocket]
@@ -99,6 +110,60 @@ class ConnectionManager:
             user_role = users_data.get(user_id, {}).get("role")
             if user_role in roles:
                 await self.send_personal_message(message, user_id)
+    
+    # ── Room-based messaging ─────────────────────────────────────────────
+    
+    def join_room(self, room_name: str, user_id: str):
+        """Adicionar um utilizador a uma room (e.g. "process_abc123")."""
+        if room_name not in self.rooms:
+            self.rooms[room_name] = set()
+        self.rooms[room_name].add(user_id)
+        
+        if user_id not in self.user_rooms:
+            self.user_rooms[user_id] = set()
+        self.user_rooms[user_id].add(room_name)
+        
+        logger.debug(f"[ROOM] Utilizador {user_id} entrou na room '{room_name}'. "
+                      f"Membros: {len(self.rooms[room_name])}")
+    
+    def leave_room(self, room_name: str, user_id: str):
+        """Remover um utilizador de uma room."""
+        self._leave_room_internal(room_name, user_id)
+        # Limpar user_rooms se ficou vazio
+        if user_id in self.user_rooms and not self.user_rooms[user_id]:
+            del self.user_rooms[user_id]
+    
+    def _leave_room_internal(self, room_name: str, user_id: str):
+        """Remover utilizador da room (sem limpar user_rooms — usado internamente)."""
+        if room_name in self.rooms:
+            self.rooms[room_name].discard(user_id)
+            # Remover room se ficou vazia
+            if not self.rooms[room_name]:
+                del self.rooms[room_name]
+            else:
+                logger.debug(f"[ROOM] Utilizador {user_id} saiu da room '{room_name}'. "
+                              f"Membros restantes: {len(self.rooms[room_name])}")
+        
+        if user_id in self.user_rooms:
+            self.user_rooms[user_id].discard(room_name)
+    
+    async def broadcast_to_room(self, room_name: str, message: dict, exclude_user: Optional[str] = None):
+        """Enviar mensagem para todos os utilizadores numa room, opcionalmente excluindo um."""
+        if room_name not in self.rooms:
+            return
+        
+        for user_id in self.rooms[room_name]:
+            if exclude_user and user_id == exclude_user:
+                continue
+            await self.send_personal_message(message, user_id)
+    
+    def get_room_members(self, room_name: str) -> list:
+        """Obter lista de user_ids numa room."""
+        return list(self.rooms.get(room_name, set()))
+    
+    def is_in_room(self, room_name: str, user_id: str) -> bool:
+        """Verificar se um utilizador está numa room."""
+        return user_id in self.rooms.get(room_name, set())
     
     def get_total_connections(self) -> int:
         """Obter número total de ligações activas."""
@@ -152,6 +217,11 @@ class WSEventType:
     # Documentos
     DOCUMENT_EXPIRING = "document_expiring"
     DOCUMENT_UPLOADED = "document_uploaded"
+    
+    # Chat / Portal Messages
+    PORTAL_MESSAGE = "portal_message"
+    NEW_CHAT_MESSAGE = "new_chat_message"
+    CHAT_TYPING = "chat_typing"
     
     # Eventos/Prazos
     DEADLINE_CREATED = "deadline_created"

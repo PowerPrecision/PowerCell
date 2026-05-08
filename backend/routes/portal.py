@@ -30,6 +30,7 @@ from services.portal_security import get_current_client, PORTAL_ROLE
 from services.s3_storage import s3_service
 from services.redis_cache import invalidate_stats_cache
 from services.notification_service import send_notification_with_preference_check
+from services.websocket_manager import manager, WSEventType, create_ws_message
 
 logger = logging.getLogger(__name__)
 
@@ -682,8 +683,8 @@ async def confirm_portal_upload(
     # Obter URL temporária para preview
     temporary_url = s3_service.get_presigned_url(file_key) or ""
 
-    # ── Notificar consultor ──
-    await _notify_consultor_upload(process, original_filename, category)
+    # ── Notificar equipa atribuída ──
+    await _notify_assigned_team_upload(process, original_filename, category)
 
     logger.info(
         f"[PORTAL] Upload confirmado: {original_filename} "
@@ -730,26 +731,27 @@ async def _create_document_record(
     await db.documents.insert_one(document)
 
 
-async def _notify_consultor_upload(process: dict, filename: str, category: str):
-    """Notifica o consultor sobre um novo upload do cliente."""
-    assigned_consultor_id = process.get("assigned_consultor_id")
-    if not assigned_consultor_id:
+async def _notify_assigned_team_upload(process: dict, filename: str, category: str):
+    """Notifica TODOS os utilizadores atribuídos sobre um novo upload do cliente."""
+    assigned_ids = _get_all_assigned_user_ids(process)
+    if not assigned_ids:
         return
 
-    try:
-        consultor = await db.users.find_one(
-            {"id": assigned_consultor_id}, {"name": 1, "email": 1}
-        )
-        if consultor:
-            client_name = process.get("client_name", "Cliente")
-            await send_notification_with_preference_check(
-                consultor.get("email"),
-                "Novo Documento Submetido",
-                f"O cliente {client_name} submeteu '{filename}' ({category}) via Portal.",
-                notification_type="document_upload"
-            )
-    except Exception as e:
-        logger.warning(f"Erro ao notificar consultor: {e}")
+    client_name = process.get("client_name", "Cliente")
+    process_ref = process.get("process_number", process.get("id", ""))
+    
+    for uid in assigned_ids:
+        try:
+            user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
+            if user and user.get("email"):
+                await send_notification_with_preference_check(
+                    user["email"],
+                    "Novo Documento Submetido",
+                    f"O cliente {client_name} submeteu '{filename}' ({category}) no processo #{process_ref} via Portal.",
+                    notification_type="document_upload"
+                )
+        except Exception as e:
+            logger.warning(f"Erro ao notificar utilizador {uid} sobre upload: {e}")
 
 
 # ====================================================================
@@ -871,8 +873,8 @@ async def send_portal_message(
             detail="Erro ao enviar mensagem. Tente novamente."
         )
 
-    # Notificar consultor sobre a nova mensagem do cliente
-    await _notify_consultor_message(process, client_name)
+    # Notificar TODOS os utilizadores atribuídos sobre a nova mensagem do cliente
+    await _notify_assigned_team_message(process, client_name, process_id)
 
     # Return without MongoDB _id
     return {
@@ -888,22 +890,83 @@ async def send_portal_message(
     }
 
 
-async def _notify_consultor_message(process: dict, client_name: str):
-    """Notifica o consultor sobre uma nova mensagem do cliente."""
-    assigned_consultor_id = process.get("assigned_consultor_id")
-    if not assigned_consultor_id:
+async def _notify_assigned_team_message(process: dict, client_name: str, process_id: str):
+    """Notifica TODOS os utilizadores atribuídos sobre uma nova mensagem do cliente.
+    
+    Também faz broadcast via WebSocket room do processo, para que todos
+    os membros da equipa que tenham o processo aberto recebam a mensagem
+    em tempo real.
+    """
+    assigned_ids = _get_all_assigned_user_ids(process)
+    if not assigned_ids:
         return
 
+    process_ref = process.get("process_number", process_id)
+    
+    # ── Email notification para cada utilizador atribuído ──
+    for uid in assigned_ids:
+        try:
+            user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
+            if user and user.get("email"):
+                await send_notification_with_preference_check(
+                    user["email"],
+                    "Nova Mensagem do Cliente",
+                    f"O cliente {client_name} enviou uma mensagem no processo #{process_ref} via Portal.",
+                    notification_type="portal_message"
+                )
+        except Exception as e:
+            logger.warning(f"Erro ao notificar utilizador {uid} sobre mensagem: {e}")
+    
+    # ── WebSocket broadcast para a room do processo ──
     try:
-        consultor = await db.users.find_one(
-            {"id": assigned_consultor_id}, {"name": 1, "email": 1}
+        room_name = f"process_{process_id}"
+        await manager.broadcast_to_room(
+            room_name,
+            create_ws_message(WSEventType.PORTAL_MESSAGE, {
+                "process_id": process_id,
+                "sender_type": "client",
+                "sender_name": client_name,
+                "message_preview": f"Nova mensagem de {client_name}",
+            })
         )
-        if consultor:
-            await send_notification_with_preference_check(
-                consultor.get("email"),
-                "Nova Mensagem do Cliente",
-                f"O cliente {client_name} enviou uma mensagem via Portal.",
-                notification_type="portal_message"
-            )
     except Exception as e:
-        logger.warning(f"Erro ao notificar consultor sobre mensagem: {e}")
+        logger.warning(f"Erro ao fazer broadcast WS para room do processo {process_id}: {e}")
+
+
+def _get_all_assigned_user_ids(process: dict) -> list:
+    """Obtém lista deduplicada de TODOS os user_ids atribuídos ao processo.
+    
+    Inclui consultores, mediadores, indexação e parceiro.
+    Usa os campos novos (_ids) com fallback para os antigos (_id).
+    """
+    ids = set()
+    
+    # Consultores (lista nova)
+    for uid in (process.get("assigned_consultor_ids") or []):
+        if uid:
+            ids.add(uid)
+    # Consultor singular (fallback)
+    uid = process.get("assigned_consultor_id")
+    if uid:
+        ids.add(uid)
+    
+    # Mediadores (lista nova)
+    for uid in (process.get("assigned_mediador_ids") or []):
+        if uid:
+            ids.add(uid)
+    # Mediador singular (fallback)
+    uid = process.get("assigned_mediador_id")
+    if uid:
+        ids.add(uid)
+    
+    # Indexação
+    uid = process.get("assigned_indexacao_id")
+    if uid:
+        ids.add(uid)
+    
+    # Parceiro
+    uid = process.get("assigned_parceiro_id")
+    if uid:
+        ids.add(uid)
+    
+    return list(ids)

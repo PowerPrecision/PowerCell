@@ -3292,6 +3292,26 @@ async def send_portal_message_staff(
             detail="Erro ao enviar mensagem. Tente novamente."
         )
 
+    # ── Notificar outros membros da equipa (excluindo o remetente) ──
+    await _notify_team_portal_message(process, user, process_id)
+
+    # ── Broadcast via WebSocket room do processo ──
+    try:
+        room_name = f"process_{process_id}"
+        await manager.broadcast_to_room(
+            room_name,
+            create_ws_message(WSEventType.PORTAL_MESSAGE, {
+                "process_id": process_id,
+                "sender_type": "staff",
+                "sender_id": user.get("id", ""),
+                "sender_name": user.get("name", "Staff"),
+                "message_preview": content[:100],
+            }),
+            exclude_user=user.get("id")  # Não enviar de volta ao remetente
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao fazer broadcast WS para room do processo {process_id}: {e}")
+
     # Return without MongoDB _id
     return {
         "id": message_id,
@@ -3304,4 +3324,33 @@ async def send_portal_message_staff(
         "read_by_client": False,
         "read_by_staff": True,
     }
+
+
+async def _notify_team_portal_message(process: dict, sender: dict, process_id: str):
+    """Notifica outros membros da equipa atribuída quando um membro envia mensagem ao cliente.
+    
+    O remetente NÃO recebe notificação. Apenas os outros utilizadores atribuídos.
+    """
+    from routes.portal import _get_all_assigned_user_ids
+    
+    assigned_ids = _get_all_assigned_user_ids(process)
+    sender_id = sender.get("id", "")
+    process_ref = process.get("process_number", process_id)
+    sender_name = sender.get("name", "Membro da equipa")
+    client_name = process.get("client_name", "Cliente")
+    
+    for uid in assigned_ids:
+        if uid == sender_id:
+            continue  # Não notificar o remetente
+        try:
+            team_user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
+            if team_user and team_user.get("email"):
+                await send_notification_with_preference_check(
+                    team_user["email"],
+                    "Nova Mensagem no Processo",
+                    f"{sender_name} enviou uma mensagem ao cliente {client_name} no processo #{process_ref}.",
+                    notification_type="portal_message"
+                )
+        except Exception as e:
+            logger.warning(f"Erro ao notificar membro {uid} sobre mensagem do portal: {e}")
 

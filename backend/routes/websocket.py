@@ -225,6 +225,38 @@ async def websocket_notifications(
                     )
                     await manager.broadcast(unlock_message, exclude_user=str(user.get("id", "")))
                 
+                elif data.get("type") == "join_process_room":
+                    # Juntar-se à room do processo para receber mensagens em tempo real
+                    process_id = data.get("process_id")
+                    if process_id:
+                        room_name = f"process_{process_id}"
+                        manager.join_room(room_name, user_id)
+                        try:
+                            await websocket.send_json(create_ws_message(
+                                "room_joined",
+                                {"room": room_name, "process_id": process_id}
+                            ))
+                        except Exception:
+                            connected = False
+                            break
+                        logger.info(f"[ROOM] Utilizador {user_id} juntou-se à room '{room_name}'")
+                
+                elif data.get("type") == "leave_process_room":
+                    # Sair da room do processo
+                    process_id = data.get("process_id")
+                    if process_id:
+                        room_name = f"process_{process_id}"
+                        manager.leave_room(room_name, user_id)
+                        try:
+                            await websocket.send_json(create_ws_message(
+                                "room_left",
+                                {"room": room_name, "process_id": process_id}
+                            ))
+                        except Exception:
+                            connected = False
+                            break
+                        logger.info(f"[ROOM] Utilizador {user_id} saiu da room '{room_name}'")
+                
             except WebSocketDisconnect:
                 logger.debug(f"WebSocketDisconnect: {user_id}")
                 connected = False
