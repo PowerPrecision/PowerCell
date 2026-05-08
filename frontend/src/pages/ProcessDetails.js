@@ -35,6 +35,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { safeLabel, safeNumber } from "../components/dashboard/DashboardShared";
 import DashboardLayout from "../layouts/DashboardLayout";
+import useWebSocket, { WSEventType } from "../hooks/useWebSocket";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -255,6 +256,17 @@ const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, token } = useAuth();
+  
+  // ── WebSocket: juntar-se à room do processo para mensagens em tempo real ──
+  const { joinProcessRoom, leaveProcessRoom, on, off } = useWebSocket({
+    onPortalMessage: (data) => {
+      // Quando chega uma nova mensagem do portal, refrescar a lista
+      if (data?.process_id === id && activeTab === "mensagens") {
+        fetchPortalMessages();
+        fetchPortalUnreadCount();
+      }
+    },
+  });
   const [process, setProcess] = useState(null);
   // Guardar os dados originais do processo (da BD) para componentes
   // que precisam dos valores guardados (ex: email para notificações)
@@ -937,6 +949,18 @@ const ProcessDetails = () => {
     fetchPortalUnreadCount();
     return () => clearInterval(interval);
   }, [fetchPortalUnreadCount]);
+
+  // ── WebSocket Room: juntar-se à room do processo para mensagens em tempo real ──
+  useEffect(() => {
+    if (id) {
+      joinProcessRoom(id);
+    }
+    return () => {
+      if (id) {
+        leaveProcessRoom(id);
+      }
+    };
+  }, [id, joinProcessRoom, leaveProcessRoom]);
 
   const fetchData = async () => {
     try {

@@ -84,6 +84,13 @@ export const WSEventType = {
 
   // Chat
   NEW_CHAT_MESSAGE: 'new_chat_message',
+
+  // Portal Messages (client ↔ staff)
+  PORTAL_MESSAGE: 'portal_message',
+
+  // Room events
+  ROOM_JOINED: 'room_joined',
+  ROOM_LEFT: 'room_left',
 };
 
 const INITIAL_RECONNECT_INTERVAL = 1000;
@@ -132,6 +139,9 @@ class WebSocketManager {
 
     // Token refresh lock (prevents concurrent refresh attempts)
     this._isRefreshing = false;
+
+    // Active process rooms (for auto-rejoin on reconnect)
+    this._joinedRooms = new Set();
   }
 
   /**
@@ -366,6 +376,7 @@ class WebSocketManager {
         this._wsFailCount = 0;
         this._stopPolling();
         this._startHeartbeat();
+        this._rejoinRooms(); // Rejuntar-se a rooms após reconexão
         this._notifyStateListeners();
         this._dispatchEvent(WSEventType.CONNECTION_STATUS, {
           status: 'connected',
@@ -479,6 +490,37 @@ class WebSocketManager {
     return false;
   }
 
+  // ── Room-based messaging (process chat rooms) ──────────────────────
+
+  /**
+   * Juntar-se à room de um processo para receber mensagens do portal em tempo real.
+   * Regista a room para auto-rejoin em caso de reconexão.
+   */
+  joinProcessRoom(processId) {
+    if (!processId) return;
+    this._joinedRooms.add(processId);
+    return this.sendMessage('join_process_room', { process_id: processId });
+  }
+
+  /**
+   * Sair da room de um processo.
+   */
+  leaveProcessRoom(processId) {
+    if (!processId) return;
+    this._joinedRooms.delete(processId);
+    return this.sendMessage('leave_process_room', { process_id: processId });
+  }
+
+  /**
+   * Rejuntar-se a todas as rooms após reconexão.
+   */
+  _rejoinRooms() {
+    if (this._joinedRooms.size === 0) return;
+    this._joinedRooms.forEach(processId => {
+      this.sendMessage('join_process_room', { process_id: processId });
+    });
+  }
+
   /**
    * Registar handler de evento
    */
@@ -588,6 +630,9 @@ export function useWebSocket(options = {}) {
     unsubs.push(wsManager.on(WSEventType.USER_ONLINE, makeHandler('onUserOnline')));
     unsubs.push(wsManager.on(WSEventType.USER_OFFLINE, makeHandler('onUserOffline')));
     unsubs.push(wsManager.on(WSEventType.NEW_CHAT_MESSAGE, makeHandler('onChatMessage')));
+    unsubs.push(wsManager.on(WSEventType.PORTAL_MESSAGE, makeHandler('onPortalMessage')));
+    unsubs.push(wsManager.on(WSEventType.ROOM_JOINED, makeHandler('onRoomJoined')));
+    unsubs.push(wsManager.on(WSEventType.ROOM_LEFT, makeHandler('onRoomLeft')));
 
     return () => unsubs.forEach(unsub => unsub?.());
   }, []);
@@ -623,6 +668,14 @@ export function useWebSocket(options = {}) {
     return wsManager.off(eventType, handler);
   }, []);
 
+  const joinProcessRoom = useCallback((processId) => {
+    return wsManager.joinProcessRoom(processId);
+  }, []);
+
+  const leaveProcessRoom = useCallback((processId) => {
+    return wsManager.leaveProcessRoom(processId);
+  }, []);
+
   return {
     isConnected,
     isPolling: !!wsManager._pollingInterval,
@@ -631,6 +684,8 @@ export function useWebSocket(options = {}) {
     connect: (t) => wsManager.connect(t || token),
     disconnect: () => wsManager.removeSubscriber(),
     sendMessage,
+    joinProcessRoom,
+    leaveProcessRoom,
     markNotificationRead,
     markAllNotificationsRead,
     on,
