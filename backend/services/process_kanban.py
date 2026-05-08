@@ -88,6 +88,7 @@ async def get_kanban_data(
             "client_phone": 1,
             "status": 1,
             "priority": 1,
+            "prioridade": 1,
             "consultant_id": 1,
             "mediador_id": 1,
             "process_type": 1,
@@ -100,6 +101,9 @@ async def get_kanban_data(
     ).sort("updated_at", -1)
     
     processes = await cursor.to_list(length=1000)
+    
+    # Ordenar por prioridade (Alta>Média>Baixa) dentro de cada coluna
+    PRIORITY_WEIGHT = {"alta": 3, "media": 2, "baixa": 1}
     
     # Organizar por coluna
     kanban_data = defaultdict(list)
@@ -130,6 +134,13 @@ async def get_kanban_data(
                 process["mediador_name"] = user_cache[mediador_id]
         
         kanban_data[status].append(process)
+    
+    # Ordenar processos dentro de cada coluna: 1ª prioridade (Alta>Média>Baixa), 2ª updated_at
+    for status_key in kanban_data:
+        kanban_data[status_key].sort(key=lambda p: (
+            -PRIORITY_WEIGHT.get(p.get("prioridade") or p.get("priority"), 0),
+            -(p.get("updated_at") or "")
+        ))
     
     return dict(kanban_data)
 

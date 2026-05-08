@@ -32,6 +32,7 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.consultor_name === nextProps.process.consultor_name &&
     prevProps.process.mediador_name === nextProps.process.mediador_name &&
     prevProps.process.prioridade === nextProps.process.prioridade &&
+    prevProps.process.priority === nextProps.process.priority &&
     prevProps.process.under_35 === nextProps.process.under_35 &&
     prevProps.process.labels === nextProps.process.labels &&
     prevProps.isDragging === nextProps.isDragging &&
@@ -78,18 +79,34 @@ const KanbanCard = memo(({
 
   const isCurrentlyDragging = isDragging || draggingCard?.process?.id === process.id;
 
-  // Compute priority-based left border classes
-  const getPriorityBorderClass = () => {
-    if (process.prioridade === 'alta') return 'border-l-4 border-l-red-500';
-    if (process.prioridade === 'media') return 'border-l-4 border-l-amber-400';
-    return hasSecondProponent ? 'border-l-4 border-blue-600' : '';
+  // Compute priority-based styling
+  const getPriorityStyles = () => {
+    const prioridade = process.prioridade || process.priority;
+    if (prioridade === 'alta' || prioridade === 'high') {
+      return {
+        borderClass: 'border-t-4 border-t-red-500 border-l-4 border-l-red-500',
+        bgClass: 'bg-red-50/50 dark:bg-red-950/20',
+      };
+    }
+    if (prioridade === 'media' || prioridade === 'medium') {
+      return {
+        borderClass: 'border-l-4 border-l-amber-400',
+        bgClass: '',
+      };
+    }
+    return {
+      borderClass: hasSecondProponent ? 'border-l-4 border-blue-600' : '',
+      bgClass: '',
+    };
   };
+
+  const priorityStyles = getPriorityStyles();
 
   return (
     <Card
       className={`cursor-pointer hover:shadow-md transition-shadow relative ${
         isCurrentlyDragging ? "opacity-50" : ""
-      } ${getPriorityBorderClass()}`}
+      } ${priorityStyles.borderClass} ${priorityStyles.bgClass}`}
       draggable
       onDragStart={handleDragStart}
       onClick={handleClick}
@@ -114,17 +131,17 @@ const KanbanCard = memo(({
               <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                 #{process.process_number || '—'}
               </span>
-              {process.prioridade === 'alta' && (
-                <Badge className="bg-red-100 text-red-700 border-red-300 text-[9px] px-1.5 py-0 h-4 gap-0.5">
-                  <Flame className="h-2.5 w-2.5" /> Alta
+              {(process.prioridade === 'alta' || process.priority === 'high') && (
+                <Badge className="bg-red-100 text-red-700 border-red-300 text-[9px] px-1.5 py-0 h-4 gap-0.5 animate-pulse">
+                  <AlertTriangle className="h-2.5 w-2.5" /> Alta
                 </Badge>
               )}
-              {process.prioridade === 'media' && (
+              {(process.prioridade === 'media' || process.priority === 'medium') && (
                 <Badge className="bg-amber-100 text-amber-700 border-amber-300 text-[9px] px-1.5 py-0 h-4">
                   Média
                 </Badge>
               )}
-              {process.prioridade === 'baixa' && (
+              {(process.prioridade === 'baixa' || process.priority === 'low') && (
                 <Badge className="bg-green-100 text-green-700 border-green-300 text-[9px] px-1.5 py-0 h-4">
                   Baixa
                 </Badge>

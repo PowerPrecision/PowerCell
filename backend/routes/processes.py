@@ -115,6 +115,7 @@ async def broadcast_process_delta(
     consultor_names: list = None,
     mediador_names: list = None,
     priority: str = None,
+    prioridade: str = None,
     process_type: str = None,
     updated_at: str = None
 ):
@@ -147,6 +148,8 @@ async def broadcast_process_delta(
             delta["mediador_names"] = mediador_names
         if priority is not None:
             delta["priority"] = priority
+        if prioridade is not None:
+            delta["prioridade"] = prioridade
         if process_type is not None:
             delta["process_type"] = process_type
         if updated_at is not None:
@@ -1085,19 +1088,27 @@ async def get_processes(
                 p["parceiro_name"] = user_map.get(p["assigned_parceiro_id"], "")
     
     # Ordenação: usar sort_field/sort_order se fornecidos, senão ordenação padrão por workflow
+    # Mapear pesos de prioridade — suporta ambos os campos (prioridade PT + priority EN)
+    _priority_map = {
+        "alta": 3, "high": 3,
+        "media": 2, "medium": 2,
+        "baixa": 1, "low": 1,
+    }
+
+    def _get_priority_weight(p):
+        """Obtém o peso de prioridade de um processo (suporta campo PT e EN)."""
+        return _priority_map.get(p.get("prioridade") or p.get("priority"), 0)
+
     if sort_field and sort_field in ("client_name", "status", "created_at", "updated_at",
                                        "priority", "property_value", "property_location",
                                        "contacto"):
-        # Mapear campos para valores extraíveis
-        _priority_map = {"high": 3, "medium": 2, "low": 1}
-
         def _sort_key(p):
             if sort_field == "client_name":
                 return (p.get("client_name") or "").lower()
             elif sort_field == "status":
                 return (p.get("status") or "").lower()
             elif sort_field == "priority":
-                return _priority_map.get(p.get("priority"), 0)
+                return _get_priority_weight(p)
             elif sort_field in ("created_at", "updated_at"):
                 return p.get(sort_field) or ""
             elif sort_field == "contacto":
@@ -1112,8 +1123,12 @@ async def get_processes(
             # Fallback para tipos mistos (ex: strings vs None)
             processes.sort(key=lambda p: str(_sort_key(p)), reverse=reverse)
     else:
-        # Ordenação padrão: 1ª por fase do workflow, 2ª por nome do cliente
-        processes.sort(key=lambda p: (status_order.get(p.get("status"), 999), (p.get("client_name") or "").lower()))
+        # Ordenação padrão: 1ª por prioridade (Alta>Média>Baixa), 2ª por fase do workflow, 3ª por nome
+        processes.sort(key=lambda p: (
+            -_get_priority_weight(p),
+            status_order.get(p.get("status"), 999),
+            (p.get("client_name") or "").lower()
+        ))
     
     # Total e paginação (após ordenação)
     total = len(processes)
@@ -1422,6 +1437,7 @@ async def get_kanban_board(
         "client_phone": 1,
         "status": 1,
         "priority": 1,
+        "prioridade": 1,
         "under_35": 1,
         "process_type": 1,
         "property_value": 1,
@@ -1471,9 +1487,13 @@ async def get_kanban_board(
         db.processes.count_documents(inactive_count_query),
     )
     
-    # Ordenar processos dentro de cada coluna por nome do cliente
+    # Ordenar processos dentro de cada coluna: 1ª por prioridade (Alta>Média>Baixa), 2ª por updated_at
+    PRIORITY_WEIGHT = {"alta": 3, "media": 2, "baixa": 1}
     for status_key in processes_by_status:
-        processes_by_status[status_key].sort(key=lambda p: (p.get("client_name") or "").lower())
+        processes_by_status[status_key].sort(key=lambda p: (
+            -PRIORITY_WEIGHT.get(p.get("prioridade") or p.get("priority"), 0),
+            -(p.get("updated_at") or "")
+        ))
     
     kanban = []
     for status in statuses:
@@ -2342,6 +2362,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         status=updated.get("status"),
         old_status=process.get("status") if data.status else None,
         priority=updated.get("prioridade") or updated.get("priority"),
+        prioridade=updated.get("prioridade"),
         updated_at=updated.get("updated_at")
     )
     
@@ -2579,6 +2600,7 @@ async def assign_process(
         assigned_mediador_ids=updated_process.get("assigned_mediador_ids", []),
         consultor_names=updated_process.get("consultor_names", []),
         mediador_names=updated_process.get("mediador_names", []),
+        prioridade=updated_process.get("prioridade"),
         updated_at=updated_process.get("updated_at")
     )
     

@@ -56,6 +56,25 @@ import ProcessDetailsModal from './kanban/ProcessDetailsModal';
 import CreateClientModal from './kanban/CreateClientModal';
 import AssignUsersModal from './kanban/AssignUsersModal';
 
+// ====================================================================
+// ORDENAÇÃO POR PRIORIDADE
+// Peso: Alta=3, Média=2, Baixa=1, undefined=0
+// Ordenação primária por peso (desc), secundária por updated_at (desc)
+// ====================================================================
+const PRIORITY_WEIGHT = { alta: 3, media: 2, baixa: 1, high: 3, medium: 2, low: 1 };
+
+const sortProcessesByPriority = (processes) => {
+  return [...processes].sort((a, b) => {
+    const weightA = PRIORITY_WEIGHT[a.prioridade || a.priority] || 0;
+    const weightB = PRIORITY_WEIGHT[b.prioridade || b.priority] || 0;
+    if (weightB !== weightA) return weightB - weightA;
+    // Secondary sort: most recently updated first
+    const dateA = a.updated_at || a.created_at || '';
+    const dateB = b.updated_at || b.created_at || '';
+    return dateB.localeCompare(dateA);
+  });
+};
+
 const KanbanBoard = ({ 
   token, 
   user, 
@@ -213,49 +232,51 @@ const KanbanBoard = ({
   // === FILTERED DATA ===
   const filteredColumns = columns.map(column => ({
     ...column,
-    processes: column.processes.filter(process => {
-      // Text search filter
-      const matchesSearch =
-        process.client_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        process.client_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        process.client_phone?.includes(searchTerm) ||
-        process.consultor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        process.mediador_name?.toLowerCase().includes(searchTerm.toLowerCase());
+    processes: sortProcessesByPriority(
+      column.processes.filter(process => {
+        // Text search filter
+        const matchesSearch =
+          process.client_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          process.client_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          process.client_phone?.includes(searchTerm) ||
+          process.consultor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          process.mediador_name?.toLowerCase().includes(searchTerm.toLowerCase());
 
-      // Date filter
-      let matchesDate = true;
-      if (dateFilter !== 'all' && process.created_at) {
-        const created = new Date(process.created_at);
-        const now = new Date();
-        if (dateFilter === 'today') {
-          matchesDate = created.toDateString() === now.toDateString();
-        } else if (dateFilter === 'week') {
-          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          matchesDate = created >= weekAgo;
-        } else if (dateFilter === 'month') {
-          const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-          matchesDate = created >= monthAgo;
-        }
-      }
-
-      // Urgency filter
-      let matchesUrgency = true;
-      if (urgencyFilter !== 'all') {
-        const lastUpdate = process.updated_at || process.created_at;
-        if (lastUpdate) {
-          const daysSinceUpdate = Math.floor((Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24));
-          if (urgencyFilter === 'overdue') {
-            matchesUrgency = daysSinceUpdate > 14;
-          } else if (urgencyFilter === 'urgent') {
-            matchesUrgency = daysSinceUpdate > 7 && daysSinceUpdate <= 14;
-          } else if (urgencyFilter === 'normal') {
-            matchesUrgency = daysSinceUpdate <= 7;
+        // Date filter
+        let matchesDate = true;
+        if (dateFilter !== 'all' && process.created_at) {
+          const created = new Date(process.created_at);
+          const now = new Date();
+          if (dateFilter === 'today') {
+            matchesDate = created.toDateString() === now.toDateString();
+          } else if (dateFilter === 'week') {
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            matchesDate = created >= weekAgo;
+          } else if (dateFilter === 'month') {
+            const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            matchesDate = created >= monthAgo;
           }
         }
-      }
 
-      return matchesSearch && matchesDate && matchesUrgency;
-    }),
+        // Urgency filter
+        let matchesUrgency = true;
+        if (urgencyFilter !== 'all') {
+          const lastUpdate = process.updated_at || process.created_at;
+          if (lastUpdate) {
+            const daysSinceUpdate = Math.floor((Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24));
+            if (urgencyFilter === 'overdue') {
+              matchesUrgency = daysSinceUpdate > 14;
+            } else if (urgencyFilter === 'urgent') {
+              matchesUrgency = daysSinceUpdate > 7 && daysSinceUpdate <= 14;
+            } else if (urgencyFilter === 'normal') {
+              matchesUrgency = daysSinceUpdate <= 7;
+            }
+          }
+        }
+
+        return matchesSearch && matchesDate && matchesUrgency;
+      })
+    ),
   }));
 
   // Flattened processes for list view
