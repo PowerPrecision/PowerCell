@@ -1,6 +1,29 @@
 # Worklog - PowerCell CRM
 
 ---
+Task ID: rbac-cleanup-2026-03-04
+Agent: Main Agent
+Task: Remoção do role mediador, validação de cargos duplicados, acesso Visão Global para indexação, correção de build Vercel
+
+Work Log:
+- Analisado o erro de build Vercel: "Unterminated regular expression" em SystemConfigPage.js:3030
+- Diagnosticado `</div>` extra (orfão) na linha 3030 — não correspondia a nenhuma tag de abertura
+- Removido o `</div>` extra — build esbuild validado com sucesso
+- Removido o role "mediador" de 15+ ficheiros (roleLabels, roleColors, filterByAnyRole, STAFF_ROLES, allowedRoles, ContextSwitcher, etc.)
+- Adicionado grupo "Visão Global" (Todos os Clientes, Todos os Processos) à Sidebar do role indexação
+- Adicionada validação de cargos duplicados em UsersManagementPage.js: cargo principal filtrado dos adicionais, aviso visual, bloqueio no submit
+- Removido package-lock.json do frontend (conflito com Yarn)
+- Atualizado CHANGELOG.md com entrada detalhada
+- Commit e40155e pushed para branch dev
+
+Stage Summary:
+- 26 ficheiros alterados, 61 inserções, 9607 eliminações (principalmente package-lock.json)
+- Build Vercel corrigido (SystemConfigPage.js)
+- Role "mediador" completamente removido do sistema (mantidas referências a mediador no contexto de processos de negócio)
+- Indexação agora vê Visão Global na Sidebar
+- Validação: cargo principal ≠ cargo adicional (com toast de erro e aviso visual)
+
+---
 Task ID: 1
 Agent: Main Agent
 Task: Implementar funcionalidades pendentes — correções de bugs e novas funcionalidades
