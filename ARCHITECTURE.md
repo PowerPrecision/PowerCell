@@ -635,6 +635,58 @@ sequenceDiagram
 
 ---
 
+## Navegação e Controlo de Acessos (RBAC)
+
+### Painel de Administração Centralizado (/admin)
+
+O Painel de Administração é o hub centralizado para gestão do sistema, acessível via rota `/admin` para os roles `admin` e `CEO`. Substitui a dispersão de links de configuração pela Sidebar.
+
+**Tabs do Painel de Administração:**
+
+| Tab | Visível para | Descrição |
+|-----|-------------|-----------|
+| Visão Geral | admin, CEO | Quadro Kanban de processos com filtros |
+| Calendário | admin, CEO | Prazos e eventos do pipeline |
+| Documentos | admin, CEO | Documentos com validades próximas |
+| Análise IA | admin, CEO | Análise inteligente de documentos |
+| Pesquisar | admin, CEO | Pesquisa global de clientes |
+| Tarefas | admin, CEO | Gestão de tarefas assíncronas |
+| Leads | admin, CEO | Pipeline de leads |
+| **Utilizadores** | admin, CEO | Gestão completa de utilizadores (UsersManagementPage) |
+| **Configurações** | admin, CEO | Configurações gerais do sistema (SystemConfigPage) |
+| **Automações** | admin, CEO | Regras de automação "Se X, Então Y" |
+| **Segurança & Backups** | **apenas admin** | Backups da BD e verificação de integridade |
+| **Logs & Diagnósticos** | **apenas admin** | Logs do sistema, importação IA e diagnósticos |
+
+### Sidebar Principal por Role
+
+| Role | Menu Visível | Observações |
+|------|-------------|-------------|
+| **indexação** | Listas de Trabalho (Registos, Processos, Doc. Pendentes) | SEM Dashboard, SEM Estatísticas, SEM Configuração |
+| **consultor/mediador/intermediário** | Dashboard + O Meu Negócio + Visão Global + Comunicações | Acesso operacional standard |
+| **diretor** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão e Operações | Vê Estatísticas e Rascunhos; sem Painel Admin |
+| **administrativo** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão (com RGPD) | Vê RGPD; sem Painel Admin |
+| **CEO** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão + ⚙️ Painel Admin | Acesso total ao negócio; tabs técnicas escondidas |
+| **admin** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão + ⚙️ Painel Admin | Acesso total incluindo tabs técnicas |
+
+### Rotas Obsoletas na Sidebar
+
+As rotas `/rgpd-admin` e `/templates` foram removidas da navegação principal da Sidebar. As páginas continuam acessíveis via URLs diretas e através do Painel de Administração (Tabs de Configurações e Utilizadores).
+
+### Arquitetura de Páginas Embedded
+
+As páginas integradas como Tabs no Painel de Administração suportam um modo `embedded` que omite o wrapper `<DashboardLayout>`, permitindo que o conteúdo seja renderizado dentro das Tabs sem duplicar a sidebar e o header.
+
+Componentes com suporte `embedded`:
+- `UsersManagementPage` — Gestão de utilizadores
+- `SystemConfigPage` — Configurações do sistema
+- `AutomationPage` — Automações de workflow
+- `BackupsPage` — Backups da base de dados
+- `UnifiedLogsPage` — Logs unificados
+- `DiagnosticsPage` — Diagnósticos do sistema
+
+---
+
 ## Segurança
 
 - **CORS Fail-Secure**: A aplicação arranca apenas com origens explicitamente configuradas (sem wildcards)

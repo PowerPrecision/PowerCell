@@ -221,8 +221,8 @@ function DashboardRedirect() {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin vai para /admin, todos os outros staff vão para /staff (Dashboard)
-  if (hasRole(user, "admin")) {
+  // Admin e CEO vão para /admin (Painel de Administração), todos os outros staff vão para /staff
+  if (hasRole(user, "admin") || hasRole(user, "ceo")) {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/staff" replace />;
@@ -242,7 +242,7 @@ function RootRedirect() {
 
   // Se autenticado, redireciona para o dashboard adequado
   if (user) {
-    if (hasRole(user, "admin")) {
+    if (hasRole(user, "admin") || hasRole(user, "ceo")) {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/staff" replace />;
@@ -319,11 +319,11 @@ function App() {
           {/* /staff-dashboard redirect → canonical /staff */}
           <Route path="/staff-dashboard" element={<Navigate to="/staff" replace />} />
           
-          {/* Admin Dashboard - Full access */}
+          {/* Admin Dashboard - Full access (admin + CEO) */}
           <Route
             path="/admin"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <RouteBoundary name="Administração">
                   <AdminDashboard />
                 </RouteBoundary>

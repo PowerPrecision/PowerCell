@@ -1,21 +1,24 @@
 /**
- * AdminDashboard — Painel de administração principal com visão agregada do CRM.
+ * AdminDashboard — Painel de Administração centralizado com visão agregada do CRM.
  *
- * PORQUÊ: O PowerCell precisa de uma vista única onde administradores e diretores
- * podem monitorizar a saúde do pipeline de processos, atribuir tarefas à equipa,
- * acompanhar prazos e analisar KPIs de conversão. Este dashboard substitui o uso
- * de múltiplas ferramentas externas (Trello, Google Sheets, etc.) por uma interface
- * unificada com dados em tempo real.
+ * PORQUÊ: O PowerCell precisa de uma vista única onde administradores e CEO
+ * podem monitorizar a saúde do pipeline de processos, gerir utilizadores,
+ * configurar o sistema e aceder a ferramentas técnicas. Este dashboard funciona
+ * como hub centralizado, substituindo a necessidade de links espalhados pela Sidebar.
  *
  * DECISÕES ARQUITECTURAIS:
  * - KPIs no topo: processos activos, valor em carteira, taxa de conversão, novos hoje.
  * - Gráfico de funil (funnel) do pipeline com Recharts para visualizar gargalos.
  * - Alerta de processos estagnados (sem actualização há 7+ dias) com navegação directa.
- * - Tabs modulares: Visão Geral (Kanban), Calendário, Documentos, Utilizadores,
- *   Análise IA, Pesquisa de Clientes, Tarefas e Leads — cada tab é um componente
- *   independente para manter a página gerível.
- * - Filtros por consultor, mediador e indexação aplicados globalmente.
- * - Feed de atividade recente para percepção imediata do que está a acontecer.
+ * - Tabs modulares organizadas em duas categorias:
+ *   1. NEGÓCIO: Visão Geral, Calendário, Documentos, Análise IA, Pesquisar,
+ *      Tarefas, Leads — visíveis para admin e CEO.
+ *   2. ADMINISTRAÇÃO: Utilizadores, Configurações Gerais, Automações — visíveis
+ *      para admin e CEO.
+ *   3. TÉCNICO (exclusivo admin): Segurança e Backups, Logs e Diagnósticos.
+ * - Lógica CEO vs Admin: O CEO tem acesso total à gestão de negócio, utilizadores
+ *   e configurações. Apenas as tabs estritamente técnicas (Backups BD, Logs de Erro,
+ *   Diagnósticos) são escondidas do CEO e exclusivas do admin.
  *
  * @context {AuthContext} — Consome user para verificar permissões e filtros
  *
@@ -23,7 +26,7 @@
  *
  * @example
  * <AdminDashboard />
- * // Acesso via layout protegido — só visível para roles admin/ceo/diretor
+ * // Acesso via layout protegido — visível para roles admin e CEO
  */
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
@@ -39,7 +42,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { 
   Users, FolderOpen, Loader2, CheckCircle, XCircle, FileText, 
   Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building,
-  TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight
+  TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight,
+  Settings, Zap, Shield, Database, AlertTriangle
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
@@ -64,10 +68,21 @@ import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
-import { hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
+import { hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, hasRole } from "../utils/roleUtils";
+
+// Páginas integradas como Tabs (modo embedded — sem DashboardLayout)
+import UsersManagementPage from "./UsersManagementPage";
+import SystemConfigPage from "./SystemConfigPage";
+import AutomationPage from "./AutomationPage";
+import BackupsPage from "./BackupsPage";
+import UnifiedLogsPage from "./UnifiedLogsPage";
+import DiagnosticsPage from "./DiagnosticsPage";
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+
+  // Verificar se o utilizador é admin (para tabs técnicas exclusivas)
+  const isAdmin = hasRole(user, "admin");
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({});
   const [users, setUsers] = useState([]);
@@ -450,10 +465,11 @@ const AdminDashboard = () => {
           </Card>
         )}
 
-        {/* Main Tabs */}
+        {/* Main Tabs — Hub Centralizado de Administração */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
             <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
+              {/* === TABS DE NEGÓCIO === */}
               <TabsTrigger value="overview" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-overview">
                 <Eye className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Visão Geral</span><span className="sm:hidden">Geral</span>
               </TabsTrigger>
@@ -462,9 +478,6 @@ const AdminDashboard = () => {
               </TabsTrigger>
               <TabsTrigger value="documents" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-documents">
                 <FileText className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Documentos</span><span className="sm:hidden">Doc</span>
-              </TabsTrigger>
-              <TabsTrigger value="users" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-users">
-                <Users className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Utilizadores</span><span className="sm:hidden">Users</span>
               </TabsTrigger>
               <TabsTrigger value="ai" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-ai">
                 <Sparkles className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Análise IA</span><span className="sm:hidden">IA</span>
@@ -478,8 +491,37 @@ const AdminDashboard = () => {
               <TabsTrigger value="leads" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-leads">
                 <Building className="h-4 w-4 shrink-0" />Leads
               </TabsTrigger>
+
+              {/* === SEPARADOR VISUAL === */}
+              <div className="w-px h-6 bg-border mx-1 self-center" />
+
+              {/* === TABS DE ADMINISTRAÇÃO (admin + CEO) === */}
+              <TabsTrigger value="users-mgmt" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400" data-testid="tab-users-mgmt">
+                <Users className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Utilizadores</span><span className="sm:hidden">Users</span>
+              </TabsTrigger>
+              <TabsTrigger value="config" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400" data-testid="tab-config">
+                <Settings className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Configurações</span><span className="sm:hidden">Config</span>
+              </TabsTrigger>
+              <TabsTrigger value="automation" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400" data-testid="tab-automation">
+                <Zap className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Automações</span><span className="sm:hidden">Auto</span>
+              </TabsTrigger>
+
+              {/* === TABS TÉCNICAS (exclusivas do admin) === */}
+              {isAdmin && (
+                <>
+                  <div className="w-px h-6 bg-border mx-1 self-center" />
+                  <TabsTrigger value="backups" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-red-600 dark:text-red-400" data-testid="tab-backups">
+                    <Shield className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Segurança & Backups</span><span className="sm:hidden">Backup</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="logs" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-red-600 dark:text-red-400" data-testid="tab-logs">
+                    <AlertTriangle className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Logs & Diagnósticos</span><span className="sm:hidden">Logs</span>
+                  </TabsTrigger>
+                </>
+              )}
             </TabsList>
           </div>
+
+          {/* === CONTEÚDO DAS TABS DE NEGÓCIO === */}
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="mt-4 space-y-4">
@@ -559,11 +601,6 @@ const AdminDashboard = () => {
             <DocumentsTab upcomingExpiries={upcomingExpiries} />
           </TabsContent>
 
-          {/* Users Tab */}
-          <TabsContent value="users" className="mt-6">
-            <UsersTab users={users} />
-          </TabsContent>
-
           {/* AI Analysis Tab */}
           <TabsContent value="ai" className="mt-6">
             <AIAnalysisTab />
@@ -583,6 +620,56 @@ const AdminDashboard = () => {
           <TabsContent value="leads" className="mt-6">
             <LeadsKanban />
           </TabsContent>
+
+          {/* === CONTEÚDO DAS TABS DE ADMINISTRAÇÃO === */}
+
+          {/* Utilizadores — Gestão completa (UsersManagementPage em modo embedded) */}
+          <TabsContent value="users-mgmt" className="mt-6">
+            <UsersManagementPage embedded={true} />
+          </TabsContent>
+
+          {/* Configurações Gerais — SystemConfigPage em modo embedded */}
+          <TabsContent value="config" className="mt-6">
+            <SystemConfigPage embedded={true} />
+          </TabsContent>
+
+          {/* Automações — AutomationPage em modo embedded */}
+          <TabsContent value="automation" className="mt-6">
+            <AutomationPage embedded={true} />
+          </TabsContent>
+
+          {/* === CONTEÚDO DAS TABS TÉCNICAS (exclusivas do admin) === */}
+
+          {/* Segurança e Backups — BackupsPage em modo embedded */}
+          {isAdmin && (
+            <TabsContent value="backups" className="mt-6">
+              <BackupsPage embedded={true} />
+            </TabsContent>
+          )}
+
+          {/* Logs e Diagnósticos — Sub-tabs com UnifiedLogsPage e DiagnosticsPage */}
+          {isAdmin && (
+            <TabsContent value="logs" className="mt-6">
+              <Tabs defaultValue="system-logs" className="w-full">
+                <TabsList>
+                  <TabsTrigger value="system-logs" className="gap-1.5">
+                    <AlertTriangle className="h-4 w-4" />
+                    Logs do Sistema
+                  </TabsTrigger>
+                  <TabsTrigger value="diagnostics" className="gap-1.5">
+                    <Database className="h-4 w-4" />
+                    Diagnósticos
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="system-logs" className="mt-4">
+                  <UnifiedLogsPage embedded={true} />
+                </TabsContent>
+                <TabsContent value="diagnostics" className="mt-4">
+                  <DiagnosticsPage embedded={true} />
+                </TabsContent>
+              </Tabs>
+            </TabsContent>
+          )}
         </Tabs>
 
         {/* Create Event Dialog */}

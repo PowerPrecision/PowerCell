@@ -1494,7 +1494,7 @@ const CompanyEmailConfigSection = () => {
   );
 };
 
-const SystemConfigPage = () => {
+const SystemConfigPage = ({ embedded = false }) => {
   const { token, user } = useAuth();
   const [searchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
@@ -1584,29 +1584,27 @@ const SystemConfigPage = () => {
   };
 
   if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="space-y-6">
-          <div className="h-7 w-64 bg-muted animate-pulse rounded" />
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[1,2,3,4,5,6].map(i => <div key={i} className="h-28 bg-muted animate-pulse rounded-lg" />)}
-          </div>
+    const loadingContent = (
+      <div className="space-y-6">
+        <div className="h-7 w-64 bg-muted animate-pulse rounded" />
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[1,2,3,4,5,6].map(i => <div key={i} className="h-28 bg-muted animate-pulse rounded-lg" />)}
         </div>
-      </DashboardLayout>
+      </div>
     );
+    return embedded ? loadingContent : <DashboardLayout>{loadingContent}</DashboardLayout>;
   }
   if (!hasAnyRole(user, ["admin", "ceo"])) {
-    return (
-      <DashboardLayout>
-        <div className="text-center py-12">
-          <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold">Acesso Restrito</h2>
-          <p className="text-muted-foreground">
-            Apenas administradores podem aceder às configurações do sistema.
-          </p>
-        </div>
-      </DashboardLayout>
+    const accessDeniedContent = (
+      <div className="text-center py-12">
+        <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold">Acesso Restrito</h2>
+        <p className="text-muted-foreground">
+          Apenas administradores podem aceder às configurações do sistema.
+        </p>
+      </div>
     );
+    return embedded ? accessDeniedContent : <DashboardLayout>{accessDeniedContent}</DashboardLayout>;
   }
 
   const sections = Object.keys(fields).filter(key => key !== "email");
@@ -2813,9 +2811,8 @@ const SystemConfigPage = () => {
     );
   };
 
-  return (
-    <DashboardLayout>
-      <div className="space-y-6">
+  const pageContent = (
+    <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -3030,8 +3027,10 @@ const SystemConfigPage = () => {
           </main>
         </div>
       </div>
-    </DashboardLayout>
+    </div>
   );
+
+  return embedded ? pageContent : <DashboardLayout>{pageContent}</DashboardLayout>;
 };
 
 // =====================================================================

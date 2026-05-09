@@ -40,7 +40,7 @@ import {
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-const BackupsPage = () => {
+const BackupsPage = ({ embedded = false }) => {
   const [statistics, setStatistics] = useState(null);
   const [history, setHistory] = useState([]);
   const [config, setConfig] = useState(null);
@@ -209,24 +209,22 @@ const BackupsPage = () => {
   };
 
   if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="space-y-6">
-          <div className="flex justify-between">
-            <div className="h-7 w-52 bg-muted animate-pulse rounded" />
-            <div className="h-9 w-32 bg-muted animate-pulse rounded" />
-          </div>
-          <div className="space-y-3">
-            {[1,2,3,4].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}
-          </div>
+    const loadingContent = (
+      <div className="space-y-6">
+        <div className="flex justify-between">
+          <div className="h-7 w-52 bg-muted animate-pulse rounded" />
+          <div className="h-9 w-32 bg-muted animate-pulse rounded" />
         </div>
-      </DashboardLayout>
+        <div className="space-y-3">
+          {[1,2,3,4].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}
+        </div>
+      </div>
     );
+    return embedded ? loadingContent : <DashboardLayout>{loadingContent}</DashboardLayout>;
   }
 
-  return (
-    <DashboardLayout>
-      <div className="space-y-6">
+  const pageContent = (
+    <div className="space-y-6">
         {/* Header */}
         <div className="flex justify-between items-center">
           <div>
@@ -509,8 +507,9 @@ const BackupsPage = () => {
           </CardContent>
         </Card>
       </div>
-    </DashboardLayout>
   );
+
+  return embedded ? pageContent : <DashboardLayout>{pageContent}</DashboardLayout>;
 };
 
 export default BackupsPage;

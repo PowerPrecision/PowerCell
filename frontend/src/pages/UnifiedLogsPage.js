@@ -1486,13 +1486,12 @@ const ImportLogsTab = ({ token }) => {
 };
 
 // ============== PÁGINA PRINCIPAL ==============
-const UnifiedLogsPage = () => {
+const UnifiedLogsPage = ({ embedded = false }) => {
   const { token } = useAuth();
   const [activeTab, setActiveTab] = useState("system");
 
-  return (
-    <DashboardLayout title="Logs do Sistema">
-      <div className="space-y-6">
+  const pageContent = (
+    <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -1527,8 +1526,9 @@ const UnifiedLogsPage = () => {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
   );
+
+  return embedded ? pageContent : <DashboardLayout title="Logs do Sistema">{pageContent}</DashboardLayout>;
 };
 
 export default UnifiedLogsPage;

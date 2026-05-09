@@ -38,7 +38,7 @@ const ACTION_LABELS = {
   send_email: "Enviar email",
 };
 
-const AutomationPage = () => {
+const AutomationPage = ({ embedded = false }) => {
   const { token } = useAuth();
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -162,21 +162,19 @@ const AutomationPage = () => {
   const selectedAction = actions.find(a => a.id === form.action);
 
   if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="space-y-6">
-          <div className="h-7 w-56 bg-muted animate-pulse rounded" />
-          <div className="space-y-3">
-            {[1,2,3].map(i => <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />)}
-          </div>
+    const loadingContent = (
+      <div className="space-y-6">
+        <div className="h-7 w-56 bg-muted animate-pulse rounded" />
+        <div className="space-y-3">
+          {[1,2,3].map(i => <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />)}
         </div>
-      </DashboardLayout>
+      </div>
     );
+    return embedded ? loadingContent : <DashboardLayout>{loadingContent}</DashboardLayout>;
   }
 
-  return (
-    <DashboardLayout>
-      <div className="space-y-6" data-testid="automation-page">
+  const pageContent = (
+    <div className="space-y-6" data-testid="automation-page">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
@@ -367,8 +365,9 @@ const AutomationPage = () => {
           </DialogContent>
         </Dialog>
       </div>
-    </DashboardLayout>
   );
+
+  return embedded ? pageContent : <DashboardLayout>{pageContent}</DashboardLayout>;
 };
 
 export default AutomationPage;

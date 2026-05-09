@@ -65,7 +65,7 @@ const additionalRoleOptions = [
   "ceo",
 ];
 
-const UsersManagementPage = () => {
+const UsersManagementPage = ({ embedded = false }) => {
   const { user: currentUser, impersonate } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -258,21 +258,20 @@ const UsersManagementPage = () => {
   };
 
   if (loading) {
-    return (
-      <DashboardLayout title="Gestão de Utilizadores">
-        <div className="space-y-6">
-          <div className="flex items-start justify-between gap-3">
-            <div className="h-8 w-48 bg-muted animate-pulse rounded" />
-            <div className="h-9 w-36 bg-muted animate-pulse rounded" />
-          </div>
-          <TableSkeleton rows={8} columns={6} />
+    const loadingContent = (
+      <div className="space-y-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="h-8 w-48 bg-muted animate-pulse rounded" />
+          <div className="h-9 w-36 bg-muted animate-pulse rounded" />
         </div>
-      </DashboardLayout>
+        <TableSkeleton rows={8} columns={6} />
+      </div>
     );
+    return embedded ? loadingContent : <DashboardLayout title="Gestão de Utilizadores">{loadingContent}</DashboardLayout>;
   }
 
-  return (
-    <DashboardLayout title="Gestão de Utilizadores">
+  const pageContent = (
+    <>
       <div className="space-y-6">
         <Card>
           <CardHeader>
@@ -830,8 +829,10 @@ const UsersManagementPage = () => {
           )}
         </DialogContent>
       </Dialog>
-    </DashboardLayout>
+    </>
   );
+
+  return embedded ? pageContent : <DashboardLayout title="Gestão de Utilizadores">{pageContent}</DashboardLayout>;
 };
 
 export default UsersManagementPage;

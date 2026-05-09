@@ -92,6 +92,7 @@ const roleLabels = {
   diretor: "Diretor",
   ceo: "CEO",
   admin: "Administrador",
+  parceiro: "Parceiro",
 };
 
 // Cores dos badges de papel - Azul PowerCell, Dourado Precision
@@ -106,6 +107,7 @@ const roleColors = {
   administrativo: "bg-slate-500 text-white",
   diretor: "bg-purple-600 text-white",
   admin: "bg-slate-800 text-white",
+  parceiro: "bg-violet-500 text-white",
 };
 
 const DashboardLayout = ({ children, title }) => {
@@ -181,16 +183,13 @@ const DashboardLayout = ({ children, title }) => {
     // Rotas do grupo Comunicações e Ficheiros
     const comunicacoesRoutes = ["/webmail", "/minutas", "/ficheiros"];
     // Rotas do grupo Gestão e Operações
-    const gestaoRoutes = ["/templates", "/estatisticas", "/rascunhos", "/rgpd-admin"];
-    // Rotas do grupo Configurações de Sistema
-    const configRoutes = ["/configuracoes", "/contas-email", "/definicoes", "/automation", "/configuracoes/ia", "/admin/backups", "/admin/logs", "/validades", "/workflow-estados", "/configuracoes-perfis", "/admin/migracao-rgpd", "/diagnosticos", "/admin/processos-background"];
+    const gestaoRoutes = ["/estatisticas", "/rascunhos"];
     
     return {
       "meu-negocio": meuNegocioRoutes.some(r => path.startsWith(r)),
       "visao-global": visaoGlobalRoutes.some(r => path.startsWith(r)),
       "comunicacoes": comunicacoesRoutes.some(r => path.startsWith(r)),
       "gestao-operacoes": gestaoRoutes.some(r => path.startsWith(r)),
-      "config-sistema": configRoutes.some(r => path.startsWith(r)),
     };
   };
   
@@ -231,8 +230,9 @@ const DashboardLayout = ({ children, title }) => {
   const getNavItems = () => {
     const userRole = effectiveRole?.toLowerCase();
     const isAdmin = userRole === "admin";
-    const isGlobalOps = ["admin", "ceo", "administrativo"].includes(userRole);
-    const isStaff = ["consultor", "mediador", "intermediario", "consultor_intermediario", "indexacao", "diretor", "administrativo", "ceo", "admin"].includes(userRole);
+    const isCeo = userRole === "ceo";
+    const canSeeAdminPanel = isAdmin || isCeo; // Botão Painel de Administração
+    const canSeeGestao = ["admin", "ceo", "diretor"].includes(userRole);
 
     // Permissões personalizadas (se definidas)
     const userPermissions = user?.permissions || {};
@@ -245,9 +245,11 @@ const DashboardLayout = ({ children, title }) => {
     };
 
     // ====================================================================
-    // DASHBOARD (Visível para todos)
+    // DASHBOARD
+    // — admin e CEO: aponta para /admin (Painel de Administração)
+    // — todos os outros: aponta para /staff
     // ====================================================================
-    const dashboardHref = isAdmin ? "/admin" : "/staff";
+    const dashboardHref = canSeeAdminPanel ? "/admin" : "/staff";
     const dashboardItem = {
       label: "Dashboard",
       icon: LayoutDashboard,
@@ -255,7 +257,7 @@ const DashboardLayout = ({ children, title }) => {
     };
 
     // ====================================================================
-    // O MEU NEGÓCIO (Visível para todos)
+    // O MEU NEGÓCIO (Visível para consultores, diretor, admin, CEO)
     // ====================================================================
     const meuNegocioGroup = {
       id: "meu-negocio",
@@ -296,7 +298,7 @@ const DashboardLayout = ({ children, title }) => {
     };
 
     // ====================================================================
-    // VISÃO GLOBAL (Apenas admin, ceo, administrativo)
+    // VISÃO GLOBAL (admin, ceo, administrativo, diretor)
     // ====================================================================
     const visaoGlobalGroup = {
       id: "visao-global",
@@ -317,7 +319,7 @@ const DashboardLayout = ({ children, title }) => {
     };
 
     // ====================================================================
-    // COMUNICAÇÕES E FICHEIROS (Visível para todos)
+    // COMUNICAÇÕES E FICHEIROS
     // ====================================================================
     const comunicacoesGroup = {
       id: "comunicacoes",
@@ -343,18 +345,15 @@ const DashboardLayout = ({ children, title }) => {
     };
 
     // ====================================================================
-    // GESTÃO E OPERAÇÕES (Apenas admin, ceo, administrativo)
+    // GESTÃO E OPERAÇÕES (admin, CEO, diretor)
+    // — /templates e /rgpd-admin REMOVIDOS da Sidebar (obsoletos como
+    //   links autónomos; acessíveis via Painel de Administração)
     // ====================================================================
     const gestaoOperacoesGroup = {
       id: "gestao-operacoes",
       label: "Gestão e Operações",
       icon: Settings,
       items: [
-        {
-          label: "Destinatários",
-          icon: Users,
-          href: "/templates",
-        },
         {
           label: "Análise e Estatísticas",
           icon: BarChart3,
@@ -365,95 +364,30 @@ const DashboardLayout = ({ children, title }) => {
           icon: FileSignature,
           href: "/rascunhos",
         },
-        {
-          label: "RGPD",
-          icon: Shield,
-          href: "/rgpd-admin",
-        },
       ],
     };
 
     // ====================================================================
-    // CONFIGURAÇÕES DE SISTEMA (Apenas admin)
-    // ====================================================================
-    const configSistemaGroup = {
-      id: "config-sistema",
-      label: "Configurações de Sistema",
-      icon: Cog,
-      items: [
-        {
-          label: "Definições Gerais",
-          icon: Settings,
-          href: "/definicoes",
-        },
-        {
-          label: "Utilizadores e Equipas",
-          icon: Users,
-          href: "/utilizadores",
-        },
-        {
-          label: "Contas de Email",
-          icon: Mail,
-          href: "/contas-email",
-        },
-        {
-          label: "Integrações",
-          icon: Zap,
-          href: "/automation",
-        },
-        {
-          label: "Gestão de Formulários",
-          icon: FileSignature,
-          href: "/gestao-formulario",
-        },
-        {
-          label: "Estados do Workflow",
-          icon: Activity,
-          href: "/workflow-estados",
-        },
-        {
-          label: "Configuração do Sistema",
-          icon: Cog,
-          href: "/configuracoes",
-        },
-      ],
-    };
-
-    // ====================================================================
-    // MENU PARA INDEXAÇÃO (simplificado)
+    // BLOQUEIO TOTAL — INDEXAÇÃO
+    // Sidebar minimalista: SÓ listas de trabalho.
+    // SEM Dashboard, SEM Estatísticas, SEM Gestão, SEM Configuração.
     // ====================================================================
     if (userRole === "indexacao") {
-      const indexacaoGroups = [];
-      if (hasPageAccess("kanban")) {
-        indexacaoGroups.push({
-          id: "meu-negocio",
-          label: "O Meu Negócio",
-          icon: Building2,
-          items: [
-            { label: "Registos de Clientes", icon: ClipboardList, href: "/registos-clientes" },
-            { label: "Os Meus Processos", icon: FileText, href: "/processos" },
-            { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
-          ],
-        });
-      }
-      // Visão Global — acessível a todos os utilizadores
-      indexacaoGroups.push(visaoGlobalGroup);
-      if (hasPageAccess("webmail")) {
-        indexacaoGroups.push({
-          id: "comunicacoes",
-          label: "Comunicações e Ficheiros",
-          icon: Mail,
-          items: [
-            { label: "Webmail", icon: Mail, href: "/webmail" },
-            { label: "Minutas", icon: FileArchive, href: "/minutas" },
-            { label: "Ficheiros", icon: FileText, href: "/ficheiros" },
-          ],
-        });
-      }
-
       return {
-        main: [dashboardItem],
-        groups: indexacaoGroups,
+        main: [], // Sem Dashboard para indexação
+        groups: [
+          {
+            id: "meu-negocio",
+            label: "Listas de Trabalho",
+            icon: ClipboardList,
+            items: [
+              { label: "Registos de Clientes", icon: ClipboardList, href: "/registos-clientes" },
+              { label: "Os Meus Processos", icon: FileText, href: "/processos" },
+              { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
+            ],
+          },
+        ],
+        showAdminButton: false,
       };
     }
 
@@ -477,11 +411,14 @@ const DashboardLayout = ({ children, title }) => {
           visaoGlobalGroup,
           comunicacoesGroup,
         ],
+        showAdminButton: false,
       };
     }
 
     // ====================================================================
     // MENU PARA DIRETOR
+    // — Vê Gestão e Operações (Estatísticas, Rascunhos)
+    // — Sem acesso ao Painel de Administração
     // ====================================================================
     if (userRole === "diretor") {
       return {
@@ -490,50 +427,59 @@ const DashboardLayout = ({ children, title }) => {
           { ...meuNegocioGroup, items: meuNegocioGroup.items.filter(i => i.href !== "/financeiro") },
           visaoGlobalGroup,
           comunicacoesGroup,
+          gestaoOperacoesGroup,
         ],
+        showAdminButton: false,
       };
     }
 
     // ====================================================================
-    // MENU PARA ADMINISTRATIVA, CEO e ADMIN
+    // MENU PARA ADMINISTRATIVO
+    // — Sem Painel de Administração, sem Gestão e Operações
     // ====================================================================
-    if (["administrativo", "ceo", "admin"].includes(userRole)) {
-      const allGroups = [
-        meuNegocioGroup,
-        visaoGlobalGroup,
-        comunicacoesGroup,
-      ];
-
-      // Gestão e Operações — para admin, remover itens redundantes
-      // (acessíveis via Definições Gerais > Destinatários, RGPD)
-      if (isAdmin) {
-        // Admin só vê "Análise e Estatísticas" neste grupo
-        allGroups.push({
-          id: "gestao-operacoes",
-          label: "Gestão e Operações",
-          icon: Settings,
-          items: gestaoOperacoesGroup.items.filter(
-            (item) => item.href === "/estatisticas"
-          ),
-        });
-      } else {
-        // CEO e Administrativo vêem todos os itens
-        allGroups.push(gestaoOperacoesGroup);
-      }
-
-      // Configurações de Sistema apenas para admin
-      if (isAdmin) {
-        allGroups.push(configSistemaGroup);
-      }
-
+    if (userRole === "administrativo") {
       return {
         main: [dashboardItem],
-        groups: allGroups,
+        groups: [
+          meuNegocioGroup,
+          visaoGlobalGroup,
+          comunicacoesGroup,
+          {
+            id: "gestao-operacoes",
+            label: "Gestão e Operações",
+            icon: Settings,
+            items: [
+              { label: "Análise e Estatísticas", icon: BarChart3, href: "/estatisticas" },
+              { label: "Rascunhos", icon: FileSignature, href: "/rascunhos" },
+              { label: "RGPD", icon: Shield, href: "/rgpd-admin" },
+            ],
+          },
+        ],
+        showAdminButton: false,
+      };
+    }
+
+    // ====================================================================
+    // MENU PARA CEO e ADMIN
+    // — Vêem Gestão e Operações
+    // — Vêem o botão "Painel de Administração" no fundo
+    // — SEM Configurações de Sistema espalhadas (tudo no Painel)
+    // ====================================================================
+    if (isAdmin || isCeo) {
+      return {
+        main: [dashboardItem],
+        groups: [
+          meuNegocioGroup,
+          visaoGlobalGroup,
+          comunicacoesGroup,
+          gestaoOperacoesGroup,
+        ],
+        showAdminButton: true,
       };
     }
 
     // Fallback
-    return { main: [dashboardItem], groups: [] };
+    return { main: [dashboardItem], groups: [], showAdminButton: false };
   };
 
   const navData = getNavItems();
@@ -664,6 +610,28 @@ const DashboardLayout = ({ children, title }) => {
               ))}
             </nav>
           </ScrollArea>
+
+          {/* Painel de Administração — apenas visível para admin e CEO */}
+          {navData.showAdminButton && (
+            <div className="px-3 pb-2">
+              <Link
+                to="/admin"
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
+                  location.pathname === "/admin"
+                    ? "bg-amber-600 text-white"
+                    : "text-amber-400 hover:bg-slate-800 hover:text-amber-300"
+                }`}
+                onClick={() => {
+                  if (window.innerWidth < 1024) {
+                    setSidebarOpen(false);
+                  }
+                }}
+              >
+                <Cog className="h-5 w-5" />
+                Painel de Administração
+              </Link>
+            </div>
+          )}
 
           {/* User section */}
           <div className="p-4 border-t border-slate-700">

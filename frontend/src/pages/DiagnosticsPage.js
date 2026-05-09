@@ -142,7 +142,7 @@ const ServiceCard = ({ serviceKey, service, onConfigure }) => {
   );
 };
 
-const DiagnosticsPage = () => {
+const DiagnosticsPage = ({ embedded = false }) => {
   const [diagnostics, setDiagnostics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -241,21 +241,19 @@ const DiagnosticsPage = () => {
   };
 
   if (loading && !diagnostics) {
-    return (
-      <DashboardLayout>
-        <div className="space-y-6">
-          <div className="h-7 w-48 bg-muted animate-pulse rounded" />
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[1,2,3,4,5,6].map(i => <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />)}
-          </div>
+    const loadingContent = (
+      <div className="space-y-6">
+        <div className="h-7 w-48 bg-muted animate-pulse rounded" />
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[1,2,3,4,5,6].map(i => <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />)}
         </div>
-      </DashboardLayout>
+      </div>
     );
+    return embedded ? loadingContent : <DashboardLayout>{loadingContent}</DashboardLayout>;
   }
 
-  return (
-    <DashboardLayout>
-      <div className="space-y-6" data-testid="diagnostics-page">
+  const pageContent = (
+    <div className="space-y-6" data-testid="diagnostics-page">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Diagnóstico do Sistema</h1>
@@ -488,8 +486,9 @@ const DiagnosticsPage = () => {
         </>
       )}
     </div>
-    </DashboardLayout>
   );
+
+  return embedded ? pageContent : <DashboardLayout>{pageContent}</DashboardLayout>;
 };
 
 export default DiagnosticsPage;
