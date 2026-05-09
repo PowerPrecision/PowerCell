@@ -317,3 +317,17 @@ Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
   syscall: 'scandir',
   path: '/home/z/my-project/src/app'
 }
+Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'scandir',
+  path: '/home/z/my-project/src/app'
+}
+Error: ENOENT: no such file or directory, scandir '/home/z/my-project/src/app'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'scandir',
+  path: '/home/z/my-project/src/app'
+}
