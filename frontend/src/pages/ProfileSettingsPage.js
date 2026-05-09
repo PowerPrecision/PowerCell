@@ -37,7 +37,6 @@ const ROLES = [
   { value: "ceo", label: "CEO", color: "bg-purple-100 text-purple-800" },
   { value: "diretor", label: "Diretor", color: "bg-blue-100 text-blue-800" },
   { value: "consultor", label: "Consultor", color: "bg-green-100 text-green-800" },
-  { value: "mediador", label: "Mediador", color: "bg-teal-100 text-teal-800" },
   { value: "intermediario", label: "Intermediário", color: "bg-cyan-100 text-cyan-800" },
   { value: "consultor_intermediario", label: "Consultor/Intermediário", color: "bg-indigo-100 text-indigo-800" },
   { value: "administrativo", label: "Administrativo", color: "bg-amber-100 text-amber-800" },

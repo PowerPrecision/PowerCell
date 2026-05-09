@@ -121,7 +121,7 @@ const KanbanBoard = ({
   const [assigningProcess, setAssigningProcess] = useState(null);
   
   // Verificar se o utilizador pode criar clientes
-  const canCreateClient = hasAnyRole(user, ['intermediario', 'mediador']);
+  const canCreateClient = hasAnyRole(user, ['intermediario']);
 
   // === REACT QUERY - DATA FETCHING ===
   const filters = { consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter };

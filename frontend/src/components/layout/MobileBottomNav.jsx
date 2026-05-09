@@ -26,7 +26,7 @@ const MobileBottomNav = () => {
   // Admin e outros vão para a lista geral de clientes
   const getClientsPath = () => {
     if (!user) return "/clientes";
-    if (hasAnyRole(user, ["consultor", "intermediario", "mediador"])) {
+    if (hasAnyRole(user, ["consultor", "intermediario"])) {
       return "/meus-clientes";
     }
     return "/clientes";

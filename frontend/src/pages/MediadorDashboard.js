@@ -46,7 +46,6 @@ const roleLabels = {
   ceo: "CEO",
   consultor: "Consultor",
   intermediario: "Intermediário de Crédito",
-  mediador: "Intermediário de Crédito",
   diretor: "Diretor(a)",
   administrativo: "Administrativo(a)",
   indexacao: "Indexação",

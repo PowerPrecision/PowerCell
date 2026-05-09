@@ -17,7 +17,6 @@ const roleLabels = {
   admin: "Administrador", 
   ceo: "CEO", 
   consultor: "Consultor", 
-  mediador: "Intermediário", 
   intermediario: "Intermediário", 
   diretor: "Diretor(a)", 
   administrativo: "Administrativo(a)"

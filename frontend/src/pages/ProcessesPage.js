@@ -32,7 +32,6 @@ import { safeString } from "../utils/safeString";
 
 const roleLabels = {
   consultor: "Consultor",
-  mediador: "Mediador",
   intermediario: "Intermediário",
   consultor_intermediario: "Consultor/Intermediário",
   indexacao: "Indexação",

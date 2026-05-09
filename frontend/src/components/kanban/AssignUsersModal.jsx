@@ -180,7 +180,7 @@ const AssignUsersModal = memo(({
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
                     {appUsers
-                      .filter(u => filterByAnyRole(u, ['mediador', 'intermediario', 'consultor_intermediario', 'intermediario_credito', 'diretor']))
+                      .filter(u => filterByAnyRole(u, ['intermediario', 'consultor_intermediario', 'intermediario_credito', 'diretor']))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})

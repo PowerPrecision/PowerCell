@@ -757,7 +757,7 @@ const ProcessDetails = () => {
     }
 
     // Verificar se o utilizador pode mudar o status
-    const canChangeStatus = ["consultor", "mediador", "admin", "ceo", "diretor", "administrativo"].includes(user?.role?.toLowerCase());
+    const canChangeStatus = ["consultor", "intermediario", "admin", "ceo", "diretor", "administrativo"].includes(user?.role?.toLowerCase());
     if (!canChangeStatus) {
       return;
     }
@@ -1360,7 +1360,7 @@ const ProcessDetails = () => {
       }
 
       // Mediador pode editar dados de crédito em fases avançadas
-      if (hasAnyRole(user, ["mediador", "admin"])) {
+      if (hasAnyRole(user, ["intermediario", "admin"])) {
         const allowedStatuses = workflowStatuses.filter(s => s.order >= 3).map(s => s.name);
         if (allowedStatuses.includes(process.status) || process.status === "ch_aprovado" || process.status === "fase_bancaria") {
           updateData.credit_data = cleanCreditDataForSubmit(creditData);
@@ -1603,24 +1603,24 @@ const ProcessDetails = () => {
   // Permissões baseadas em actions (se disponíveis) ou fallback para role
   const hasEditProcess = userActions.length > 0 
     ? userActions.includes("edit_process") 
-    : ["cliente", "consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole);
+    : ["cliente", "consultor", "intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole);
   
   const canEditPersonal = hasEditProcess;
   const canEditFinancial = hasEditProcess || (userActions.includes("view_financials") && userRole === "indexacao");
   const canEditRealEstate = hasEditProcess && 
     (userActions.length > 0 ? true : ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canEditCredit = hasEditProcess && 
-    (userActions.length > 0 ? true : ["mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+    (userActions.length > 0 ? true : ["intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canChangeStatus = hasEditProcess && 
-    (userActions.length > 0 ? true : ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+    (userActions.length > 0 ? true : ["consultor", "intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canManageDeadlines = hasEditProcess && 
-    (userActions.length > 0 ? true : ["consultor", "mediador", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+    (userActions.length > 0 ? true : ["consultor", "intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canDeleteClient = ["admin", "ceo", "diretor", "administrativo"].includes(userRole);
   
   // Permissões específicas por action
   const canManageTasks = userActions.length > 0 
     ? userActions.includes("manage_tasks") 
-    : ["admin", "ceo", "consultor", "mediador", "diretor", "administrativo"].includes(userRole);
+    : ["admin", "ceo", "consultor", "intermediario", "diretor", "administrativo"].includes(userRole);
   const canUploadDocs = userActions.length > 0 
     ? userActions.includes("upload_docs") 
     : true; // Por defeito todos podem upload
@@ -5405,7 +5405,7 @@ const ProcessDetails = () => {
               <div>
                 <Label className="text-sm font-medium mb-2 block">Intermediários / Mediadores</Label>
                 <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, ["mediador", "intermediario", "intermediario_credito", "diretor"])
+                  {filterByAnyRole(appUsers, ["intermediario", "intermediario", "intermediario_credito", "diretor"])
                     .map(u => (
                       <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
                         <input
@@ -5425,7 +5425,7 @@ const ProcessDetails = () => {
                       </label>
                     ))
                   }
-                  {filterByAnyRole(appUsers, ["mediador", "intermediario", "intermediario_credito", "diretor"]).length === 0 && (
+                  {filterByAnyRole(appUsers, ["intermediario", "intermediario", "intermediario_credito", "diretor"]).length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-2">Nenhum intermediário disponível</p>
                   )}
                 </div>

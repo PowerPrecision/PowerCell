@@ -39,7 +39,6 @@ import { Mail, Save, RefreshCw, Loader2, Eye, EyeOff, Shield, AlertCircle, Unlin
 
 const roleLabels = {
   consultor: "Consultor",
-  mediador: "Mediador",
   intermediario: "Intermediário",
   consultor_intermediario: "Consultor/Intermediário",
   indexacao: "Indexação",

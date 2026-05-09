@@ -31,7 +31,6 @@ const roleLabels = {
   cliente: "Cliente",
   consultor: "Consultor",
   intermediario: "Intermediário de Crédito",
-  mediador: "Intermediário de Crédito", // Legacy alias — maps to same label as intermediario
   consultor_intermediario: "Consultor/Intermediário",
   diretor: "Diretor(a)",
   administrativo: "Administrativo(a)",
@@ -54,7 +53,7 @@ const roleColors = {
   parceiro: "bg-violet-100 text-violet-800",
 };
 
-// Roles available as additional (excludes admin, cliente, parceiro, mediador legacy)
+// Roles available as additional (excludes admin, cliente, parceiro)
 const additionalRoleOptions = [
   "consultor",
   "intermediario",
@@ -142,6 +141,11 @@ const UsersManagementPage = ({ embedded = false }) => {
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
+    // Validação: cargo principal não pode estar nos cargos adicionais
+    if (formData.additional_roles.includes(formData.role)) {
+      toast.error(`O cargo principal "${roleLabels[formData.role]}" não pode ser também cargo adicional.`);
+      return;
+    }
     setFormLoading(true);
     try {
       const response = await createUser(formData);
@@ -181,6 +185,11 @@ const UsersManagementPage = ({ embedded = false }) => {
     e.preventDefault();
     if (!selectedUser?.id) {
       toast.error("Nenhum utilizador selecionado");
+      return;
+    }
+    // Validação: cargo principal não pode estar nos cargos adicionais
+    if (formData.additional_roles.includes(formData.role)) {
+      toast.error(`O cargo principal "${roleLabels[formData.role]}" não pode ser também cargo adicional.`);
       return;
     }
     setFormLoading(true);
@@ -452,8 +461,13 @@ const UsersManagementPage = ({ embedded = false }) => {
                       <div className="space-y-2">
                         <Label>Cargos Adicionais</Label>
                         <p className="text-xs text-muted-foreground">
-                          Permitir que este utilizador alterne entre múltiplos perfis no Context Switcher.
+                          Permitir que este utilizador alterne entre múltiplos perfis no Context Switcher. O cargo principal não pode ser selecionado como adicional.
                         </p>
+                        {formData.additional_roles.includes(formData.role) && (
+                          <p className="text-xs text-red-500 font-medium">
+                            ⚠ O cargo principal já está selecionado e não pode ser adicionado como cargo adicional.
+                          </p>
+                        )}
                         <div className="grid grid-cols-2 gap-2 pt-1">
                           {additionalRoleOptions
                             .filter((r) => r !== formData.role)
@@ -767,8 +781,13 @@ const UsersManagementPage = ({ embedded = false }) => {
               <div className="space-y-2">
                 <Label>Cargos Adicionais</Label>
                 <p className="text-xs text-muted-foreground">
-                  Permitir que este utilizador alterne entre múltiplos perfis no Context Switcher.
+                  Permitir que este utilizador alterne entre múltiplos perfis no Context Switcher. O cargo principal não pode ser selecionado como adicional.
                 </p>
+                {formData.additional_roles.includes(formData.role) && (
+                  <p className="text-xs text-red-500 font-medium">
+                    ⚠ O cargo principal já está selecionado e não pode ser adicionado como cargo adicional.
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   {additionalRoleOptions
                     .filter((r) => r !== formData.role)

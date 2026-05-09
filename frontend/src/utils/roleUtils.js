@@ -4,14 +4,14 @@
  * Utilitários para verificação de roles que consideram tanto o role principal
  * quanto o array additional_roles de um utilizador.
  *
- * Quando um utilizador tem role="consultor" e additional_roles=["mediador"],
- * hasRole(user, "mediador") retorna TRUE.
+ * Quando um utilizador tem role="consultor" e additional_roles=["intermediario"],
+ * hasRole(user, "intermediario") retorna TRUE.
  */
 
 /**
  * Verifica se um utilizador possui um determinado role (principal ou adicional).
  * @param {Object} user - Objecto do utilizador
- * @param {string} role - Role a verificar (ex: "consultor", "mediador")
+ * @param {string} role - Role a verificar (ex: "consultor", "intermediario")
  * @returns {boolean}
  */
 export const hasRole = (user, role) => {

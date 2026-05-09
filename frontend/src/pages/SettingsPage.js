@@ -224,7 +224,6 @@ const SettingsPage = () => {
       ceo: "CEO",
       consultor: "Consultor",
       intermediario: "Intermediário de Crédito",
-      mediador: "Mediador",
       consultor_intermediario: "Consultor/Intermediário",
       cliente: "Cliente",
     };

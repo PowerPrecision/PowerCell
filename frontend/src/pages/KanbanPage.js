@@ -33,7 +33,7 @@ const KanbanPage = () => {
   const parceiroFilter = searchParams.get("parceiro") || "all";
 
   const consultors = useMemo(() => filterByAnyRole(users, ["consultor", "diretor"]), [users]);
-  const intermediarios = useMemo(() => filterByAnyRole(users, ["mediador", "intermediario", "diretor"]), [users]);
+  const intermediarios = useMemo(() => filterByAnyRole(users, ["intermediario", "diretor"]), [users]);
   const indexacaoUsers = useMemo(() => filterByRole(users, "indexacao"), [users]);
   const parceiros = useMemo(() => filterByRole(users, "parceiro"), [users]);
 
@@ -114,7 +114,7 @@ const KanbanPage = () => {
               Quadro Geral de Processos
             </CardTitle>
             <CardDescription className="text-xs sm:text-sm">
-              {user?.name?.split(' ')[0]} · {hasRole(user, "admin") ? "Administrador" : hasRole(user, "ceo") ? "CEO" : hasRole(user, "consultor") ? "Consultor" : hasRole(user, "mediador") || hasRole(user, "intermediario") ? "Intermediário" : hasRole(user, "indexacao") ? "Indexação" : hasRole(user, "diretor") ? "Diretor(a)" : hasRole(user, "administrativo") ? "Administrativo(a)" : user?.role}
+              {user?.name?.split(' ')[0]} · {hasRole(user, "admin") ? "Administrador" : hasRole(user, "ceo") ? "CEO" : hasRole(user, "consultor") ? "Consultor" : hasRole(user, "intermediario") ? "Intermediário" : hasRole(user, "indexacao") ? "Indexação" : hasRole(user, "diretor") ? "Diretor(a)" : hasRole(user, "administrativo") ? "Administrativo(a)" : user?.role}
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0">

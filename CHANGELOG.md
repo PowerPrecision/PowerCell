@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-04] — Limpeza RBAC: Remoção de "mediador", Validação de Cargos e Correção de Build
+
+### Corrigido
+- **Build error: `</div>` extra em SystemConfigPage.js** (`fix` — **BUILD BLOCKER**): O ficheiro `SystemConfigPage.js` tinha um `</div>` orfão na linha 3030 que causava erro "Unterminated regular expression" no esbuild/Vercel, impedindo o build. O `</div>` não correspondia a nenhuma tag de abertura — removido.
+- **package-lock.json misturado com Yarn** (`fix`): Removido `package-lock.json` do frontend para eliminar o warning do Yarn sobre lock files misturados.
+
+### Alterado
+- **Role "mediador" removida do sistema** (`refactor` — RBAC): O role "mediador" não existe como cargo de utilizador — era um alias legacy de "intermediario". Removido de todas as roleLabels, roleColors, filterByAnyRole arrays, STAFF_ROLES, allowedRoles e ContextSwitcher em 15+ ficheiros. O role "intermediario" passa a ser o único cargo de intermediário de crédito. As referências a "mediador" no contexto de processos (assigned_mediador_id, mediador_name, mediadorFilter) foram mantidas pois referem-se ao intermediário de crédito no processo de negócio, não ao cargo de utilizador.
+- **Indexação agora tem acesso à Visão Global** (`refactor` — RBAC): O role "indexação" passou a ver o grupo "Visão Global" (Todos os Clientes, Todos os Processos) na Sidebar, além das Listas de Trabalho habituais.
+- **Validação: cargo principal ≠ cargo adicional** (`feat` — RBAC): Adicionada validação nos formulários de criação e edição de utilizadores que impede selecionar o mesmo cargo como principal e como adicional (ex: consultor + consultor). Inclui: (1) filtro automático nos checkboxes de cargos adicionais (o cargo principal já não aparece como opção), (2) aviso visual vermelho se houver duplicado, (3) bloqueio no submit com toast de erro descritivo.
+
 ## [2026-07-07] — Correção de TypeError no PUT /processes/:id
 
 ### Corrigido

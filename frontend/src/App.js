@@ -180,7 +180,7 @@ class LazyChunkErrorBoundary extends Component {
 import "./App.css";
 
 // Staff roles that can access the Kanban dashboard
-const STAFF_ROLES = ["consultor", "mediador", "intermediario", "consultor_intermediario", "indexacao", "diretor", "administrativo", "ceo", "admin"];
+const STAFF_ROLES = ["consultor", "intermediario", "consultor_intermediario", "indexacao", "diretor", "administrativo", "ceo", "admin"];
 
 // Admin roles for automation and system config
 const ADMIN_ROLES = ["admin", "ceo"];
@@ -431,7 +431,7 @@ function App() {
           <Route
             path="/meus-clientes"
             element={
-              <ProtectedRoute allowedRoles={["consultor", "intermediario", "mediador", "consultor_intermediario", "admin", "ceo", "indexacao"]}>
+              <ProtectedRoute allowedRoles={["consultor", "intermediario", "consultor_intermediario", "admin", "ceo", "indexacao"]}>
                 <RouteBoundary name="Meus Clientes">
                   <MyClientsPage />
                 </RouteBoundary>

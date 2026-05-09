@@ -36,7 +36,6 @@ const roleLabels = {
   ceo: "CEO",
   consultor: "Consultor",
   intermediario: "Intermediário de Crédito",
-  mediador: "Intermediário de Crédito",
   diretor: "Diretor(a)",
   administrativo: "Administrativo(a)",
   cliente: "Cliente"
@@ -134,7 +133,7 @@ const StaffDashboard = () => {
   const canSeeAllStats = isAdminOrCeo;
 
   const consultors = useMemo(() => filterByAnyRole(users, ["consultor", "diretor"]), [users]);
-  const intermediarios = useMemo(() => filterByAnyRole(users, ["mediador", "intermediario", "diretor"]), [users]);
+  const intermediarios = useMemo(() => filterByAnyRole(users, ["intermediario", "diretor"]), [users]);
   const indexacaoUsers = useMemo(() => filterByRole(users, "indexacao"), [users]);
   const parceiros = useMemo(() => filterByRole(users, "parceiro"), [users]);
 

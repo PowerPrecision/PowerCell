@@ -54,7 +54,7 @@ const formatRole = (role) => {
     ceo: "CEO",
     diretor: "Diretor",
     consultor: "Consultor",
-    mediador: "Intermediário",
+    intermediario: "Intermediário",
     indexacao: "Indexação",
     administrativo: "Administrativo",
     cliente: "Cliente",

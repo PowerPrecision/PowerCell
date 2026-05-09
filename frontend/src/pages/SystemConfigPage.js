@@ -3027,7 +3027,6 @@ const SystemConfigPage = ({ embedded = false }) => {
           </main>
         </div>
       </div>
-    </div>
   );
 
   return embedded ? pageContent : <DashboardLayout>{pageContent}</DashboardLayout>;

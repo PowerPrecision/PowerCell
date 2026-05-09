@@ -15,7 +15,6 @@ const roleLabels = {
   admin: "Administrador", 
   ceo: "CEO", 
   consultor: "Consultor", 
-  mediador: "Intermediário de Crédito", 
   intermediario: "Intermediário de Crédito", 
   diretor: "Diretor(a)", 
   administrativo: "Administrativo(a)"
@@ -25,7 +24,6 @@ const roleColors = {
   admin: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
   ceo: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   consultor: "bg-blue-100 text-blue-800 dark:bg-teal-600/30 dark:text-blue-400",
-  mediador: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
   intermediario: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
   diretor: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
   administrativo: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
@@ -82,7 +80,7 @@ const UsersTab = ({ users, onImpersonate }) => {
             <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
               <p className="text-sm text-muted-foreground">Intermediários</p>
               <p className="text-2xl font-bold text-emerald-800">
-                {countByRole(users, 'mediador') + countByRole(users, 'intermediario')}
+                {countByRole(users, 'intermediario')}
               </p>
             </div>
             <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">

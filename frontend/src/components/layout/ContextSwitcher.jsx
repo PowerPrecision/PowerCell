@@ -28,7 +28,6 @@ import { ChevronDown, Shield } from "lucide-react";
 
 const roleLabels = {
   consultor: "Consultor",
-  mediador: "Mediador",
   intermediario: "Intermediário",
   consultor_intermediario: "Consultor/Intermediário",
   indexacao: "Indexação",
@@ -40,7 +39,6 @@ const roleLabels = {
 
 const roleIcons = {
   consultor: "💼",
-  mediador: "🤝",
   intermediario: "🤝",
   consultor_intermediario: "💼🤝",
   indexacao: "📋",

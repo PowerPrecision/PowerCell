@@ -84,7 +84,6 @@ const MAX_UNREAD_DISPLAY = 99;
 const roleLabels = {
   cliente: "Cliente",
   consultor: "Consultor",
-  mediador: "Mediador",
   intermediario: "Intermediário de Crédito",
   consultor_intermediario: "Consultor/Intermediário",
   indexacao: "Indexação",
@@ -99,7 +98,6 @@ const roleLabels = {
 const roleColors = {
   cliente: "bg-blue-100 text-blue-800",
   consultor: "bg-brand text-white",                    // PowerCell
-  mediador: "bg-amber-500 text-white",                    // PowerCell
   intermediario: "bg-amber-500 text-white",               // PowerCell
   consultor_intermediario: "bg-gradient-to-r from-blue-900 to-amber-500 text-white",
   ceo: "bg-blue-800 text-white",                          // PowerCell
@@ -386,15 +384,16 @@ const DashboardLayout = ({ children, title }) => {
               { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
             ],
           },
+          visaoGlobalGroup, // Indexação também tem acesso à Visão Global
         ],
         showAdminButton: false,
       };
     }
 
     // ====================================================================
-    // MENU PARA CONSULTORES, INTERMEDIÁRIOS, MEDIADORES
+    // MENU PARA CONSULTORES E INTERMEDIÁRIOS
     // ====================================================================
-    if (["consultor", "mediador", "intermediario", "consultor_intermediario"].includes(userRole)) {
+    if (["consultor", "intermediario", "consultor_intermediario"].includes(userRole)) {
       const consultorNegocioItems = [
         { label: "Registos de Clientes", icon: ClipboardList, href: "/registos-clientes" },
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },

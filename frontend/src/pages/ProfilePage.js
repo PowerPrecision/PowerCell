@@ -338,7 +338,6 @@ const ProfilePage = () => {
       diretor: "Diretor(a)",
       consultor: "Consultor(a)",
       intermediario: "Intermediário de Crédito",
-      mediador: "Mediador",
       administrativo: "Administrativo(a)",
       indexacao: "Indexação",
       cliente: "Cliente",

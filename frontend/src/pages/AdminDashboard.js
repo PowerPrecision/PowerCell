@@ -105,7 +105,7 @@ const AdminDashboard = () => {
   // Get staff users for assignment (excluindo admin e ceo)
   const staffUsers = useMemo(() => excludeRoles(users || [], ["cliente", "admin", "ceo"]), [users]);
   const consultors = useMemo(() => filterByAnyRole(users || [], ["consultor", "diretor"]), [users]);
-  const intermediarios = useMemo(() => filterByAnyRole(users || [], ["mediador", "intermediario", "diretor"]), [users]);
+  const intermediarios = useMemo(() => filterByAnyRole(users || [], ["intermediario", "diretor"]), [users]);
   const indexacaoUsers = useMemo(() => filterByRole(users || [], "indexacao"), [users]);
 
   // Filter processes
