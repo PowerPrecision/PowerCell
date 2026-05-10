@@ -297,7 +297,8 @@ export const isValidRole = (role) => {
  */
 export const isStaff = (user) => {
   if (!user) return false;
-  return STAFF_ROLES.includes(user.role);
+  return STAFF_ROLES.includes(user.role) ||
+    (user.additional_roles && user.additional_roles.some(r => STAFF_ROLES.includes(r)));
 };
 
 /**
