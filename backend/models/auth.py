@@ -122,8 +122,8 @@ class UserRole:
     
     @classmethod
     def can_access_admin_panel(cls, role: str) -> bool:
-        """Check if role can access admin panel"""
-        return role in cls.MANAGEMENT_ROLES
+        """Check if role can access admin panel (apenas admin e CEO)"""
+        return role in [cls.ADMIN, cls.CEO]
     
     @classmethod
     def can_manage_documents(cls, role: str) -> bool:

@@ -114,14 +114,14 @@ export const ROLE_SHORT_LABELS = {
 /**
  * Cores para badges de perfil — schema visual coerente.
  * CEO = dourado/preto (executivo), Admin = vermelho (poder total),
- * Indexação = cinza (restrição), Consultor = esmeralda (operacional), etc.
+ * Consultor = azul (operacional), Indexação = cinza (restrição), etc.
  */
 export const ROLE_COLORS = {
   admin: "bg-red-100 text-red-800 border-red-200",
-  ceo: "bg-amber-100 text-amber-800 border-amber-200",
+  ceo: "bg-yellow-100 text-yellow-950 border-yellow-400",
   diretor: "bg-purple-100 text-purple-800 border-purple-200",
   administrativo: "bg-orange-100 text-orange-800 border-orange-200",
-  consultor: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  consultor: "bg-blue-100 text-blue-800 border-blue-200",
   intermediario: "bg-cyan-100 text-cyan-800 border-cyan-200",
   indexacao: "bg-slate-100 text-slate-800 border-slate-200",
   parceiro: "bg-violet-100 text-violet-800 border-violet-200",
@@ -131,10 +131,10 @@ export const ROLE_COLORS = {
 /** Cores para sidebar escura (fundo slate-900) */
 export const ROLE_SIDEBAR_COLORS = {
   admin: "bg-red-500/20 text-red-300",
-  ceo: "bg-amber-500/20 text-amber-300",
+  ceo: "bg-yellow-500/20 text-yellow-200",
   diretor: "bg-purple-500/20 text-purple-300",
   administrativo: "bg-orange-500/20 text-orange-300",
-  consultor: "bg-emerald-500/20 text-emerald-300",
+  consultor: "bg-blue-500/20 text-blue-300",
   intermediario: "bg-cyan-500/20 text-cyan-300",
   indexacao: "bg-slate-500/20 text-slate-300",
   parceiro: "bg-violet-500/20 text-violet-300",
@@ -144,10 +144,10 @@ export const ROLE_SIDEBAR_COLORS = {
 /** Cores para pills/badges adicionais (mais subtis) */
 export const ROLE_ADDITIONAL_COLORS = {
   admin: "bg-red-50 text-red-700 border-red-100",
-  ceo: "bg-amber-50 text-amber-700 border-amber-100",
+  ceo: "bg-yellow-50 text-yellow-800 border-yellow-200",
   diretor: "bg-purple-50 text-purple-700 border-purple-100",
   administrativo: "bg-orange-50 text-orange-700 border-orange-100",
-  consultor: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  consultor: "bg-blue-50 text-blue-700 border-blue-100",
   intermediario: "bg-cyan-50 text-cyan-700 border-cyan-100",
   indexacao: "bg-slate-50 text-slate-700 border-slate-100",
   parceiro: "bg-violet-50 text-violet-700 border-violet-100",
@@ -239,6 +239,29 @@ export const canManageUsers = (user) => {
  */
 export const canSeeGestao = (user) => {
   return hasAnyRole(user, MANAGEMENT_ROLES);
+};
+
+/**
+ * Verifica se o utilizador é gestor (admin, CEO ou diretor).
+ * Gestores têm permissões alargadas mas não acesso total ao Painel de Administração.
+ */
+export const isManager = (user) => {
+  return hasAnyRole(user, MANAGEMENT_ROLES);
+};
+
+/**
+ * Verifica se o utilizador tem nível hierárquico suficiente para uma ação.
+ * @param {Object} user - Objecto do utilizador
+ * @param {string} requiredRole - Role mínimo necessário
+ * @returns {boolean}
+ */
+export const hasAccess = (user, requiredRole) => {
+  if (!user) return false;
+  const userLevel = Math.max(
+    getRoleLevel(user.role),
+    ...(user.additional_roles || []).map(r => getRoleLevel(r))
+  );
+  return userLevel >= getRoleLevel(requiredRole);
 };
 
 /**
