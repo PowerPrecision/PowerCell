@@ -45,6 +45,7 @@ const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
 // PÁGINAS COM CODE SPLITTING (lazy loading)
 // ====================================================================
 const AdminDashboard = React.lazy(() => import("./pages/AdminDashboard"));
+const SystemAdminPanel = React.lazy(() => import("./pages/SystemAdminPanel"));
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const StatisticsPage = React.lazy(() => import("./pages/StatisticsPage"));
 const UsersManagementPage = React.lazy(() => import("./pages/UsersManagementPage"));
@@ -316,13 +317,25 @@ function App() {
           {/* /staff-dashboard redirect → canonical /staff */}
           <Route path="/staff-dashboard" element={<Navigate to="/staff" replace />} />
           
-          {/* Admin Dashboard - Full access (admin + CEO) */}
+          {/* Admin Dashboard - Painel Operacional (admin + CEO) */}
           <Route
             path="/admin"
             element={
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <RouteBoundary name="Administração">
+                <RouteBoundary name="Dashboard Operacional">
                   <AdminDashboard />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* System Admin Panel - Configurações do Sistema (admin + CEO) */}
+          <Route
+            path="/system-admin"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <RouteBoundary name="Painel de Administração do Sistema">
+                  <SystemAdminPanel />
                 </RouteBoundary>
               </ProtectedRoute>
             }

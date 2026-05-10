@@ -589,13 +589,13 @@ const DashboardLayout = ({ children, title }) => {
             </nav>
           </ScrollArea>
 
-          {/* Painel de Administração — apenas visível para admin e CEO */}
+          {/* Painel de Administração do Sistema — apenas visível para admin e CEO */}
           {navData.showAdminButton && (
             <div className="px-3 pb-2">
               <Link
-                to="/admin"
+                to="/system-admin"
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                  location.pathname === "/admin"
+                  location.pathname === "/system-admin"
                     ? "bg-amber-600 text-white"
                     : "text-amber-400 hover:bg-slate-800 hover:text-amber-300"
                 }`}
