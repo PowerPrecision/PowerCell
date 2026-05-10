@@ -25,3 +25,7 @@ https://nextjs.org/telemetry
  GET / 200 in 25ms (compile: 1951µs, render: 24ms)
  GET / 200 in 45ms (compile: 3ms, render: 42ms)
  GET / 200 in 32ms (compile: 3ms, render: 29ms)
+ GET / 200 in 29ms (compile: 2ms, render: 27ms)
+✓ Compiled in 294ms
+⚠ Cross origin request detected from preview-chat-10068647-242f-454b-8992-bc5c7ffcbe6a.space-z.ai to /_next/* resource. In a future major version of Next.js, you will need to explicitly configure "allowedDevOrigins" in next.config to allow this.
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins

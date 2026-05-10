@@ -30,7 +30,7 @@ router = APIRouter(tags=["Restore"])
 @router.post("/processes/{process_id}/restore")
 async def restore_process(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR]))
 ):
     """
     Restaura um processo que foi eliminado (soft delete).
@@ -135,7 +135,7 @@ async def restore_process(
 @router.post("/documents/{document_id}/restore")
 async def restore_document(
     document_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INDEXACAO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))
 ):
     """
     Restaura um documento que foi eliminado.
@@ -232,7 +232,7 @@ async def restore_document(
 @router.post("/tasks/{task_id}/restore")
 async def restore_task(
     task_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
 ):
     """
     Restaura uma tarefa eliminada.

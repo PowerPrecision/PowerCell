@@ -131,7 +131,7 @@ const FilesExplorerPage = () => {
   const navigate = useNavigate();
 
   const isFullAccess = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo"]);
-  const canViewExplorer = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "consultor_intermediario", "indexacao"]);
+  const canViewExplorer = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]);
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [currentPath, setCurrentPath] = useState("");

@@ -43,7 +43,7 @@ class AnalyzeOneDriveDocumentRequest(BaseModel):
 @router.post("/analyze-document")
 async def analyze_document(
     request: AnalyzeDocumentRequest,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
 ):
     """
     Analyze a document using AI and extract structured data.
@@ -113,7 +113,7 @@ async def analyze_document(
 @router.post("/analyze-onedrive-document")
 async def analyze_onedrive_document(
     request: AnalyzeOneDriveDocumentRequest,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
 ):
     """
     Analyze a document from S3 storage using AI.
@@ -390,7 +390,7 @@ async def _analyze_document_background(
 async def analyze_document_async(
     request: AsyncAnalyzeDocumentRequest,
     background_tasks: BackgroundTasks,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
 ):
     """
     Analisa um documento com IA de forma assíncrona.

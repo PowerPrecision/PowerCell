@@ -33,9 +33,7 @@ RATE_LIMITS_BY_ROLE = {
     
     # Staff operacional - limite elevado (CRM faz muitos pedidos por página)
     "consultor": {"requests": 600, "window": 60},  # 600 req/min
-    "mediador": {"requests": 600, "window": 60},
     "intermediario": {"requests": 600, "window": 60},
-    "consultor_intermediario": {"requests": 600, "window": 60},
     "administrativo": {"requests": 600, "window": 60},
     "indexacao": {"requests": 600, "window": 60},
     

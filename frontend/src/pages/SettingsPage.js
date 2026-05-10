@@ -224,7 +224,6 @@ const SettingsPage = () => {
       ceo: "CEO",
       consultor: "Consultor",
       intermediario: "Intermediário de Crédito",
-      consultor_intermediario: "Consultor/Intermediário",
       cliente: "Cliente",
     };
     return labels[role] || role;

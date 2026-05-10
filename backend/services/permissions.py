@@ -119,17 +119,6 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
             "upload_docs", "view_financials", "export_data"
         ],
     },
-    "mediador": {
-        "pages": [
-            "dashboard", "kanban", "processes", "clients", "documents",
-            "calendar", "notifications", "ai_insights", "minutas"
-        ],
-        "actions": [
-            "create_process", "edit_process",
-            "create_client", "edit_client",
-            "upload_docs", "view_financials", "export_data"
-        ],
-    },
     "administrativo": {
         "pages": [
             "dashboard", "kanban", "processes", "clients", "documents",
@@ -317,10 +306,9 @@ def get_role_display_info() -> Dict[str, Dict[str, str]]:
         "ceo": {"label": "CEO", "color": "bg-purple-100 text-purple-800"},
         "diretor": {"label": "Diretor", "color": "bg-blue-100 text-blue-800"},
         "consultor": {"label": "Consultor", "color": "bg-green-100 text-green-800"},
-        "mediador": {"label": "Mediador", "color": "bg-teal-100 text-teal-800"},
-        "intermediario": {"label": "Intermediário", "color": "bg-cyan-100 text-cyan-800"},
-        "administrativo": {"label": "Administrativo", "color": "bg-amber-100 text-amber-800"},
-        "indexacao": {"label": "Indexação", "color": "bg-gray-100 text-gray-800"},
+        "intermediario": {"label": "Intermediário de Crédito", "color": "bg-cyan-100 text-cyan-800"},
+        "administrativo": {"label": "Apoio Administrativo", "color": "bg-amber-100 text-amber-800"},
+        "indexacao": {"label": "Indexação de Dados", "color": "bg-gray-100 text-gray-800"},
         "cliente": {"label": "Cliente", "color": "bg-neutral-100 text-neutral-800"},
-        "parceiro": {"label": "Parceiro", "color": "bg-indigo-100 text-indigo-800"},
+        "parceiro": {"label": "Parceiro", "color": "bg-violet-100 text-violet-800"},
     }

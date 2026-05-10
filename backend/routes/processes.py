@@ -607,7 +607,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     Returns:
         ProcessResponse: Processo criado
     """
-    allowed_roles = [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.MEDIADOR, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]
+    allowed_roles = [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]
     
     if user["role"] not in allowed_roles:
         raise HTTPException(
@@ -777,7 +777,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     }
     
     # Atribuir automaticamente ao criador baseado no seu papel
-    if user["role"] in [UserRole.INTERMEDIARIO, UserRole.MEDIADOR]:
+    if user["role"] == UserRole.INTERMEDIARIO:
         process_doc["assigned_mediador_id"] = user["id"]
         process_doc["mediador_name"] = user["name"]
     elif user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR]:
@@ -848,7 +848,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         assigned_consultor_ids=process_doc.get("assigned_consultor_ids", []),
         assigned_mediador_ids=process_doc.get("assigned_mediador_ids", []),
         consultor_names=[user["name"]] if user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR] else [],
-        mediador_names=[user["name"]] if user["role"] in [UserRole.INTERMEDIARIO, UserRole.MEDIADOR] else [],
+        mediador_names=[user["name"]] if user["role"] == UserRole.INTERMEDIARIO else [],
         updated_at=now
     )
     
@@ -949,7 +949,7 @@ async def get_processes(
                     {"assigned_consultor_ids": user["id"]},
                     {"assigned_consultor_id": user["id"]}
                 ])
-            elif r in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+            elif r == UserRole.INTERMEDIARIO:
                 role_conditions.extend([
                     {"assigned_mediador_ids": user["id"]},
                     {"assigned_mediador_id": user["id"]}
@@ -979,7 +979,7 @@ async def get_processes(
             {"assigned_consultor_ids": user["id"]},
             {"assigned_consultor_id": user["id"]}
         ]
-    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+    elif role == UserRole.INTERMEDIARIO:
         query["$or"] = [
             {"assigned_mediador_ids": user["id"]},
             {"assigned_mediador_id": user["id"]}
@@ -1226,7 +1226,7 @@ async def get_processes_paginated(
             {"assigned_consultor_ids": user["id"]},
             {"assigned_consultor_id": user["id"]}
         ]
-    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+    elif role == UserRole.INTERMEDIARIO:
         query["$or"] = [
             {"assigned_mediador_ids": user["id"]},
             {"assigned_mediador_id": user["id"]}
@@ -1331,7 +1331,7 @@ async def get_kanban_board(
                 {"assigned_consultor_ids": user_id},
                 {"assigned_consultor_id": user_id}
             ]
-        elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+        elif role == UserRole.INTERMEDIARIO:
             query["$or"] = [
                 {"assigned_mediador_ids": user_id},
                 {"assigned_mediador_id": user_id}
@@ -1531,7 +1531,7 @@ async def get_kanban_board(
                 "consultor_name": consultor.get("name", ""),
                 "mediador_name": mediador.get("name", ""),
                 "is_assigned_to_me": is_my_consultor or is_my_mediador,
-                "my_role_in_process": "consultor" if is_my_consultor else ("mediador" if is_my_mediador else None)
+                "my_role_in_process": "consultor" if is_my_consultor else ("intermediario" if is_my_mediador else None)
             })
         
         kanban.append({
@@ -1559,7 +1559,7 @@ async def get_my_clients(
     page: int = Query(1, ge=1, description="Número da página"),
     size: int = Query(50, ge=1, le=100, description="Itens por página"),
     user: dict = Depends(require_roles([
-    UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
+    UserRole.CONSULTOR, UserRole.INTERMEDIARIO, 
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     UserRole.INDEXACAO
 ]))):
@@ -1595,7 +1595,7 @@ async def get_my_clients(
                 {"assigned_consultor_id": user_id}
             ]
         }
-    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+    elif role == UserRole.INTERMEDIARIO:
         query = {
             "$or": [
                 {"assigned_mediador_ids": user_id},
@@ -2177,10 +2177,10 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     
     # Check role-based permissions
     can_update_personal = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
-    can_update_financial = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO]
+    can_update_financial = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO]
     can_update_real_estate = UserRole.can_act_as_consultor(role)
-    can_update_credit = UserRole.can_act_as_mediador(role)
-    can_update_status = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
+    can_update_credit = UserRole.can_act_as_intermediario(role)
+    can_update_status = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
     
     if role == UserRole.CLIENTE:
         if process.get("client_id") != user["id"]:
@@ -2696,7 +2696,7 @@ async def assign_me_to_process(
         update_data["consultor_name"] = new_consultor_names[0]
         
         assignment_type = "consultor"
-    elif UserRole.can_act_as_mediador(user_role):
+    elif UserRole.can_act_as_intermediario(user_role):
         # Verificar se já está atribuído como mediador
         if user_id in current_mediador_ids:
             raise HTTPException(status_code=400, detail="Já está atribuído como intermediário a este processo")
@@ -2711,7 +2711,7 @@ async def assign_me_to_process(
         update_data["assigned_mediador_id"] = new_mediador_ids[0]
         update_data["mediador_name"] = new_mediador_names[0]
         
-        assignment_type = "mediador"
+        assignment_type = "intermediario"
     else:
         raise HTTPException(status_code=403, detail="O seu papel não permite atribuir-se a processos")
     
@@ -2780,8 +2780,8 @@ async def unassign_me_from_process(
         update_data["assigned_mediador_id"] = new_mediador_ids[0] if new_mediador_ids else None
         update_data["mediador_name"] = new_mediador_names[0] if new_mediador_names else None
         
-        removed_from.append("mediador")
-        await log_history(process_id, user, "Removeu-se como mediador", "assigned_mediador_ids", user_name, None)
+        removed_from.append("intermediario")
+        await log_history(process_id, user, "Removeu-se como intermediário", "assigned_mediador_ids", user_name, None)
     
     if not removed_from:
         raise HTTPException(status_code=400, detail="Não está atribuído a este processo")

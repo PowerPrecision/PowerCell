@@ -25,28 +25,7 @@ import {
   DropdownMenuLabel,
 } from "../ui/dropdown-menu";
 import { ChevronDown, Shield } from "lucide-react";
-
-const roleLabels = {
-  consultor: "Consultor",
-  intermediario: "Intermediário",
-  consultor_intermediario: "Consultor/Intermediário",
-  indexacao: "Indexação",
-  administrativo: "Administrativo",
-  diretor: "Diretor",
-  ceo: "CEO",
-  admin: "Administrador",
-};
-
-const roleIcons = {
-  consultor: "💼",
-  intermediario: "🤝",
-  consultor_intermediario: "💼🤝",
-  indexacao: "📋",
-  administrativo: "📁",
-  diretor: "👔",
-  ceo: "⭐",
-  admin: "🛡️",
-};
+import { ROLE_LABELS, ROLE_ICONS } from "../../utils/roleUtils";
 
 const ContextSwitcher = () => {
   const { user, effectiveRole, switchActiveRole } = useAuth();
@@ -58,8 +37,8 @@ const ContextSwitcher = () => {
   // Build list of all available roles (primary + additional, no duplicates)
   const allRoles = [user.role, ...additionalRoles.filter(r => r !== user.role)];
 
-  const currentLabel = roleLabels[effectiveRole] || effectiveRole;
-  const currentIcon = roleIcons[effectiveRole] || "👤";
+  const currentLabel = ROLE_LABELS[effectiveRole] || effectiveRole;
+  const currentIcon = ROLE_ICONS[effectiveRole] || "👤";
 
   return (
     <DropdownMenu>
@@ -82,8 +61,8 @@ const ContextSwitcher = () => {
         <DropdownMenuSeparator />
         {allRoles.map((role) => {
           const isActive = role === effectiveRole;
-          const label = roleLabels[role] || role;
-          const icon = roleIcons[role] || "👤";
+          const label = ROLE_LABELS[role] || role;
+          const icon = ROLE_ICONS[role] || "👤";
           return (
             <DropdownMenuItem
               key={role}

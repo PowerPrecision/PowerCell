@@ -101,7 +101,7 @@ def can_view_process(user: dict, process: dict) -> bool:
     
     # Todos os staff podem ver todos os processos
     # Indexação incluído pois precisa de ver todos para atribuir processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return True
     
@@ -160,7 +160,7 @@ def can_edit_process_data(user: dict, process: dict) -> tuple:
             return False, "Indexação não tem permissão para editar dados do processo"
     
     # Staff roles que podem editar (verificar se tem action edit_process)
-    staff_edit_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario"]
+    staff_edit_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]
     
     if user_role in staff_edit_roles:
         # Admin e CEO podem editar qualquer processo
@@ -181,7 +181,7 @@ def can_edit_process_data(user: dict, process: dict) -> tuple:
             return False, "Apenas pode editar processos que lhe estão atribuídos"
         
         # Mediador/Intermediário: pode editar se estiver atribuído ao processo
-        if user_role in ["mediador", "intermediario"]:
+        if user_role == "intermediario":
             assigned_mediador_ids = process.get("assigned_mediador_ids", [])
             assigned_mediador_id = process.get("assigned_mediador_id")
             if user_id in assigned_mediador_ids or user_id == assigned_mediador_id:
@@ -211,7 +211,7 @@ def build_query_filter(user: dict) -> dict:
     
     # Staff (incluindo indexacao) veem todos os processos
     # Indexação precisa de ver todos para poder atribuir a consultores/intermediários
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "mediador", "intermediario", "indexacao"]
+    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return {}
     
@@ -507,7 +507,7 @@ def encrypt_sensitive_data(data: dict) -> dict:
         "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_utilizador", "portal_financas_senha", "seg_social_utilizador", "seg_social_senha"],
         "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
         "vendedor": ["nif", "documento_id", "phone", "telefone"],
-        "mediador": ["nif", "phone", "telefone"],
+        "intermediario": ["nif", "phone", "telefone"],
     }
     
     for section, fields in sections.items():
@@ -572,7 +572,7 @@ def decrypt_sensitive_data(data: dict) -> dict:
         "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_utilizador", "portal_financas_senha", "seg_social_utilizador", "seg_social_senha"],
         "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
         "vendedor": ["nif", "documento_id", "phone", "telefone"],
-        "mediador": ["nif", "phone", "telefone"],
+        "intermediario": ["nif", "phone", "telefone"],
     }
     
     for section, fields in sections.items():

@@ -81,7 +81,7 @@ async def get_my_assigned_clients(
                 {"created_by": user_email}
             ]
         }
-    elif user_role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+    elif user_role == UserRole.INTERMEDIARIO:
         query = {
             "$or": [
                 {"assigned_mediador_ids": user_id},
@@ -561,7 +561,7 @@ async def assign_client_to_user(
         
         # Atribuir automaticamente baseado no papel do utilizador de destino
         target_role = target_user.get("role", "")
-        if target_role in ["intermediario", "mediador"]:
+        if target_role == "intermediario":
             process_doc["assigned_mediador_id"] = target_user_id
             process_doc["mediador_name"] = target_user.get("name")
         elif target_role == "consultor":
@@ -925,7 +925,7 @@ async def list_clients(
                 {"created_by": user_email}
             ]
         }
-    elif user_role in ["mediador", "intermediario"]:
+    elif user_role == "intermediario":
         role_query = {
             "$or": [
                 {"assigned_mediador_id": user_id},
@@ -1172,8 +1172,8 @@ async def update_client(
     if not can_edit and not user_actions:
         # Sem permissões personalizadas - verificar pelo role
         from models.auth import UserRole
-        can_edit = user_role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, 
-                                UserRole.MEDIADOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
+        can_edit = user_role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+                                UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
     
     if not can_edit:
         raise HTTPException(
@@ -1479,7 +1479,7 @@ async def create_process_for_client(
     }
     
     # Auto-assign based on creator role
-    if user["role"] in ["mediador", "intermediario"]:
+    if user["role"] == "intermediario":
         new_process["assigned_mediador_id"] = user["id"]
         new_process["mediador_name"] = user["name"]
     elif user["role"] in ["consultor", "diretor"]:

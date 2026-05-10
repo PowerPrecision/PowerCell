@@ -1,12 +1,199 @@
 /**
- * Deep Role Search Utilities
+ * ====================================================================
+ * ROLE UTILITIES — PowerCell CRM
+ * ====================================================================
+ * Fonte única de verdade (Single Source of Truth) para RBAC no frontend.
  *
- * Utilitários para verificação de roles que consideram tanto o role principal
- * quanto o array additional_roles de um utilizador.
+ * LISTA DEFINITIVA DE 8 PERFIS (em ordem hierárquica descendente):
+ * 1. admin          — Administrador do Sistema
+ * 2. ceo            — CEO
+ * 3. diretor        — Diretor(a)
+ * 4. administrativo — Apoio Administrativo
+ * 5. consultor      — Consultor(a)
+ * 6. intermediario  — Intermediário(a) de Crédito
+ * 7. indexacao      — Indexação de Dados
+ * 8. parceiro       — Parceiro (utilizador fantasma)
  *
- * Quando um utilizador tem role="consultor" e additional_roles=["intermediario"],
- * hasRole(user, "intermediario") retorna TRUE.
+ * NOTA: Os perfis 'mediador' e 'consultor_intermediario' foram removidos.
+ * O perfil 'cliente' é mantido apenas para referência (não é perfil de sistema).
+ * ====================================================================
  */
+
+// ====================================================================
+// CONSTANTES DE PERFIS
+// ====================================================================
+
+/** Lista definitiva de perfis do sistema (exclui 'cliente') */
+export const VALID_ROLES = [
+  "admin",
+  "ceo",
+  "diretor",
+  "administrativo",
+  "consultor",
+  "intermediario",
+  "indexacao",
+  "parceiro",
+];
+
+/** Perfis de staff (têm acesso à plataforma, exclui cliente e parceiro) */
+export const STAFF_ROLES = [
+  "admin",
+  "ceo",
+  "diretor",
+  "administrativo",
+  "consultor",
+  "intermediario",
+  "indexacao",
+];
+
+/** Perfis que podem aceder ao Painel de Administração */
+export const ADMIN_PANEL_ROLES = ["admin", "ceo"];
+
+/** Perfis que podem gerir utilizadores (CRUD) */
+export const USER_MANAGEMENT_ROLES = ["admin", "ceo"];
+
+/** Perfis de gestão (diretoria + admin) */
+export const MANAGEMENT_ROLES = ["admin", "ceo", "diretor"];
+
+/** Perfis disponíveis como "Cargo Adicional" (exclui admin, parceiro, cliente) */
+export const ADDITIONAL_ROLE_OPTIONS = [
+  "consultor",
+  "intermediario",
+  "diretor",
+  "administrativo",
+  "indexacao",
+  "ceo",
+];
+
+/** Perfis disponíveis no dropdown de "Cargo Principal" (exclui cliente) */
+export const PRIMARY_ROLE_OPTIONS = [
+  "consultor",
+  "intermediario",
+  "diretor",
+  "administrativo",
+  "indexacao",
+  "parceiro",
+  "ceo",
+  "admin",
+];
+
+// ====================================================================
+// MAPEAMENTO DE RÓTULOS AMIGÁVEIS
+// ====================================================================
+
+/** Rótulo amigável completo (para tabelas e formulários) */
+export const ROLE_LABELS = {
+  admin: "Administrador do Sistema",
+  ceo: "CEO",
+  diretor: "Diretor(a)",
+  administrativo: "Apoio Administrativo",
+  consultor: "Consultor(a)",
+  intermediario: "Intermediário(a) de Crédito",
+  indexacao: "Indexação de Dados",
+  parceiro: "Parceiro",
+  cliente: "Cliente",
+};
+
+/** Rótulo curto (para badges e espaços reduzidos) */
+export const ROLE_SHORT_LABELS = {
+  admin: "Admin",
+  ceo: "CEO",
+  diretor: "Diretor",
+  administrativo: "Adminvo",
+  consultor: "Consultor",
+  intermediario: "Intermédio",
+  indexacao: "Indexação",
+  parceiro: "Parceiro",
+  cliente: "Cliente",
+};
+
+// ====================================================================
+// CORES DOS BADGES (Tailwind CSS)
+// ====================================================================
+
+/**
+ * Cores para badges de perfil — schema visual coerente.
+ * CEO = dourado/preto (executivo), Admin = vermelho (poder total),
+ * Indexação = cinza (restrição), Consultor = esmeralda (operacional), etc.
+ */
+export const ROLE_COLORS = {
+  admin: "bg-red-100 text-red-800 border-red-200",
+  ceo: "bg-amber-100 text-amber-800 border-amber-200",
+  diretor: "bg-purple-100 text-purple-800 border-purple-200",
+  administrativo: "bg-orange-100 text-orange-800 border-orange-200",
+  consultor: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  intermediario: "bg-cyan-100 text-cyan-800 border-cyan-200",
+  indexacao: "bg-slate-100 text-slate-800 border-slate-200",
+  parceiro: "bg-violet-100 text-violet-800 border-violet-200",
+  cliente: "bg-gray-100 text-gray-800 border-gray-200",
+};
+
+/** Cores para sidebar escura (fundo slate-900) */
+export const ROLE_SIDEBAR_COLORS = {
+  admin: "bg-red-500/20 text-red-300",
+  ceo: "bg-amber-500/20 text-amber-300",
+  diretor: "bg-purple-500/20 text-purple-300",
+  administrativo: "bg-orange-500/20 text-orange-300",
+  consultor: "bg-emerald-500/20 text-emerald-300",
+  intermediario: "bg-cyan-500/20 text-cyan-300",
+  indexacao: "bg-slate-500/20 text-slate-300",
+  parceiro: "bg-violet-500/20 text-violet-300",
+  cliente: "bg-gray-500/20 text-gray-300",
+};
+
+/** Cores para pills/badges adicionais (mais subtis) */
+export const ROLE_ADDITIONAL_COLORS = {
+  admin: "bg-red-50 text-red-700 border-red-100",
+  ceo: "bg-amber-50 text-amber-700 border-amber-100",
+  diretor: "bg-purple-50 text-purple-700 border-purple-100",
+  administrativo: "bg-orange-50 text-orange-700 border-orange-100",
+  consultor: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  intermediario: "bg-cyan-50 text-cyan-700 border-cyan-100",
+  indexacao: "bg-slate-50 text-slate-700 border-slate-100",
+  parceiro: "bg-violet-50 text-violet-700 border-violet-100",
+  cliente: "bg-gray-50 text-gray-700 border-gray-100",
+};
+
+// ====================================================================
+// ÍCONES DOS PERFIS
+// ====================================================================
+
+/** Emojis para o Context Switcher e indicações rápidas */
+export const ROLE_ICONS = {
+  admin: "🛡️",
+  ceo: "⭐",
+  diretor: "👔",
+  administrativo: "📁",
+  consultor: "💼",
+  intermediario: "🤝",
+  indexacao: "📋",
+  parceiro: "🏢",
+  cliente: "👤",
+};
+
+// ====================================================================
+// HIERARQUIA DE PERFIS
+// ====================================================================
+
+/**
+ * Nível hierárquico — quanto maior, mais permissões.
+ * Usado para comparações e ordenação.
+ */
+export const ROLE_HIERARCHY = {
+  admin: 100,
+  ceo: 90,
+  diretor: 70,
+  administrativo: 50,
+  consultor: 30,
+  intermediario: 30,
+  indexacao: 10,
+  parceiro: 0,
+  cliente: 0,
+};
+
+// ====================================================================
+// FUNÇÕES DE VERIFICAÇÃO DE PERMISSÕES
+// ====================================================================
 
 /**
  * Verifica se um utilizador possui um determinado role (principal ou adicional).
@@ -29,6 +216,107 @@ export const hasAnyRole = (user, roles) => {
   if (!user || !roles || roles.length === 0) return false;
   return roles.some(role => hasRole(user, role));
 };
+
+/**
+ * Verifica se o utilizador pode aceder ao Painel de Administração.
+ * Apenas admin e CEO.
+ */
+export const canAccessAdminPanel = (user) => {
+  return hasAnyRole(user, ADMIN_PANEL_ROLES);
+};
+
+/**
+ * Verifica se o utilizador pode gerir outros utilizadores (CRUD).
+ * Apenas admin e CEO.
+ */
+export const canManageUsers = (user) => {
+  return hasAnyRole(user, USER_MANAGEMENT_ROLES);
+};
+
+/**
+ * Verifica se o utilizador pode ver a secção "Gestão e Operações".
+ * Admin, CEO e Diretor.
+ */
+export const canSeeGestao = (user) => {
+  return hasAnyRole(user, MANAGEMENT_ROLES);
+};
+
+/**
+ * Verifica se um role é válido no sistema.
+ * @param {string} role - Role a validar
+ * @returns {boolean}
+ */
+export const isValidRole = (role) => {
+  return VALID_ROLES.includes(role);
+};
+
+/**
+ * Verifica se o utilizador é staff (tem acesso à plataforma).
+ * @param {Object} user - Objecto do utilizador
+ * @returns {boolean}
+ */
+export const isStaff = (user) => {
+  if (!user) return false;
+  return STAFF_ROLES.includes(user.role);
+};
+
+/**
+ * Retorna o nível hierárquico de um role.
+ * @param {string} role - Role a consultar
+ * @returns {number} Nível (0-100)
+ */
+export const getRoleLevel = (role) => {
+  return ROLE_HIERARCHY[role] || 0;
+};
+
+/**
+ * Retorna o rótulo amigável completo de um role.
+ * @param {string} role - Role a consultar
+ * @returns {string} Rótulo amigável
+ */
+export const getRoleLabel = (role) => {
+  return ROLE_LABELS[role] || role;
+};
+
+/**
+ * Retorna o rótulo curto de um role.
+ * @param {string} role - Role a consultar
+ * @returns {string} Rótulo curto
+ */
+export const getRoleShortLabel = (role) => {
+  return ROLE_SHORT_LABELS[role] || role;
+};
+
+/**
+ * Retorna as classes CSS do badge para um role.
+ * @param {string} role - Role a consultar
+ * @returns {string} Classes Tailwind
+ */
+export const getRoleColor = (role) => {
+  return ROLE_COLORS[role] || "bg-gray-100 text-gray-800 border-gray-200";
+};
+
+/**
+ * Retorna as classes CSS do badge para sidebar escura.
+ * @param {string} role - Role a consultar
+ * @returns {string} Classes Tailwind
+ */
+export const getRoleSidebarColor = (role) => {
+  return ROLE_SIDEBAR_COLORS[role] || "bg-gray-500/20 text-gray-300";
+};
+
+/**
+ * Retorna o ícone (emoji) de um role.
+ * @param {string} role - Role a consultar
+ * @returns {string} Emoji
+ */
+export const getRoleIcon = (role) => {
+  return ROLE_ICONS[role] || "👤";
+};
+
+// ====================================================================
+// FUNÇÕES DE FILTRAGEM E CONTAGEM
+// ====================================================================
 
 /**
  * Filtra uma lista de utilizadores que possuem um determinado role.

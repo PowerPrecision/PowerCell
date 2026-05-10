@@ -47,7 +47,7 @@ async def create_temp_link(
     file_paths: Optional[str] = Form(default=None),  # JSON string ou comma-separated
     notify_email: Optional[str] = Form(default="true"),
     base_url: Optional[str] = Form(default=None),  # URL do frontend (para construir links corretos)
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
 ):
     """
     Cria um link temporário para upload ou download de documentação.
@@ -178,7 +178,7 @@ async def list_process_temp_links(
 @router.post("/{link_id}/cancel")
 async def cancel_temp_link(
     link_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
 ):
     """
     Cancela um link temporário.

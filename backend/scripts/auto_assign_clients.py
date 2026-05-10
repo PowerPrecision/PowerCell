@@ -45,7 +45,6 @@ from models.auth import UserRole
 MAX_PROCESS_PER_USER = {
     UserRole.CONSULTOR: 10000,
     UserRole.INTERMEDIARIO: 10000,
-    UserRole.MEDIADOR: 10000,
     UserRole.INDEXACAO: 10000,
 }
 
@@ -54,7 +53,6 @@ MAX_PROCESS_PER_USER = {
 ELIGIBLE_ROLES = [
     UserRole.CONSULTOR,
     UserRole.INTERMEDIARIO,
-    UserRole.MEDIADOR,
     UserRole.INDEXACAO,
 ]
 
@@ -184,7 +182,7 @@ async def assign_process_to_user(
     now = datetime.now(timezone.utc).isoformat()
     
     # Determinar campo de atribuição baseado no role
-    if user_role in [UserRole.INTERMEDIARIO, UserRole.MEDIADOR]:
+    if user_role == UserRole.INTERMEDIARIO:
         update_fields = {
             "assigned_mediador_id": user_id,
             "mediador_name": user_name,
@@ -357,7 +355,7 @@ def main():
     parser.add_argument(
         "--role",
         type=str,
-        choices=["consultor", "intermediario", "mediador", "indexacao"],
+        choices=["consultor", "intermediario", "indexacao"],
         help="Filtrar por role de utilizador"
     )
     parser.add_argument(

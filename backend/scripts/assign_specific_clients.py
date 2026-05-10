@@ -45,7 +45,7 @@ async def list_users():
 
     users = await db.users.find({
         "is_active": True,
-        **deep_role_in_filter(["admin", "ceo", "diretor", "consultor", "mediador", "indexacao"])
+        **deep_role_in_filter(["admin", "ceo", "diretor", "consultor", "intermediario", "indexacao"])
     }).to_list(100)
     
     print("\n" + "=" * 80)

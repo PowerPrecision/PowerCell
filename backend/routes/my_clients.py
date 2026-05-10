@@ -22,7 +22,7 @@ router = APIRouter(prefix="/my-clients", tags=["My Clients"])
 
 @router.get("")
 async def get_my_clients(request: Request, user: dict = Depends(require_roles([
-    UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
+    UserRole.CONSULTOR, UserRole.INTERMEDIARIO, 
     UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO,
     UserRole.DIRETOR, UserRole.ADMINISTRATIVO
 ]))):
@@ -47,7 +47,7 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     # Construir query baseada no papel do utilizador
     if role == UserRole.CONSULTOR:
         query = {"assigned_consultor_id": user_id}
-    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+    elif role == UserRole.INTERMEDIARIO:
         # Intermediários vêem processos atribuídos a eles OU criados por eles
         query = {
             "$or": [
@@ -123,7 +123,7 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
 
 @router.get("/stats")
 async def get_my_clients_stats(user: dict = Depends(require_roles([
-    UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, 
+    UserRole.CONSULTOR, UserRole.INTERMEDIARIO, 
     UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO,
     UserRole.DIRETOR, UserRole.ADMINISTRATIVO
 ]))):
@@ -137,7 +137,7 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
     # Construir query baseada no papel do utilizador
     if role == UserRole.CONSULTOR:
         query = {"assigned_consultor_id": user_id}
-    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+    elif role == UserRole.INTERMEDIARIO:
         query = {
             "$or": [
                 {"assigned_mediador_id": user_id},

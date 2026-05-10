@@ -146,7 +146,7 @@ async def find_matching_user(trello_members: list) -> dict:
                     result["consultor_name"] = matched_user["name"]
             
             # Papéis que podem ser intermediários
-            if role in ["mediador", "intermediario", "intermediario_credito", "diretor"]:
+            if role in ["intermediario", "intermediario_credito", "diretor"]:
                 if not result["assigned_mediador_id"]:
                     result["assigned_mediador_id"] = matched_user["id"]
                     result["mediador_name"] = matched_user["name"]
@@ -1258,10 +1258,10 @@ async def handle_member_added_to_card(action: dict):
         update_fields["assigned_consultor_id"] = user_id
         update_fields["consultor_name"] = user.get("name")
         logger.info(f"Consultor {user['name']} atribuído a {process['client_name']} via Trello")
-    elif user.get("role") == "mediador":
+    elif user.get("role") == "intermediario":
         update_fields["assigned_mediador_id"] = user_id
         update_fields["mediador_name"] = user.get("name")
-        logger.info(f"Mediador {user['name']} atribuído a {process['client_name']} via Trello")
+        logger.info(f"Intermediário {user['name']} atribuído a {process['client_name']} via Trello")
     
     if len(update_fields) > 1:
         await db.processes.update_one(
@@ -1313,7 +1313,7 @@ async def handle_member_removed_from_card(action: dict):
     if process.get("assigned_mediador_id") == user_id:
         update_fields["assigned_mediador_id"] = None
         update_fields["mediador_name"] = None
-        logger.info(f"Mediador removido de {process['client_name']} via Trello")
+        logger.info(f"Intermediário removido de {process['client_name']} via Trello")
     
     if len(update_fields) > 1:
         await db.processes.update_one(

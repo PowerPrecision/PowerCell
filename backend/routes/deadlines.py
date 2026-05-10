@@ -356,7 +356,7 @@ async def update_deadline(deadline_id: str, data: DeadlineUpdate, user: dict = D
 
 
 @router.delete("/{deadline_id}")
-async def delete_deadline(deadline_id: str, user: dict = Depends(require_roles([UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.ADMIN]))):
+async def delete_deadline(deadline_id: str, user: dict = Depends(require_roles([UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.ADMIN]))):
     """Elimina um prazo existente.
 
     Apenas consultores, intermediários e admins podem eliminar prazos.

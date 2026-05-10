@@ -1600,7 +1600,7 @@ EXPIRY_WARNING_DAYS = 60
 @router.post("/expiry", response_model=DocumentExpiryResponse, responses={404: HTTP_404_RESPONSE})
 async def create_document_expiry(
     data: DocumentExpiryCreate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INDEXACAO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))
 ):
     """Registar validade de um documento."""
     process = await db.processes.find_one({"id": data.process_id})
@@ -1640,7 +1640,7 @@ async def get_document_expiries(
     elif user["role"] == UserRole.CONSULTOR:
         processes = await db.processes.find({"assigned_consultor_id": user["id"]}, {"id": 1}).to_list(1000)
         query["process_id"] = {"$in": [p["id"] for p in processes]}
-    elif user["role"] == UserRole.MEDIADOR:
+    elif user["role"] == UserRole.INTERMEDIARIO:
         processes = await db.processes.find({"assigned_mediador_id": user["id"]}, {"id": 1}).to_list(1000)
         query["process_id"] = {"$in": [p["id"] for p in processes]}
     
@@ -2450,7 +2450,7 @@ async def get_expiring_documents_dashboard(
     if is_management:
         from services.role_query import deep_role_in_filter
         all_consultors = await db.users.find(
-            deep_role_in_filter(["consultor", "intermediario", "mediador"]),
+            deep_role_in_filter(["consultor", "intermediario"]),
             {"_id": 0, "id": 1, "name": 1}
         ).to_list(100)
         consultors_filter = [{"id": c["id"], "name": c.get("name", DEFAULT_CONSULTOR_NAME)} for c in all_consultors]
@@ -3587,7 +3587,7 @@ DOCUMENT_CATEGORY_MAP = {
 @router.get("/portal-requests/{process_id}")
 async def get_portal_document_requests(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Lista todos os pedidos de documentos do portal para um processo.
@@ -3663,7 +3663,7 @@ class DocumentRequestCreate(BaseModel):
 async def create_portal_document_request(
     process_id: str,
     data: DocumentRequestCreate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Solicita um documento ao cliente via portal.
@@ -3799,7 +3799,7 @@ async def update_portal_document_request(
     process_id: str,
     document_id: str,
     data: DocumentStatusUpdate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Atualiza o status de um documento do portal.
@@ -3877,7 +3877,7 @@ async def update_portal_document_request(
 async def delete_portal_document_request(
     process_id: str,
     document_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Remove um pedido de documento do portal.

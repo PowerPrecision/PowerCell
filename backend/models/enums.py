@@ -84,13 +84,14 @@ class ProcessType(str, Enum):
 
 class UserRoleEnum(str, Enum):
     """
-    Roles de utilizador do sistema.
-    Importado de models/auth.py para manter compatibilidade.
+    Roles de utilizador do sistema — lista DEFINITIVA de 8 perfis.
+    Sincronizado com models/auth.py.
+    
+    NOTA: 'mediador' e 'consultor_intermediario' foram removidos.
     """
     CLIENTE = "cliente"
     CONSULTOR = "consultor"
     INTERMEDIARIO = "intermediario"
-    MEDIADOR = "mediador"
     ADMINISTRATIVO = "administrativo"
     INDEXACAO = "indexacao"
     DIRETOR = "diretor"

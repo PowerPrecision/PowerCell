@@ -73,7 +73,7 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { hasRole } from "../utils/roleUtils";
+import { hasRole, ROLE_LABELS, ROLE_SIDEBAR_COLORS, STAFF_ROLES, ADMIN_PANEL_ROLES, MANAGEMENT_ROLES } from "../utils/roleUtils";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -81,32 +81,10 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 // Máximo de itens para o badge de mensagens não lidas
 const MAX_UNREAD_DISPLAY = 99;
 
-const roleLabels = {
-  cliente: "Cliente",
-  consultor: "Consultor",
-  intermediario: "Intermediário de Crédito",
-  consultor_intermediario: "Consultor/Intermediário",
-  indexacao: "Indexação",
-  administrativo: "Administrativo",
-  diretor: "Diretor",
-  ceo: "CEO",
-  admin: "Administrador",
-  parceiro: "Parceiro",
-};
-
-// Cores dos badges de papel - Azul PowerCell, Dourado Precision
-const roleColors = {
-  cliente: "bg-blue-100 text-blue-800",
-  consultor: "bg-brand text-white",                    // PowerCell
-  intermediario: "bg-amber-500 text-white",               // PowerCell
-  consultor_intermediario: "bg-gradient-to-r from-blue-900 to-amber-500 text-white",
-  ceo: "bg-blue-800 text-white",                          // PowerCell
-  indexacao: "bg-indigo-500 text-white",
-  administrativo: "bg-slate-500 text-white",
-  diretor: "bg-purple-600 text-white",
-  admin: "bg-slate-800 text-white",
-  parceiro: "bg-violet-500 text-white",
-};
+// Fonte única de verdade para rótulos e cores: roleUtils.js
+const roleLabels = ROLE_LABELS;
+// Cores para sidebar escura (fundo slate-900)
+const roleColors = ROLE_SIDEBAR_COLORS;
 
 const DashboardLayout = ({ children, title }) => {
   const { user, logout, effectiveRole } = useAuth();
@@ -366,9 +344,9 @@ const DashboardLayout = ({ children, title }) => {
     };
 
     // ====================================================================
-    // BLOQUEIO TOTAL — INDEXAÇÃO
-    // Sidebar minimalista: SÓ listas de trabalho.
-    // SEM Dashboard, SEM Estatísticas, SEM Gestão, SEM Configuração.
+    // INDEXAÇÃO — Sidebar minimalista com restrição máxima
+    // Vê: Listas de Trabalho, Visão Global, Comunicações e Ficheiros
+    // NÃO vê: Dashboard, Estatísticas, Gestão, Configuração
     // ====================================================================
     if (userRole === "indexacao") {
       return {
@@ -385,6 +363,7 @@ const DashboardLayout = ({ children, title }) => {
             ],
           },
           visaoGlobalGroup, // Indexação também tem acesso à Visão Global
+          comunicacoesGroup, // Indexação também tem acesso a Comunicações e Ficheiros
         ],
         showAdminButton: false,
       };
@@ -393,7 +372,7 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     // MENU PARA CONSULTORES E INTERMEDIÁRIOS
     // ====================================================================
-    if (["consultor", "intermediario", "consultor_intermediario"].includes(userRole)) {
+    if (["consultor", "intermediario"].includes(userRole)) {
       const consultorNegocioItems = [
         { label: "Registos de Clientes", icon: ClipboardList, href: "/registos-clientes" },
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },

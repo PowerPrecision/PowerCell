@@ -50,7 +50,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
     elif role == UserRole.INDEXACAO:
         # INDEXACAO vê apenas os processos atribuídos a ele
         process_query["assigned_indexacao_id"] = user_id
-    elif role in [UserRole.MEDIADOR, UserRole.INTERMEDIARIO]:
+    elif role == UserRole.INTERMEDIARIO:
         process_query["assigned_mediador_id"] = user_id
     # Admin, CEO, Administrativo e Diretor see all (no additional filter)
     
@@ -146,7 +146,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
             db.users.count_documents({"is_active": False}),
             db.users.count_documents(deep_role_filter(UserRole.CLIENTE)),
             db.users.count_documents(deep_role_in_filter([UserRole.CONSULTOR, UserRole.DIRETOR])),
-            db.users.count_documents(deep_role_in_filter([UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR])),
+            db.users.count_documents(deep_role_in_filter([UserRole.INTERMEDIARIO, UserRole.DIRETOR])),
         )
         
         stats["total_users"] = total_users

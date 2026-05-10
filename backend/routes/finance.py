@@ -30,9 +30,8 @@ router = APIRouter(tags=["Finance"])
 # Alinhado com a sidebar do frontend (STAFF_ROLES)
 FINANCE_READ_ROLES = [
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
-    UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO,
-    UserRole.CONSULTOR_INTERMEDIARIO, UserRole.ADMINISTRATIVO,
-    UserRole.INDEXACAO,
+    UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
+    UserRole.ADMINISTRATIVO, UserRole.INDEXACAO,
 ]
 
 
@@ -588,7 +587,7 @@ async def get_finance_commissions(
             if key not in collaborator_data:
                 collaborator_data[key] = {
                     "name": name,
-                    "role": "mediador",
+                    "role": "intermediario",
                     "total_comissao": 0.0,
                     "num_processos": 0,
                     "areas": {"imobiliaria": 0, "credito": 0},

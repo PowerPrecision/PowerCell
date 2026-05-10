@@ -532,7 +532,7 @@ async def batch_update_process_s3_mappings(
 @router.get("/s3-folder-contents")
 async def get_s3_folder_contents(
     folder_path: str = Query("", description="Caminho da pasta S3 (vazio = raiz)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.INDEXACAO]))
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))
 ):
     """Lista conteúdo de uma pasta S3. Se folder_path vazio, lista a raiz do bucket (Documentação Clientes/)."""
     from services.s3_storage import s3_service
@@ -595,7 +595,7 @@ async def get_s3_folder_contents(
 # Roles that can perform file operations
 FILE_OPS_ROLES = [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
 # Roles that can view/download files (broader access)
-FILE_VIEW_ROLES = [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.INTERMEDIARIO, UserRole.CONSULTOR_INTERMEDIARIO, UserRole.INDEXACAO]
+FILE_VIEW_ROLES = [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]
 
 
 class S3RenameRequest(BaseModel):

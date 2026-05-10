@@ -10,7 +10,7 @@ import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { hasRole, hasAnyRole } from "./utils/roleUtils";
+import { hasRole, hasAnyRole, STAFF_ROLES } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";
@@ -178,9 +178,6 @@ class LazyChunkErrorBoundary extends Component {
 
 // IdealistaImportPage movido para modal na página de Leads
 import "./App.css";
-
-// Staff roles that can access the Kanban dashboard
-const STAFF_ROLES = ["consultor", "intermediario", "consultor_intermediario", "indexacao", "diretor", "administrativo", "ceo", "admin"];
 
 // Admin roles for automation and system config
 const ADMIN_ROLES = ["admin", "ceo"];
@@ -431,7 +428,7 @@ function App() {
           <Route
             path="/meus-clientes"
             element={
-              <ProtectedRoute allowedRoles={["consultor", "intermediario", "consultor_intermediario", "admin", "ceo", "indexacao"]}>
+              <ProtectedRoute allowedRoles={["consultor", "intermediario", "admin", "ceo", "indexacao"]}>
                 <RouteBoundary name="Meus Clientes">
                   <MyClientsPage />
                 </RouteBoundary>

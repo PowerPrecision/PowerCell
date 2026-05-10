@@ -25,44 +25,17 @@ import { toast } from "sonner";
 import { getUsers, createUser, updateUser, deleteUser } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import EmailConfigForm from "../components/EmailConfigForm";
-import { hasRole, hasAnyRole } from "../utils/roleUtils";
-
-const roleLabels = {
-  cliente: "Cliente",
-  consultor: "Consultor",
-  intermediario: "Intermediário de Crédito",
-  consultor_intermediario: "Consultor/Intermediário",
-  diretor: "Diretor(a)",
-  administrativo: "Administrativo(a)",
-  indexacao: "Indexação",
-  ceo: "CEO",
-  admin: "Administrador",
-  parceiro: "Parceiro",
-};
-
-const roleColors = {
-  cliente: "bg-blue-100 text-blue-800",
-  consultor: "bg-emerald-100 text-emerald-800",
-  intermediario: "bg-purple-100 text-purple-800",
-  consultor_intermediario: "bg-gradient-to-r from-emerald-100 to-purple-100 text-purple-800",
-  diretor: "bg-indigo-100 text-indigo-800",
-  administrativo: "bg-amber-100 text-amber-800",
-  indexacao: "bg-cyan-100 text-cyan-800",
-  ceo: "bg-orange-100 text-orange-800",
-  admin: "bg-red-100 text-red-800",
-  parceiro: "bg-violet-100 text-violet-800",
-};
-
-// Roles available as additional (excludes admin, cliente, parceiro)
-const additionalRoleOptions = [
-  "consultor",
-  "intermediario",
-  "consultor_intermediario",
-  "diretor",
-  "administrativo",
-  "indexacao",
-  "ceo",
-];
+import {
+  hasRole,
+  hasAnyRole,
+  canManageUsers,
+  ROLE_LABELS,
+  ROLE_COLORS,
+  ROLE_ADDITIONAL_COLORS,
+  PRIMARY_ROLE_OPTIONS,
+  ADDITIONAL_ROLE_OPTIONS,
+  STAFF_ROLES,
+} from "../utils/roleUtils";
 
 const UsersManagementPage = ({ embedded = false }) => {
   const { user: currentUser, impersonate } = useAuth();
@@ -143,7 +116,7 @@ const UsersManagementPage = ({ embedded = false }) => {
     e.preventDefault();
     // Validação: cargo principal não pode estar nos cargos adicionais
     if (formData.additional_roles.includes(formData.role)) {
-      toast.error(`O cargo principal "${roleLabels[formData.role]}" não pode ser também cargo adicional.`);
+      toast.error(`O cargo principal "${ROLE_LABELS[formData.role]}" não pode ser também cargo adicional.`);
       return;
     }
     setFormLoading(true);
@@ -189,7 +162,7 @@ const UsersManagementPage = ({ embedded = false }) => {
     }
     // Validação: cargo principal não pode estar nos cargos adicionais
     if (formData.additional_roles.includes(formData.role)) {
-      toast.error(`O cargo principal "${roleLabels[formData.role]}" não pode ser também cargo adicional.`);
+      toast.error(`O cargo principal "${ROLE_LABELS[formData.role]}" não pode ser também cargo adicional.`);
       return;
     }
     setFormLoading(true);
@@ -437,19 +410,23 @@ const UsersManagementPage = ({ embedded = false }) => {
                     )}
                     <div className="space-y-2">
                       <Label>Perfil</Label>
-                      <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value, additional_roles: formData.additional_roles.filter((r) => r !== value) })}>
+                      <Select 
+                        value={formData.role} 
+                        onValueChange={(value) => setFormData({ ...formData, role: value, additional_roles: formData.additional_roles.filter((r) => r !== value) })}
+                        disabled={!canManageUsers(currentUser)}
+                      >
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="consultor">Consultor</SelectItem>
-                          <SelectItem value="intermediario">Intermediário de Crédito</SelectItem>
-                          <SelectItem value="diretor">Diretor(a)</SelectItem>
-                          <SelectItem value="administrativo">Administrativo(a)</SelectItem>
-                          <SelectItem value="indexacao">Indexação</SelectItem>
-                          <SelectItem value="parceiro">Parceiro</SelectItem>
-                          <SelectItem value="ceo">CEO</SelectItem>
-                          <SelectItem value="admin">Administrador</SelectItem>
+                          {PRIMARY_ROLE_OPTIONS.map((role) => (
+                            <SelectItem key={role} value={role}>{ROLE_LABELS[role]}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
+                      {!canManageUsers(currentUser) && (
+                        <p className="text-xs text-amber-600 font-medium">
+                          Apenas administradores ou CEO podem alterar perfis.
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">
                         {formData.role === "parceiro" 
                           ? "Parceiros são utilizadores fantasma sem acesso à plataforma, usados apenas para tracking e atribuição."
@@ -465,27 +442,32 @@ const UsersManagementPage = ({ embedded = false }) => {
                         </p>
                         {formData.additional_roles.includes(formData.role) && (
                           <p className="text-xs text-red-500 font-medium">
-                            ⚠ O cargo principal já está selecionado e não pode ser adicionado como cargo adicional.
+                            O cargo principal já está selecionado e não pode ser adicionado como cargo adicional.
                           </p>
                         )}
                         <div className="grid grid-cols-2 gap-2 pt-1">
-                          {additionalRoleOptions
+                          {ADDITIONAL_ROLE_OPTIONS
                             .filter((r) => r !== formData.role)
                             .map((role) => (
                               <label
                                 key={role}
-                                className="flex items-center gap-2 text-sm cursor-pointer rounded-md border px-3 py-2 hover:bg-muted/50 transition-colors has-[data-state=checked]:bg-primary/10 has-[data-state=checked]:border-primary/30"
+                                className={`flex items-center gap-2 text-sm rounded-md border px-3 py-2 transition-colors ${
+                                  !canManageUsers(currentUser) 
+                                    ? "opacity-50 cursor-not-allowed" 
+                                    : "cursor-pointer hover:bg-muted/50 has-[data-state=checked]:bg-primary/10 has-[data-state=checked]:border-primary/30"
+                                }`}
                               >
                                 <Checkbox
                                   checked={formData.additional_roles.includes(role)}
-                                  onCheckedChange={(checked) => {
+                                  onCheckedChange={canManageUsers(currentUser) ? (checked) => {
                                     const updated = checked
                                       ? [...formData.additional_roles, role]
                                       : formData.additional_roles.filter((r) => r !== role);
                                     setFormData({ ...formData, additional_roles: updated });
-                                  }}
+                                  } : undefined}
+                                  disabled={!canManageUsers(currentUser)}
                                 />
-                                <span className="text-sm">{roleLabels[role]}</span>
+                                <span className="text-sm">{ROLE_LABELS[role]}</span>
                               </label>
                             ))}
                         </div>
@@ -518,15 +500,9 @@ const UsersManagementPage = ({ embedded = false }) => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos os perfis</SelectItem>
-                  <SelectItem value="cliente">Cliente</SelectItem>
-                  <SelectItem value="consultor">Consultor</SelectItem>
-                  <SelectItem value="intermediario">Intermediário de Crédito</SelectItem>
-                  <SelectItem value="diretor">Diretor(a)</SelectItem>
-                  <SelectItem value="administrativo">Administrativo(a)</SelectItem>
-                  <SelectItem value="indexacao">Indexação</SelectItem>
-                  <SelectItem value="parceiro">Parceiro</SelectItem>
-                  <SelectItem value="ceo">CEO</SelectItem>
-                  <SelectItem value="admin">Administrador</SelectItem>
+                  {[...STAFF_ROLES, "parceiro"].map((role) => (
+                    <SelectItem key={role} value={role}>{ROLE_LABELS[role]}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -545,9 +521,9 @@ const UsersManagementPage = ({ embedded = false }) => {
                           <p className="text-sm text-muted-foreground truncate">{u.email}</p>
                         </div>
                         <div className="flex gap-1 shrink-0 flex-wrap justify-end">
-                          <Badge className={`${roleColors[u.role]} border text-xs`}>{roleLabels[u.role]}</Badge>
+                          <Badge className={`${ROLE_COLORS[u.role] || ''} border text-xs font-semibold`}>{ROLE_LABELS[u.role] || u.role}</Badge>
                           {u.additional_roles?.length > 0 && u.additional_roles.map((r) => (
-                            <Badge key={r} variant="outline" className="text-xs">{roleLabels[r]}</Badge>
+                            <Badge key={r} variant="outline" className={`${ROLE_ADDITIONAL_COLORS[r] || ''} text-xs`}>{ROLE_LABELS[r] || r}</Badge>
                           ))}
                           <Badge className={u.is_active ? "bg-green-100 text-green-800 text-xs" : "bg-red-100 text-red-800 text-xs"}>
                             {u.is_active ? "Ativo" : "Inativo"}
@@ -603,11 +579,11 @@ const UsersManagementPage = ({ embedded = false }) => {
                         <TableCell>{user.email}</TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
-                            <Badge className={`${roleColors[user.role]} border`}>
-                              {roleLabels[user.role]}
+                            <Badge className={`${ROLE_COLORS[user.role] || ''} border font-semibold`}>
+                              {ROLE_LABELS[user.role] || user.role}
                             </Badge>
                             {user.additional_roles?.length > 0 && user.additional_roles.map((r) => (
-                              <Badge key={r} variant="outline">{roleLabels[r]}</Badge>
+                              <Badge key={r} variant="outline" className={`${ROLE_ADDITIONAL_COLORS[r] || ''}`}>{ROLE_LABELS[r] || r}</Badge>
                             ))}
                           </div>
                         </TableCell>
@@ -757,19 +733,23 @@ const UsersManagementPage = ({ embedded = false }) => {
             )}
             <div className="space-y-2">
               <Label>Perfil</Label>
-              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value, additional_roles: formData.additional_roles.filter((r) => r !== value) })}>
+              <Select 
+                value={formData.role} 
+                onValueChange={(value) => setFormData({ ...formData, role: value, additional_roles: formData.additional_roles.filter((r) => r !== value) })}
+                disabled={!canManageUsers(currentUser)}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="consultor">Consultor</SelectItem>
-                  <SelectItem value="intermediario">Intermediário de Crédito</SelectItem>
-                  <SelectItem value="diretor">Diretor(a)</SelectItem>
-                  <SelectItem value="administrativo">Administrativo(a)</SelectItem>
-                  <SelectItem value="indexacao">Indexação</SelectItem>
-                  <SelectItem value="parceiro">Parceiro</SelectItem>
-                  <SelectItem value="ceo">CEO</SelectItem>
-                  <SelectItem value="admin">Administrador</SelectItem>
+                  {PRIMARY_ROLE_OPTIONS.map((role) => (
+                    <SelectItem key={role} value={role}>{ROLE_LABELS[role]}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              {!canManageUsers(currentUser) && (
+                <p className="text-xs text-amber-600 font-medium">
+                  Apenas administradores ou CEO podem alterar perfis.
+                </p>
+              )}
               {formData.role === "parceiro" && (
                 <p className="text-xs text-muted-foreground">
                   Parceiros são utilizadores fantasma sem acesso à plataforma, usados apenas para tracking e atribuição.
@@ -785,27 +765,32 @@ const UsersManagementPage = ({ embedded = false }) => {
                 </p>
                 {formData.additional_roles.includes(formData.role) && (
                   <p className="text-xs text-red-500 font-medium">
-                    ⚠ O cargo principal já está selecionado e não pode ser adicionado como cargo adicional.
+                    O cargo principal já está selecionado e não pode ser adicionado como cargo adicional.
                   </p>
                 )}
                 <div className="grid grid-cols-2 gap-2 pt-1">
-                  {additionalRoleOptions
+                  {ADDITIONAL_ROLE_OPTIONS
                     .filter((r) => r !== formData.role)
                     .map((role) => (
                       <label
                         key={role}
-                        className="flex items-center gap-2 text-sm cursor-pointer rounded-md border px-3 py-2 hover:bg-muted/50 transition-colors has-[data-state=checked]:bg-primary/10 has-[data-state=checked]:border-primary/30"
+                        className={`flex items-center gap-2 text-sm rounded-md border px-3 py-2 transition-colors ${
+                          !canManageUsers(currentUser) 
+                            ? "opacity-50 cursor-not-allowed" 
+                            : "cursor-pointer hover:bg-muted/50 has-[data-state=checked]:bg-primary/10 has-[data-state=checked]:border-primary/30"
+                        }`}
                       >
                         <Checkbox
                           checked={formData.additional_roles.includes(role)}
-                          onCheckedChange={(checked) => {
+                          onCheckedChange={canManageUsers(currentUser) ? (checked) => {
                             const updated = checked
                               ? [...formData.additional_roles, role]
                               : formData.additional_roles.filter((r) => r !== role);
                             setFormData({ ...formData, additional_roles: updated });
-                          }}
+                          } : undefined}
+                          disabled={!canManageUsers(currentUser)}
                         />
-                        <span className="text-sm">{roleLabels[role]}</span>
+                        <span className="text-sm">{ROLE_LABELS[role]}</span>
                       </label>
                     ))}
                 </div>

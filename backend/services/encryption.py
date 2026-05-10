@@ -50,7 +50,7 @@ SENSITIVE_FIELDS = {
     "titular2_data": ["nif", "documento_id", "phone"],
     "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
     "vendedor": ["nif", "documento_id", "phone"],
-    "mediador": ["nif", "phone"],
+    "intermediario": ["nif", "phone"],
     "co_buyers": ["nif", "documento_id", "phone"],
     "co_applicants": ["nif"],
     "root": ["client_phone", "client_nif"]  # Campos no nível raiz do processo

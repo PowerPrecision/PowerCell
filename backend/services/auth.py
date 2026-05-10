@@ -290,19 +290,19 @@ def require_roles(allowed_roles: List[str]):
         if user_role == UserRole.ADMIN:
             return user
         
-        # CEO has access to consultor and mediador routes
+        # CEO has access to consultor and intermediario routes
         if user_role == UserRole.CEO:
-            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.CEO]):
+            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.CEO]):
                 return user
         
-        # Diretor has access to both consultor and mediador routes
+        # Diretor has access to both consultor and intermediario routes
         if user_role == UserRole.DIRETOR:
-            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.DIRETOR]):
+            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR]):
                 return user
         
         # Administrativo has general access to most routes
         if user_role == UserRole.ADMINISTRATIVO:
-            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.MEDIADOR, UserRole.ADMINISTRATIVO]):
+            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO]):
                 return user
         
         # Standard role check - check against ALL user roles (primary + additional)
