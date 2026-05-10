@@ -8,6 +8,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
+import useWebSocket, { WSEventType } from "../hooks/useWebSocket";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -235,6 +236,43 @@ const WebmailPage = () => {
     : null;
 
   // ============================================================
+  // WEBSOCKET: Escutar NEW_EMAIL em tempo real
+  // ============================================================
+  // Ref para as funções de refresh (evita stale closures)
+  const handleRefreshRef = useRef(null);
+  const fetchUnreadCountsRef = useRef(null);
+
+  const onNewEmail = useCallback((payload) => {
+    if (!payload) return;
+
+    const fromEmail = payload.from_email || "remetente desconhecido";
+    const subject = payload.subject || "";
+    const direction = payload.direction || "received";
+
+    // Ação A: Toast de notificação
+    if (direction === "received") {
+      toast.info(`📧 Novo email recebido de: ${fromEmail}`, {
+        description: subject ? (subject.length > 60 ? subject.slice(0, 57) + "..." : subject) : undefined,
+        duration: 6000,
+      });
+    }
+
+    // Ação B: Refresh automático da lista de emails e contadores
+    // (sem mostrar loading spinner — atualização silenciosa)
+    if (handleRefreshRef.current) {
+      handleRefreshRef.current();
+    }
+    if (fetchUnreadCountsRef.current) {
+      fetchUnreadCountsRef.current();
+    }
+  }, []);
+
+  useWebSocket({
+    autoConnect: true,
+    onNewEmail,
+  });
+
+  // ============================================================
   // FETCH LABELS
   // ============================================================
   const fetchLabels = useCallback(async () => {
@@ -454,6 +492,10 @@ const WebmailPage = () => {
       fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
     }
   }, [activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel, activeCustomFolder]);
+
+  // Manter refs atualizados para o callback do WebSocket
+  useEffect(() => { handleRefreshRef.current = handleRefresh; }, [handleRefresh]);
+  useEffect(() => { fetchUnreadCountsRef.current = fetchUnreadCounts; }, [fetchUnreadCounts]);
 
   // ============================================================
   // SYNC EMAILS (IMAP → DB)

@@ -198,6 +198,7 @@ class WSEventType:
         - Documentos (DOCUMENT_EXPIRING, DOCUMENT_UPLOADED)
         - Prazos (DEADLINE_CREATED, DEADLINE_UPDATED, DEADLINE_REMINDER)
         - Sistema (HEARTBEAT, CONNECTION_STATUS, USER_ONLINE, USER_OFFLINE)
+        - Email / Webmail (NEW_EMAIL)
         - Chat / Rooms (PORTAL_MESSAGE, NEW_CHAT_MESSAGE, CHAT_TYPING)
     """
     # Notificações
@@ -220,6 +221,9 @@ class WSEventType:
     DOCUMENT_EXPIRING = "document_expiring"
     DOCUMENT_UPLOADED = "document_uploaded"
     
+    # Email (Webmail em tempo real)
+    NEW_EMAIL = "new_email"
+
     # Chat / Portal Messages
     PORTAL_MESSAGE = "portal_message"
     NEW_CHAT_MESSAGE = "new_chat_message"

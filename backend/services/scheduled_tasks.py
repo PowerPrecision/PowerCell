@@ -1288,6 +1288,123 @@ class ScheduledTasksService:
         finally:
             await self.disconnect()
 
+    async def auto_sync_emails(self) -> Dict[str, Any]:
+        """
+        Sincronização automática de emails para todas as caixas ativas.
+        
+        Executa sync_webmail_emails (caixa geral) e sync_user_emails
+        (caixas pessoais configuradas). Os novos emails detetados
+        geram automaticamente eventos WebSocket NEW_EMAIL para os
+        utilizadores conectados.
+        
+        Returns:
+            Dict com resumo da sincronização
+        """
+        logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
+        
+        total_synced = 0
+        total_errors = 0
+        results = {}
+        
+        try:
+            # 1. Sincronizar caixa geral (global)
+            try:
+                from services.email_service import sync_webmail_emails
+                global_result = await sync_webmail_emails(days=3, max_emails=50)
+                total_synced += global_result.get("total_synced", 0)
+                total_errors += global_result.get("total_errors", 0)
+                results["global"] = {
+                    "synced": global_result.get("total_synced", 0),
+                    "duplicates": global_result.get("total_duplicates", 0),
+                }
+            except Exception as e:
+                logger.error(f"[Auto-Sync Email] Erro na caixa geral: {e}")
+                total_errors += 1
+                results["global"] = {"error": str(e)}
+            
+            # 2. Sincronizar caixas pessoais dos utilizadores com email_config ativa
+            try:
+                users_with_email = await self.db.users.find(
+                    {
+                        "email_config.is_configured": True,
+                        "is_active": {"$ne": False},
+                    },
+                    {"_id": 0, "id": 1, "email": 1, "email_config": 1}
+                ).to_list(50)
+                
+                from services.email_service import sync_user_emails
+                
+                for u in users_with_email:
+                    try:
+                        user_result = await sync_user_emails(
+                            user_id=u["id"],
+                            days=3,
+                            max_emails=50
+                        )
+                        total_synced += user_result.get("total_synced", 0)
+                        total_errors += user_result.get("total_errors", 0)
+                    except Exception as e:
+                        logger.debug(f"[Auto-Sync Email] Erro caixa pessoal {u.get('id', '?')}: {e}")
+                        total_errors += 1
+                
+                results["personal_accounts"] = len(users_with_email)
+            except Exception as e:
+                logger.error(f"[Auto-Sync Email] Erro ao buscar utilizadores com email: {e}")
+                results["personal_accounts"] = {"error": str(e)}
+            
+            # 3. Sincronizar caixas partilhadas (indexação, etc.)
+            try:
+                from services.email_service import sync_shared_role_emails
+                shared_result = await sync_shared_role_emails("indexacao", days=3, max_emails=50)
+                total_synced += shared_result.get("total_synced", 0)
+                results["shared_indexacao"] = {
+                    "synced": shared_result.get("total_synced", 0),
+                }
+            except Exception as e:
+                logger.debug(f"[Auto-Sync Email] Erro caixa partilhada indexação: {e}")
+            
+        except Exception as e:
+            logger.error(f"[Auto-Sync Email] Erro geral: {e}")
+            total_errors += 1
+        
+        logger.info(
+            f"[Auto-Sync Email] Concluído: {total_synced} novos emails, "
+            f"{total_errors} erros"
+        )
+        
+        return {
+            "total_synced": total_synced,
+            "total_errors": total_errors,
+            "results": results,
+        }
+
+
+async def run_email_auto_sync(interval_seconds: int = 180):
+    """
+    Loop de auto-sync de emails que corre em background.
+    
+    Por defeito, sincroniza a cada 3 minutos (180s). Esta função
+    é registada como tarefa de background no startup do FastAPI.
+    
+    Args:
+        interval_seconds: Intervalo entre sincronizações (default 180s)
+    """
+    # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
+    await asyncio.sleep(30)
+    
+    service = ScheduledTasksService()
+    
+    while True:
+        try:
+            await service.connect()
+            await service.auto_sync_emails()
+        except Exception as e:
+            logger.error(f"[Email Auto-Sync] Erro no ciclo: {e}")
+        finally:
+            await service.disconnect()
+        
+        await asyncio.sleep(interval_seconds)
+
 
 async def run_daemon(interval_hours: int = 24):
     """
