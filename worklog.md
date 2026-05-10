@@ -1,5 +1,27 @@
 ---
-Task ID: 1
+Task ID: webmail-realtime-sync
+Agent: main
+Task: Webmail Real-Time Sync — Auto-sync em background + WebSocket NEW_EMAIL + Frontend reativo
+
+Work Log:
+- Analisou arquitetura atual: sync_webmail_emails(), sync_user_emails(), WebSocket manager, scheduled_tasks.py, server.py startup, WebmailPage.jsx
+- Backend: Adicionou WSEventType.NEW_EMAIL ao websocket_manager.py (backend + frontend)
+- Backend: Modificou sync_webmail_emails() em email_service.py para emitir evento NEW_EMAIL via WebSocket quando novo email é inserido na BD global (notifica admin/ceo/diretor/administrativo + utilizadores cujo email está nos destinatários + indexação)
+- Backend: Modificou sync_user_emails() em email_service.py para emitir evento NEW_EMAIL diretamente ao dono da caixa pessoal
+- Backend: Criou auto_sync_emails() e run_email_auto_sync() em scheduled_tasks.py — sincroniza caixa geral, pessoais e partilhadas a cada 3 minutos
+- Backend: Registou run_email_auto_sync() como tarefa de background no startup do FastAPI (server.py)
+- Frontend: Adicionou WSEventType.NEW_EMAIL ao useWebSocket.js
+- Frontend: Adicionou handler onNewEmail ao useWebSocket.js
+- Frontend: Em WebmailPage.jsx, adicionou hook useWebSocket com callback onNewEmail que:
+  - Ação A: Mostra toast.info('📧 Novo email recebido de: [Remetente]')
+  - Ação B: Faz refresh automático da lista de emails e contadores de pastas
+- Commit 6678e0b pushed para origin/dev
+
+Stage Summary:
+- Webmail agora sincroniza automaticamente a cada 3 minutos (sem intervenção do utilizador)
+- Novos emails detetados geram evento WebSocket NEW_EMAIL em tempo real
+- Frontend atualiza pastas e mostra toast quando chegam novos emails
+- Arquitectura de 3 camadas: Auto-sync → WebSocket → UI reativa
 Agent: main
 Task: RBAC Synchronization — 8 definitive profiles, centralized roleUtils, security rules
 
