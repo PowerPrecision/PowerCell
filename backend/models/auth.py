@@ -5,32 +5,22 @@ from enum import Enum
 
 class UserRoleEnum(str, Enum):
     """
-    Enum para roles de utilizador — lista DEFINITIVA de 8 perfis do sistema.
-    Garante type-safety e evita magic strings.
+    Enum para roles de utilizador — garante type-safety e evita magic strings.
     Herda de str para ser serializável em JSON automaticamente.
-
-    PERFIS (em ordem hierárquica descendente):
-    1. admin        — Administrador do sistema (acesso total)
-    2. ceo          — CEO (gestão estratégica)
-    3. diretor      — Diretor(a) (gestão de direção)
-    4. administrativo — Apoio Administrativo (gestão administrativa)
-    5. consultor    — Consultor(a) (relacionamento e processos)
-    6. intermediario — Intermediário(a) de Crédito
-    7. indexacao    — Indexação de Dados (restrição máxima)
-    8. parceiro     — Parceiro (utilizador fantasma, sem acesso à plataforma)
-
-    NOTA: Os perfis 'mediador' e 'consultor_intermediario' foram removidos.
-    A coluna 'cliente' é mantida apenas para referência (não é perfil de sistema).
+    
+    Lista DEFINITIVA e ÚNICA de 8 perfis: admin, ceo, diretor, administrativo,
+    consultor, intermediario, indexacao, parceiro.
+    "mediador" e "consultor_intermediario" foram removidos (obsoletos).
     """
-    CLIENTE = "cliente"           # Externo — não acede ao sistema
-    CONSULTOR = "consultor"
-    INTERMEDIARIO = "intermediario"
-    ADMINISTRATIVO = "administrativo"
-    INDEXACAO = "indexacao"
-    DIRETOR = "diretor"
-    CEO = "ceo"
-    ADMIN = "admin"
-    PARCEIRO = "parceiro"
+    CLIENTE = "cliente"                # Pseudo-role — processos, não utilizadores do sistema
+    CONSULTOR = "consultor"          # Consultor(a)
+    INTERMEDIARIO = "intermediario"   # Intermediário de Crédito
+    ADMINISTRATIVO = "administrativo" # Apoio Administrativo
+    INDEXACAO = "indexacao"          # Indexação de Dados
+    DIRETOR = "diretor"              # Diretor(a)
+    CEO = "ceo"                      # CEO
+    ADMIN = "admin"                  # Administrador do Sistema
+    PARCEIRO = "parceiro"            # Parceiro — utilizador fantasma, sem acesso à plataforma
     
     @classmethod
     def from_string(cls, role: str) -> "UserRoleEnum":
@@ -46,8 +36,11 @@ class UserRole:
     Classe helper para verificações de permissões.
     Mantida para compatibilidade com código existente.
     Usa UserRoleEnum internamente para type-safety.
+    
+    Lista DEFINITIVA de 8 perfis: admin, ceo, diretor, administrativo,
+    consultor, intermediario, indexacao, parceiro.
     """
-    # Constantes de role (strings) — para compatibilidade
+    # Constantes de role (strings) - para compatibilidade
     CLIENTE = UserRoleEnum.CLIENTE.value
     CONSULTOR = UserRoleEnum.CONSULTOR.value
     INTERMEDIARIO = UserRoleEnum.INTERMEDIARIO.value
@@ -58,11 +51,15 @@ class UserRole:
     ADMIN = UserRoleEnum.ADMIN.value
     PARCEIRO = UserRoleEnum.PARCEIRO.value
     
+    # Backward compatibility — mapear valores antigos para novos
+    MEDIADOR = UserRoleEnum.INTERMEDIARIO.value  # Legacy: mediador → intermediario
+    CONSULTOR_INTERMEDIARIO = UserRoleEnum.CONSULTOR.value  # Legacy: consultor_intermediario → consultor
+    
     # Lista de todos os roles válidos
     ALL_ROLES = [e.value for e in UserRoleEnum]
     
     # Grupos de roles para permissões
-    # STAFF_ROLES não inclui CLIENTE nem PARCEIRO
+    # STAFF_ROLES não inclui PARCEIRO (utilizador fantasma sem acesso à plataforma)
     STAFF_ROLES = [
         UserRoleEnum.CONSULTOR.value,
         UserRoleEnum.INTERMEDIARIO.value,
@@ -90,6 +87,18 @@ class UserRole:
         UserRoleEnum.ADMIN.value,
     ]
     
+    # Roles com acesso total ao Painel de Administração
+    ADMIN_PANEL_ROLES = [
+        UserRoleEnum.CEO.value,
+        UserRoleEnum.ADMIN.value,
+    ]
+    
+    # Roles que podem gerir utilizadores
+    USER_MANAGEMENT_ROLES = [
+        UserRoleEnum.CEO.value,
+        UserRoleEnum.ADMIN.value,
+    ]
+    
     @classmethod
     def is_valid_role(cls, role: str) -> bool:
         """Verifica se o role é válido."""
@@ -104,6 +113,11 @@ class UserRole:
     def can_act_as_intermediario(cls, role: str) -> bool:
         """Check if role can perform intermediário de crédito tasks"""
         return role in [cls.INTERMEDIARIO, cls.DIRETOR, cls.CEO, cls.ADMIN, cls.ADMINISTRATIVO]
+    
+    @classmethod
+    def can_act_as_mediador(cls, role: str) -> bool:
+        """Legacy alias for can_act_as_intermediario"""
+        return cls.can_act_as_intermediario(role)
     
     @classmethod
     def is_staff(cls, role: str) -> bool:

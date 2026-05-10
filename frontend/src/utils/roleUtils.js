@@ -99,9 +99,9 @@ export const ROLE_SHORT_LABELS = {
   admin: "Admin",
   ceo: "CEO",
   diretor: "Diretor",
-  administrativo: "Adminvo",
+  administrativo: "Adm.",
   consultor: "Consultor",
-  intermediario: "Intermédio",
+  intermediario: "Intermediário",
   indexacao: "Indexação",
   parceiro: "Parceiro",
   cliente: "Cliente",
@@ -191,6 +191,22 @@ export const ROLE_HIERARCHY = {
   cliente: 0,
 };
 
+/**
+ * Ordem hierárquica dos roles — do mais privilegiado para o menos.
+ * Usado para ordenação visual em listas e dropdowns.
+ */
+export const ROLE_HIERARCHY_ORDER = [
+  "admin",
+  "ceo",
+  "diretor",
+  "administrativo",
+  "consultor",
+  "intermediario",
+  "indexacao",
+  "parceiro",
+  "cliente",
+];
+
 // ====================================================================
 // FUNÇÕES DE VERIFICAÇÃO DE PERMISSÕES
 // ====================================================================
@@ -251,6 +267,7 @@ export const isManager = (user) => {
 
 /**
  * Verifica se o utilizador tem nível hierárquico suficiente para uma ação.
+ * Compara o nível máximo do utilizador (role + additional_roles) com o nível requerido.
  * @param {Object} user - Objecto do utilizador
  * @param {string} requiredRole - Role mínimo necessário
  * @returns {boolean}
