@@ -45,9 +45,9 @@ class TestRateLimitConfiguration:
         # Admin: 2000 req/min
         assert RATE_LIMITS_BY_ROLE["admin"]["requests"] == 2000
 
-        # Consultor/Mediador: 600 req/min
+        # Consultor/Intermediário: 600 req/min
         assert RATE_LIMITS_BY_ROLE["consultor"]["requests"] == 600
-        assert RATE_LIMITS_BY_ROLE["mediador"]["requests"] == 600
+        assert RATE_LIMITS_BY_ROLE["intermediario"]["requests"] == 600
 
         # Cliente: 400 req/min
         assert RATE_LIMITS_BY_ROLE["cliente"]["requests"] == 400
