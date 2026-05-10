@@ -441,3 +441,37 @@ def require_staff():
             raise HTTPException(status_code=403, detail="Permissão negada")
         return user
     return staff_checker
+
+
+def require_permission(capability: str):
+    """
+    Dependency do FastAPI que verifica se o utilizador tem uma capability granular.
+
+    Algoritmo de resolução (via models.permissions.resolve_capability):
+    1. Se role ∈ ["admin", "ceo"] → Super Admin Bypass → sempre True
+    2. Se user.permissions.capabilities[capability] existe → usar esse valor
+    3. Fallback → ROLE_CAPABILITY_DEFAULTS[role][capability]
+    4. Se não existe → False (acesso negado)
+
+    Isto permite proteger endpoints com granularidade fina:
+    ``Depends(require_permission("PROCESS_DELETE"))`` em vez de verificar
+    apenas o role do utilizador.
+
+    Args:
+        capability: Nome da capability (ex: "PROCESS_DELETE", "FINANCE_VIEW").
+
+    Returns:
+        Callable: Dependency function para uso com ``Depends()``.
+
+    Raises:
+        HTTPException: 403 se o utilizador não tiver a capability.
+    """
+    async def permission_checker(user: dict = Depends(get_current_user)):
+        from models.permissions import resolve_capability as _resolve
+        if not _resolve(user, capability):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Permissão negada: requer capability '{capability}'"
+            )
+        return user
+    return permission_checker

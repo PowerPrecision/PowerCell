@@ -55,6 +55,9 @@ export const USER_MANAGEMENT_ROLES = ["admin", "ceo"];
 /** Perfis de gestão (diretoria + admin) */
 export const MANAGEMENT_ROLES = ["admin", "ceo", "diretor"];
 
+/** Perfis com Super Admin Bypass — têm todas as capabilities sempre ligadas */
+export const SUPER_ADMIN_ROLES = ["admin", "ceo"];
+
 /** Perfis disponíveis como "Cargo Adicional" (exclui admin, parceiro, cliente) */
 export const ADDITIONAL_ROLE_OPTIONS = [
   "consultor",
@@ -412,4 +415,82 @@ export const excludeRoles = (users, excludeRoles) => {
 export const countByRole = (users, role) => {
   if (!users || !role) return 0;
   return users.filter(u => u.role === role || (u.additional_roles && u.additional_roles.includes(role))).length;
+};
+
+// ====================================================================
+// PERMISSÕES GRANULARES (CAPABILITIES)
+// ====================================================================
+
+/**
+ * Verifica se um utilizador tem uma capability granular.
+ *
+ * Algoritmo de resolução (igual ao backend):
+ * 1. Se role ∈ SUPER_ADMIN_ROLES → true (bypass)
+ * 2. Se user.permissions.capabilities[capability] existe → usar esse valor
+ * 3. Fallback → false (o backend é a fonte de verdade para defaults)
+ *
+ * NOTA: No frontend, usamos o campo `permissions.capabilities` que vem
+ * do backend. Os defaults por cargo são resolvidos no backend e incluídos
+ * no `effective_capabilities` quando o user é carregado.
+ *
+ * @param {Object} user - Objecto do utilizador
+ * @param {string} capability - Nome da capability (ex: "PROCESS_DELETE")
+ * @returns {boolean}
+ */
+export const hasPermission = (user, capability) => {
+  if (!user) return false;
+
+  // 1. Super Admin Bypass
+  if (SUPER_ADMIN_ROLES.includes(user.role)) return true;
+
+  // 2. Check effective_capabilities (pre-computed by backend)
+  const effectiveCaps = user.permissions?.effective_capabilities || 
+                        user.permissions?.capabilities || {};
+  if (capability in effectiveCaps) {
+    return Boolean(effectiveCaps[capability]);
+  }
+
+  // 3. Fallback — se não temos dados de capabilities, usar role-based
+  // (backward compatibility para sessões antigas)
+  return false;
+};
+
+/**
+ * Verifica se o utilizador tem QUALQUER uma das capabilities especificadas.
+ * @param {Object} user - Objecto do utilizador
+ * @param {string[]} capabilities - Lista de capabilities
+ * @returns {boolean}
+ */
+export const hasAnyPermission = (user, capabilities) => {
+  if (!user || !capabilities || capabilities.length === 0) return false;
+  return capabilities.some(cap => hasPermission(user, cap));
+};
+
+/**
+ * Verifica se o utilizador tem TODAS as capabilities especificadas.
+ * @param {Object} user - Objecto do utilizador
+ * @param {string[]} capabilities - Lista de capabilities
+ * @returns {boolean}
+ */
+export const hasAllPermissions = (user, capabilities) => {
+  if (!user || !capabilities || capabilities.length === 0) return false;
+  return capabilities.every(cap => hasPermission(user, cap));
+};
+
+/**
+ * Retorna as capabilities efetivas de um utilizador.
+ * Combina role defaults (do backend) com overrides pessoais.
+ * @param {Object} user - Objecto do utilizador
+ * @returns {Object} Dict de { capability: boolean }
+ */
+export const getEffectiveCapabilities = (user) => {
+  if (!user) return {};
+
+  if (SUPER_ADMIN_ROLES.includes(user.role)) {
+    // Super Admin — todas true
+    return {}; // O backend sabe que é tudo true
+  }
+
+  return user.permissions?.effective_capabilities ||
+         user.permissions?.capabilities || {};
 };

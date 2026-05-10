@@ -43,7 +43,7 @@ import {
   Users, FolderOpen, Loader2, CheckCircle, XCircle, FileText, 
   Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building,
   TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight,
-  Settings, Zap, Shield, Database, AlertTriangle
+  Settings, Zap, Shield, Database, AlertTriangle, Lock
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
@@ -64,6 +64,7 @@ import UsersTab from "../components/admin/UsersTab";
 import ClientSearchTab from "../components/admin/ClientSearchTab";
 import CreateEventDialog from "../components/admin/CreateEventDialog";
 import AIAnalysisTab from "../components/admin/AIAnalysisTab";
+import PermissionsTab from "../components/admin/PermissionsTab";
 import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
@@ -505,6 +506,9 @@ const AdminDashboard = () => {
               <TabsTrigger value="automation" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400" data-testid="tab-automation">
                 <Zap className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Automações</span><span className="sm:hidden">Auto</span>
               </TabsTrigger>
+              <TabsTrigger value="permissions" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400" data-testid="tab-permissions">
+                <Lock className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Permissões</span><span className="sm:hidden">Perms</span>
+              </TabsTrigger>
 
               {/* === TABS TÉCNICAS (exclusivas do admin) === */}
               {isAdmin && (
@@ -636,6 +640,11 @@ const AdminDashboard = () => {
           {/* Automações — AutomationPage em modo embedded */}
           <TabsContent value="automation" className="mt-6">
             <AutomationPage embedded={true} />
+          </TabsContent>
+
+          {/* Permissões Granulares — PermissionsTab */}
+          <TabsContent value="permissions" className="mt-6">
+            <PermissionsTab />
           </TabsContent>
 
           {/* === CONTEÚDO DAS TABS TÉCNICAS (exclusivas do admin) === */}
