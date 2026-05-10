@@ -82,6 +82,9 @@ export const WSEventType = {
   USER_ONLINE: 'user_online',
   USER_OFFLINE: 'user_offline',
 
+  // Email / Webmail
+  NEW_EMAIL: 'new_email',
+
   // Chat
   NEW_CHAT_MESSAGE: 'new_chat_message',
 
@@ -631,6 +634,7 @@ export function useWebSocket(options = {}) {
     unsubs.push(wsManager.on(WSEventType.USER_OFFLINE, makeHandler('onUserOffline')));
     unsubs.push(wsManager.on(WSEventType.NEW_CHAT_MESSAGE, makeHandler('onChatMessage')));
     unsubs.push(wsManager.on(WSEventType.PORTAL_MESSAGE, makeHandler('onPortalMessage')));
+    unsubs.push(wsManager.on(WSEventType.NEW_EMAIL, makeHandler('onNewEmail')));
     unsubs.push(wsManager.on(WSEventType.ROOM_JOINED, makeHandler('onRoomJoined')));
     unsubs.push(wsManager.on(WSEventType.ROOM_LEFT, makeHandler('onRoomLeft')));
 

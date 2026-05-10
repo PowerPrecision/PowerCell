@@ -757,6 +757,17 @@ async def startup():
     except (IOError, OSError, ValueError, ImportError) as cdc_err:
         logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
 
+    # Iniciar Auto-Sync de Emails (sincronização periódica IMAP → BD + WebSocket)
+    # Corre a cada 3 minutos, notifica utilizadores conectados via NEW_EMAIL
+    try:
+        from services.scheduled_tasks import run_email_auto_sync
+        email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=180))
+        _background_tasks.add(email_sync_task)
+        email_sync_task.add_done_callback(_background_tasks.discard)
+        logger.info("📧 Auto-Sync Email iniciado - sincronização a cada 3 minutos")
+    except (IOError, OSError, ValueError, ImportError) as email_sync_err:
+        logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     # CORREÇÃO CRÍTICA: Não fechar a ligação DB se estivermos a correr testes!
