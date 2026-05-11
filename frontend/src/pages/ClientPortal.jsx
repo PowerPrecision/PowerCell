@@ -28,8 +28,16 @@ import {
   Shield,
   BarChart3,
   Send,
+  Landmark,
+  HeartPulse,
+  HelpCircle,
+  Eye,
+  EyeOff,
+  Pin,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
 
@@ -284,8 +292,232 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
 // ====================================================================
 // DOCUMENTS PANEL — Right column (desktop) / Section (mobile)
 // ====================================================================
+
+// ====================================================================
+// CREDENTIALS DIALOG — Finanças / Segurança Social
+// ====================================================================
+function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
+  const [idField, setIdField] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+
+  const isFinancas = source === 'financas';
+  const idLabel = isFinancas ? 'NIF' : 'NISS';
+  const idLength = isFinancas ? 9 : 11;
+  const sourceLabel = isFinancas ? 'Portal das Finanças' : 'Segurança Social';
+  const sourceIcon = isFinancas ? <Landmark className="w-5 h-5 text-teal-600" /> : <HeartPulse className="w-5 h-5 text-rose-500" />;
+
+  // Reset on open
+  useEffect(() => {
+    if (open) { setIdField(''); setPassword(''); setShowPassword(false); setLoading(false); setError(null); setSuccess(null); }
+  }, [open]);
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    const trimmed = idField.trim();
+    if (!trimmed || trimmed.length !== idLength || !/^\d+$/.test(trimmed)) {
+      setError(`${idLabel} inválido. Deve conter ${idLength} dígitos.`);
+      return;
+    }
+    if (!password) {
+      setError('A password é obrigatória.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = sessionStorage.getItem('portal_token');
+      if (!token) throw new Error('Sessão expirada.');
+
+      const endpoint = isFinancas ? 'fetch-financas' : 'fetch-seguranca-social';
+      const bodyKey = isFinancas ? 'nif' : 'niss';
+
+      const res = await fetch(`${BACKEND_URL}/portal/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ [bodyKey]: trimmed, password }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setSuccess(data.message || 'Documentos obtidos com sucesso!');
+        setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 2500);
+      } else {
+        setError(data.detail || 'Erro ao obter documentos. Tente novamente.');
+      }
+    } catch (err) {
+      setError(err.message || 'Erro de ligação. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent title={sourceLabel} description={`Obter documentos do ${sourceLabel}`} className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {sourceIcon}
+            {sourceLabel}
+          </DialogTitle>
+          <DialogDescription className="text-xs text-gray-500">
+            Introduza as suas credenciais para obter automaticamente os seus documentos.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Security notice */}
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <Shield className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-amber-700">
+            <strong>As suas credenciais não são guardadas.</strong> São usadas apenas em memória para obter os documentos e eliminadas de imediato.
+          </p>
+        </div>
+
+        {success ? (
+          <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-emerald-800">Sucesso!</p>
+              <p className="text-xs text-emerald-600 mt-0.5">{success}</p>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-gray-700 mb-1 block">{idLabel}</label>
+              <input
+                type="text"
+                value={idField}
+                onChange={(e) => setIdField(e.target.value.replace(/\D/g, '').slice(0, idLength))}
+                placeholder={isFinancas ? '123456789' : '12345678901'}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+                inputMode="numeric"
+                disabled={loading}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-700 mb-1 block">Password do {sourceLabel}</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="A sua password"
+                  className="w-full px-3 py-2 pr-10 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+                  disabled={loading}
+                />
+                <button type="button" onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <DialogFooter>
+              <button type="button" onClick={() => onOpenChange(false)} disabled={loading}
+                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+                Cancelar
+              </button>
+              <button type="submit" disabled={loading || !idField || !password}
+                className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> A obter...</> : <><ExternalLink className="w-4 h-4" /> Obter Documentos</>}
+              </button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ====================================================================
+// DOCUMENT HELP DIALOG — Accordion com ajuda por documento
+// ====================================================================
+function DocumentHelpDialog({ open, onOpenChange }) {
+  const helpItems = [
+    {
+      id: 'identificacao',
+      title: 'Identificação (CC / Passaporte)',
+      content: 'Precisa do Cartão de Cidadão ou Passaporte válido. Pode enviar fotografia (frente e verso) ou digitalização em PDF. Certifique-se que os dados são legíveis e que o documento não está caducado.',
+    },
+    {
+      id: 'mapa-responsabilidades',
+      title: 'Mapa de Responsabilidades',
+      content: 'Este documento é emitido pelo Banco de Portugal e pode ser obtido gratuitamente em www.bportugal.pt ou num balcão do BdP. Mostra todos os seus créditos ativos (habitação, consumo, cartões). O mapa deve ter data recente (últimos 30 dias).',
+    },
+    {
+      id: 'irs',
+      title: 'IRS (Declaração de IRS)',
+      content: 'Necessita da última declaração de IRS entregue às Finanças. Pode obter automaticamente através do botão "Obter IRS" acima, ou descarregar do Portal das Finanças (www.portaldasfinancas.gov.pt). Também pode enviar a Nota de Liquidação que recebeu das Finanças.',
+    },
+    {
+      id: 'extratos',
+      title: 'Extratos Bancários',
+      content: 'São necessários os extratos bancários dos últimos 3 a 6 meses de todas as contas bancárias onde recebe vencimento ou tem despesas relevantes. Pode obter através da sua banca online ou app do banco. Formato PDF é preferível. Não é necessário enviar extratos de contas sem movimentos.',
+    },
+    {
+      id: 'escritura',
+      title: 'Escritura / CPCV',
+      content: 'Se já tem um imóvel identificado, necessita da Cópia do Contrato de Promessa de Compra e Venda (CPCV) ou da Escritura de Compra e Venda. Este documento é fornecido pelo vendedor ou pelo notário. Inclui o valor do imóvel, prazos e condições.',
+    },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent title="Ajuda com Documentos" description="Guia de ajuda para cada tipo de documento" className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <HelpCircle className="w-5 h-5 text-teal-500" />
+            Ajuda com Documentos
+          </DialogTitle>
+          <DialogDescription className="text-xs text-gray-500">
+            Clique em cada documento para ver detalhes e como obtê-lo.
+          </DialogDescription>
+        </DialogHeader>
+
+        <Accordion type="single" collapsible className="w-full">
+          {helpItems.map((item) => (
+            <AccordionItem key={item.id} value={item.id}>
+              <AccordionTrigger className="text-sm text-gray-700 hover:text-emerald-700 hover:no-underline">
+                {item.title}
+              </AccordionTrigger>
+              <AccordionContent className="text-xs text-gray-600 leading-relaxed">
+                {item.content}
+              </AccordionContent>
+            </AccordionItem>
+          ))}
+        </Accordion>
+
+        <DialogFooter>
+          <button onClick={() => onOpenChange(false)}
+            className="px-4 py-2 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+            Fechar
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function DocumentsPanel({ documents, onUploadSuccess }) {
   const { requested = [], uploaded = [], received = [], has_pending } = documents || {};
+  const [credDialogSource, setCredDialogSource] = useState(null); // 'financas' | 'seguranca_social' | null
+  const [helpOpen, setHelpOpen] = useState(false);
 
   return (
     <div className="space-y-4">
@@ -299,6 +531,24 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
           Submeta os documentos solicitados para avançar com o seu processo.
         </p>
 
+        {/* ── Auto-fetch buttons (Finanças + Seg. Social) ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+          <button
+            onClick={() => setCredDialogSource('financas')}
+            className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium bg-teal-50 text-teal-800 border border-teal-200 rounded-xl hover:bg-teal-100 hover:border-teal-300 transition-all"
+          >
+            <Landmark className="w-4 h-4 flex-shrink-0" />
+            Obter IRS e Nota de Liquidação (Finanças)
+          </button>
+          <button
+            onClick={() => setCredDialogSource('seguranca_social')}
+            className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium bg-rose-50 text-rose-800 border border-rose-200 rounded-xl hover:bg-rose-100 hover:border-rose-300 transition-all"
+          >
+            <HeartPulse className="w-4 h-4 flex-shrink-0" />
+            Obter Documentos da Segurança Social
+          </button>
+        </div>
+
         {has_pending && requested.length > 0 ? (
           <div className="space-y-2">
             {requested.map((doc) => (
@@ -311,6 +561,15 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
             <p className="text-sm text-emerald-700 font-medium">Todos os documentos foram submetidos</p>
           </div>
         )}
+
+        {/* Help button */}
+        <button
+          onClick={() => setHelpOpen(true)}
+          className="mt-4 flex items-center gap-1.5 text-xs text-gray-400 hover:text-teal-600 transition-colors"
+        >
+          <HelpCircle className="w-3.5 h-3.5" />
+          Precisa de ajuda com os documentos?
+        </button>
       </div>
 
       {/* Uploaded by client */}
@@ -337,6 +596,20 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
           </div>
         </div>
       )}
+
+      {/* Credentials Dialog */}
+      <CredentialsDialog
+        open={credDialogSource !== null}
+        onOpenChange={(v) => { if (!v) setCredDialogSource(null); }}
+        source={credDialogSource}
+        onSuccess={onUploadSuccess}
+      />
+
+      {/* Document Help Dialog */}
+      <DocumentHelpDialog
+        open={helpOpen}
+        onOpenChange={setHelpOpen}
+      />
 
       {/* Received by admin (documents delivered outside portal) */}
       {received && received.length > 0 && (
@@ -439,7 +712,7 @@ function ContactCard({ contact }) {
 // ====================================================================
 // PORTAL MESSAGES — Chat interface for client ↔ staff communication
 // ====================================================================
-function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, sending, unreadCount, isInSheet }) {
+function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, sending, unreadCount, isInSheet, welcomeMessage }) {
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to bottom when messages change
@@ -485,6 +758,16 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
               {unreadCount}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Pinned Welcome Card */}
+      {welcomeMessage && (
+        <div className="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-xl p-4 mb-1">
+          <div className="flex items-start gap-2">
+            <Pin className="w-3.5 h-3.5 text-teal-500 mt-0.5 flex-shrink-0" />
+            <div className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{welcomeMessage}</div>
+          </div>
         </div>
       )}
 
@@ -762,6 +1045,14 @@ export default function ClientPortal() {
   const currentStep = stepper?.find(s => s.is_current);
   const statusColor = currentStep ? stepColor(currentStep.color) : stepColor('green');
 
+  // ── Welcome message (dynamic) ──
+  const welcomeMessage = React.useMemo(() => {
+    const clientName = process.client_name || 'Cliente';
+    const consultorName = consultor?.name || 'a sua equipa';
+    const empresa = 'Power Precision';
+    return `Olá, ${clientName}!\n\nChamo-me ${consultorName}, faço parte da equipa que vai acompanhar todo o seu processo de Crédito e dou-lhe as boas-vindas. O nosso serviço não tem qualquer custo para si.\n\nO seu processo vai percorrer 2 fases:\n\n1ª Fase — Reunião de documentação:\n• Cartão de Cidadão / Passaporte\n• IRS e Nota de Liquidação\n• Recibos de Vencimento\n• Extratos Bancários\n• Mapa de Responsabilidades (Banco de Portugal)\n• Comprovativo de IBAN\n\n2ª Fase — Análise e submissão bancária:\nA sua documentação será analisada e submetida às entidades bancárias para aprovação.\n\nPode contactar-me por aqui a qualquer momento.\n\nObrigado por escolher a ${empresa}.`;
+  }, [process.client_name, consultor]);
+
   return (
     <IframeDetector>
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex flex-col">
@@ -932,6 +1223,7 @@ export default function ClientPortal() {
               onSend={sendMessage}
               sending={sendingMessage}
               unreadCount={unreadCount}
+              welcomeMessage={welcomeMessage}
             />
           </div>
 
@@ -976,6 +1268,7 @@ export default function ClientPortal() {
                 sending={sendingMessage}
                 unreadCount={unreadCount}
                 isInSheet
+                welcomeMessage={welcomeMessage}
               />
             </div>
           </SheetContent>
