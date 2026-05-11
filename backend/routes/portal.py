@@ -978,6 +978,8 @@ async def check_scraper_status():
             "available": result.get("playwright_installed") and result.get("chromium_available"),
             "playwright_installed": result.get("playwright_installed", False),
             "chromium_available": result.get("chromium_available", False),
+            "browsers_path": result.get("browsers_path"),
+            "browsers_dir_exists": result.get("browsers_dir_exists"),
             "error": result.get("error"),
         }
     except Exception as e:

@@ -52,30 +52,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # App settings
     APP_ENV=production \
     # Render porta (será sobrescrita pelo Render se disponível)
-    PORT=8001
+    PORT=8001 \
+    # Playwright: instalar browsers em path partilhado (acessível pelo appuser)
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Instalar dependências de runtime + Playwright browser dependencies
+# Instalar dependências de runtime (não-Chromium)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
     curl \
-    # Playwright/Chromium dependencies
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libdbus-1-3 \
-    libxkbcommon0 \
-    libatspi2.0-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -87,9 +71,12 @@ RUN groupadd --gid 1000 appgroup \
 COPY --from=builder /root/.local /home/appuser/.local
 ENV PATH=/home/appuser/.local/bin:$PATH
 
-# Instalar Playwright Chromium browser (requer dependências de sistema acima)
-# Deve ser ANTES de mudar para utilizador não-root
-RUN playwright install chromium
+# Instalar Playwright Chromium browser COM dependências de sistema automáticas
+# --with-deps instala TODAS as libs de sistema necessárias (libnss3, libgbm1, etc.)
+# Correr ANTES de mudar para utilizador não-root (requer apt-get)
+# PLAYWRIGHT_BROWSERS_PATH garante que o browser fica em /ms-playwright (partilhado)
+RUN playwright install --with-deps chromium \
+    && chown -R appuser:appgroup /ms-playwright
 
 # Criar diretórios da aplicação
 WORKDIR /app

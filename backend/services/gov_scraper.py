@@ -755,6 +755,14 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
             documents.append(doc_ext)
             logger.info(f"[GOV_SCRAPER] Extrato de Remunerações descarregado: {doc_ext.filename}")
 
+        # ── 9. Retornar resultados ──
+        if not documents:
+            logger.warning(f"[GOV_SCRAPER] Nenhum documento obtido para NISS {masked_niss}")
+            return ScraperResult(success=False, error="sem_documentos")
+
+        logger.info(f"[GOV_SCRAPER] {len(documents)} documentos obtidos para NISS {masked_niss}")
+        return ScraperResult(success=True, documents=documents)
+
     except Exception as e:
         logger.error(f"[GOV_SCRAPER] Erro interno no scraper Seg. Social: {type(e).__name__}")
         # NÃO logar detalhes que possam conter credenciais
@@ -770,15 +778,6 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
             await pw.stop()
         except Exception:
             pass
-
-    # Este código é inatingível devido ao return no except/finally,
-    # mas mantemos por segurança
-    if not documents:
-        logger.warning(f"[GOV_SCRAPER] Nenhum documento obtido para NISS {masked_niss}")
-        return ScraperResult(success=False, error="sem_documentos")
-
-    logger.info(f"[GOV_SCRAPER] {len(documents)} documentos obtidos para NISS {masked_niss}")
-    return ScraperResult(success=True, documents=documents)
 
 
 async def _download_seg_social_document(
@@ -912,10 +911,14 @@ async def check_playwright_available() -> Dict[str, Any]:
     Verifica se o Playwright e o browser Chromium estão disponíveis.
 
     Retorna informações sobre o estado da instalação para diagnóstico.
+    Inclui o PLAYWRIGHT_BROWSERS_PATH para ajudar a debugar problemas de path.
     """
+    browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "(default: ~/.cache/ms-playwright)")
+
     result = {
         "playwright_installed": False,
         "chromium_available": False,
+        "browsers_path": browsers_path,
         "error": None,
     }
 
@@ -923,19 +926,29 @@ async def check_playwright_available() -> Dict[str, Any]:
         from playwright.async_api import async_playwright
         result["playwright_installed"] = True
 
+        # Verificar se o diretório de browsers existe
+        if os.path.isdir(browsers_path):
+            result["browsers_dir_exists"] = True
+            try:
+                result["browsers_dir_contents"] = os.listdir(browsers_path)
+            except Exception:
+                result["browsers_dir_contents"] = "(erro ao listar)"
+        else:
+            result["browsers_dir_exists"] = False
+
         pw = await async_playwright().start()
         try:
             browser = await pw.chromium.launch(**_get_browser_launch_args())
             result["chromium_available"] = True
             await browser.close()
         except Exception as e:
-            result["error"] = f"Chromium não disponível: {type(e).__name__}"
+            result["error"] = f"Chromium não disponível: {type(e).__name__}: {str(e)[:200]}"
         finally:
             await pw.stop()
 
     except ImportError:
-        result["error"] = "Playwright não instalado. Execute: pip install playwright && playwright install chromium"
+        result["error"] = "Playwright não instalado. Execute: pip install playwright && playwright install --with-deps chromium"
     except Exception as e:
-        result["error"] = f"Erro ao verificar Playwright: {type(e).__name__}"
+        result["error"] = f"Erro ao verificar Playwright: {type(e).__name__}: {str(e)[:200]}"
 
     return result
