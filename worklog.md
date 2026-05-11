@@ -116,3 +116,23 @@ Stage Summary:
 - Backend scraper engine (Playwright RPA) already implemented: fetch_financas_documents() + fetch_seg_social_documents()
 - Portal routes with S3 upload, email notifications, team notifications already complete
 - All changes pushed to origin/dev
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix persistent React error #310 — previous fix was not applied on dev branch
+
+Work Log:
+- User reported React #310 still occurring after previous fix attempt
+- Diagnosed: previous commit 447924b was only on main, not properly pushed to dev
+- PermissionsTab.js still had the broken IIFE + require() + useAuth() pattern on dev branch
+- Fixed PermissionsTab.js: replaced IIFE `(() => { try { const { useAuth } = require(...); return useAuth(); } catch { ... } })()` with proper top-level `import { useAuth } from "../../contexts/AuthContext"` and direct `const { user: currentUser } = useAuth()` call
+- Fixed ClientPortal.jsx: changed useMemo dependency from `consultor` (object reference) to `consultor?.name` (primitive) to prevent unnecessary recalculations
+- Verified frontend build succeeds (npx vite build ✓)
+- Cherry-picked fix to dev branch and pushed to origin/dev (commit 92b83f3)
+
+Stage Summary:
+- Root cause: PermissionsTab.js called useAuth() inside an IIFE with dynamic require() and try/catch — violates React Rules of Hooks, causing inconsistent hook ordering → infinite re-renders
+- Fix 1: PermissionsTab.js — proper top-level import + hook call
+- Fix 2: ClientPortal.jsx — stable useMemo dependency (consultor?.name instead of consultor)
+- Commit 92b83f3 pushed to origin/dev
