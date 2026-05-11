@@ -37,7 +37,7 @@
  *   mediadorFilter="all"
  * />
  */
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { toast } from 'sonner';
 import { hasAnyRole } from '../utils/roleUtils';
@@ -124,7 +124,8 @@ const KanbanBoard = ({
   const canCreateClient = hasAnyRole(user, ['intermediario']);
 
   // === REACT QUERY - DATA FETCHING ===
-  const filters = { consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter };
+  // Memoize filters to prevent infinite re-renders in dependent hooks
+  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter]);
   
   const {
     kanbanData,
@@ -161,7 +162,7 @@ const KanbanBoard = ({
 
   // === AUTO-COLLAPSE EMPTY COLUMNS ===
   // Este efeito é local, não precisa de React Query
-  useState(() => {
+  useEffect(() => {
     if (columns.length > 0 && collapsedColumns.size === 0) {
       const emptyColumnIds = columns
         .filter(col => col.count === 0)

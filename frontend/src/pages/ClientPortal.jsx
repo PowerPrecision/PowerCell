@@ -9,7 +9,7 @@
  * Fluxo de autenticação:
  *   short_id → resolve → JWT (sessionStorage) → status + upload
  */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import {
   FileText,
   Upload,
@@ -38,6 +38,27 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+
+// ====================================================================
+// CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
+// ====================================================================
+function ClientOnly({ children, fallback = null }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  return mounted ? children : fallback;
+}
+
+// ====================================================================
+// LOADER FALLBACK for Suspense boundaries
+// ====================================================================
+function LoaderFallback() {
+  return (
+    <div className="flex items-center justify-center py-8">
+      <Loader2 className="w-5 h-5 text-emerald-500 animate-spin mr-2" />
+      <span className="text-sm text-gray-500">A carregar...</span>
+    </div>
+  );
+}
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
 
@@ -310,9 +331,13 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
   const sourceLabel = isFinancas ? 'Portal das Finanças' : 'Segurança Social';
   const sourceIcon = isFinancas ? <Landmark className="w-5 h-5 text-teal-600" /> : <HeartPulse className="w-5 h-5 text-rose-500" />;
 
-  // Reset on open
+  // Reset state when dialog opens (safe: only runs on open transition)
+  const prevOpenRef = useRef(false);
   useEffect(() => {
-    if (open) { setIdField(''); setPassword(''); setShowPassword(false); setLoading(false); setError(null); setSuccess(null); }
+    if (open && !prevOpenRef.current) {
+      setIdField(''); setPassword(''); setShowPassword(false); setLoading(false); setError(null); setSuccess(null);
+    }
+    prevOpenRef.current = open;
   }, [open]);
 
   const handleSubmit = async (e) => {
@@ -360,88 +385,90 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title={sourceLabel} description={`Obter documentos do ${sourceLabel}`} className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {sourceIcon}
-            {sourceLabel}
-          </DialogTitle>
-          <DialogDescription className="text-xs text-gray-500">
-            Introduza as suas credenciais para obter automaticamente os seus documentos.
-          </DialogDescription>
-        </DialogHeader>
+    <ClientOnly>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent title={sourceLabel} description={`Obter documentos do ${sourceLabel}`} className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {sourceIcon}
+              {sourceLabel}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              Introduza as suas credenciais para obter automaticamente os seus documentos.
+            </DialogDescription>
+          </DialogHeader>
 
-        {/* Security notice */}
-        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <Shield className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-amber-700">
-            <strong>As suas credenciais não são guardadas.</strong> São usadas apenas em memória para obter os documentos e eliminadas de imediato.
-          </p>
-        </div>
-
-        {success ? (
-          <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-emerald-800">Sucesso!</p>
-              <p className="text-xs text-emerald-600 mt-0.5">{success}</p>
-            </div>
+          {/* Security notice */}
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <Shield className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-amber-700">
+              <strong>As suas credenciais não são guardadas.</strong> São usadas apenas em memória para obter os documentos e eliminadas de imediato.
+            </p>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div>
-              <label className="text-xs font-medium text-gray-700 mb-1 block">{idLabel}</label>
-              <input
-                type="text"
-                value={idField}
-                onChange={(e) => setIdField(e.target.value.replace(/\D/g, '').slice(0, idLength))}
-                placeholder={isFinancas ? '123456789' : '12345678901'}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
-                inputMode="numeric"
-                disabled={loading}
-                autoFocus
-              />
+
+          {success ? (
+            <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-emerald-800">Sucesso!</p>
+                <p className="text-xs text-emerald-600 mt-0.5">{success}</p>
+              </div>
             </div>
-            <div>
-              <label className="text-xs font-medium text-gray-700 mb-1 block">Password do {sourceLabel}</label>
-              <div className="relative">
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-700 mb-1 block">{idLabel}</label>
                 <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="A sua password"
-                  className="w-full px-3 py-2 pr-10 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+                  type="text"
+                  value={idField}
+                  onChange={(e) => setIdField(e.target.value.replace(/\D/g, '').slice(0, idLength))}
+                  placeholder={isFinancas ? '123456789' : '12345678901'}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+                  inputMode="numeric"
                   disabled={loading}
+                  autoFocus
                 />
-                <button type="button" onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700 mb-1 block">Password do {sourceLabel}</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="A sua password"
+                    className="w-full px-3 py-2 pr-10 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+                    disabled={loading}
+                  />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <DialogFooter>
+                <button type="button" onClick={() => onOpenChange(false)} disabled={loading}
+                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+                  Cancelar
                 </button>
-              </div>
-            </div>
-
-            {error && (
-              <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
-                <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <DialogFooter>
-              <button type="button" onClick={() => onOpenChange(false)} disabled={loading}
-                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
-                Cancelar
-              </button>
-              <button type="submit" disabled={loading || !idField || !password}
-                className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
-                {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> A obter...</> : <><ExternalLink className="w-4 h-4" /> Obter Documentos</>}
-              </button>
-            </DialogFooter>
-          </form>
-        )}
-      </DialogContent>
-    </Dialog>
+                <button type="submit" disabled={loading || !idField || !password}
+                  className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                  {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> A obter...</> : <><ExternalLink className="w-4 h-4" /> Obter Documentos</>}
+                </button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+    </ClientOnly>
   );
 }
 
@@ -478,39 +505,43 @@ function DocumentHelpDialog({ open, onOpenChange }) {
   ];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Ajuda com Documentos" description="Guia de ajuda para cada tipo de documento" className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <HelpCircle className="w-5 h-5 text-teal-500" />
-            Ajuda com Documentos
-          </DialogTitle>
-          <DialogDescription className="text-xs text-gray-500">
-            Clique em cada documento para ver detalhes e como obtê-lo.
-          </DialogDescription>
-        </DialogHeader>
+    <ClientOnly>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent title="Ajuda com Documentos" description="Guia de ajuda para cada tipo de documento" className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HelpCircle className="w-5 h-5 text-teal-500" />
+              Ajuda com Documentos
+            </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              Clique em cada documento para ver detalhes e como obtê-lo.
+            </DialogDescription>
+          </DialogHeader>
 
-        <Accordion type="single" collapsible className="w-full">
-          {helpItems.map((item) => (
-            <AccordionItem key={item.id} value={item.id}>
-              <AccordionTrigger className="text-sm text-gray-700 hover:text-emerald-700 hover:no-underline">
-                {item.title}
-              </AccordionTrigger>
-              <AccordionContent className="text-xs text-gray-600 leading-relaxed">
-                {item.content}
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+          <Suspense fallback={<LoaderFallback />}>
+            <Accordion type="single" collapsible className="w-full">
+              {helpItems.map((item) => (
+                <AccordionItem key={item.id} value={item.id}>
+                  <AccordionTrigger className="text-sm text-gray-700 hover:text-emerald-700 hover:no-underline">
+                    {item.title}
+                  </AccordionTrigger>
+                  <AccordionContent className="text-xs text-gray-600 leading-relaxed">
+                    {item.content}
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </Suspense>
 
-        <DialogFooter>
-          <button onClick={() => onOpenChange(false)}
-            className="px-4 py-2 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-            Fechar
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <button onClick={() => onOpenChange(false)}
+              className="px-4 py-2 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+              Fechar
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </ClientOnly>
   );
 }
 
@@ -1007,6 +1038,16 @@ export default function ClientPortal() {
     return () => clearInterval(interval);
   }, [fetchMessages, fetchUnreadCount]);
 
+  // ── Welcome message (dynamic) — MUST be before early returns (Rules of Hooks) ──
+  const welcomeMessage = useMemo(() => {
+    const proc = data?.process;
+    const cons = data?.consultor;
+    const clientName = proc?.client_name || 'Cliente';
+    const consultorName = cons?.name || 'a sua equipa';
+    const empresa = 'Power Precision';
+    return `Olá, ${clientName}!\n\nChamo-me ${consultorName}, faço parte da equipa que vai acompanhar todo o seu processo de Crédito e dou-lhe as boas-vindas. O nosso serviço não tem qualquer custo para si.\n\nO seu processo vai percorrer 2 fases:\n\n1ª Fase — Reunião de documentação:\n• Cartão de Cidadão / Passaporte\n• IRS e Nota de Liquidação\n• Recibos de Vencimento\n• Extratos Bancários\n• Mapa de Responsabilidades (Banco de Portugal)\n• Comprovativo de IBAN\n\n2ª Fase — Análise e submissão bancária:\nA sua documentação será analisada e submetida às entidades bancárias para aprovação.\n\nPode contactar-me por aqui a qualquer momento.\n\nObrigado por escolher a ${empresa}.`;
+  }, [data?.process?.client_name, data?.consultor?.name]);
+
   // ── Loading ──
   if (loading) {
     return (
@@ -1044,14 +1085,6 @@ export default function ClientPortal() {
   const { process, progress, stepper, documents, rgpd, team, consultor } = data;
   const currentStep = stepper?.find(s => s.is_current);
   const statusColor = currentStep ? stepColor(currentStep.color) : stepColor('green');
-
-  // ── Welcome message (dynamic) ──
-  const welcomeMessage = React.useMemo(() => {
-    const clientName = process.client_name || 'Cliente';
-    const consultorName = consultor?.name || 'a sua equipa';
-    const empresa = 'Power Precision';
-    return `Olá, ${clientName}!\n\nChamo-me ${consultorName}, faço parte da equipa que vai acompanhar todo o seu processo de Crédito e dou-lhe as boas-vindas. O nosso serviço não tem qualquer custo para si.\n\nO seu processo vai percorrer 2 fases:\n\n1ª Fase — Reunião de documentação:\n• Cartão de Cidadão / Passaporte\n• IRS e Nota de Liquidação\n• Recibos de Vencimento\n• Extratos Bancários\n• Mapa de Responsabilidades (Banco de Portugal)\n• Comprovativo de IBAN\n\n2ª Fase — Análise e submissão bancária:\nA sua documentação será analisada e submetida às entidades bancárias para aprovação.\n\nPode contactar-me por aqui a qualquer momento.\n\nObrigado por escolher a ${empresa}.`;
-  }, [process.client_name, consultor?.name]);
 
   return (
     <IframeDetector>
