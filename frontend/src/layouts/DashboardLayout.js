@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate, Link, useLocation } from "react-router-dom";
@@ -86,8 +86,13 @@ const roleLabels = ROLE_LABELS;
 // Cores para sidebar escura (fundo slate-900)
 const roleColors = ROLE_SIDEBAR_COLORS;
 
+// Stable empty object for useKeyboardShortcuts — prevents the hook's internal
+// useCallback from recreating on every render (which would re-register the
+// keydown listener on every render when AuthContext value changes).
+const EMPTY_HANDLERS = {};
+
 const DashboardLayout = ({ children, title }) => {
-  const { user, logout, effectiveRole } = useAuth();
+  const { user, logout, effectiveRole, isImpersonating } = useAuth();
   const { theme, toggleTheme, isDark } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -98,8 +103,10 @@ const DashboardLayout = ({ children, title }) => {
   const chatUnreadRef = useRef(0);
   const chatUnreadIntervalRef = useRef(null);
   
-  // Atalhos de teclado
-  const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts({});
+  // Atalhos de teclado — empty object is hoisted to module scope so the
+  // reference is stable across renders (prevents useKeyboardShortcuts from
+  // recreating its internal useCallback every render).
+  const { showHelpModal, setShowHelpModal, showSearchModal, setShowSearchModal, shortcuts } = useKeyboardShortcuts(EMPTY_HANDLERS);
 
   // --- Contagem de mensagens não lidas (Chat Interno) ---
   const fetchChatUnreadCount = useCallback(async () => {
@@ -149,7 +156,8 @@ const DashboardLayout = ({ children, title }) => {
   });
   
   // Determinar quais secções devem estar abertas baseado na rota actual
-  const getInitialOpenSections = () => {
+  // Memoized to avoid creating new object references on every render
+  const computedOpenSections = useMemo(() => {
     const path = location.pathname;
     
     // Rotas do grupo O Meu Negócio
@@ -167,20 +175,14 @@ const DashboardLayout = ({ children, title }) => {
       "comunicacoes": comunicacoesRoutes.some(r => path.startsWith(r)),
       "gestao-operacoes": gestaoRoutes.some(r => path.startsWith(r)),
     };
-  };
+  }, [location.pathname, effectiveRole]);
   
-  const [openSections, setOpenSections] = useState(getInitialOpenSections);
+  const [openSections, setOpenSections] = useState({});
   
-  // Actualizar secções abertas quando a rota muda
+  // Sync openSections with computed values when path or role changes
   useEffect(() => {
-    setOpenSections(getInitialOpenSections());
-  }, [location.pathname]);
-
-  // Forçar re-render completo do menu lateral quando a role muda (Context Switcher)
-  // Resetar openSections para que as secções sejam recalculadas com o novo role
-  useEffect(() => {
-    setOpenSections(getInitialOpenSections());
-  }, [effectiveRole]);
+    setOpenSections(computedOpenSections);
+  }, [computedOpenSections]);
 
   // Detectar scroll para minimizar header
   useEffect(() => {
@@ -462,8 +464,7 @@ const DashboardLayout = ({ children, title }) => {
 
   const navData = getNavItems();
   
-  // Verificar se está em modo de impersonate para ajustar o layout
-  const { isImpersonating } = useAuth();
+  // Impersonate offset (isImpersonating already consumed above)
   const impersonateOffset = isImpersonating ? 'top-12' : 'top-0';
   const headerStyle = isImpersonating ? { top: '48px' } : {};
 

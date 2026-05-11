@@ -34,6 +34,11 @@ export default class ErrorBoundary extends Component {
   componentDidCatch(error, errorInfo) {
     const { moduleName } = this.props;
 
+    // Log component stack to console for debugging (especially for #310 errors)
+    if (error?.message?.includes('Too many re-renders') || error?.message?.includes('#310')) {
+      console.error('[ErrorBoundary] React #310 detected! Component stack:', errorInfo?.componentStack);
+    }
+
     // Enviar erro ao Sentry com contexto do módulo
     const eventId = Sentry.captureException(error, {
       contexts: {
@@ -151,6 +156,14 @@ export default class ErrorBoundary extends Component {
               <pre className="text-xs text-left bg-muted/50 rounded-lg p-3 overflow-auto max-h-32 font-mono text-muted-foreground">
                 {error.message}
               </pre>
+            )}
+            {this.state.errorInfo?.componentStack && (
+              <details className="text-left">
+                <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">Component Stack</summary>
+                <pre className="text-[10px] bg-muted/30 rounded-lg p-2 overflow-auto max-h-24 font-mono text-muted-foreground mt-1">
+                  {this.state.errorInfo.componentStack}
+                </pre>
+              </details>
             )}
             <div className="flex gap-3 justify-center pt-2">
               {showRetry && canRetry && (

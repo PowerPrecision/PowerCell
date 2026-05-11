@@ -25,7 +25,7 @@
  *   - hasActiveUploads {boolean} — true se há uploads em curso
  *   - startUpload, updateProgress, finishUpload, dismissUpload {Function}
  */
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useMemo } from "react";
 
 const UploadProgressContext = createContext(null);
 
@@ -110,23 +110,27 @@ export function UploadProgressProvider({ children }) {
   // Verificar se há uploads activos
   const hasActiveUploads = Object.values(activeUploads).some(u => u.status === "running");
   
-  // Obter lista de uploads
-  const uploadList = Object.entries(activeUploads).map(([id, data]) => ({
+  // Obter lista de uploads — memoized to keep reference stable when unchanged
+  const uploadList = useMemo(() => Object.entries(activeUploads).map(([id, data]) => ({
     id,
     ...data,
     progress: data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0,
-  }));
+  })), [activeUploads]);
   
+  // ── FIX: memoize context value to prevent all consumers re-rendering
+  // when the Provider re-renders but nothing changed ──
+  const value = useMemo(() => ({
+    activeUploads,
+    uploadList,
+    hasActiveUploads,
+    startUpload,
+    updateProgress,
+    finishUpload,
+    dismissUpload,
+  }), [activeUploads, uploadList, hasActiveUploads, startUpload, updateProgress, finishUpload, dismissUpload]);
+
   return (
-    <UploadProgressContext.Provider value={{
-      activeUploads,
-      uploadList,
-      hasActiveUploads,
-      startUpload,
-      updateProgress,
-      finishUpload,
-      dismissUpload,
-    }}>
+    <UploadProgressContext.Provider value={value}>
       {children}
     </UploadProgressContext.Provider>
   );

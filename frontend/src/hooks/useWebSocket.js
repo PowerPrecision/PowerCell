@@ -569,23 +569,18 @@ export function useWebSocket(options = {}) {
   const optionsRef = useRef(options);
   const tokenRef = useRef(token);
 
-  // Keep options ref up-to-date synchronously (no useEffect needed —
-  // this avoids an unnecessary re-effect on every render when options
-  // is a new object reference, which happens when callers pass inline objects).
-  // Note: we do NOT use useEffect here because options changes on every
-  // render (callers pass { autoConnect: true, onNotification: fn } inline),
-  // which would fire the effect needlessly. The ref is consumed by event
-  // handlers and the subscriber lifecycle, both of which are stable.
+  // ── FIX: update optionsRef synchronously on every render ──
+  // Callers pass inline option objects ({ autoConnect: true, onChatMessage: fn })
+  // which are new references every render. Putting `options` in a useEffect dep
+  // array would fire that effect on every render. Instead, we update the ref
+  // synchronously during render (before any event handlers fire) and only use
+  // useEffect for the token ref (which changes infrequently).
+  optionsRef.current = options;
 
   // Keep token ref up-to-date
   useEffect(() => {
     tokenRef.current = token;
-    optionsRef.current = options;
-  }, [token, options]);
-  // NOTE: options IS intentionally in this dep array alongside token so that
-  // the ref is updated before any event fires. Unlike the previous version
-  // which had a separate useEffect for options (running every render), this
-  // combined effect only runs when token changes (which is infrequent).
+  }, [token]);
 
   // When token changes (from AuthContext refresh), update the WebSocket manager
   useEffect(() => {
