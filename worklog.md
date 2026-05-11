@@ -65,3 +65,34 @@ Stage Summary:
 - Non-admin/CEO users cannot change roles (dropdowns disabled)
 - All mediador/consultor_intermediario references cleaned from both backend and frontend
 - Friendly labels: indexação → "Indexação de Dados", administrativo → "Apoio Administrativo"
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Implement Playwright RPA engine for Portal das Finanças & Segurança Social
+
+Work Log:
+- Explored existing backend structure: portal.py (mock scrapers), S3 service, email service
+- Installed playwright==1.59.0 and Chromium browser
+- Created backend/services/gov_scraper.py with full Playwright async automation
+- Implemented fetch_financas_documents(): Login via acesso.gov.pt, download IRS + Nota de Liquidação
+- Implemented fetch_seg_social_documents(): Login via app.seg-social.pt, download docs
+- Replaced mock scrapers in portal.py with real gov_scraper calls + S3 upload + DB records
+- Fixed email service: replaced raw SMTP with main email service (Resend API) + fallback
+- Added /portal/scraper-status diagnostic endpoint (requires portal auth)
+- Conducted security audit, fixed all CRITICAL and HIGH issues:
+  - Fixed _secure_clear_password no-op (now uses del password in caller scope)
+  - Added try/finally to _financas_scraper_inner for browser cleanup
+  - Fixed double-close risk in _seg_social_scraper_inner
+  - Sanitized exception logging (type only, no credential leakage)
+  - Removed --disable-web-security Chromium flag
+  - Reduced NIF/NISS mask visibility (2 visible digits instead of 5)
+  - Made /scraper-status require portal authentication
+- Committed as 3c5cce1 on dev branch, pushed to origin/dev
+
+Stage Summary:
+- New file: backend/services/gov_scraper.py (949 lines, Playwright RPA)
+- Modified: backend/routes/portal.py (replaced mock scrapers with real automation + S3 upload)
+- Modified: backend/requirements.txt (added playwright==1.59.0)
+- All security audit issues fixed (3 CRITICAL, 3 HIGH, 4 MEDIUM)
+- Pushed to origin/dev: commit 3c5cce1
