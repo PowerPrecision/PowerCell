@@ -41,6 +41,10 @@ LABEL maintainer="CreditoIMO <dev@creditoimo.pt>" \
       version="2.0" \
       description="CreditoIMO Backend - Sistema de Gestão de Crédito Habitação"
 
+# Prevent interactive prompts (tzdata, etc.)
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC
+
 # Environment
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -56,13 +60,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # Playwright: instalar browsers em path partilhado (acessível pelo appuser)
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Instalar dependências de runtime (não-Chromium)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libmagic1 \
-    curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
 # Criar utilizador não-root para segurança
 RUN groupadd --gid 1000 appgroup \
     && useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
@@ -71,11 +68,60 @@ RUN groupadd --gid 1000 appgroup \
 COPY --from=builder /root/.local /home/appuser/.local
 ENV PATH=/home/appuser/.local/bin:$PATH
 
-# Instalar Playwright Chromium browser COM dependências de sistema automáticas
-# --with-deps instala TODAS as libs de sistema necessárias (libnss3, libgbm1, etc.)
-# Correr ANTES de mudar para utilizador não-root (requer apt-get)
+# ── Instalar TODAS as dependências de sistema + Playwright Chromium em 1 layer ──
+# Lista de deps obtida com: playwright install-deps --dry-run chromium
+# NÃO usamos --with-deps porque esse flag invoca sudo (não existe em Docker).
+# Em vez disso, instalamos as deps manualmente e depois só o browser.
+#
+# NOTA: Os pacotes com sufixo t64 são pacotes de transição do Debian 12 (bookworm).
+# O python:3.11-slim é baseado em bookworm, por isso precisa destes nomes.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Runtime gerais
+    libmagic1 \
+    curl \
+    # ── Playwright Chromium dependencies (Debian 12 / bookworm) ──
+    # Core rendering (t64 = Debian 12 64-bit time_t transition packages)
+    libasound2t64 \
+    libatk-bridge2.0-0t64 \
+    libatk1.0-0t64 \
+    libatspi2.0-0t64 \
+    libcairo2 \
+    libcups2t64 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0t64 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    # Virtual framebuffer (Xvfb) — necessário para --headless=new em alguns ambientes
+    xvfb \
+    # Fonts (necessário para renderização de PDFs com caracteres especiais/CJK)
+    fonts-noto-color-emoji \
+    fonts-unifont \
+    xfonts-scalable \
+    fonts-liberation \
+    fonts-ipafont-gothic \
+    fonts-wqy-zenhei \
+    fonts-tlwg-loma-otf \
+    fonts-freefont-ttf \
+    # Font rendering libraries
+    libfontconfig1 \
+    libfreetype6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Instalar Playwright Chromium browser (apenas o browser, deps já instaladas acima)
 # PLAYWRIGHT_BROWSERS_PATH garante que o browser fica em /ms-playwright (partilhado)
-RUN playwright install --with-deps chromium \
+RUN playwright install chromium \
     && chown -R appuser:appgroup /ms-playwright
 
 # Criar diretórios da aplicação
