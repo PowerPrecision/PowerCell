@@ -963,6 +963,32 @@ async def _notify_assigned_team_message(process: dict, process_id: str, client_n
 # INTEGRAÇÃO AUTOMÁTICA — Portal das Finanças & Segurança Social
 # ====================================================================
 
+@router.get("/scraper-status")
+async def check_scraper_status():
+    """
+    Verifica se o serviço de obtenção automática de documentos está disponível.
+
+    Retorna o estado do Playwright e do browser Chromium, para diagnóstico.
+    Endpoint público (não requer autenticação) para permitir verificação prévia.
+    """
+    try:
+        from services.gov_scraper import check_playwright_available
+        result = await check_playwright_available()
+        return {
+            "available": result.get("playwright_installed") and result.get("chromium_available"),
+            "playwright_installed": result.get("playwright_installed", False),
+            "chromium_available": result.get("chromium_available", False),
+            "error": result.get("error"),
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "playwright_installed": False,
+            "chromium_available": False,
+            "error": str(e),
+        }
+
+
 @router.post("/fetch-financas")
 async def fetch_financas_documents(
     data: dict,
@@ -1034,19 +1060,28 @@ async def fetch_financas_documents(
                 "documents_count": docs_count,
             }
         else:
-            # ── 3b. Erro de credenciais ──
-            error_detail = result.get("error", "credenciais_invalidas")
+            # ── 3b. Erro do scraper — diferenciar credenciais vs. erro do sistema ──
+            error_detail = result.get("error", "erro_desconhecido")
 
-            try:
-                await _send_portal_fetch_email(
-                    client_email, client_name, "financas", "error"
+            # Credenciais inválidas → 401 (erro do utilizador)
+            if error_detail == "credenciais_invalidas":
+                try:
+                    await _send_portal_fetch_email(
+                        client_email, client_name, "financas", "error"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PORTAL] Erro ao enviar email de erro (Finanças): {e}")
+
+                raise HTTPException(
+                    status_code=401,
+                    detail="As credenciais que introduziu estão incorretas. Verifique o seu NIF e password do Portal das Finanças e tente novamente."
                 )
-            except Exception as e:
-                logger.warning(f"[PORTAL] Erro ao enviar email de erro (Finanças): {e}")
 
+            # Erros do sistema (Playwright não instalado, timeout, etc.) → 503
+            logger.error(f"[PORTAL] Erro do scraper Finanças: {error_detail}")
             raise HTTPException(
-                status_code=401,
-                detail="As credenciais que introduziu estão incorretas. Verifique o seu NIF e password do Portal das Finanças e tente novamente."
+                status_code=503,
+                detail="O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente do Portal das Finanças e envie os documentos através do botão de upload."
             )
 
     except HTTPException:
@@ -1132,18 +1167,27 @@ async def fetch_seguranca_social_documents(
                 "documents_count": docs_count,
             }
         else:
-            error_detail = result.get("error", "credenciais_invalidas")
+            error_detail = result.get("error", "erro_desconhecido")
 
-            try:
-                await _send_portal_fetch_email(
-                    client_email, client_name, "seguranca_social", "error"
+            # Credenciais inválidas → 401 (erro do utilizador)
+            if error_detail == "credenciais_invalidas":
+                try:
+                    await _send_portal_fetch_email(
+                        client_email, client_name, "seguranca_social", "error"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PORTAL] Erro ao enviar email de erro (Seg. Social): {e}")
+
+                raise HTTPException(
+                    status_code=401,
+                    detail="As credenciais que introduziu estão incorretas. Verifique o seu NISS e password da Segurança Social e tente novamente."
                 )
-            except Exception as e:
-                logger.warning(f"[PORTAL] Erro ao enviar email de erro (Seg. Social): {e}")
 
+            # Erros do sistema (Playwright não instalado, timeout, etc.) → 503
+            logger.error(f"[PORTAL] Erro do scraper Seg. Social: {error_detail}")
             raise HTTPException(
-                status_code=401,
-                detail="As credenciais que introduziu estão incorretas. Verifique o seu NISS e password da Segurança Social e tente novamente."
+                status_code=503,
+                detail="O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
             )
 
     except HTTPException:

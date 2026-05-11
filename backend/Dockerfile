@@ -54,10 +54,28 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # Render porta (será sobrescrita pelo Render se disponível)
     PORT=8001
 
-# Instalar dependências de runtime
+# Instalar dependências de runtime + Playwright browser dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
     curl \
+    # Playwright/Chromium dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxkbcommon0 \
+    libatspi2.0-0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -68,6 +86,10 @@ RUN groupadd --gid 1000 appgroup \
 # Copiar dependências do builder
 COPY --from=builder /root/.local /home/appuser/.local
 ENV PATH=/home/appuser/.local/bin:$PATH
+
+# Instalar Playwright Chromium browser (requer dependências de sistema acima)
+# Deve ser ANTES de mudar para utilizador não-root
+RUN playwright install chromium
 
 # Criar diretórios da aplicação
 WORKDIR /app
