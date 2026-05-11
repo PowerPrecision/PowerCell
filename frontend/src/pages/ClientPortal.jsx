@@ -1051,7 +1051,7 @@ export default function ClientPortal() {
     const consultorName = consultor?.name || 'a sua equipa';
     const empresa = 'Power Precision';
     return `Olá, ${clientName}!\n\nChamo-me ${consultorName}, faço parte da equipa que vai acompanhar todo o seu processo de Crédito e dou-lhe as boas-vindas. O nosso serviço não tem qualquer custo para si.\n\nO seu processo vai percorrer 2 fases:\n\n1ª Fase — Reunião de documentação:\n• Cartão de Cidadão / Passaporte\n• IRS e Nota de Liquidação\n• Recibos de Vencimento\n• Extratos Bancários\n• Mapa de Responsabilidades (Banco de Portugal)\n• Comprovativo de IBAN\n\n2ª Fase — Análise e submissão bancária:\nA sua documentação será analisada e submetida às entidades bancárias para aprovação.\n\nPode contactar-me por aqui a qualquer momento.\n\nObrigado por escolher a ${empresa}.`;
-  }, [process.client_name, consultor]);
+  }, [process.client_name, consultor?.name]);
 
   return (
     <IframeDetector>
