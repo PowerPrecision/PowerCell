@@ -68,61 +68,43 @@ RUN groupadd --gid 1000 appgroup \
 COPY --from=builder /root/.local /home/appuser/.local
 ENV PATH=/home/appuser/.local/bin:$PATH
 
-# ── Instalar TODAS as dependências de sistema + Playwright Chromium em 1 layer ──
-# Lista de deps obtida com: playwright install-deps --dry-run chromium
-# NÃO usamos --with-deps porque esse flag invoca sudo (não existe em Docker).
-# Em vez disso, instalamos as deps manualmente e depois só o browser.
-#
-# NOTA: Os pacotes com sufixo t64 são pacotes de transição do Debian 12 (bookworm).
-# O python:3.11-slim é baseado em bookworm, por isso precisa destes nomes.
+# ── Dependências de runtime básicas ──
+# wget e gnupg necessários para Playwright install-deps (chaves de repositório)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Runtime gerais
     libmagic1 \
     curl \
-    # ── Playwright Chromium dependencies (Debian 12 / bookworm) ──
-    # Core rendering (t64 = Debian 12 64-bit time_t transition packages)
-    libasound2t64 \
-    libatk-bridge2.0-0t64 \
-    libatk1.0-0t64 \
-    libatspi2.0-0t64 \
-    libcairo2 \
-    libcups2t64 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libglib2.0-0t64 \
-    libnspr4 \
-    libnss3 \
-    libpango-1.0-0 \
-    libx11-6 \
-    libxcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    # Virtual framebuffer (Xvfb) — necessário para --headless=new em alguns ambientes
-    xvfb \
-    # Fonts (necessário para renderização de PDFs com caracteres especiais/CJK)
-    fonts-noto-color-emoji \
-    fonts-unifont \
-    xfonts-scalable \
-    fonts-liberation \
-    fonts-ipafont-gothic \
-    fonts-wqy-zenhei \
-    fonts-tlwg-loma-otf \
-    fonts-freefont-ttf \
-    # Font rendering libraries
-    libfontconfig1 \
-    libfreetype6 \
+    wget \
+    gnupg \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Instalar Playwright Chromium browser (apenas o browser, deps já instaladas acima)
-# PLAYWRIGHT_BROWSERS_PATH garante que o browser fica em /ms-playwright (partilhado)
-RUN playwright install chromium \
-    && chown -R appuser:appgroup /ms-playwright
+# ── Playwright: instalar browser + dependências de sistema (como root) ──
+# ORDEM CRÍTICA:
+#   1. Criar pasta do browser com permissões corretas
+#   2. playwright install chromium   → descarrega o binário Chromium
+#   3. playwright install-deps chromium → instala deps de OS via apt-get (auto-detecta Debian/Ubuntu)
+#   4. Limpar cache do apt
+#   5. Ajustar permissões para appuser
+#
+# NOTA: NÃO usamos --with-deps (esse flag invoca sudo, não existe em Docker).
+# Em vez disso, usamos o comando separado "install-deps" que corre apt-get diretamente.
+# O install-deps faz o seu próprio apt-get update, pelo que não precisamos de
+# manter as listas de apt entre passos.
+
+# 1. Criar pasta do browser ANTES da instalação
+RUN mkdir -p /ms-playwright
+
+# 2. Instalar Chromium (download do binário)
+RUN playwright install chromium
+
+# 3. Instalar dependências de sistema do Chromium (apt-get automático)
+RUN playwright install-deps chromium
+
+# 4. Limpar cache do apt (após install-deps ter corrido apt-get)
+RUN rm -rf /var/lib/apt/lists/* && apt-get clean
+
+# 5. Ajustar permissões do browser para o utilizador da aplicação
+RUN chown -R appuser:appgroup /ms-playwright
 
 # Criar diretórios da aplicação
 WORKDIR /app
