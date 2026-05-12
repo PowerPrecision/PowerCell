@@ -33,7 +33,7 @@ import {
   HelpCircle,
   Eye,
   EyeOff,
-  Pin,
+
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -792,16 +792,6 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
         </div>
       )}
 
-      {/* Pinned Welcome Card */}
-      {welcomeMessage && (
-        <div className="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-xl p-4 mb-1">
-          <div className="flex items-start gap-2">
-            <Pin className="w-3.5 h-3.5 text-teal-500 mt-0.5 flex-shrink-0" />
-            <div className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{welcomeMessage}</div>
-          </div>
-        </div>
-      )}
-
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto space-y-3 min-h-0 mb-3 pr-1" style={{ scrollbarWidth: 'thin' }}>
         {loading ? (
@@ -809,32 +799,44 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
             <Loader2 className="w-5 h-5 text-emerald-500 animate-spin mr-2" />
             <span className="text-sm text-gray-500">A carregar mensagens...</span>
           </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <MessageCircle className="w-10 h-10 text-gray-300 mb-2" />
-            <p className="text-sm text-gray-400">Sem mensagens ainda. Envie a primeira!</p>
-          </div>
         ) : (
-          messages.map((msg) => {
-            const isClient = msg.sender_type === 'client';
-            return (
-              <div key={msg.id} className={`flex ${isClient ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                  isClient
-                    ? 'bg-emerald-50 border border-emerald-200 text-right'
-                    : 'bg-gray-100 border border-gray-200'
-                }`}>
-                  {!isClient && msg.sender_name && (
-                    <p className="text-xs font-semibold text-gray-600 mb-0.5">{msg.sender_name}</p>
-                  )}
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{msg.content}</p>
-                  <p className={`text-[10px] mt-1 ${isClient ? 'text-emerald-500' : 'text-gray-400'}`}>
-                    {formatRelativeTime(msg.created_at)}
-                  </p>
+          <>
+            {/* Welcome message as the first message in the chat */}
+            {welcomeMessage && (
+              <div className="flex justify-start">
+                <div className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-gray-100 border border-gray-200">
+                  <p className="text-xs font-semibold text-gray-600 mb-0.5">PowerCell</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{welcomeMessage}</p>
                 </div>
               </div>
-            );
-          })
+            )}
+            {messages.length === 0 && !welcomeMessage && (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <MessageCircle className="w-10 h-10 text-gray-300 mb-2" />
+                <p className="text-sm text-gray-400">Sem mensagens ainda. Envie a primeira!</p>
+              </div>
+            )}
+            {messages.map((msg) => {
+              const isClient = msg.sender_type === 'client';
+              return (
+                <div key={msg.id} className={`flex ${isClient ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                    isClient
+                      ? 'bg-emerald-50 border border-emerald-200 text-right'
+                      : 'bg-gray-100 border border-gray-200'
+                  }`}>
+                    {!isClient && msg.sender_name && (
+                      <p className="text-xs font-semibold text-gray-600 mb-0.5">{msg.sender_name}</p>
+                    )}
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{msg.content}</p>
+                    <p className={`text-[10px] mt-1 ${isClient ? 'text-emerald-500' : 'text-gray-400'}`}>
+                      {formatRelativeTime(msg.created_at)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </>
         )}
         <div ref={messagesEndRef} />
       </div>
