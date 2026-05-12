@@ -179,17 +179,29 @@ def _force_gc() -> None:
 
 
 def _get_browser_launch_args() -> Dict[str, Any]:
-    """Retorna argumentos de configuração para o browser headless."""
+    """
+    Retorna argumentos de configuração para o browser headless.
+
+    Otimizado para ambientes Docker com RAM limitada (512MB no Render).
+    As flags --single-process + --no-zygote reduzem o Chromium de ~6 processos
+    para apenas 1, cortando o consumo de RAM em ~60%.
+    """
     return {
         "headless": True,
         "args": [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",  # Essencial em Docker/Render
-            "--disable-gpu",
-            "--disable-extensions",
-            "--disable-software-rasterizer",
-            "--window-size=1920,1080",
+            "--no-sandbox",                    # Necessário em Docker (sem kernel sandbox)
+            "--disable-setuid-sandbox",        # Idem
+            "--disable-dev-shm-usage",          # Usa /tmp em vez de /dev/shm (crucial p/ Docker)
+            "--disable-gpu",                    # Sem GPU em headless
+            "--no-zygote",                      # Não fork do processo zygote
+            "--single-process",                 # 1 processo só (vs ~6 por default)
+            "--disable-extensions",             # Sem extensões
+            "--disable-software-rasterizer",    # Sem rasterização por software
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-ipc-flooding-protection",
+            "--window-size=1280,720",           # Viewport menor = menos RAM p/ rendering
         ],
     }
 
@@ -287,10 +299,11 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
 
     pw = await async_playwright().start()
     browser = await pw.chromium.launch(**_get_browser_launch_args())
+    context = None
 
     try:
         context = await browser.new_context(
-            viewport={"width": 1920, "height": 1080},
+            viewport={"width": 1280, "height": 720},
             locale="pt-PT",
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -417,7 +430,13 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         return ScraperResult(success=False, error=type(e).__name__)
 
     finally:
-        # CRÍTICO: Garantir que o browser é SEMPRE fechado
+        # CRÍTICO: Garantir que TODOS os recursos são SEMPRE libertados
+        # Ordem: context → browser → playwright (evita processos zombie)
+        try:
+            if context:
+                await context.close()
+        except Exception:
+            pass
         try:
             await browser.close()
         except Exception:
@@ -629,10 +648,11 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
 
     pw = await async_playwright().start()
     browser = await pw.chromium.launch(**_get_browser_launch_args())
+    context = None
 
     try:
         context = await browser.new_context(
-            viewport={"width": 1920, "height": 1080},
+            viewport={"width": 1280, "height": 720},
             locale="pt-PT",
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -769,7 +789,13 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
         return ScraperResult(success=False, error=type(e).__name__)
 
     finally:
-        # CRÍTICO: Garantir que o browser é SEMPRE fechado
+        # CRÍTICO: Garantir que TODOS os recursos são SEMPRE libertados
+        # Ordem: context → browser → playwright (evita processos zombie)
+        try:
+            if context:
+                await context.close()
+        except Exception:
+            pass
         try:
             await browser.close()
         except Exception:
@@ -937,13 +963,18 @@ async def check_playwright_available() -> Dict[str, Any]:
             result["browsers_dir_exists"] = False
 
         pw = await async_playwright().start()
+        browser = None
         try:
             browser = await pw.chromium.launch(**_get_browser_launch_args())
             result["chromium_available"] = True
-            await browser.close()
         except Exception as e:
             result["error"] = f"Chromium não disponível: {type(e).__name__}: {str(e)[:200]}"
         finally:
+            try:
+                if browser:
+                    await browser.close()
+            except Exception:
+                pass
             await pw.stop()
 
     except ImportError:
