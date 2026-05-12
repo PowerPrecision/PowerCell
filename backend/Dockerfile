@@ -42,9 +42,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# ── Criar utilizador não-root para segurança ──
-RUN groupadd --gid 1000 appgroup \
-    && useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
 
 # ── Working directory ──
 WORKDIR /app
@@ -59,12 +56,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # ── Permissões ──
-# Apenas /app — os browsers em /ms-playwright já têm permissões
-# de leitura global (a imagem base garante isto).
-RUN chown -R appuser:appgroup /app
+# A imagem Playwright já traz o utilizador pwuser (UID/GID 1000).
+# Atribuímos ownership de /app ao pwuser. Os browsers em /ms-playwright
+# já têm permissões de leitura global (a imagem base garante isto).
+RUN chown -R pwuser:pwuser /app
 
-# ── Mudar para utilizador não-root ──
-USER appuser
+# ── Mudar para utilizador não-root (nativo da imagem Playwright) ──
+USER pwuser
 
 # ── Health check ──
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
