@@ -349,6 +349,24 @@ async def get_portal_status(
     # ── RGPD Status ──
     rgpd_info = await _get_rgpd_status(process_id)
 
+    # ── Welcome message (from portal_settings, rendered with variables) ──
+    welcome_message = None
+    try:
+        from routes.portal_settings import _get_portal_settings_doc, render_welcome_message
+        settings_doc = await _get_portal_settings_doc()
+        template = settings_doc.get("welcome_message_template", "")
+        if template:
+            consultor_name = team_info["consultores"][0]["name"] if team_info["consultores"] else "a sua equipa"
+            empresa_name = process.get("company", "Power Precision")
+            welcome_message = render_welcome_message(
+                template=template,
+                client_name=process.get("client_name", "Cliente"),
+                consultor_name=consultor_name,
+                empresa_name=empresa_name,
+            )
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao gerar welcome message: {type(e).__name__}")
+
     return {
         "process": {
             "id": process_id,
@@ -375,6 +393,7 @@ async def get_portal_status(
         "rgpd": rgpd_info,
         "team": team_info,
         "consultor": team_info["consultores"][0] if team_info["consultores"] else None,
+        "welcome_message": welcome_message,
     }
 
 

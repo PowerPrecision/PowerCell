@@ -1040,15 +1040,13 @@ export default function ClientPortal() {
     return () => clearInterval(interval);
   }, [fetchMessages, fetchUnreadCount]);
 
-  // ── Welcome message (dynamic) — MUST be before early returns (Rules of Hooks) ──
+  // ── Welcome message (from API, already rendered with variables) ──
+  // MUST be before early returns (Rules of Hooks)
   const welcomeMessage = useMemo(() => {
-    const proc = data?.process;
-    const cons = data?.consultor;
-    const clientName = proc?.client_name || 'Cliente';
-    const consultorName = cons?.name || 'a sua equipa';
-    const empresa = 'Power Precision';
-    return `Olá, ${clientName}!\n\nChamo-me ${consultorName}, faço parte da equipa que vai acompanhar todo o seu processo de Crédito e dou-lhe as boas-vindas. O nosso serviço não tem qualquer custo para si.\n\nO seu processo vai percorrer 2 fases:\n\n1ª Fase — Reunião de documentação:\n• Cartão de Cidadão / Passaporte\n• IRS e Nota de Liquidação\n• Recibos de Vencimento\n• Extratos Bancários\n• Mapa de Responsabilidades (Banco de Portugal)\n• Comprovativo de IBAN\n\n2ª Fase — Análise e submissão bancária:\nA sua documentação será analisada e submetida às entidades bancárias para aprovação.\n\nPode contactar-me por aqui a qualquer momento.\n\nObrigado por escolher a ${empresa}.`;
-  }, [data?.process?.client_name, data?.consultor?.name]);
+    // The backend returns welcome_message already with {{cliente}}, {{consultor}},
+    // {{empresa}} replaced by the actual values. Fallback to nothing if not available.
+    return data?.welcome_message || '';
+  }, [data?.welcome_message]);
 
   // ── Loading ──
   if (loading) {
