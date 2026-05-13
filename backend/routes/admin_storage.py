@@ -529,6 +529,31 @@ async def batch_update_process_s3_mappings(
     }
 
 
+# Base path do explorador de ficheiros — pasta raiz virtual do S3
+S3_EXPLORER_BASE_PATH = "Documentação Clientes"
+
+
+def _resolve_explorer_path(path: str) -> str:
+    """
+    Resolve o caminho S3 para operações do File Explorer.
+    
+    Se o caminho estiver vazio, retorna o base path ("Documentação Clientes").
+    Se o caminho já contiver o base path, retorna como está.
+    Se o caminho não contiver o base path, prefixa com ele.
+    
+    Isto garante que as operações de criação/upload respeitem
+    a pasta actual onde o utilizador navegou, corrigindo o bug
+    onde pastas criadas na raiz do explorador iam parar à raiz
+    do bucket S3 em vez de dentro de "Documentação Clientes/".
+    """
+    path = path.strip()
+    if not path:
+        return S3_EXPLORER_BASE_PATH
+    if path.startswith(S3_EXPLORER_BASE_PATH):
+        return path
+    return f"{S3_EXPLORER_BASE_PATH}/{path}"
+
+
 @router.get("/s3-folder-contents")
 async def get_s3_folder_contents(
     folder_path: str = Query("", description="Caminho da pasta S3 (vazio = raiz)"),
@@ -541,10 +566,7 @@ async def get_s3_folder_contents(
         raise HTTPException(status_code=503, detail="S3 não configurado")
     
     # Se folder_path vazio, usar a pasta principal "Documentação Clientes/" como raiz
-    prefix = folder_path.strip()
-    if not prefix:
-        # Listar "Documentação Clientes/" como pasta raiz do explorador
-        prefix = "Documentação Clientes"
+    prefix = _resolve_explorer_path(folder_path.strip())
     
     try:
         list_prefix = prefix if prefix.endswith("/") else f"{prefix}/"
@@ -748,7 +770,13 @@ async def s3_create_folder(
     data: S3CreateFolderRequest,
     user: dict = Depends(require_roles(FILE_OPS_ROLES))
 ):
-    """Cria uma pasta no S3 (cria um ficheiro marcador .keep vazio)."""
+    """Cria uma pasta no S3 (cria um ficheiro marcador .keep vazio).
+    
+    O caminho é resolvido relativamente ao base path do explorador
+    ("Documentação Clientes"), garantindo que a pasta é criada no
+    nível correto da árvore de ficheiros, mesmo quando o utilizador
+    está na raiz do explorador.
+    """
     from services.s3_storage import s3_service
 
     if not s3_service.is_configured():
@@ -757,6 +785,9 @@ async def s3_create_folder(
     folder_path = data.folder_path.strip()
     if not folder_path:
         raise HTTPException(status_code=400, detail="Caminho da pasta é obrigatório")
+
+    # Resolver caminho relativo ao base path do explorador
+    folder_path = _resolve_explorer_path(folder_path)
 
     # Ensure path ends with /
     if not folder_path.endswith("/"):
@@ -785,7 +816,13 @@ async def s3_upload(
     folder_path: str = Form(""),
     user: dict = Depends(require_roles(FILE_OPS_ROLES))
 ):
-    """Faz upload de um ficheiro para uma pasta S3 (usado pelo File Explorer)."""
+    """Faz upload de um ficheiro para uma pasta S3 (usado pelo File Explorer).
+    
+    O caminho é resolvido relativamente ao base path do explorador
+    ("Documentação Clientes"), garantindo que o ficheiro é colocado no
+    nível correto da árvore de ficheiros, mesmo quando o utilizador
+    está na raiz do explorador.
+    """
     from services.s3_storage import s3_service
 
     if not s3_service.is_configured():
@@ -794,9 +831,9 @@ async def s3_upload(
     if not file or not file.filename:
         raise HTTPException(status_code=400, detail="Ficheiro é obrigatório")
 
-    # Build the S3 key
-    base_path = folder_path.strip()
-    if base_path and not base_path.endswith("/"):
+    # Resolver caminho relativo ao base path do explorador
+    base_path = _resolve_explorer_path(folder_path.strip())
+    if not base_path.endswith("/"):
         base_path += "/"
 
     s3_key = f"{base_path}{file.filename}"
