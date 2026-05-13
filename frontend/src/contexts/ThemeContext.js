@@ -23,7 +23,7 @@
  *   - toggleTheme {Function} — Alterna entre light e dark
  *   - isDark {boolean} — true se o tema activo é "dark"
  */
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
 
 const ThemeContext = createContext({
   theme: "light",
@@ -80,21 +80,25 @@ export function ThemeProvider({ children }) {
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
-  const setTheme = (newTheme) => {
+  const setTheme = useCallback((newTheme) => {
     setThemeState(newTheme);
-  };
+  }, []);
 
-  const toggleTheme = () => {
+  const toggleTheme = useCallback(() => {
     setThemeState(prev => prev === "dark" ? "light" : "dark");
-  };
+  }, []);
+
+  // ── FIX: memoize context value to prevent all consumers re-rendering
+  // when ThemeProvider re-renders but theme hasn't changed ──
+  const value = useMemo(() => ({ 
+    theme, 
+    setTheme, 
+    toggleTheme,
+    isDark: theme === "dark"
+  }), [theme, setTheme, toggleTheme]);
 
   return (
-    <ThemeContext.Provider value={{ 
-      theme, 
-      setTheme, 
-      toggleTheme,
-      isDark: theme === "dark"
-    }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

@@ -70,6 +70,7 @@ export function AuthProvider({ children }) {
   const activeRoleInitialized = useRef(false);
 
   // Função para decodificar JWT e obter expiração
+  // (stable — empty deps, no outer references)
   const getTokenExpiry = useCallback((token) => {
     if (!token) return null;
     try {
@@ -202,7 +203,12 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const login = async (email, password) => {
+  // ── FIX: wrap in useCallback to stabilise AuthContext value ──
+  // Without useCallback, these functions are recreated on every render,
+  // which makes the context `value` useMemo recalculate every render,
+  // which creates a new object reference, which causes ALL consumers
+  // to re-render in a cascade. This is the ROOT CAUSE of the #310 error.
+  const login = useCallback(async (email, password) => {
     // Login com refresh tokens (login-v2) - rota segura obrigatória
     const response = await api.post("/auth/login-v2", {
       email,
@@ -233,9 +239,9 @@ export function AuthProvider({ children }) {
     scheduleTokenRefresh(access_token);
     
     return userData;
-  };
+  }, [scheduleTokenRefresh]);
 
-  const register = async (name, email, password, phone) => {
+  const register = useCallback(async (name, email, password, phone) => {
     const response = await api.post("/auth/register", {
       name,
       email,
@@ -247,9 +253,9 @@ export function AuthProvider({ children }) {
     setToken(access_token);
     setUser(userData);
     return userData;
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     // Tentar revogar refresh token no servidor
     const currentRefreshToken = localStorage.getItem("refreshToken");
     if (currentRefreshToken) {
@@ -281,10 +287,10 @@ export function AuthProvider({ children }) {
     sessionStorage.removeItem("activeRole");
     setActiveRole(null);
     activeRoleInitialized.current = false;
-  };
+  }, []);
 
   // Impersonate - ver como outro utilizador
-  const impersonate = async (userId) => {
+  const impersonate = useCallback(async (userId) => {
     try {
       const response = await api.post(`/admin/impersonate/${userId}`);
       const { access_token, user: userData } = response.data;
@@ -302,10 +308,10 @@ export function AuthProvider({ children }) {
       console.error("Error impersonating:", error);
       throw error;
     }
-  };
+  }, []);
 
   // Terminar impersonate e voltar à conta original
-  const stopImpersonating = async () => {
+  const stopImpersonating = useCallback(async () => {
     try {
       const response = await api.post("/admin/stop-impersonate");
       const data = response.data;
@@ -358,7 +364,7 @@ export function AuthProvider({ children }) {
       
       throw error;
     }
-  };
+  }, []);
 
   // Context Switching - Múltiplos Perfis
   const switchActiveRole = useCallback((newRole) => {

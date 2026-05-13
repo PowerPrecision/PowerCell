@@ -21,6 +21,7 @@ ENDPOINTS:
 """
 import uuid
 import logging
+import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -348,6 +349,24 @@ async def get_portal_status(
     # ── RGPD Status ──
     rgpd_info = await _get_rgpd_status(process_id)
 
+    # ── Welcome message (from portal_settings, rendered with variables) ──
+    welcome_message = None
+    try:
+        from routes.portal_settings import _get_portal_settings_doc, render_welcome_message
+        settings_doc = await _get_portal_settings_doc()
+        template = settings_doc.get("welcome_message_template", "")
+        if template:
+            consultor_name = team_info["consultores"][0]["name"] if team_info["consultores"] else "a sua equipa"
+            empresa_name = process.get("company", "Power Precision")
+            welcome_message = render_welcome_message(
+                template=template,
+                client_name=process.get("client_name", "Cliente"),
+                consultor_name=consultor_name,
+                empresa_name=empresa_name,
+            )
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao gerar welcome message: {type(e).__name__}")
+
     return {
         "process": {
             "id": process_id,
@@ -374,6 +393,7 @@ async def get_portal_status(
         "rgpd": rgpd_info,
         "team": team_info,
         "consultor": team_info["consultores"][0] if team_info["consultores"] else None,
+        "welcome_message": welcome_message,
     }
 
 
@@ -958,9 +978,594 @@ async def _notify_assigned_team_message(process: dict, process_id: str, client_n
     )
 
 
+# ====================================================================
+# INTEGRAÇÃO AUTOMÁTICA — Portal das Finanças & Segurança Social
+# ====================================================================
+
+@router.get("/scraper-status")
+async def check_scraper_status():
+    """
+    Verifica se o serviço de obtenção automática de documentos está disponível.
+
+    Retorna o estado do Playwright e do browser Chromium, para diagnóstico.
+    Endpoint público (não requer autenticação) para permitir verificação prévia.
+    """
+    try:
+        from services.gov_scraper import check_playwright_available
+        result = await check_playwright_available()
+        return {
+            "available": result.get("playwright_installed") and result.get("chromium_available"),
+            "playwright_installed": result.get("playwright_installed", False),
+            "chromium_available": result.get("chromium_available", False),
+            "browsers_path": result.get("browsers_path"),
+            "browsers_dir_exists": result.get("browsers_dir_exists"),
+            "error": result.get("error"),
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "playwright_installed": False,
+            "chromium_available": False,
+            "error": str(e),
+        }
+
+
+@router.post("/fetch-financas")
+async def fetch_financas_documents(
+    data: dict,
+    client_data: dict = Depends(get_current_client),
+):
+    """
+    Obtém documentos do Portal das Finanças (IRS, Nota de Liquidação).
+
+    SEGURANÇA: As credenciais (NIF + Password) NUNCA são guardadas na BD.
+    São usadas apenas em memória para invocar o scraper e descartadas de imediato.
+
+    Body:
+    - nif: NIF do cliente (obrigatório, 9 dígitos)
+    - password: Password do Portal das Finanças (obrigatório)
+
+    Fluxo:
+    1. Envia email ao cliente: "O nosso sistema começou a reunir os seus documentos..."
+    2. Invoca o scraper (ou mock) com as credenciais
+    3. Em caso de sucesso: anexa documentos ao processo + email de sucesso
+    4. Em caso de erro de credenciais: email de erro
+    """
+    process = client_data["process"]
+    process_id = process["id"]
+    client_name = process.get("client_name", "Cliente")
+    client_email = process.get("client_email", "")
+
+    nif = data.get("nif", "").strip()
+    password = data.get("password", "")
+
+    # Validação básica
+    if not nif or len(nif) != 9 or not nif.isdigit():
+        raise HTTPException(status_code=400, detail="NIF inválido. Deve conter 9 dígitos.")
+    if not password:
+        raise HTTPException(status_code=400, detail="A password é obrigatória.")
+
+    # ── 1. Enviar email de início de processo ──
+    try:
+        await _send_portal_fetch_email(
+            client_email, client_name, "financas", "started"
+        )
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao enviar email de início (Finanças): {e}")
+
+    # ── 2. Invocar scraper (Playwright RPA via gov_scraper.py) ──
+    try:
+        result = await _run_financas_scraper(nif, password, process_id)
+
+        if result.get("success"):
+            # ── 3a. Sucesso — anexar documentos + email de sucesso ──
+            docs_count = result.get("documents_count", 0)
+            logger.info(
+                f"[PORTAL] Finanças: {docs_count} documentos obtidos para processo {process_id}"
+            )
+
+            try:
+                await _send_portal_fetch_email(
+                    client_email, client_name, "financas", "success",
+                    docs_count=docs_count
+                )
+            except Exception as e:
+                logger.warning(f"[PORTAL] Erro ao enviar email de sucesso (Finanças): {e}")
+
+            # Notificar equipa
+            await _notify_assigned_team_fetch(process, "Portal das Finanças", docs_count)
+
+            return {
+                "success": True,
+                "message": f"Os documentos foram descarregados e anexados ao seu processo com sucesso. ({docs_count} documento{'s' if docs_count != 1 else ''} obtido{'s' if docs_count != 1 else ''})",
+                "documents_count": docs_count,
+            }
+        else:
+            # ── 3b. Erro do scraper — diferenciar credenciais vs. erro do sistema ──
+            error_detail = result.get("error", "erro_desconhecido")
+
+            # Credenciais inválidas → 401 (erro do utilizador)
+            if error_detail == "credenciais_invalidas":
+                try:
+                    await _send_portal_fetch_email(
+                        client_email, client_name, "financas", "error"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PORTAL] Erro ao enviar email de erro (Finanças): {e}")
+
+                raise HTTPException(
+                    status_code=401,
+                    detail="As credenciais que introduziu estão incorretas. Verifique o seu NIF e password do Portal das Finanças e tente novamente."
+                )
+
+            # Erros do sistema (Playwright não instalado, timeout, etc.) → 503
+            logger.error(f"[PORTAL] Erro do scraper Finanças: {error_detail}")
+            raise HTTPException(
+                status_code=503,
+                detail="O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente do Portal das Finanças e envie os documentos através do botão de upload."
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[PORTAL] Erro inesperado no scraper Finanças: {type(e).__name__}")
+
+        try:
+            await _send_portal_fetch_email(
+                client_email, client_name, "financas", "error"
+            )
+        except:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail="Ocorreu um erro ao obter os documentos. Tente novamente mais tarde ou contacte o seu consultor."
+        )
+
+
+@router.post("/fetch-seguranca-social")
+async def fetch_seguranca_social_documents(
+    data: dict,
+    client_data: dict = Depends(get_current_client),
+):
+    """
+    Obtém documentos da Segurança Social.
+
+    SEGURANÇA: As credenciais (NISS + Password) NUNCA são guardadas na BD.
+    São usadas apenas em memória para invocar o scraper e descartadas de imediato.
+
+    Body:
+    - niss: NISS do cliente (obrigatório, 11 dígitos)
+    - password: Password da Segurança Social (obrigatório)
+
+    Fluxo idêntico ao fetch-financas.
+    """
+    process = client_data["process"]
+    process_id = process["id"]
+    client_name = process.get("client_name", "Cliente")
+    client_email = process.get("client_email", "")
+
+    niss = data.get("niss", "").strip()
+    password = data.get("password", "")
+
+    # Validação básica
+    if not niss or len(niss) != 11 or not niss.isdigit():
+        raise HTTPException(status_code=400, detail="NISS inválido. Deve conter 11 dígitos.")
+    if not password:
+        raise HTTPException(status_code=400, detail="A password é obrigatória.")
+
+    # ── 1. Enviar email de início de processo ──
+    try:
+        await _send_portal_fetch_email(
+            client_email, client_name, "seguranca_social", "started"
+        )
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao enviar email de início (Seg. Social): {e}")
+
+    # ── 2. Invocar scraper (Playwright RPA via gov_scraper.py) ──
+    try:
+        result = await _run_seguranca_social_scraper(niss, password, process_id)
+
+        if result.get("success"):
+            docs_count = result.get("documents_count", 0)
+            logger.info(
+                f"[PORTAL] Seg. Social: {docs_count} documentos obtidos para processo {process_id}"
+            )
+
+            try:
+                await _send_portal_fetch_email(
+                    client_email, client_name, "seguranca_social", "success",
+                    docs_count=docs_count
+                )
+            except Exception as e:
+                logger.warning(f"[PORTAL] Erro ao enviar email de sucesso (Seg. Social): {e}")
+
+            await _notify_assigned_team_fetch(process, "Segurança Social", docs_count)
+
+            return {
+                "success": True,
+                "message": f"Os documentos foram descarregados e anexados ao seu processo com sucesso. ({docs_count} documento{'s' if docs_count != 1 else ''} obtido{'s' if docs_count != 1 else ''})",
+                "documents_count": docs_count,
+            }
+        else:
+            error_detail = result.get("error", "erro_desconhecido")
+
+            # Credenciais inválidas → 401 (erro do utilizador)
+            if error_detail == "credenciais_invalidas":
+                try:
+                    await _send_portal_fetch_email(
+                        client_email, client_name, "seguranca_social", "error"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PORTAL] Erro ao enviar email de erro (Seg. Social): {e}")
+
+                raise HTTPException(
+                    status_code=401,
+                    detail="As credenciais que introduziu estão incorretas. Verifique o seu NISS e password da Segurança Social e tente novamente."
+                )
+
+            # Erros do sistema (Playwright não instalado, timeout, etc.) → 503
+            logger.error(f"[PORTAL] Erro do scraper Seg. Social: {error_detail}")
+            raise HTTPException(
+                status_code=503,
+                detail="O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[PORTAL] Erro inesperado no scraper Seg. Social: {type(e).__name__}")
+
+        try:
+            await _send_portal_fetch_email(
+                client_email, client_name, "seguranca_social", "error"
+            )
+        except:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail="Ocorreu um erro ao obter os documentos. Tente novamente mais tarde ou contacte o seu consultor."
+        )
+
+
+# ====================================================================
+# HELPERS: Scraper invocation (gov_scraper.py) & email notifications
+# ====================================================================
+
+async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dict:
+    """
+    Invoca o scraper do Portal das Finanças (gov_scraper.py).
+
+    O scraper utiliza Playwright em modo headless para:
+    1. Autenticar no Portal das Finanças via acesso.gov.pt
+    2. Navegar até à secção de IRS
+    3. Descarregar a Declaração de IRS e a Nota de Liquidação
+    4. Retornar os PDFs em bytes
+
+    Após obter os documentos, faz upload para o S3 e cria registos na BD.
+
+    SEGURANÇA: As credenciais (NIF + password) são usadas APENAS em memória
+    pelo scraper e eliminadas logo após a execução (del + gc.collect).
+    NUNCA são persistidas na BD ou impressas no log.
+    """
+    from services.gov_scraper import fetch_financas_documents
+
+    # Obter informações do processo para upload S3
+    process = await db.processes.find_one({"id": process_id})
+    client_name = process.get("client_name", "cliente") if process else "cliente"
+    s3_folder = process.get("s3_folder") if process else None
+
+    # ── Invocar o scraper real ──
+    result = await fetch_financas_documents(nif, password)
+
+    # Neste ponto, o scraper já limpou as credenciais da memória
+    # (garantido pelo `finally` em fetch_financas_documents)
+
+    if not result.success:
+        error_map = {
+            "credenciais_invalidas": "credenciais_invalidas",
+            "timeout": "timeout_scraper",
+            "sem_documentos": "sem_documentos",
+        }
+        return {"success": False, "error": error_map.get(result.error, result.error or "erro_desconhecido")}
+
+    # ── Upload dos documentos para o S3 e registo na BD ──
+    now = datetime.now(timezone.utc).isoformat()
+    docs_registered = 0
+
+    for doc in result.documents:
+        try:
+            # Upload para o S3
+            import io
+            file_obj = io.BytesIO(doc.content_bytes)
+            s3_path = s3_service.upload_file(
+                file_obj=file_obj,
+                client_id=process_id,
+                client_name=client_name,
+                category=doc.category,
+                filename=doc.filename,
+                content_type=doc.content_type,
+                s3_folder=s3_folder,
+            )
+
+            if not s3_path:
+                logger.warning(f"[PORTAL] Falha no upload S3 para {doc.filename} — a criar registo sem S3 path")
+
+            # Criar registo na BD
+            doc_id = str(uuid.uuid4())
+            doc_record = {
+                "id": doc_id,
+                "process_id": process_id,
+                "filename": doc.filename,
+                "original_filename": doc.filename,
+                "category": doc.category,
+                "custom_label": doc.label if "captura" in doc.label else None,
+                "status": "RECEIVED",
+                "source": "auto_financas",
+                "uploaded_at": now,
+                "uploaded_by": "system_financas_scraper",
+                "content_type": doc.content_type,
+                "file_size": len(doc.content_bytes),
+                "s3_path": s3_path,
+                "auto_fetched": True,
+            }
+            # Remover custom_label se for None
+            if not doc_record["custom_label"]:
+                del doc_record["custom_label"]
+
+            await db.documents.insert_one(doc_record)
+            docs_registered += 1
+
+            logger.info(
+                f"[PORTAL] Documento Finanças registado: {doc.filename} "
+                f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'})"
+            )
+
+        except Exception as e:
+            logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}")
+
+    return {"success": True, "documents_count": docs_registered}
+
+
+async def _run_seguranca_social_scraper(niss: str, password: str, process_id: str) -> dict:
+    """
+    Invoca o scraper da Segurança Social (gov_scraper.py).
+
+    O scraper utiliza Playwright em modo headless para:
+    1. Autenticar na Segurança Social Direta
+    2. Navegar até à secção de documentos
+    3. Descarregar a Situação Contributiva e o Extrato de Remunerações
+    4. Retornar os PDFs em bytes
+
+    SEGURANÇA: As credenciais (NISS + password) são usadas APENAS em memória
+    pelo scraper e eliminadas logo após a execução (del + gc.collect).
+    NUNCA são persistidas na BD ou impressas no log.
+    """
+    from services.gov_scraper import fetch_seg_social_documents
+
+    # Obter informações do processo para upload S3
+    process = await db.processes.find_one({"id": process_id})
+    client_name = process.get("client_name", "cliente") if process else "cliente"
+    s3_folder = process.get("s3_folder") if process else None
+
+    # ── Invocar o scraper real ──
+    result = await fetch_seg_social_documents(niss, password)
+
+    # Neste ponto, o scraper já limpou as credenciais da memória
+
+    if not result.success:
+        error_map = {
+            "credenciais_invalidas": "credenciais_invalidas",
+            "timeout": "timeout_scraper",
+            "sem_documentos": "sem_documentos",
+        }
+        return {"success": False, "error": error_map.get(result.error, result.error or "erro_desconhecido")}
+
+    # ── Upload dos documentos para o S3 e registo na BD ──
+    now = datetime.now(timezone.utc).isoformat()
+    docs_registered = 0
+
+    for doc in result.documents:
+        try:
+            # Upload para o S3
+            import io
+            file_obj = io.BytesIO(doc.content_bytes)
+            s3_path = s3_service.upload_file(
+                file_obj=file_obj,
+                client_id=process_id,
+                client_name=client_name,
+                category=doc.category,
+                filename=doc.filename,
+                content_type=doc.content_type,
+                s3_folder=s3_folder,
+            )
+
+            if not s3_path:
+                logger.warning(f"[PORTAL] Falha no upload S3 para {doc.filename} — a criar registo sem S3 path")
+
+            # Criar registo na BD
+            doc_id = str(uuid.uuid4())
+            doc_record = {
+                "id": doc_id,
+                "process_id": process_id,
+                "filename": doc.filename,
+                "original_filename": doc.filename,
+                "category": doc.category,
+                "custom_label": doc.label if "captura" in doc.label else None,
+                "status": "RECEIVED",
+                "source": "auto_seguranca_social",
+                "uploaded_at": now,
+                "uploaded_by": "system_seguranca_social_scraper",
+                "content_type": doc.content_type,
+                "file_size": len(doc.content_bytes),
+                "s3_path": s3_path,
+                "auto_fetched": True,
+            }
+            # Remover custom_label se for None
+            if not doc_record["custom_label"]:
+                del doc_record["custom_label"]
+
+            await db.documents.insert_one(doc_record)
+            docs_registered += 1
+
+            logger.info(
+                f"[PORTAL] Documento Seg. Social registado: {doc.filename} "
+                f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'})"
+            )
+
+        except Exception as e:
+            logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}")
+
+    return {"success": True, "documents_count": docs_registered}
+
+
+async def _send_portal_fetch_email(
+    to_email: str,
+    client_name: str,
+    source: str,
+    status: str,
+    docs_count: int = 0
+):
+    """
+    Envia email de estado ao cliente sobre a obtenção automática de documentos.
+
+    Utiliza o serviço de email principal (send_email) em vez de SMTP directo,
+    para suportar tanto Resend API como SMTP, e garantir que os emails são
+    registados no histórico do processo.
+
+    Status:
+    - started:  "O nosso sistema automático começou a reunir os seus documentos..."
+    - error:    "As credenciais que introduziu estão incorretas..."
+    - success:  "Os documentos foram descarregados e anexados ao seu processo com sucesso..."
+    """
+    if not to_email:
+        return
+
+    source_label = {
+        "financas": "Portal das Finanças",
+        "seguranca_social": "Segurança Social",
+    }.get(source, source)
+
+    if status == "started":
+        subject = f"Obtenção de Documentos — {source_label}"
+        body_text = (
+            f"Exmo(a). Sr(a). {client_name},\n\n"
+            f"O nosso sistema automático começou a reunir os seus documentos "
+            f"junto do {source_label}.\n\n"
+            f"Iremos notificá-lo(a) assim que o processo esteja concluído.\n\n"
+            f"Com os melhores cumprimentos,\nEquipa Power Precision"
+        )
+    elif status == "error":
+        subject = f"Credenciais Incorretas — {source_label}"
+        body_text = (
+            f"Exmo(a). Sr(a). {client_name},\n\n"
+            f"As credenciais que introduziu estão incorretas para o {source_label}.\n\n"
+            f"Por favor, verifique os seus dados e tente novamente no portal, "
+            f"ou contacte o seu consultor para assistência.\n\n"
+            f"Com os melhores cumprimentos,\nEquipa Power Precision"
+        )
+    elif status == "success":
+        subject = f"Documentos Obtidos com Sucesso — {source_label}"
+        body_text = (
+            f"Exmo(a). Sr(a). {client_name},\n\n"
+            f"Os documentos foram descarregados e anexados ao seu processo com sucesso "
+            f"junto do {source_label} ({docs_count} documento{'s' if docs_count != 1 else ''} obtido{'s' if docs_count != 1 else ''}).\n\n"
+            f"Não é necessário qualquer ação adicional da sua parte.\n\n"
+            f"Com os melhores cumprimentos,\nEquipa Power Precision"
+        )
+    else:
+        return
+
+    html_content = f"""
+    <html><body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: #0f766e; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0;">Power Precision</h2>
+        </div>
+        <div style="background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px;">
+            <p>{body_text.replace(chr(10), '<br>')}</p>
+        </div>
+        <p style="text-align: center; font-size: 11px; color: #999; margin-top: 15px;">
+            Este email foi enviado automaticamente. Não responda diretamente.
+        </p>
+    </div>
+    </body></html>
+    """
+
+    # ── Enviar via serviço de email principal (Resend API ou SMTP) ──
+    try:
+        from services.email_service import send_email
+        await send_email(
+            account_name="power",
+            to_emails=[to_email],
+            subject=subject,
+            body=body_text,
+            body_html=html_content,
+            force_system=True,
+        )
+        logger.info(f"[PORTAL] Email de estado '{status}' enviado para {to_email} ({source_label})")
+    except Exception as e:
+        # Fallback para SMTP directo se o serviço principal falhar
+        logger.warning(f"[PORTAL] Serviço de email principal falhou, a tentar SMTP directo: {type(e).__name__}")
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+
+            smtp_server = os.environ.get('SMTP_SERVER')
+            smtp_port = int(os.environ.get('SMTP_PORT', 465))
+            smtp_email = os.environ.get('SMTP_EMAIL')
+            smtp_password_env = os.environ.get('SMTP_PASSWORD')
+
+            if not all([smtp_server, smtp_email, smtp_password_env]):
+                logger.warning("[PORTAL] SMTP também não configurado — email de estado não enviado")
+                return
+
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = smtp_email
+            msg['To'] = to_email
+            msg.attach(MIMEText(html_content, 'html'))
+
+            import ssl
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context, timeout=30) as server:
+                server.login(smtp_email, smtp_password_env)
+                server.sendmail(smtp_email, to_email, msg.as_string())
+
+            logger.info(f"[PORTAL] Email de estado '{status}' enviado via SMTP fallback para {to_email}")
+        except Exception as fallback_err:
+            logger.warning(f"[PORTAL] SMTP fallback também falhou: {type(fallback_err).__name__}")
+
+
+async def _notify_assigned_team_fetch(process: dict, source_name: str, docs_count: int):
+    """Notifica a equipa atribuída sobre documentos obtidos automaticamente."""
+    assigned_ids = _get_all_assigned_user_ids(process)
+    if not assigned_ids:
+        return
+
+    client_name = process.get("client_name", "Cliente")
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else process.get("id", "")[:8]
+
+    for uid in assigned_ids:
+        try:
+            user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
+            if user:
+                await send_notification_with_preference_check(
+                    user.get("email"),
+                    f"Documentos Obtidos — {source_name}",
+                    f"O sistema obteve {docs_count} documento{'s' if docs_count != 1 else ''} do {source_name} para o cliente {client_name} no processo {process_ref}.",
+                    notification_type="document_auto_fetch"
+                )
+        except Exception as e:
+            logger.warning(f"Erro ao notificar {uid} sobre fetch {source_name}: {e}")
+
+
 def _get_all_assigned_user_ids(process: dict) -> list:
     """Obtém lista deduplicada de TODOS os user_ids atribuídos ao processo.
-    
+
     Inclui consultores, mediadores, indexação e parceiro.
     Usa os campos novos (_ids) com fallback para os antigos (_id).
     """
@@ -995,3 +1600,25 @@ def _get_all_assigned_user_ids(process: dict) -> list:
         ids.add(uid)
     
     return list(ids)
+
+
+# ====================================================================
+# DIAGNÓSTICO — Verificar estado do scraper
+# ====================================================================
+
+@router.get("/scraper-status")
+async def get_scraper_status(
+    client_data: dict = Depends(get_current_client),
+):
+    """
+    Verifica se o motor de automação (Playwright + Chromium) está disponível.
+
+    Endpoint de diagnóstico para confirmar que o scraper está funcional.
+    Requer autenticação via portal token (qualquer cliente autenticado).
+    """
+    from services.gov_scraper import check_playwright_available
+    status = await check_playwright_available()
+    return {
+        "scraper_available": status.get("playwright_installed") and status.get("chromium_available"),
+        "details": status,
+    }

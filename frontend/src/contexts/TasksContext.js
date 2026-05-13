@@ -342,12 +342,14 @@ export function TasksProvider({ children }) {
     };
   }, [fetchActiveTasks, user]);
   
+  // NOTE: lastFetchTime is intentionally EXCLUDED from the context value
+  // to prevent all consumers from re-rendering on every poll cycle (every 5-30s).
+  // It was only used for debugging and is not needed by any consumer component.
   const value = useMemo(() => ({
     tasks,
     activeCount,
     completedUnacknowledged,
     isLoading,
-    lastFetchTime,
     fetchActiveTasks,
     acknowledgeTask,
     cancelTask,
@@ -355,7 +357,7 @@ export function TasksProvider({ children }) {
     TaskTypes,
     TaskStatus,
     TaskTypeLabels,
-  }), [tasks, activeCount, completedUnacknowledged, isLoading, lastFetchTime, fetchActiveTasks, acknowledgeTask, cancelTask, getTaskDetails]);
+  }), [tasks, activeCount, completedUnacknowledged, isLoading, fetchActiveTasks, acknowledgeTask, cancelTask, getTaskDetails]);
   
   return (
     <TasksContext.Provider value={value}>
