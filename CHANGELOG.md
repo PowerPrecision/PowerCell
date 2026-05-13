@@ -3,7 +3,19 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [2026-07-14] — Console Warnings + Bug do Explorador de Ficheiros + Permissões de Rascunhos
+## [2026-07-14] — Resiliência a 503 no Portal do Cliente (Cold Start Render)
+
+### Corrigido
+- **Erro 503 ao obter documentos do Portal das Finanças** (`fix` — **Resiliência**): O endpoint `POST /api/portal/fetch-financas` retornava 503 (Service Unavailable) em duas situações: (1) Render free tier cold start — o servidor adormece após inatividade e a primeira request recebe 503 do proxy antes da app estar pronta; (2) Falha do scraper Playwright/Chromium (timeout, falta de memória). O erro era apresentado de forma genérica ao utilizador, sem retry automático nem mensagem útil.
+- **Parse de JSON falhava quando o 503 vinha do proxy Render** (`fix`): O proxy do Render retorna HTML no 503 (não JSON), o que causava erro de parsing no `res.json()` e crashava o fluxo. Adicionado parsing seguro com try/catch e mensagem específica para 503 do proxy vs 503 da app.
+- **Credenciais pedidas mesmo com scraper indisponível** (`fix` — UX): O utilizador podia introduzir NIF e password, esperar pelo scraper, e só depois receber erro 503. Agora o sistema verifica a disponibilidade do scraper antes de mostrar o dialog de credenciais.
+
+### Adicionado
+- **`fetchWithRetry()` — Retry automático para 503** (`feat` — Resiliência): Nova utilidade que faz retry automático até 2 vezes (com delays de 3s e 6s) quando recebe HTTP 503 ou erro de rede. Isto cobre a maioria dos cold starts do Render (tipicamente 5-15s para acordar).
+- **Verificação prévia de disponibilidade do scraper** (`feat` — UX): Ao carregar a página de documentos, o sistema consulta `GET /portal/scraper-status` para verificar se o Playwright/Chromium está disponível. Se não estiver, mostra aviso amarelo a guiar o utilizador para upload manual.
+- **Re-verificação ao clicar no botão** (`feat` — UX): Se o scraper estava indisponível no carregamento da página, ao clicar em "Obter IRS" o sistema re-verifica — o servidor pode ter acordado entretanto.
+- **Mensagens de erro específicas** (`feat` — UX): Erros 503 mostram mensagem distinta (servidor a iniciar vs scraper indisponível), 401 mostra "credenciais incorretas", e erros genéricos têm fallback adequado.
+- **Spinner nos botões de auto-fetch durante verificação** (`feat` — UX): Botões mostram Loader2 spinner enquanto verificam disponibilidade do scraper.
 
 ### Corrigido
 - **Console warning: "Collapsible is changing from uncontrolled to controlled"** (`fix` — **Console Spam**): O componente Radix `Collapsible` na sidebar do DashboardLayout recebia `open={openSections[group.id]}` que era `undefined` quando o grupo ainda não tinha sido interagido. O Radix trata `undefined` como uncontrolled e `true/false` como controlled, causando o warning repetido no console. Corrigido com `!!openSections[group.id]` para garantir que `open` é sempre `boolean`, nunca `undefined`. Isto elimina dezenas de warnings repetidos do Radix Collapsible por cada render.
