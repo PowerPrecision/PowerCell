@@ -3,9 +3,10 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [2026-07-14] — Bug do Explorador de Ficheiros: Nova Pasta na Raiz + Permissões de Rascunhos + Correção Visual
+## [2026-07-14] — Console Warnings + Bug do Explorador de Ficheiros + Permissões de Rascunhos
 
 ### Corrigido
+- **Console warning: "Collapsible is changing from uncontrolled to controlled"** (`fix` — **Console Spam**): O componente Radix `Collapsible` na sidebar do DashboardLayout recebia `open={openSections[group.id]}` que era `undefined` quando o grupo ainda não tinha sido interagido. O Radix trata `undefined` como uncontrolled e `true/false` como controlled, causando o warning repetido no console. Corrigido com `!!openSections[group.id]` para garantir que `open` é sempre `boolean`, nunca `undefined`. Isto elimina dezenas de warnings repetidos do Radix Collapsible por cada render.
 - **Bug: Nova Pasta criada sempre na raiz do bucket S3** (`fix` — **UX CRÍTICO**): Quando o utilizador navegava para uma subpasta no Explorador de Ficheiros e criava uma "Nova Pasta", ela era criada na raiz do bucket S3 (fora de "Documentação Clientes/"), ignorando a pasta actual. Causa: os endpoints `POST /api/admin/s3-create-folder` e `POST /api/admin/s3-upload` não prefixavam o caminho com o base path do explorador quando `folder_path` estava vazio ou não continha o prefixo "Documentação Clientes". Corrigido com a função `_resolve_explorer_path()` que normaliza todos os caminhos relativamente ao base path, consistente com a lógica já existente no `GET /api/admin/s3-folder-contents`.
 - **Upload na raiz também ia para o bucket root** (`fix`): O mesmo bug afetava o upload de ficheiros quando o utilizador estava na raiz do explorador. Agora também usa `_resolve_explorer_path()`.
 

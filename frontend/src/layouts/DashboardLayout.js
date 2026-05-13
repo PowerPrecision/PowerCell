@@ -555,11 +555,11 @@ const DashboardLayout = ({ children, title }) => {
               {navData.groups.map((group) => (
                 <Collapsible
                   key={group.id}
-                  open={openSections[group.id]}
+                  open={!!openSections[group.id]}
                   onOpenChange={(open) => {
                     // Only toggle if the CollapsibleTrigger itself was clicked
                     // Prevent items inside from collapsing the group
-                    if (open !== openSections[group.id]) {
+                    if (open !== !!openSections[group.id]) {
                       toggleSection(group.id);
                     }
                   }}
@@ -570,7 +570,7 @@ const DashboardLayout = ({ children, title }) => {
                       <group.icon className="h-5 w-5" />
                       {group.label}
                     </div>
-                    {openSections[group.id] ? (
+                    {!!openSections[group.id] ? (
                       <ChevronDown className="h-4 w-4" />
                     ) : (
                       <ChevronRight className="h-4 w-4" />
