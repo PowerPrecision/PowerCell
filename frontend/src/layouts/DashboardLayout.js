@@ -73,7 +73,7 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { hasRole, ROLE_LABELS, ROLE_SIDEBAR_COLORS, STAFF_ROLES, ADMIN_PANEL_ROLES, MANAGEMENT_ROLES } from "../utils/roleUtils";
+import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, STAFF_ROLES, ADMIN_PANEL_ROLES, MANAGEMENT_ROLES } from "../utils/roleUtils";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -168,6 +168,8 @@ const DashboardLayout = ({ children, title }) => {
     const comunicacoesRoutes = ["/webmail", "/minutas", "/ficheiros"];
     // Rotas do grupo Gestão e Operações
     const gestaoRoutes = ["/estatisticas", "/rascunhos"];
+    // Verificar se /rascunhos está acessível por capability
+    const hasDraftAccess = hasPermission(user, "DRAFT_VIEW");
     
     return {
       "meu-negocio": meuNegocioRoutes.some(r => path.startsWith(r)),
@@ -326,23 +328,27 @@ const DashboardLayout = ({ children, title }) => {
     // GESTÃO E OPERAÇÕES (admin, CEO, diretor)
     // — /templates e /rgpd-admin REMOVIDOS da Sidebar (obsoletos como
     //   links autónomos; acessíveis via Painel de Administração)
+    // — Rascunhos filtrado por capability DRAFT_VIEW
     // ====================================================================
+    const gestaoOperacoesItems = [
+      {
+        label: "Análise e Estatísticas",
+        icon: BarChart3,
+        href: "/estatisticas",
+      },
+      {
+        label: "Rascunhos",
+        icon: FileSignature,
+        href: "/rascunhos",
+        requiredCapability: "DRAFT_VIEW",
+      },
+    ].filter(item => !item.requiredCapability || hasPermission(user, item.requiredCapability));
+
     const gestaoOperacoesGroup = {
       id: "gestao-operacoes",
       label: "Gestão e Operações",
       icon: Settings,
-      items: [
-        {
-          label: "Análise e Estatísticas",
-          icon: BarChart3,
-          href: "/estatisticas",
-        },
-        {
-          label: "Rascunhos",
-          icon: FileSignature,
-          href: "/rascunhos",
-        },
-      ],
+      items: gestaoOperacoesItems,
     };
 
     // ====================================================================
@@ -401,23 +407,34 @@ const DashboardLayout = ({ children, title }) => {
     // — Sem acesso ao Painel de Administração
     // ====================================================================
     if (userRole === "diretor") {
+      const diretorGroups = [
+        { ...meuNegocioGroup, items: meuNegocioGroup.items.filter(i => i.href !== "/financeiro") },
+        visaoGlobalGroup,
+        comunicacoesGroup,
+      ];
+      // Só mostrar "Gestão e Operações" se tiver items após filtrar capabilities
+      if (gestaoOperacoesItems.length > 0) {
+        diretorGroups.push(gestaoOperacoesGroup);
+      }
       return {
         main: [dashboardItem],
-        groups: [
-          { ...meuNegocioGroup, items: meuNegocioGroup.items.filter(i => i.href !== "/financeiro") },
-          visaoGlobalGroup,
-          comunicacoesGroup,
-          gestaoOperacoesGroup,
-        ],
+        groups: diretorGroups,
         showAdminButton: false,
       };
     }
 
     // ====================================================================
     // MENU PARA ADMINISTRATIVO
-    // — Sem Painel de Administração, sem Gestão e Operações
+    // — Sem Painel de Administração
+    // — Rascunhos filtrado por capability DRAFT_VIEW
     // ====================================================================
     if (userRole === "administrativo") {
+      const adminGestaoItems = [
+        { label: "Análise e Estatísticas", icon: BarChart3, href: "/estatisticas" },
+        { label: "Rascunhos", icon: FileSignature, href: "/rascunhos", requiredCapability: "DRAFT_VIEW" },
+        { label: "RGPD", icon: Shield, href: "/rgpd-admin" },
+      ].filter(item => !item.requiredCapability || hasPermission(user, item.requiredCapability));
+
       return {
         main: [dashboardItem],
         groups: [
@@ -428,11 +445,7 @@ const DashboardLayout = ({ children, title }) => {
             id: "gestao-operacoes",
             label: "Gestão e Operações",
             icon: Settings,
-            items: [
-              { label: "Análise e Estatísticas", icon: BarChart3, href: "/estatisticas" },
-              { label: "Rascunhos", icon: FileSignature, href: "/rascunhos" },
-              { label: "RGPD", icon: Shield, href: "/rgpd-admin" },
-            ],
+            items: adminGestaoItems,
           },
         ],
         showAdminButton: false,
@@ -446,14 +459,18 @@ const DashboardLayout = ({ children, title }) => {
     // — SEM Configurações de Sistema espalhadas (tudo no Painel)
     // ====================================================================
     if (isAdmin || isCeo) {
+      const adminGroups = [
+        meuNegocioGroup,
+        visaoGlobalGroup,
+        comunicacoesGroup,
+      ];
+      // Só mostrar "Gestão e Operações" se tiver items após filtrar capabilities
+      if (gestaoOperacoesItems.length > 0) {
+        adminGroups.push(gestaoOperacoesGroup);
+      }
       return {
         main: [dashboardItem],
-        groups: [
-          meuNegocioGroup,
-          visaoGlobalGroup,
-          comunicacoesGroup,
-          gestaoOperacoesGroup,
-        ],
+        groups: adminGroups,
         showAdminButton: true,
       };
     }

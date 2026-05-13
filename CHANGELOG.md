@@ -3,6 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-14] — Permissões de Rascunhos e Correção Visual no Gestor de Permissões
+
+### Adicionado
+- **Permissões granulares para Rascunhos** (`feat` — Permissões): Adicionadas duas novas capabilities ao sistema de permissões:
+  - `DRAFT_VIEW` — Aceder à página de Rascunhos (ver e consultar)
+  - `DRAFT_MANAGE` — Criar, editar e eliminar rascunhos
+  - Ambas estão na categoria "Comunicações" do gestor de permissões
+  - **Diretor** e **Administrativo** têm ambas as capabilities ativas por padrão
+  - **Consultor**, **Intermediário** e **Indexação** têm ambas desativadas por padrão (disponíveis para ativação pelo admin)
+  - Admin e CEO mantêm bypass total (Super Admin)
+- **Acesso à página de Rascunhos via capability** (`feat` — RBAC): A rota `/rascunhos` passou de verificação por cargo hardcoded (`allowedRoles: ["admin", "ceo", "administrativo"]`) para verificação por capability granular (`requiredCapability: "DRAFT_VIEW"`). Isto permite ao administrador controlar quem acede aos Rascunhos diretamente no gestor de permissões, sem depender de cargo.
+- **Sidebar respeita capability DRAFT_VIEW** (`feat` — UX): O link "Rascunhos" na sidebar agora só aparece se o utilizador tiver a capability `DRAFT_VIEW`. O grupo "Gestão e Operações" é automaticamente ocultado se ficar sem items após a filtragem.
+- **`ProtectedRoute` suporta `requiredCapability`** (`feat` — Infraestrutura): O componente `ProtectedRoute` no `App.js` agora aceita a prop `requiredCapability` além de `allowedRoles`, permitindo verificação granular de acesso por capability.
+- **Mapeamento legado de Rascunhos** (`feat` — Compatibilidade): Adicionado `"rascunhos"` a `AVAILABLE_PAGES` e `"view_drafts"`/`"manage_drafts"` a `AVAILABLE_ACTIONS` no serviço de permissões legado, com mapeamento para `DRAFT_VIEW`/`DRAFT_MANAGE` no `ACTION_TO_CAPABILITY_MAP`.
+
+### Corrigido
+- **Bug visual: campos ocultos no Gestor de Permissões** (`fix` — UX): Quando todos os accordions de categorias eram expandidos na página de permissões, a lista ficava demasiado grande sem scroll adequado, cortando os campos do fundo. Corrigido alterando o `ScrollArea` de `max-h-[65vh]` para `h-[65vh]` com `overflow-hidden` no container pai, e adicionado `pb-10` ao conteúdo interno para garantir que a última opção nunca fica colada ou escondida atrás de bordas.
+- **Mismatch de acesso: Diretor via Sidebar vs Rota** (`fix` — RBAC): O Diretor via o link "Rascunhos" na sidebar mas era redirecionado ao clicar porque a rota só permitia `["admin", "ceo", "administrativo"]`. Agora ambos usam a mesma verificação de capability `DRAFT_VIEW`.
+
 ## [2026-03-04] — Limpeza RBAC: Remoção de "mediador", Validação de Cargos e Correção de Build
 
 ### Corrigido

@@ -354,10 +354,10 @@ const PermissionsTab = () => {
       </Card>
 
       {/* Permissions Matrix */}
-      <Card>
-        <CardContent className="p-0">
-          <ScrollArea className="max-h-[65vh]">
-            <div className="p-4">
+      <Card className="flex flex-col">
+        <CardContent className="p-0 flex-1 min-h-0 overflow-hidden">
+          <ScrollArea className="h-[65vh]">
+            <div className="p-4 pb-10">
               {categories.map(category => {
                 const catCaps = Object.entries(capabilities)
                   .filter(([, meta]) => meta.category === category.id);

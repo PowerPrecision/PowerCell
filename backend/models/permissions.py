@@ -101,6 +101,8 @@ CAPABILITIES: Dict[str, CapabilityMeta] = {
     "EMAIL_SEND":           CapabilityMeta("Enviar Emails",           "comunicacoes",  "Send",        "Enviar emails através do webmail"),
     "EMAIL_VIEW_ALL":       CapabilityMeta("Ver Todos os Emails",     "comunicacoes",  "Mail",        "Ver emails de outros utilizadores"),
     "CHAT_ACCESS":          CapabilityMeta("Chat Interno",            "comunicacoes",  "MessageSquare","Aceder ao chat interno da equipa"),
+    "DRAFT_VIEW":           CapabilityMeta("Ver Rascunhos",           "comunicacoes",  "FileText",    "Aceder à página de Rascunhos (ver e consultar)"),
+    "DRAFT_MANAGE":         CapabilityMeta("Gerir Rascunhos",         "comunicacoes",  "FileEdit",    "Criar, editar e eliminar rascunhos"),
     
     # ── ESTATÍSTICAS ──
     "STATS_VIEW":           CapabilityMeta("Ver Estatísticas",        "estatisticas",  "BarChart3",   "Ver dashboard de estatísticas gerais"),
@@ -136,6 +138,7 @@ ROLE_CAPABILITY_DEFAULTS: Dict[str, Dict[str, bool]] = {
         "DOCUMENT_UPLOAD": True, "DOCUMENT_DELETE": True,  "DOCUMENT_DOWNLOAD": True, "DOCUMENT_VIEW_ALL": True,
         "FINANCE_VIEW": True,    "FINANCE_EDIT": True,     "FINANCE_EXPORT": True,
         "EMAIL_SEND": True,      "EMAIL_VIEW_ALL": True,   "CHAT_ACCESS": True,
+        "DRAFT_VIEW": True,      "DRAFT_MANAGE": True,
         "STATS_VIEW": True,      "STATS_FINANCIAL": True,  "STATS_EXPORT": True,
         "SETTINGS_EDIT": False,  "BACKUP_MANAGE": False,   "LOGS_VIEW": False,
         "USER_CREATE": False,    "USER_EDIT": False,       "USER_DELETE": False,  "USER_IMPERSONATE": False,
@@ -149,6 +152,7 @@ ROLE_CAPABILITY_DEFAULTS: Dict[str, Dict[str, bool]] = {
         "DOCUMENT_UPLOAD": True, "DOCUMENT_DELETE": True,   "DOCUMENT_DOWNLOAD": True, "DOCUMENT_VIEW_ALL": True,
         "FINANCE_VIEW": False,   "FINANCE_EDIT": False,     "FINANCE_EXPORT": False,
         "EMAIL_SEND": True,      "EMAIL_VIEW_ALL": False,   "CHAT_ACCESS": True,
+        "DRAFT_VIEW": True,      "DRAFT_MANAGE": True,
         "STATS_VIEW": True,      "STATS_FINANCIAL": False,  "STATS_EXPORT": False,
         "SETTINGS_EDIT": False,  "BACKUP_MANAGE": False,    "LOGS_VIEW": False,
         "USER_CREATE": False,    "USER_EDIT": False,        "USER_DELETE": False,  "USER_IMPERSONATE": False,
@@ -162,6 +166,7 @@ ROLE_CAPABILITY_DEFAULTS: Dict[str, Dict[str, bool]] = {
         "DOCUMENT_UPLOAD": True, "DOCUMENT_DELETE": False,   "DOCUMENT_DOWNLOAD": True, "DOCUMENT_VIEW_ALL": False,
         "FINANCE_VIEW": True,    "FINANCE_EDIT": False,      "FINANCE_EXPORT": False,
         "EMAIL_SEND": True,      "EMAIL_VIEW_ALL": False,    "CHAT_ACCESS": True,
+        "DRAFT_VIEW": False,     "DRAFT_MANAGE": False,
         "STATS_VIEW": False,     "STATS_FINANCIAL": False,   "STATS_EXPORT": False,
         "SETTINGS_EDIT": False,  "BACKUP_MANAGE": False,     "LOGS_VIEW": False,
         "USER_CREATE": False,    "USER_EDIT": False,         "USER_DELETE": False,  "USER_IMPERSONATE": False,
@@ -175,6 +180,7 @@ ROLE_CAPABILITY_DEFAULTS: Dict[str, Dict[str, bool]] = {
         "DOCUMENT_UPLOAD": True, "DOCUMENT_DELETE": False,   "DOCUMENT_DOWNLOAD": True, "DOCUMENT_VIEW_ALL": False,
         "FINANCE_VIEW": True,    "FINANCE_EDIT": False,      "FINANCE_EXPORT": False,
         "EMAIL_SEND": True,      "EMAIL_VIEW_ALL": False,    "CHAT_ACCESS": True,
+        "DRAFT_VIEW": False,     "DRAFT_MANAGE": False,
         "STATS_VIEW": False,     "STATS_FINANCIAL": False,   "STATS_EXPORT": False,
         "SETTINGS_EDIT": False,  "BACKUP_MANAGE": False,     "LOGS_VIEW": False,
         "USER_CREATE": False,    "USER_EDIT": False,         "USER_DELETE": False,  "USER_IMPERSONATE": False,
@@ -188,6 +194,7 @@ ROLE_CAPABILITY_DEFAULTS: Dict[str, Dict[str, bool]] = {
         "DOCUMENT_UPLOAD": False, "DOCUMENT_DELETE": False,   "DOCUMENT_DOWNLOAD": True, "DOCUMENT_VIEW_ALL": True,
         "FINANCE_VIEW": False,   "FINANCE_EDIT": False,       "FINANCE_EXPORT": False,
         "EMAIL_SEND": False,     "EMAIL_VIEW_ALL": False,     "CHAT_ACCESS": True,
+        "DRAFT_VIEW": False,     "DRAFT_MANAGE": False,
         "STATS_VIEW": False,     "STATS_FINANCIAL": False,    "STATS_EXPORT": False,
         "SETTINGS_EDIT": False,  "BACKUP_MANAGE": False,      "LOGS_VIEW": False,
         "USER_CREATE": False,    "USER_EDIT": False,          "USER_DELETE": False,  "USER_IMPERSONATE": False,
@@ -229,6 +236,8 @@ ACTION_TO_CAPABILITY_MAP: Dict[str, str] = {
     "manage_tasks": "PROCESS_ASSIGN",
     "use_chat": "CHAT_ACCESS",
     "assign_process_users": "PROCESS_ASSIGN",
+    "view_drafts": "DRAFT_VIEW",
+    "manage_drafts": "DRAFT_MANAGE",
 }
 
 

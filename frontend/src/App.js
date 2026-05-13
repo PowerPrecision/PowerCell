@@ -10,7 +10,7 @@ import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { hasRole, hasAnyRole, STAFF_ROLES } from "./utils/roleUtils";
+import { hasRole, hasAnyRole, hasPermission, STAFF_ROLES } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";
@@ -183,7 +183,7 @@ import "./App.css";
 // Admin roles for automation and system config
 const ADMIN_ROLES = ["admin", "ceo"];
 
-function ProtectedRoute({ children, allowedRoles }) {
+function ProtectedRoute({ children, allowedRoles, requiredCapability }) {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -198,8 +198,13 @@ function ProtectedRoute({ children, allowedRoles }) {
     return <Navigate to="/login" replace />;
   }
 
-  // Comparação case-insensitive para evitar problemas de formatação
+  // Verificação de role (compatibilidade existente)
   if (allowedRoles && !allowedRoles.some(r => hasRole(user, r))) {
+    return <Navigate to="/staff" replace />;
+  }
+
+  // Verificação de capability granular (se especificada)
+  if (requiredCapability && !hasPermission(user, requiredCapability)) {
     return <Navigate to="/staff" replace />;
   }
 
@@ -551,11 +556,11 @@ function App() {
             }
           />
 
-          {/* Rascunhos (Drafts) - Admin, CEO, Administrativo */}
+          {/* Rascunhos (Drafts) - Acesso via capability DRAFT_VIEW */}
           <Route
             path="/rascunhos"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+              <ProtectedRoute requiredCapability="DRAFT_VIEW">
                 <RouteBoundary name="Rascunhos">
                   <DraftsPage />
                 </RouteBoundary>

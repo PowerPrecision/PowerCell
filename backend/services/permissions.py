@@ -40,7 +40,7 @@ AVAILABLE_PAGES = [
     "workflow", "automation", "email_search", "ai_insights", "system_config",
     "properties", "minutas", "validades", "rgpd", "backups",
     "logs", "diagnostics", "background_jobs", "leads", "permissions",
-    "form_manager", "my_clients", "webmail",
+    "form_manager", "my_clients", "webmail", "rascunhos",
 ]
 
 AVAILABLE_ACTIONS = [
@@ -52,7 +52,7 @@ AVAILABLE_ACTIONS = [
     "manage_minutas", "manage_leads", "manage_rgpd",
     "manage_workflow", "manage_automation", "view_reports",
     "manage_ai", "manage_tasks", "use_chat",
-    "assign_process_users", "download_docs",
+    "assign_process_users", "download_docs", "view_drafts", "manage_drafts",
 ]
 
 # Permissões padrão por role (formato legado)
@@ -69,13 +69,14 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
         "pages": [
             "dashboard", "kanban", "processes", "clients", "documents",
             "calendar", "notifications", "stats", "email_search", "ai_insights",
-            "properties", "minutas", "validades", "leads"
+            "properties", "minutas", "validades", "leads", "rascunhos"
         ],
         "actions": [
             "create_process", "edit_process", "delete_process",
             "create_client", "edit_client", "delete_client",
             "upload_docs", "delete_docs", "view_financials", "export_data", "assign_clients",
-            "manage_properties", "manage_minutas", "manage_leads", "view_reports"
+            "manage_properties", "manage_minutas", "manage_leads", "view_reports",
+            "view_drafts", "manage_drafts"
         ],
     },
     "consultor": {
@@ -105,12 +106,13 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
     "administrativo": {
         "pages": [
             "dashboard", "kanban", "processes", "clients", "documents",
-            "calendar", "notifications", "registrations", "validades"
+            "calendar", "notifications", "registrations", "validades", "rascunhos"
         ],
         "actions": [
             "create_process", "edit_process",
             "create_client", "edit_client",
-            "upload_docs", "delete_docs", "export_data"
+            "upload_docs", "delete_docs", "export_data",
+            "view_drafts", "manage_drafts"
         ],
     },
     "indexacao": {
