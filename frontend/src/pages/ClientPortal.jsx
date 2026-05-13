@@ -63,6 +63,35 @@ function LoaderFallback() {
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
 
 // ====================================================================
+// FETCH WITH RETRY — handles Render cold starts (503) automatically
+// ====================================================================
+const FETCH_RETRY_DELAYS = [3000, 6000]; // retry after 3s, then 6s
+const MAX_RETRIES = FETCH_RETRY_DELAYS.length;
+
+async function fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      // Only retry on 503 (Service Unavailable — cold start or transient issue)
+      if (res.status === 503 && attempt < retries) {
+        await new Promise((r) => setTimeout(r, FETCH_RETRY_DELAYS[attempt]));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastError = err;
+      // Network errors might be transient too — retry once
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, FETCH_RETRY_DELAYS[attempt]));
+        continue;
+      }
+    }
+  }
+  throw lastError || new Error('Erro de ligação após várias tentativas.');
+}
+
+// ====================================================================
 // STEP COLOR HELPER
 // ====================================================================
 function stepColor(colorStr) {
@@ -363,17 +392,33 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
       const endpoint = isFinancas ? 'fetch-financas' : 'fetch-seguranca-social';
       const bodyKey = isFinancas ? 'nif' : 'niss';
 
-      const res = await fetch(`${BACKEND_URL}/portal/${endpoint}`, {
+      const res = await fetchWithRetry(`${BACKEND_URL}/portal/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ [bodyKey]: trimmed, password }),
       });
 
-      const data = await res.json();
+      // Safely parse JSON — 503 from Render proxy returns HTML, not JSON
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        // Response wasn't JSON (e.g., Render's 503 HTML page)
+        if (res.status === 503) {
+          setError('O servidor está a iniciar. Por favor, aguarde uns segundos e tente novamente.');
+          return;
+        }
+        setError('Erro inesperado do servidor. Tente novamente mais tarde.');
+        return;
+      }
 
       if (res.ok && data.success) {
         setSuccess(data.message || 'Documentos obtidos com sucesso!');
         setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 2500);
+      } else if (res.status === 503) {
+        setError(data.detail || 'O serviço de obtenção automática não está disponível de momento. Por favor, faça download manualmente e envie os documentos através do botão de upload.');
+      } else if (res.status === 401 && data.detail) {
+        setError(data.detail);
       } else {
         setError(data.detail || 'Erro ao obter documentos. Tente novamente.');
       }
@@ -549,6 +594,47 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
   const { requested = [], uploaded = [], received = [], has_pending } = documents || {};
   const [credDialogSource, setCredDialogSource] = useState(null); // 'financas' | 'seguranca_social' | null
   const [helpOpen, setHelpOpen] = useState(false);
+  const [scraperAvailable, setScraperAvailable] = useState(null); // null=unchecked, true/false
+  const [checkingScraper, setCheckingScraper] = useState(false);
+
+  // Check scraper availability on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/portal/scraper-status`);
+        const data = await res.json();
+        if (!cancelled) setScraperAvailable(data.available === true);
+      } catch {
+        if (!cancelled) setScraperAvailable(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Re-check scraper when user clicks the button (may have become available after cold start)
+  const handleOpenCredDialog = async (source) => {
+    if (scraperAvailable === false) {
+      setCheckingScraper(true);
+      try {
+        const res = await fetch(`${BACKEND_URL}/portal/scraper-status`);
+        const data = await res.json();
+        const available = data.available === true;
+        setScraperAvailable(available);
+        if (available) {
+          setCredDialogSource(source);
+        }
+      } catch {
+        // Server might be waking up — still let user try
+        setScraperAvailable(null);
+        setCredDialogSource(source);
+      } finally {
+        setCheckingScraper(false);
+      }
+    } else {
+      setCredDialogSource(source);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -565,20 +651,32 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
         {/* ── Auto-fetch buttons (Finanças + Seg. Social) ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
           <button
-            onClick={() => setCredDialogSource('financas')}
-            className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium bg-teal-50 text-teal-800 border border-teal-200 rounded-xl hover:bg-teal-100 hover:border-teal-300 transition-all"
+            onClick={() => handleOpenCredDialog('financas')}
+            disabled={checkingScraper}
+            className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium bg-teal-50 text-teal-800 border border-teal-200 rounded-xl hover:bg-teal-100 hover:border-teal-300 transition-all disabled:opacity-50 disabled:cursor-wait"
           >
-            <Landmark className="w-4 h-4 flex-shrink-0" />
+            {checkingScraper ? <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" /> : <Landmark className="w-4 h-4 flex-shrink-0" />}
             Obter IRS e Nota de Liquidação (Finanças)
           </button>
           <button
-            onClick={() => setCredDialogSource('seguranca_social')}
-            className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium bg-rose-50 text-rose-800 border border-rose-200 rounded-xl hover:bg-rose-100 hover:border-rose-300 transition-all"
+            onClick={() => handleOpenCredDialog('seguranca_social')}
+            disabled={checkingScraper}
+            className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium bg-rose-50 text-rose-800 border border-rose-200 rounded-xl hover:bg-rose-100 hover:border-rose-300 transition-all disabled:opacity-50 disabled:cursor-wait"
           >
-            <HeartPulse className="w-4 h-4 flex-shrink-0" />
+            {checkingScraper ? <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" /> : <HeartPulse className="w-4 h-4 flex-shrink-0" />}
             Obter Documentos da Segurança Social
           </button>
         </div>
+
+        {/* Scraper unavailable warning */}
+        {scraperAvailable === false && !checkingScraper && (
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+            <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-amber-700">
+              <strong>Obtenção automática indisponível.</strong> O serviço de download automático não está disponível de momento. Por favor, faça download manualmente dos portais e envie os documentos através do botão de upload.
+            </p>
+          </div>
+        )}
 
         {has_pending && requested.length > 0 ? (
           <div className="space-y-2">
