@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-14] — Modelo On-Demand em Dev (Fix OOM no Render)
+
+### Corrigido
+- **Render crash por OOM (Ran out of memory — 512MB)** (`fix` — **CRÍTICO**): O serviço de sincronização de emails em background consumia ~200MB de RAM persistente (ThreadPoolExecutor + ligações IMAP), excedendo os 512MB do Render free tier e causando crashes constantes no deploy. Em ambiente de desenvolvimento (`ENVIRONMENT=dev/development/local/preview`), o auto-sync de emails NÃO arranca mais no startup.
+- **Background sync desativado em dev** (`fix`): `server.py` agora verifica `ENVIRONMENT` antes de criar a tarefa `run_email_auto_sync()`. O `worker.py` também salta a sincronização webmail em dev. Em produção (`ENVIRONMENT=production`), o comportamento mantém-se (sync a cada 15min).
+- **Logs desnecessários em dev** (`fix`): O worker loga "Webmail sync DESATIVADO em dev" apenas uma vez por hora (não a cada minuto).
+
+### Adicionado
+- **Auto-sync ao abrir o Webmail** (`feat` — On-Demand): Quando o utilizador navega para a página de Webmail, a sincronização IMAP é disparada automaticamente (uma vez por visita à página). Isto substitui o polling contínuo em dev, garantindo emails frescos sem consumo de RAM persistente.
+- **Modelo On-Demand para dev** (`feat` — Arquitetura): Em vez de sincronizar continuamente em background (modelo Push), o ambiente de dev usa o modelo Pull — sincroniza apenas quando o utilizador abre o Webmail ou clica "Sincronizar". Os endpoints `POST /api/emails/webmail/sync-user` (pessoal) e `POST /api/emails/webmail/sync` (global) já existiam e continuam disponíveis em ambos os ambientes.
+
 ## [2026-07-14] — Proteção contra Rate Limiting IMAP (Policy Violation)
 
 ### Corrigido
