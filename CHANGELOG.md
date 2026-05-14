@@ -3,6 +3,23 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-05] — BRUTE FORCE Kill Switch: Email Sync Loop Desativado no Código Fonte
+
+### Corrigido
+- **Render DEV: OOM persistente apesar de kill switches baseados em ENVIRONMENT** (`fix` — **CRÍTICO**): Os kill switches anteriores baseados em `os.environ.get('ENVIRONMENT', 'dev')` falharam porque: (1) O Dockerfile define `APP_ENV=production` (não `ENVIRONMENT`), e se `ENVIRONMENT=production` estiver configurado no Render, o bypass é ultrapassado e o loop arranca; (2) As variáveis de ambiente podem ter valores inesperados em diferentes ambientes de deploy. Aplicada solução de "Força Bruta": o código fonte foi diretamente comentado/amputado, independente de qualquer variável de ambiente.
+- **`server.py`: `asyncio.create_task(run_email_auto_sync())` COMENTADO** (`fix` — **BRUTE FORCE**): A criação da tarefa de email sync no startup do FastAPI foi comentada. O loop IMAP de polling NÃO arranca mais, independentemente de variáveis de ambiente. Log de aviso adicionado: `🛑 EMERGENCY BYPASS: Email Auto-Sync task creation COMMENTED OUT`.
+- **`scheduled_tasks.py`: `run_email_auto_sync()` → return forçado na 1ª linha** (`fix` — **BRUTE FORCE**): Mesmo que a função seja chamada por outro path, retorna imediatamente com log `🛑 BRUTE FORCE KILL SWITCH: Webmail Sync desativado no código fonte.`.
+- **`scheduled_tasks.py`: `auto_sync_emails()` → return forçado na 1ª linha** (`fix` — **BRUTE FORCE**): O método `auto_sync_emails()` da classe `ScheduledTasksService` retorna imediatamente com `{"success": True, "error": "BRUTE FORCE BYPASS", "total_synced": 0}`.
+- **`email_service.py`: `sync_webmail_emails()` → return forçado na 1ª linha** (`fix` — **BRUTE FORCE**): A função principal de sincronização IMAP retorna imediatamente com `{"success": True, "error": "BRUTE FORCE BYPASS", "total_synced": 0}`. Qualquer chamada direta ou indireta é bloqueada.
+- **`worker.py`: `scheduler_loop()` e `run_scheduled_tasks()` → return forçado na 1ª linha** (`fix` — **BRUTE FORCE**): O scheduler do worker (que faz IMAP polling a cada 20min) e as tarefas agendadas retornam imediatamente, impedindo qualquer execução.
+
+### Notas
+- **6 pontos de kill** aplicados em 4 ficheiros (`server.py`, `scheduled_tasks.py`, `email_service.py`, `worker.py`).
+- Cada kill switch é **incondicional** — não depende de variáveis de ambiente.
+- O código original é preservado mas inalcançável (comentado ou após `return`).
+- Para reativar em PRODUÇÃO: (1) Descomentar o bloco `try/except` em `server.py`, (2) Remover as 3-4 linhas de "BRUTE FORCE KILL SWITCH" em cada função.
+- Commit: `468fb3f`
+
 ## [2026-07-14] — Modelo On-Demand em Dev (Fix OOM no Render)
 
 ### Corrigido
