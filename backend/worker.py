@@ -177,20 +177,10 @@ async def run_scheduled_tasks():
     LAZY LOADING: O módulo pesado scheduled_tasks só é carregado aqui.
     BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE EXECUÇÃO.
     """
-    # ============================================================
-    # BRUTE FORCE KILL SWITCH — CÓDIGO DESATIVADO TEMPORARIAMENTE
-    # Tarefas agendadas causam OOM no Render DEV (512MB RAM).
-    # Este return FORÇADO impede QUALQUER execução.
-    # Para reativar: remover estas 3 linhas.
-    # ============================================================
-    logger.warning("🛑 BRUTE FORCE KILL SWITCH: run_scheduled_tasks desativado no código fonte.")
-    return
-    # ============================================================
-    # (Código original abaixo — inalcançável devido ao return acima)
-    # KILL SWITCH — SÓ PRODUÇÃO PERMITE TAREFAS AGENDADAS
+    # KILL SWITCH — SÓ PRODUÇÃO PERMITE TAREFAS AGENDADAS (proteção RAM em DEV)
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        logger.warning("[RADICAL BLOCK] run_scheduled_tasks BLOCKED — ENVIRONMENT != production")
+    if os.environ.get('ENVIRONMENT') != 'production':
+        logger.info("[run_scheduled_tasks] BLOCKED — ENVIRONMENT != production")
         return
 
     try:
@@ -208,20 +198,10 @@ async def scheduler_loop():
     Loop para tarefas agendadas (Cron jobs).
     BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE O SCHEDULER.
     """
-    # ============================================================
-    # BRUTE FORCE KILL SWITCH — CÓDIGO DESATIVADO TEMPORARIAMENTE
-    # O scheduler loop (com IMAP polling) causa OOM no Render DEV.
-    # Este return FORÇADO impede QUALQUER execução do scheduler.
-    # Para reativar: remover estas 3 linhas.
-    # ============================================================
-    logger.warning("🛑 BRUTE FORCE KILL SWITCH: scheduler_loop desativado no código fonte. Scheduler will NOT start.")
-    return
-    # ============================================================
-    # (Código original abaixo — inalcançável devido ao return acima)
-    # KILL SWITCH — SÓ PRODUÇÃO PERMITE SCHEDULER LOOP
+    # KILL SWITCH — SÓ PRODUÇÃO PERMITE SCHEDULER LOOP (proteção RAM em DEV)
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        logger.warning("[RADICAL BLOCK] scheduler_loop BLOCKED — ENVIRONMENT != production — scheduler will NOT start")
+    if os.environ.get('ENVIRONMENT') != 'production':
+        logger.info("[scheduler_loop] BLOCKED — ENVIRONMENT != production — scheduler will NOT start")
         return
 
     logger.info("Agendador iniciado.")

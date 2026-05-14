@@ -989,7 +989,19 @@ async def check_scraper_status():
 
     Retorna o estado do Playwright e do browser Chromium, para diagnóstico.
     Endpoint público (não requer autenticação) para permitir verificação prévia.
+
+    Em DEV (ENVIRONMENT != production): retorna mock sem importar Playwright.
     """
+    # DEV MODE: Mock — não importar Playwright em DEV para poupar RAM
+    if os.environ.get('ENVIRONMENT') != 'production':
+        return {
+            "available": False,
+            "playwright_installed": False,
+            "chromium_available": False,
+            "dev_mode": True,
+            "error": "MOCK DEV: Scraper de portais governamentais desativado em DEV para poupar RAM. Funciona apenas em ENVIRONMENT=production.",
+        }
+
     try:
         from services.gov_scraper import check_playwright_available
         result = await check_playwright_available()
@@ -1030,7 +1042,20 @@ async def fetch_financas_documents(
     2. Invoca o scraper (ou mock) com as credenciais
     3. Em caso de sucesso: anexa documentos ao processo + email de sucesso
     4. Em caso de erro de credenciais: email de erro
+
+    DEV MODE: Se ENVIRONMENT != 'production', retorna mock de sucesso sem invocar Playwright.
     """
+    # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
+    # REGRA ABSOLUTA: Se ENVIRONMENT != 'production', o Chromium NÃO lança.
+    if os.environ.get('ENVIRONMENT') != 'production':
+        logger.info("[PORTAL] MOCK DEV: fetch-financas desativado em DEV para poupar RAM.")
+        return {
+            "success": True,
+            "message": "MOCK DEV: Acesso ao Portal das Finanças desativado em DEV para poupar RAM. Funciona apenas em ENVIRONMENT=production.",
+            "documents_count": 0,
+            "dev_mode": True,
+        }
+
     process = client_data["process"]
     process_id = process["id"]
     client_name = process.get("client_name", "Cliente")
@@ -1139,7 +1164,20 @@ async def fetch_seguranca_social_documents(
     - password: Password da Segurança Social (obrigatório)
 
     Fluxo idêntico ao fetch-financas.
+
+    DEV MODE: Se ENVIRONMENT != 'production', retorna mock de sucesso sem invocar Playwright.
     """
+    # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
+    # REGRA ABSOLUTA: Se ENVIRONMENT != 'production', o Chromium NÃO lança.
+    if os.environ.get('ENVIRONMENT') != 'production':
+        logger.info("[PORTAL] MOCK DEV: fetch-seguranca-social desativado em DEV para poupar RAM.")
+        return {
+            "success": True,
+            "message": "MOCK DEV: Acesso à Segurança Social desativado em DEV para poupar RAM. Funciona apenas em ENVIRONMENT=production.",
+            "documents_count": 0,
+            "dev_mode": True,
+        }
+
     process = client_data["process"]
     process_id = process["id"]
     client_name = process.get("client_name", "Cliente")

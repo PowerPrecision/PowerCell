@@ -731,16 +731,11 @@ async def startup():
         logger.debug(f"Trello não configurado: {trello_err}")
     
     # ==========================================
-    # KILL SWITCH PARA AMBIENTE DEV (RENDER OOM FIX)
+    # TAREFAS DE BACKGROUND (leves — correm sempre)
     # ==========================================
-    import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        logger.warning("🛑 MODO DEV: Tarefas pesadas de background (Email Sync, CDC, Backups, Monitor) DESATIVADAS para poupar RAM!")
-        return
-    # ==========================================
+    import asyncio
 
     # Iniciar scheduler para monitorização de jobs stuck
-    import asyncio
     monitor_task = asyncio.create_task(background_job_monitor())
     _background_tasks.add(monitor_task)
     monitor_task.add_done_callback(_background_tasks.discard)
@@ -765,19 +760,24 @@ async def startup():
     except (IOError, OSError, ValueError, ImportError) as cdc_err:
         logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
 
-    # --- Email Auto-Sync: DESATIVADO (EMERGENCY BYPASS) ---
-    # O loop de email (IMAP polling a cada 15min) causa OOM no Render DEV (512MB RAM).
-    # Comentar esta tarefa é a ÚNICA garantia de que o loop NÃO arranca.
-    # Para reativar em PROD: descomentar o bloco abaixo.
-    # try:
-    #     from services.scheduled_tasks import run_email_auto_sync
-    #     email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=900))
-    #     _background_tasks.add(email_sync_task)
-    #     email_sync_task.add_done_callback(_background_tasks.discard)
-    #     logger.info("📧 Auto-Sync Email iniciado - sincronização a cada 15 minutos")
-    # except (IOError, OSError, ValueError, ImportError) as email_sync_err:
-    #     logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
-    logger.warning("🛑 EMERGENCY BYPASS: Email Auto-Sync task creation COMMENTED OUT — IMAP loop will NOT start")
+    # ==========================================
+    # TAREFAS PESADAS — SÓ PRODUÇÃO (ENVIRONMENT=production)
+    # ==========================================
+    # O loop IMAP (Email Sync) e o Playwright (Gov Scraper) consomem
+    # muita RAM. Em DEV (Render 512MB), estes serviços causam OOM.
+    # Apenas arrancam quando ENVIRONMENT=production.
+    if os.environ.get('ENVIRONMENT') == 'production':
+        # --- Email Auto-Sync: IMAP polling a cada 15 minutos ---
+        try:
+            from services.scheduled_tasks import run_email_auto_sync
+            email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=900))
+            _background_tasks.add(email_sync_task)
+            email_sync_task.add_done_callback(_background_tasks.discard)
+            logger.info("📧 Auto-Sync Email iniciado - sincronização a cada 15 minutos")
+        except (IOError, OSError, ValueError, ImportError) as email_sync_err:
+            logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
+    else:
+        logger.warning("🛑 MODO DEV: Playwright e Email Sync totalmente desativados para evitar OOM.")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

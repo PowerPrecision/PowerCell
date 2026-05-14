@@ -1301,21 +1301,11 @@ class ScheduledTasksService:
         Returns:
             Dict com resumo da sincronização
         """
-        # ============================================================
-        # BRUTE FORCE KILL SWITCH — CÓDIGO DESATIVADO TEMPORARIAMENTE
-        # auto_sync_emails causa OOM no Render DEV (512MB RAM).
-        # Este return FORÇADO impede QUALQUER execução.
-        # Para reativar: remover estas 3 linhas.
-        # ============================================================
-        logger.warning("🛑 BRUTE FORCE KILL SWITCH: auto_sync_emails desativado no código fonte.")
-        return {"success": True, "error": "BRUTE FORCE BYPASS: auto_sync_emails desativado", "total_synced": 0}
-        # ============================================================
-        # (Código original abaixo — inalcançável devido ao return acima)
-        # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
+        # KILL SWITCH — SÓ PRODUÇÃO PERMITE SYNC (proteção RAM em DEV)
         import os
-        if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-            logger.warning("[RADICAL BLOCK] auto_sync_emails BLOCKED — ENVIRONMENT != production")
-            return {"success": False, "error": "Email sync HARD DISABLED (ENVIRONMENT != production)", "total_synced": 0}
+        if os.environ.get('ENVIRONMENT') != 'production':
+            logger.info("[auto_sync_emails] BLOCKED — ENVIRONMENT != production — uso on-demand")
+            return {"success": True, "error": "Email sync desativado em DEV (ENVIRONMENT != production)", "total_synced": 0}
 
         logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
         
@@ -1452,20 +1442,10 @@ async def run_email_auto_sync(interval_seconds: int = 900):
     Args:
         interval_seconds: Intervalo entre sincronizações (default 900s = 15min)
     """
-    # ============================================================
-    # BRUTE FORCE KILL SWITCH — CÓDIGO DESATIVADO TEMPORARIAMENTE
-    # O loop IMAP causa OOM no Render DEV (512MB RAM).
-    # Este return FORÇADO impede QUALQUER execução, independentemente
-    # de variáveis de ambiente. Para reativar: remover estas 3 linhas.
-    # ============================================================
-    logger.warning("🛑 BRUTE FORCE KILL SWITCH: Webmail Sync desativado no código fonte. IMAP loop will NOT start.")
-    return
-    # ============================================================
-    # (Código original abaixo — inalcançável devido ao return acima)
-    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC LOOP
+    # KILL SWITCH — SÓ PRODUÇÃO PERMITE SYNC LOOP (proteção RAM em DEV)
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        logger.warning("[RADICAL BLOCK] run_email_auto_sync BLOCKED — ENVIRONMENT != production — IMAP loop will NOT start")
+    if os.environ.get('ENVIRONMENT') != 'production':
+        logger.info("[run_email_auto_sync] BLOCKED — ENVIRONMENT != production — IMAP loop will NOT start")
         return
 
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar

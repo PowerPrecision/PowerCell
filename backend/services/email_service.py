@@ -1037,19 +1037,11 @@ async def sync_webmail_emails(
     days: int = 30,
     max_emails: int = 100
 ) -> Dict[str, Any]:
-    # ============================================================
-    # BRUTE FORCE KILL SWITCH — CÓDIGO DESATIVADO TEMPORARIAMENTE
-    # A sincronização IMAP causa OOM no Render DEV (512MB RAM).
-    # Este return FORÇADO impede QUALQUER execução, independentemente
-    # de variáveis de ambiente. Para reativar: remover estas 4 linhas.
-    # ============================================================
-    logger.warning("🛑 BRUTE FORCE KILL SWITCH: sync_webmail_emails desativado no código fonte. IMAP sync will NOT execute.")
-    return {"success": True, "error": "BRUTE FORCE BYPASS: Webmail Sync desativado no código fonte", "total_synced": 0, "total_duplicates": 0, "total_errors": 0, "accounts": {}}
-    # ============================================================
-    # (Código original abaixo — inalcançável devido ao return acima)
+    # KILL SWITCH — SÓ PRODUÇÃO PERMITE SYNC (proteção RAM em DEV)
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        return {"success": True, "error": "Bypass em DEV", "total_synced": 0, "total_duplicates": 0, "total_errors": 0, "accounts": {}}
+    if os.environ.get('ENVIRONMENT') != 'production':
+        logger.info("[sync_webmail_emails] BLOCKED — ENVIRONMENT != production — uso on-demand")
+        return {"success": True, "error": "Webmail sync desativado em DEV (ENVIRONMENT != production)", "total_synced": 0, "total_duplicates": 0, "total_errors": 0, "accounts": {}}
     """
     Sincronizar TODOS os emails recentes do IMAP para o webmail.
     Sem filtro de processo — guarda todos os emails recebidos e enviados.

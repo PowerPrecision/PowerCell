@@ -612,14 +612,52 @@ npm run build
 - `main` - Produção
 - `dev` - Desenvolvimento
 
+## Proteção DEV vs PROD (ENVIRONMENT)
+
+O sistema distingue DEV de PROD através da variável `ENVIRONMENT`. Em DEV (Render free tier, 512MB RAM), os serviços pesados são desativados para evitar OOM:
+
+### Serviços condicionados por `ENVIRONMENT`
+
+| Serviço | DEV (`!= production`) | PROD (`== production`) |
+|---------|----------------------|------------------------|
+| **Email Auto-Sync** (IMAP polling) | ❌ Desativado | ✅ Ativo (cada 15 min) |
+| **Webmail Sync** (`sync_webmail_emails`) | ❌ Retorna mock | ✅ Ativo |
+| **Gov Scraper** (Playwright/Chromium) | ❌ Retorna mock | ✅ Ativo |
+| **Portal Scraper endpoints** (`/fetch-financas`, `/fetch-seguranca-social`) | ❌ Retorna mock JSON | ✅ Ativo |
+| **Scraper status** (`/scraper-status`) | ❌ Retorna `available: false` | ✅ Verifica Playwright |
+| **Worker** (background scheduler) | ❌ Não arranca | ✅ Ativo |
+| **Job Monitor** | ✅ Ativo | ✅ Ativo |
+| **Backup Scheduler** | ✅ Ativo | ✅ Ativo |
+| **CDC Audit Listener** | ✅ Ativo | ✅ Ativo |
+
+### Ficheiros com guards ENVIRONMENT
+
+- `backend/server.py` — Startup: Email Sync só arranca se `ENVIRONMENT=production`
+- `backend/services/gov_scraper.py` — Lazy Playwright imports + ENV guard nas funções principais
+- `backend/services/email_service.py` — `sync_webmail_emails()` retorna mock em DEV
+- `backend/services/scheduled_tasks.py` — `auto_sync_emails()` e `run_email_auto_sync()` bloqueados em DEV
+- `backend/worker.py` — `run_scheduled_tasks()` e `scheduler_loop()` bloqueados em DEV
+- `backend/routes/portal.py` — Rotas `/fetch-financas`, `/fetch-seguranca-social`, `/scraper-status` retornam mock em DEV
+
+### Nota sobre `ENVIRONMENT`
+
+**Obrigatório** configurar `ENVIRONMENT=production` no Render de PRODUÇÃO. Sem esta variável, o sistema assume DEV e desativa os serviços pesados. No Render DEV (preview), NÃO definir `ENVIRONMENT=production`.
+
 ## Problemas Conhecidos / Limitações
 
 - **Render cold start**: O backend pode levar ~30s a responder no primeiro request após inatividade
 - **Vercel preview CSP**: Headers CSP são configurados via vercel.json — mudanças requerem novo deploy
 - **S3 CORS**: Configuração automática via endpoint, mas pode requerer verificação manual no bucket
-- **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretas, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Configurações do Sistema (`/configuracoes`).
+- **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretos, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Configurações do Sistema (`/configuracoes`).
 
 ## Histórico de Correções Recentes (dev)
+
+### OOM Fix — Render DEV (Lazy Loading + ENV Guards)
+- **Lazy Loading do Playwright**: Removidos todos os imports top-level de `playwright` em `gov_scraper.py`. As importações estão apenas dentro das funções que as utilizam, evitando que o Chromium seja carregado na memória ao arrancar.
+- **ENVIRONMENT guards**: Adicionadas verificações `if os.environ.get('ENVIRONMENT') != 'production'` no início de todas as funções pesadas (scraper, email sync, worker). Em DEV, retornam mock JSON em vez de executar as operações reais.
+- **Mock routes no Portal**: Os endpoints `/fetch-financas`, `/fetch-seguranca-social` e `/scraper-status` retornam respostas simuladas em DEV, impedindo o Frontend de pendurar.
+- **Startup cirúrgico em server.py**: Removido o `return` em bloco que bloqueava TODAS as tarefas de background em DEV. Agora, tarefas leves (Job Monitor, Backup, CDC) correm sempre; apenas o Email Sync (IMAP) é condicionado por `ENVIRONMENT=production`.
+- **Remoção de Brute Force Kill Switches**: Substituídos os `return` forçados (que impediam execução mesmo em PROD) por guards `ENVIRONMENT != production` que permitem funcionamento normal em produção.
 
 ### Correções de Bugs
 - **Rota /definicoes vs /configuracoes**: Corrigido — o File Explorer agora navega para `/configuracoes` (SystemConfigPage) em vez de `/definicoes` (SettingsPage pessoal) quando o utilizador clica em "Definições Gerais" ou "Ir para Definições Gerais".
