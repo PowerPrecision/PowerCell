@@ -1301,6 +1301,16 @@ class ScheduledTasksService:
         Returns:
             Dict com resumo da sincronização
         """
+        # ============================================================
+        # BRUTE FORCE KILL SWITCH — CÓDIGO DESATIVADO TEMPORARIAMENTE
+        # auto_sync_emails causa OOM no Render DEV (512MB RAM).
+        # Este return FORÇADO impede QUALQUER execução.
+        # Para reativar: remover estas 3 linhas.
+        # ============================================================
+        logger.warning("🛑 BRUTE FORCE KILL SWITCH: auto_sync_emails desativado no código fonte.")
+        return {"success": True, "error": "BRUTE FORCE BYPASS: auto_sync_emails desativado", "total_synced": 0}
+        # ============================================================
+        # (Código original abaixo — inalcançável devido ao return acima)
         # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
         import os
         if os.environ.get('ENVIRONMENT', 'dev') != 'production':
@@ -1442,6 +1452,16 @@ async def run_email_auto_sync(interval_seconds: int = 900):
     Args:
         interval_seconds: Intervalo entre sincronizações (default 900s = 15min)
     """
+    # ============================================================
+    # BRUTE FORCE KILL SWITCH — CÓDIGO DESATIVADO TEMPORARIAMENTE
+    # O loop IMAP causa OOM no Render DEV (512MB RAM).
+    # Este return FORÇADO impede QUALQUER execução, independentemente
+    # de variáveis de ambiente. Para reativar: remover estas 3 linhas.
+    # ============================================================
+    logger.warning("🛑 BRUTE FORCE KILL SWITCH: Webmail Sync desativado no código fonte. IMAP loop will NOT start.")
+    return
+    # ============================================================
+    # (Código original abaixo — inalcançável devido ao return acima)
     # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC LOOP
     import os
     if os.environ.get('ENVIRONMENT', 'dev') != 'production':
