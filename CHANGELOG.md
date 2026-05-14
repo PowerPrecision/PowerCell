@@ -3,7 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [2026-03-05] — BRUTE FORCE Kill Switch: Email Sync Loop Desativado no Código Fonte
+## [2026-03-05] — HARDCODE Definitivo: Email Sync + Webmail Worker Amputados (OOM Render)
+
+### Corrigido
+- **Render DEV: OOM persistente apesar de kill switches ENVIRONMENT** (`fix` — **CRÍTICO**): Os kill switches baseados em `os.environ.get('ENVIRONMENT')` falharam porque `ENVIRONMENT=production` está configurado no Render (para Sentry e outros serviços), o que bypassava todos os guards e fazia o loop IMAP arrancar, consumindo ~200MB de RAM e causando OOM no free tier (512MB). Aplicada solução de **HARDCODE definitivo**: o código foi amputado/comentado diretamente, sem qualquer dependência de variáveis de ambiente.
+- **`scheduled_tasks.py`: `run_email_auto_sync()` → return imediato** (`fix` — **HARDCODE**): O corpo inteiro da função (while True, IMAP sync, jitter) foi substituído por um simples `return`. O loop infinito morre imediatamente, independentemente de qualquer variável de ambiente. Log: `🛑 AMPUTAÇÃO DE EMERGÊNCIA: Auto-Sync de Email COMPLETAMENTE DESATIVADO para salvar a RAM do Render em DEV.`
+- **`worker.py`: Webmail sync condition → `if False:`** (`fix` — **HARDCODE**): A condição `elif now - last_runs["webmail"] > 1200:` foi substituída por `if False:`. O bloco de sincronização webmail nunca executa, independentemente de ENVIRONMENT. A condição original está comentada acima para fácil restauração.
+- **`server.py`: `email_sync_task` criação COMENTADA** (`fix` — **HARDCODE**): As 3 linhas que criam a tarefa de email sync no startup (`asyncio.create_task`, `_background_tasks.add`, `add_done_callback`) foram comentadas. A tarefa NUNCA arranca, independentemente de ENVIRONMENT. Log: `🛑 Tarefa de email_sync anulada no server.py!`
+
+### Notas
+- **3 pontos de amputação** em 3 ficheiros (`scheduled_tasks.py`, `worker.py`, `server.py`).
+- Cada amputação é **incondicional** — não depende de variáveis de ambiente.
+- O código original é preservado mas inalcançável (comentado ou após `return`).
+- Para reativar em PRODUÇÃO: (1) Restaurar `run_email_auto_sync()` em `scheduled_tasks.py`, (2) Trocar `if False:` por `if now - last_runs["webmail"] > 1200:` em `worker.py`, (3) Descomentar as 3 linhas de `email_sync_task` em `server.py`.
+- Commit: `8ab0385`
 
 ### Corrigido
 - **Render DEV: OOM persistente apesar de kill switches baseados em ENVIRONMENT** (`fix` — **CRÍTICO**): Os kill switches anteriores baseados em `os.environ.get('ENVIRONMENT', 'dev')` falharam porque: (1) O Dockerfile define `APP_ENV=production` (não `ENVIRONMENT`), e se `ENVIRONMENT=production` estiver configurado no Render, o bypass é ultrapassado e o loop arranca; (2) As variáveis de ambiente podem ter valores inesperados em diferentes ambientes de deploy. Aplicada solução de "Força Bruta": o código fonte foi diretamente comentado/amputado, independente de qualquer variável de ambiente.
