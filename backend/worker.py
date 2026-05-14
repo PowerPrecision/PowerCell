@@ -355,6 +355,31 @@ async def shutdown_async():
 
 async def main():
     """Ponto de entrada principal do worker."""
+
+    # ==================================================================
+    # KILL SWITCH — Worker em DEV
+    # ==================================================================
+    # Em ambientes de dev/preview (Render free tier, 512MB RAM), o worker
+    # NÃO arranca. Isto poupa ~150MB de RAM que o processo Python consome
+    # em idle (mesmo com lazy loading, a base Motor + asyncio event loop
+    # + MongoDB connection pool reservam memória significativa).
+    #
+    # O servidor FastAPI (server.py) já tem a sua própria kill switch que
+    # desativa todos os asyncio.create_task() de background no startup.
+    # Este kill switch garante que o processo worker separado também não
+    # arranca em dev.
+    # ==================================================================
+    is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
+
+    if is_dev:
+        logger.info("=" * 60)
+        logger.info("🛑 KILL SWITCH: DEV Environment detected")
+        logger.info("   Worker process NOT starting to save RAM.")
+        logger.info("   All scheduled tasks (webmail sync, matching, etc.)")
+        logger.info("   are disabled. Use on-demand endpoints instead.")
+        logger.info("=" * 60)
+        return  # Exit immediately — no event loop, no DB connection, no RAM
+
     # Registar handlers de sinais (SIGINT, SIGTERM)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

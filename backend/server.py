@@ -730,42 +730,56 @@ async def startup():
     except (ImportError, ValueError, KeyError) as trello_err:
         logger.debug(f"Trello não configurado: {trello_err}")
     
-    # Iniciar scheduler para monitorização de jobs stuck
+    # ==================================================================
+    # KILL SWITCH — Tarefas de Background
+    # ==================================================================
+    # Em ambientes de dev/preview (Render free tier, 512MB RAM), TODAS as
+    # tarefas de fundo são desativadas para evitar OOM no arranque.
+    # O email sync sozinho consome ~200MB; com backup scheduler + CDC +
+    # job monitor, ultrapassa os 512MB disponíveis.
+    #
+    # Em dev, utiliza-se sincronização on-demand (POST /api/emails/webmail/sync-user)
+    # e os backups/CDC são executados manualmente quando necessário.
+    # ==================================================================
     import asyncio
-    monitor_task = asyncio.create_task(background_job_monitor())
-    _background_tasks.add(monitor_task)
-    monitor_task.add_done_callback(_background_tasks.discard)
-    
-    # Iniciar scheduler de backups automáticos
-    try:
-        from services.backup import start_backup_scheduler
-        backup_task = asyncio.create_task(start_backup_scheduler())
-        _background_tasks.add(backup_task)
-        backup_task.add_done_callback(_background_tasks.discard)
-        logger.info("💾 Backup scheduler iniciado - backup diário às 03:00 UTC")
-    except (IOError, OSError, ValueError, ImportError) as backup_err:
-        logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
-
-    # Iniciar CDC Audit Listener (Change Data Capture para compliance)
-    # Monitoriza alterações em processes/document_metadata via Change Stream
-    # e regista eventos na coleção compliance_audit_logs.
-    # Roles em modo fantasma (ex: indexacao) são automaticamente excluídas.
-    try:
-        from services.audit_cdc import cdc_listener
-        cdc_task = asyncio.create_task(cdc_listener.start())
-        _background_tasks.add(cdc_task)
-        cdc_task.add_done_callback(_background_tasks.discard)
-        logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
-    except (IOError, OSError, ValueError, ImportError) as cdc_err:
-        logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
-
-    # Iniciar Auto-Sync de Emails (sincronização periódica IMAP → BD + WebSocket)
-    # DESATIVADO em dev/preview: o serviço consome ~200MB de RAM no arranque,
-    # excedendo os 512MB do Render free tier. Em dev, usa-se sync on-demand.
     is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
+
     if is_dev:
-        logger.info("📧 Auto-Sync Email DESATIVADO em ambiente de dev — usar sincronização on-demand (POST /api/emails/webmail/sync-user)")
+        logger.info("=" * 60)
+        logger.info("🛑 KILL SWITCH: DEV Environment detected")
+        logger.info("   ALL background tasks DISABLED to save RAM:")
+        logger.info("   - Email Auto-Sync   → use POST /api/emails/webmail/sync-user")
+        logger.info("   - Backup Scheduler   → run manually when needed")
+        logger.info("   - CDC Audit Listener → disabled")
+        logger.info("   - Job Monitor        → disabled")
+        logger.info("=" * 60)
     else:
+        # --- Job Monitor: detecção de jobs stuck (a cada 30 min) ---
+        monitor_task = asyncio.create_task(background_job_monitor())
+        _background_tasks.add(monitor_task)
+        monitor_task.add_done_callback(_background_tasks.discard)
+
+        # --- Backup Scheduler: backup diário às 03:00 UTC ---
+        try:
+            from services.backup import start_backup_scheduler
+            backup_task = asyncio.create_task(start_backup_scheduler())
+            _background_tasks.add(backup_task)
+            backup_task.add_done_callback(_background_tasks.discard)
+            logger.info("💾 Backup scheduler iniciado - backup diário às 03:00 UTC")
+        except (IOError, OSError, ValueError, ImportError) as backup_err:
+            logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
+
+        # --- CDC Audit Listener: Change Data Capture para compliance ---
+        try:
+            from services.audit_cdc import cdc_listener
+            cdc_task = asyncio.create_task(cdc_listener.start())
+            _background_tasks.add(cdc_task)
+            cdc_task.add_done_callback(_background_tasks.discard)
+            logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
+        except (IOError, OSError, ValueError, ImportError) as cdc_err:
+            logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
+
+        # --- Email Auto-Sync: sincronização periódica IMAP → BD ---
         try:
             from services.scheduled_tasks import run_email_auto_sync
             email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=900))
