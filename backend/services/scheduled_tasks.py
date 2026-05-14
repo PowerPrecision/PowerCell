@@ -1430,10 +1430,28 @@ class ScheduledTasksService:
 
 
 async def run_email_auto_sync(interval_seconds: int = 900):
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.warning("🛑 AMPUTAÇÃO DE EMERGÊNCIA: Auto-Sync de Email COMPLETAMENTE DESATIVADO para salvar a RAM do Render em DEV.")
-    return # O loop infinito morre imediatamente aqui!
+    import os
+    if os.environ.get('ENVIRONMENT') != 'production':
+        return
+
+    # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
+    await asyncio.sleep(30)
+    
+    service = ScheduledTasksService()
+    
+    while True:
+        try:
+            await service.connect()
+            await service.auto_sync_emails()
+        except Exception as e:
+            logger.error(f"[Email Auto-Sync] Erro no ciclo: {e}")
+        finally:
+            await service.disconnect()
+        
+        # Jitter: adicionar variação aleatória de 0-60s para evitar que
+        # múltiplas instâncias sincronizem ao mesmo tempo
+        jitter = random.randint(0, 60)
+        await asyncio.sleep(interval_seconds + jitter)
 
 
 async def run_daemon(interval_hours: int = 24):

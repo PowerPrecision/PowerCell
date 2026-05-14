@@ -1037,11 +1037,10 @@ async def sync_webmail_emails(
     days: int = 30,
     max_emails: int = 100
 ) -> Dict[str, Any]:
-    # KILL SWITCH — SÓ PRODUÇÃO PERMITE SYNC (proteção RAM em DEV)
     import os
     if os.environ.get('ENVIRONMENT') != 'production':
-        logger.info("[sync_webmail_emails] BLOCKED — ENVIRONMENT != production — uso on-demand")
-        return {"success": True, "error": "Webmail sync desativado em DEV (ENVIRONMENT != production)", "total_synced": 0, "total_duplicates": 0, "total_errors": 0, "accounts": {}}
+        logger.info("Sincronização IMAP ignorada (Ambiente DEV).")
+        return {"success": True, "message": "Ignorado em DEV", "accounts": {}}
     """
     Sincronizar TODOS os emails recentes do IMAP para o webmail.
     Sem filtro de processo — guarda todos os emails recebidos e enviados.
@@ -1363,8 +1362,8 @@ async def sync_webmail_emails(
 
 async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) -> Dict[str, Any]:
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        return {"success": True, "error": "Bypass em DEV", "total_synced": 0}
+    if os.environ.get('ENVIRONMENT') != 'production':
+        return {"success": True, "message": "Ignorado em DEV", "accounts": {}}
     """
     Sincronizar emails para um utilizador específico usando a sua configuração pessoal.
     
@@ -1637,8 +1636,8 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
 
 async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 200) -> Dict[str, Any]:
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        return {"success": True, "error": "Bypass em DEV", "total_synced": 0}
+    if os.environ.get('ENVIRONMENT') != 'production':
+        return {"success": True, "message": "Ignorado em DEV", "accounts": {}}
     """
     Sincronizar emails para um role partilhado (indexacao, suporte, etc.)
     usando a conta de email partilhada do departamento.
@@ -1894,8 +1893,8 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
 
 async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        return {"success": True, "error": "Bypass em DEV", "total_synced": 0, "users_synced": 0}
+    if os.environ.get('ENVIRONMENT') != 'production':
+        return {"success": True, "message": "Ignorado em DEV", "accounts": {}}
     """
     Sincronizar emails para TODOS os utilizadores com configuração ativa.
     Usa asyncio.gather para execução concorrente.
