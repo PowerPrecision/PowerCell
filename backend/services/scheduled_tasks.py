@@ -1301,6 +1301,11 @@ class ScheduledTasksService:
         Returns:
             Dict com resumo da sincronização
         """
+        # KILL SWITCH — HARD DISABLE via DISABLE_EMAIL_SYNC env var
+        if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+            logger.warning("[HARD DISABLE] auto_sync_emails BLOCKED — DISABLE_EMAIL_SYNC=true")
+            return {"success": False, "error": "Email sync is HARD DISABLED", "total_synced": 0}
+
         logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
         
         total_synced = 0
@@ -1436,6 +1441,14 @@ async def run_email_auto_sync(interval_seconds: int = 900):
     Args:
         interval_seconds: Intervalo entre sincronizações (default 900s = 15min)
     """
+    # KILL SWITCH — HARD DISABLE via DISABLE_EMAIL_SYNC env var
+    # Esta é a GUARDA MAIS ALTA: mesmo que outra parte do código tente
+    # chamar run_email_auto_sync(), ela retorna imediatamente sem entrar
+    # no loop. Isto corta o problema pela raiz — o loop IMAP nem arranca.
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        logger.warning("[HARD DISABLE] run_email_auto_sync BLOCKED — DISABLE_EMAIL_SYNC=true — IMAP loop will NOT start")
+        return
+
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
     await asyncio.sleep(30)
     

@@ -1049,6 +1049,18 @@ async def sync_webmail_emails(
     Returns:
         Dict com resultado da sincronização
     """
+    # ============================================================
+    # KILL SWITCH — HARD DISABLE via DISABLE_EMAIL_SYNC env var
+    # ============================================================
+    # Se DISABLE_EMAIL_SYNC=true, esta função retorna imediatamente
+    # sem abrir qualquer ligação IMAP. Isto previne OOM crashes no
+    # Render free tier (512MB RAM) e policy violations do servidor
+    # de webmail. Em dev, usa-se sync on-demand via API endpoint.
+    # ============================================================
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        logger.warning("[HARD DISABLE] sync_webmail_emails BLOCKED — DISABLE_EMAIL_SYNC=true")
+        return {"success": False, "error": "Email sync is HARD DISABLED via DISABLE_EMAIL_SYNC env var", "total_synced": 0}
+
     accounts = await get_email_accounts_async()
     if not accounts:
         return {"success": False, "error": "Nenhuma conta de email configurada"}
@@ -1366,6 +1378,11 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
     Returns:
         Dict com resultado da sincronização
     """
+    # KILL SWITCH — HARD DISABLE via DISABLE_EMAIL_SYNC env var
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        logger.warning("[HARD DISABLE] sync_user_emails BLOCKED — DISABLE_EMAIL_SYNC=true")
+        return {"success": False, "error": "Email sync is HARD DISABLED via DISABLE_EMAIL_SYNC env var", "total_synced": 0}
+
     from services.encryption import encryption_service
     
     user = await db.users.find_one(
@@ -1639,6 +1656,11 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
     Returns:
         Dict com resultado da sincronização
     """
+    # KILL SWITCH — HARD DISABLE via DISABLE_EMAIL_SYNC env var
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        logger.warning("[HARD DISABLE] sync_shared_role_emails BLOCKED — DISABLE_EMAIL_SYNC=true")
+        return {"success": False, "error": "Email sync is HARD DISABLED via DISABLE_EMAIL_SYNC env var", "total_synced": 0}
+
     from services.encryption import encryption_service
     
     shared_config = await db.shared_role_email_configs.find_one(
@@ -1883,6 +1905,11 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     Returns:
         Dict com resumo global da sincronização
     """
+    # KILL SWITCH — HARD DISABLE via DISABLE_EMAIL_SYNC env var
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        logger.warning("[HARD DISABLE] sync_all_user_emails BLOCKED — DISABLE_EMAIL_SYNC=true")
+        return {"success": False, "error": "Email sync is HARD DISABLED via DISABLE_EMAIL_SYNC env var", "total_synced": 0, "users_synced": 0}
+
     # Query: utilizadores com email_config.is_configured == True
     # Excluir roles com email partilhado (indexacao, suporte) — esses usam sync_shared_role_emails
     from services.role_query import deep_role_nin_filter

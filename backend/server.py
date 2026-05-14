@@ -733,6 +733,10 @@ async def startup():
     # ==================================================================
     # KILL SWITCH — Tarefas de Background
     # ==================================================================
+    # DUPLA PROTECÇÃO: Duas flags independentes desativam TUDO:
+    #   1. ENVIRONMENT=dev|development|local|preview  → desativa por ambiente
+    #   2. DISABLE_EMAIL_SYNC=true                     → kill switch explícito
+    #
     # Em ambientes de dev/preview (Render free tier, 512MB RAM), TODAS as
     # tarefas de fundo são desativadas para evitar OOM no arranque.
     # O email sync sozinho consome ~200MB; com backup scheduler + CDC +
@@ -743,11 +747,17 @@ async def startup():
     # ==================================================================
     import asyncio
     is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
+    email_sync_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
+    _bg_disabled = is_dev or email_sync_disabled
 
-    if is_dev:
+    if _bg_disabled:
         logger.info("=" * 60)
-        logger.info("🛑 KILL SWITCH: DEV Environment detected")
-        logger.info("   ALL background tasks DISABLED to save RAM:")
+        logger.info("🛑 KILL SWITCH: Background tasks DISABLED")
+        if is_dev:
+            logger.info("   Reason: ENVIRONMENT=%s", os.environ.get('ENVIRONMENT', 'development'))
+        if email_sync_disabled:
+            logger.info("   Reason: DISABLE_EMAIL_SYNC=true")
+        logger.info("   ALL background tasks BLOCKED:")
         logger.info("   - Email Auto-Sync   → use POST /api/emails/webmail/sync-user")
         logger.info("   - Backup Scheduler   → run manually when needed")
         logger.info("   - CDC Audit Listener → disabled")

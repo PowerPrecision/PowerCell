@@ -217,17 +217,13 @@ async def scheduler_loop():
                 last_runs["matching"] = now
 
             # Sincronização Webmail (a cada 20 minutos)
-            # DESATIVADO em dev/preview: consome ~200MB de RAM no arranque,
-            # excedendo os 512MB do Render free tier. Em dev, usa-se sync on-demand.
-            # ISOLAMENTO DE DADOS: Em vez de descarregar emails da conta global "geral",
-            # itera APENAS pelos utilizadores com email_config.is_configured == True
-            # e sincroniza as suas caixas pessoais de email.
-            # INCLUÍDO: Sincronização de caixas partilhadas via Gmail API (ex: indexacao)
-            # PROTEÇÃO: 3s de delay entre contas para evitar rate-limiting do servidor IMAP
+            # DUPLA PROTECÇÃO: DESATIVADO se ENVIRONMENT=dev OU DISABLE_EMAIL_SYNC=true
             is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
-            if is_dev:
+            email_sync_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
+            if is_dev or email_sync_disabled:
                 if now - last_runs["webmail"] > 3600:  # Log apenas a cada hora para não encher os logs
-                    logger.info("Webmail sync DESATIVADO em dev — usar sincronização on-demand")
+                    reason = "ENVIRONMENT=dev" if is_dev else "DISABLE_EMAIL_SYNC=true"
+                    logger.info(f"Webmail sync DESATIVADO ({reason}) — usar sincronização on-demand")
                     last_runs["webmail"] = now
             elif now - last_runs["webmail"] > 1200:
                 logger.info("Agendando sincronização de webmail por utilizador...")
@@ -357,24 +353,28 @@ async def main():
     """Ponto de entrada principal do worker."""
 
     # ==================================================================
-    # KILL SWITCH — Worker em DEV
+    # KILL SWITCH — Worker em DEV / DISABLE_EMAIL_SYNC
     # ==================================================================
+    # DUPLA PROTECÇÃO: Duas flags independentes desativam o worker:
+    #   1. ENVIRONMENT=dev|development|local|preview  → desativa por ambiente
+    #   2. DISABLE_EMAIL_SYNC=true                     → kill switch explícito
+    #
     # Em ambientes de dev/preview (Render free tier, 512MB RAM), o worker
     # NÃO arranca. Isto poupa ~150MB de RAM que o processo Python consome
     # em idle (mesmo com lazy loading, a base Motor + asyncio event loop
     # + MongoDB connection pool reservam memória significativa).
-    #
-    # O servidor FastAPI (server.py) já tem a sua própria kill switch que
-    # desativa todos os asyncio.create_task() de background no startup.
-    # Este kill switch garante que o processo worker separado também não
-    # arranca em dev.
     # ==================================================================
     is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
+    email_sync_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
+    _worker_disabled = is_dev or email_sync_disabled
 
-    if is_dev:
+    if _worker_disabled:
         logger.info("=" * 60)
-        logger.info("🛑 KILL SWITCH: DEV Environment detected")
-        logger.info("   Worker process NOT starting to save RAM.")
+        logger.info("🛑 KILL SWITCH: Worker process NOT starting")
+        if is_dev:
+            logger.info("   Reason: ENVIRONMENT=%s", os.environ.get('ENVIRONMENT', 'development'))
+        if email_sync_disabled:
+            logger.info("   Reason: DISABLE_EMAIL_SYNC=true")
         logger.info("   All scheduled tasks (webmail sync, matching, etc.)")
         logger.info("   are disabled. Use on-demand endpoints instead.")
         logger.info("=" * 60)
