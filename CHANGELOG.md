@@ -3,24 +3,22 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [2026-03-05] — HARDCODE Definitivo: Email Sync + Webmail Worker Amputados + ensure_libmagic REMOVIDO (OOM Render)
+## [2026-03-05] — ENVIRONMENT Guards em 3 Camadas: Webmail Sync SÓ Produção + ensure_libmagic REMOVIDO
 
 ### Corrigido
 - **Render DEV: OOM causado por `ensure_libmagic()` no arranque** (`fix` — **CAUSA RAIZ**): A função `ensure_libmagic()` no topo de `server.py` executava `apt-get update && apt-get install -y libmagic1` em CADA arranque do servidor. Isto consumia centenas de MB de RAM instantaneamente, causando OOM no Render free tier (512MB) ANTES de qualquer kill switch poder atuar. A função e a invocação foram **completamente apagadas**. O `libmagic1` já está instalado no Dockerfile (camada de build, linha 40-43).
-- **Render DEV: OOM persistente apesar de kill switches ENVIRONMENT** (`fix` — **CRÍTICO**): Os kill switches baseados em `os.environ.get('ENVIRONMENT')` falharam porque `ENVIRONMENT=production` está configurado no Render (para Sentry e outros serviços), o que bypassava todos os guards e fazia o loop IMAP arrancar, consumindo ~200MB de RAM e causando OOM no free tier (512MB). Aplicada solução de **HARDCODE definitivo**: o código foi amputado/comentado diretamente, sem qualquer dependência de variáveis de ambiente.
-- **`server.py`: `ensure_libmagic()` APAGADA** (`fix` — **HARDCODE**): Função inteira (22 linhas) e invocação removidas. `import subprocess` também removido. Comentário de aviso adicionado para não repetir este padrão.
-- **`scheduled_tasks.py`: `run_email_auto_sync()` → return imediato** (`fix` — **HARDCODE**): O corpo inteiro da função (while True, IMAP sync, jitter) foi substituído por um simples `return`. O loop infinito morre imediatamente, independentemente de qualquer variável de ambiente. Log: `🛑 AMPUTAÇÃO DE EMERGÊNCIA: Auto-Sync de Email COMPLETAMENTE DESATIVADO para salvar a RAM do Render em DEV.`
-- **`worker.py`: Webmail sync condition → `if False:`** (`fix` — **HARDCODE**): A condição `elif now - last_runs["webmail"] > 1200:` foi substituída por `if False:`. O bloco de sincronização webmail nunca executa, independentemente de ENVIRONMENT. A condição original está comentada acima para fácil restauração.
-- **`server.py`: `email_sync_task` criação COMENTADA** (`fix` — **HARDCODE**): As 3 linhas que criam a tarefa de email sync no startup (`asyncio.create_task`, `_background_tasks.add`, `add_done_callback`) foram comentadas. A tarefa NUNCA arranca, independentemente de ENVIRONMENT. Log: `🛑 Tarefa de email_sync anulada no server.py!`
+- **Webmail Sync: 3 camadas de proteção ENVIRONMENT** (`fix` — **CRÍTICO**): O sistema de sincronização IMAP estava a correr em DEV (Render 512MB), causando OOM e policy violations do servidor de email (IP 74.220.51.5). Aplicados guards `ENVIRONMENT == 'production'` em 3 camadas para garantir que NENHUMA ligação IMAP é feita em DEV:
+  - **Camada 1 — `server.py` startup**: `email_sync_task` só é criado se `ENVIRONMENT == 'production'`. Em DEV, log: `🛑 MODO DEV: Webmail Sync DESATIVADO para poupar RAM.`
+  - **Camada 2 — `scheduled_tasks.py` `run_email_auto_sync()`**: Guard na 1ª linha: `if ENVIRONMENT != 'production' → return`. Corpo do loop restaurado para produção.
+  - **Camada 3 — `email_service.py` (4 funções)**: `sync_webmail_emails`, `sync_user_emails`, `sync_shared_role_emails`, `sync_all_user_emails` — todas retornam `{"success": True, "message": "Ignorado em DEV"}` quando `ENVIRONMENT != 'production'`. Removido `'dev'` como default do `os.environ.get('ENVIRONMENT', 'dev')` para evitar bypass se a variável não estiver definida.
+- **`worker.py`: `if False:` mantido** (`fix` — redundância intencional): O bloco de webmail sync no worker continua com `if False:` como proteção extra, impedindo query à DB e import do módulo email_service em DEV.
 
 ### Notas
-- **4 pontos de amputação** em 3 ficheiros (`server.py`×2, `scheduled_tasks.py`, `worker.py`).
-- **Causa raiz do OOM identificada**: `ensure_libmagic()` → `apt-get` no runtime = +centenas de MB instantâneos.
-- Cada amputação é **incondicional** — não depende de variáveis de ambiente.
-- O código original é preservado mas inalcançável (comentado ou após `return`).
-- `libmagic1` já instalado no Dockerfile — não precisa de runtime install.
-- Para reativar em PRODUÇÃO: (1) Restaurar `run_email_auto_sync()` em `scheduled_tasks.py`, (2) Trocar `if False:` por `if now - last_runs["webmail"] > 1200:` em `worker.py`, (3) Descomentar as 3 linhas de `email_sync_task` em `server.py`.
-- Commits: `8ab0385`, `ce76cec`, `1d6a9bc`
+- **6 pontos de proteção** em 4 ficheiros (`server.py`, `scheduled_tasks.py`, `email_service.py`×4, `worker.py`).
+- Guards usam `os.environ.get('ENVIRONMENT')` sem default — se a variável não existir, o sync NÃO corre (fail-safe).
+- **IMPORTANTE**: Se `ENVIRONMENT=production` estiver definido no Render dev, os guards são bypassados. Garantir que a variável NÃO é `production` no ambiente de dev.
+- `libmagic1` instalado no Dockerfile — não precisa de runtime install.
+- Commits: `1d6a9bc`, `1d2aef9`
 
 ### Corrigido
 - **Render DEV: OOM persistente apesar de kill switches baseados em ENVIRONMENT** (`fix` — **CRÍTICO**): Os kill switches anteriores baseados em `os.environ.get('ENVIRONMENT', 'dev')` falharam porque: (1) O Dockerfile define `APP_ENV=production` (não `ENVIRONMENT`), e se `ENVIRONMENT=production` estiver configurado no Render, o bypass é ultrapassado e o loop arranca; (2) As variáveis de ambiente podem ter valores inesperados em diferentes ambientes de deploy. Aplicada solução de "Força Bruta": o código fonte foi diretamente comentado/amputado, independente de qualquer variável de ambiente.
