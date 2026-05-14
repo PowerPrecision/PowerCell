@@ -3,6 +3,22 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-14] — Proteção contra Rate Limiting IMAP (Policy Violation)
+
+### Corrigido
+- **IP do Render bloqueado pelo servidor Webmail (IMAP policy violation)** (`fix` — **CRÍTICO**): O servidor de email estava a bloquear o IP do Render com o erro `* BYE Service temporarily refused connection from IP because a policy violation has occurred`, seguido de `LOGIN Failed`. Causa raiz: o sistema de sincronização automática corria a cada 3 minutos e abria ligações IMAP em rajada para todas as contas de utilizadores (Tiago, Carina, Andrea, etc.) sem qualquer delay, disparando as firewalls de rate limiting do provedor de email.
+- **Intervalo de polling demasiado agressivo (3 minutos)** (`fix`): O `run_email_auto_sync` no `server.py` corria a cada 180s, criando ~20 ciclos de sync por hora. Cada ciclo abria ligações IMAP para todas as contas configuradas sem qualquer espaçamento. Alterado para 900s (15 minutos).
+- **Sem delay entre contas IMAP** (`fix`): O loop de sincronização iterava sobre todas as contas de email sem qualquer pausa, abrindo múltiplas ligações IMAP em simultâneo. Agora adicionado `await asyncio.sleep(3)` entre cada conta.
+- **Erros de policy violation inundavam os logs como ERROR** (`fix`): Erros de rate limiting eram logados como `logger.error()`, criando dezenas de entradas repetitivas por ciclo. Agora são logados como `logger.warning()` com mensagem clara e truncada.
+- **Ligações IMAP vazadas em caso de erro** (`fix`): `_fetch_all_from_folder_sync()` não chamava `mail.logout()` em caso de exceção durante o fetch, vazando ligações IMAP. Agora `mail.logout()` está num bloco `finally`.
+- **Sincronização continuava após policy violation** (`fix`): Mesmo quando o servidor IMAP bloqueava o IP, o loop continuava a tentar as contas restantes, agravando o bloqueio. Agora o loop para imediatamente (`break`) ao detetar policy violation.
+
+### Adicionado
+- **Detecção de policy violation no IMAP** (`feat` — Resiliência): Keywords detetadas: `policy violation`, `temporarily refused`, `too many`, `rate limit`, `connection limit`, `abuse`, `blocked`. Aplicada em 3 camadas: `_fetch_all_from_folder_sync`, `sync_webmail_emails` / `sync_user_emails`, e `auto_sync_emails`.
+- **Jitter aleatório no intervalo de sync** (`feat` — Anti-thundering-herd): O loop `run_email_auto_sync` adiciona 0-60s de variação aleatória ao intervalo de 15 minutos, para evitar que múltiplas instâncias sincronizem simultaneamente após deploy.
+- **Delay de 3s entre fases de sync** (`feat`): Pausas de 3 segundos entre sync global → pessoal → partilhado em `auto_sync_emails()`.
+- **Worker: intervalo de webmail sync aumentado para 20 minutos** (`feat`): O worker ARQ agora sincroniza webmail a cada 1200s (20 min) em vez de 900s, para evitar sobreposição com o scheduler do FastAPI (15 min).
+
 ## [2026-07-14] — Resiliência a 503 no Portal do Cliente (Cold Start Render)
 
 ### Corrigido
