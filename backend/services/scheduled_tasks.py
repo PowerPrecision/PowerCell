@@ -25,6 +25,7 @@ Uso:
 import asyncio
 import logging
 import argparse
+import random
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any
 import uuid
@@ -1306,6 +1307,19 @@ class ScheduledTasksService:
         total_errors = 0
         results = {}
         
+        def _is_policy_violation(error_str: str) -> bool:
+            """Detectar erros de policy violation / rate limiting do servidor IMAP."""
+            lower = error_str.lower()
+            return any(kw in lower for kw in [
+                "policy violation",
+                "temporarily refused",
+                "too many",
+                "rate limit",
+                "connection limit",
+                "abuse",
+                "blocked",
+            ])
+        
         try:
             # 1. Sincronizar caixa geral (global)
             try:
@@ -1318,9 +1332,16 @@ class ScheduledTasksService:
                     "duplicates": global_result.get("total_duplicates", 0),
                 }
             except Exception as e:
-                logger.error(f"[Auto-Sync Email] Erro na caixa geral: {e}")
+                error_str = str(e)
+                if _is_policy_violation(error_str):
+                    logger.warning(f"[Auto-Sync Email] Caixa geral bloqueada por rate limit — a saltar este ciclo: {error_str[:200]}")
+                else:
+                    logger.error(f"[Auto-Sync Email] Erro na caixa geral: {e}")
                 total_errors += 1
                 results["global"] = {"error": str(e)}
+            
+            # Pausa entre sync global e sync pessoal (evitar rajadas de ligações IMAP)
+            await asyncio.sleep(3)
             
             # 2. Sincronizar caixas pessoais dos utilizadores com email_config ativa
             try:
@@ -1343,14 +1364,33 @@ class ScheduledTasksService:
                         )
                         total_synced += user_result.get("total_synced", 0)
                         total_errors += user_result.get("total_errors", 0)
+                        
+                        # Verificar se houve policy violation — parar de iterar contas
+                        if user_result.get("error") and _is_policy_violation(user_result["error"]):
+                            logger.warning(
+                                f"[Auto-Sync Email] Policy violation detectada para {u.get('email', '?')} "
+                                f"— a cancelar sync das restantes contas neste ciclo"
+                            )
+                            total_errors += 1
+                            break
                     except Exception as e:
+                        error_str = str(e)
+                        if _is_policy_violation(error_str):
+                            logger.warning(f"[Auto-Sync Email] Conta {u.get('email', '?')} bloqueada por rate limit — a parar iteração: {error_str[:200]}")
+                            break
                         logger.debug(f"[Auto-Sync Email] Erro caixa pessoal {u.get('id', '?')}: {e}")
                         total_errors += 1
+                    
+                    # Delay entre contas para evitar ligações IMAP simultâneas (3s)
+                    await asyncio.sleep(3)
                 
                 results["personal_accounts"] = len(users_with_email)
             except Exception as e:
                 logger.error(f"[Auto-Sync Email] Erro ao buscar utilizadores com email: {e}")
                 results["personal_accounts"] = {"error": str(e)}
+            
+            # Pausa antes de sync partilhado
+            await asyncio.sleep(3)
             
             # 3. Sincronizar caixas partilhadas (indexação, etc.)
             try:
@@ -1361,7 +1401,11 @@ class ScheduledTasksService:
                     "synced": shared_result.get("total_synced", 0),
                 }
             except Exception as e:
-                logger.debug(f"[Auto-Sync Email] Erro caixa partilhada indexação: {e}")
+                error_str = str(e)
+                if _is_policy_violation(error_str):
+                    logger.warning(f"[Auto-Sync Email] Caixa partilhada bloqueada por rate limit: {error_str[:200]}")
+                else:
+                    logger.debug(f"[Auto-Sync Email] Erro caixa partilhada indexação: {e}")
             
         except Exception as e:
             logger.error(f"[Auto-Sync Email] Erro geral: {e}")
@@ -1379,15 +1423,18 @@ class ScheduledTasksService:
         }
 
 
-async def run_email_auto_sync(interval_seconds: int = 180):
+async def run_email_auto_sync(interval_seconds: int = 900):
     """
     Loop de auto-sync de emails que corre em background.
     
-    Por defeito, sincroniza a cada 3 minutos (180s). Esta função
+    Por defeito, sincroniza a cada 15 minutos (900s). Esta função
     é registada como tarefa de background no startup do FastAPI.
     
+    IMPORTANTE: O intervalo foi aumentado de 3min para 15min para evitar
+    rate-limiting do servidor IMAP (policy violation / IP blocking).
+    
     Args:
-        interval_seconds: Intervalo entre sincronizações (default 180s)
+        interval_seconds: Intervalo entre sincronizações (default 900s = 15min)
     """
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
     await asyncio.sleep(30)
@@ -1403,7 +1450,10 @@ async def run_email_auto_sync(interval_seconds: int = 180):
         finally:
             await service.disconnect()
         
-        await asyncio.sleep(interval_seconds)
+        # Jitter: adicionar variação aleatória de 0-60s para evitar que
+        # múltiplas instâncias sincronizem ao mesmo tempo
+        jitter = random.randint(0, 60)
+        await asyncio.sleep(interval_seconds + jitter)
 
 
 async def run_daemon(interval_hours: int = 24):

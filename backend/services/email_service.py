@@ -883,6 +883,7 @@ def _fetch_all_from_folder_sync(
     """
     emails_found = []
     connection_error = None
+    mail = None
     
     try:
         context = ssl.create_default_context()
@@ -895,8 +896,8 @@ def _fetch_all_from_folder_sync(
         result, data = mail.select(folder)
         if result != 'OK':
             logger.debug(f"[Webmail Sync] Pasta não encontrada: {folder} ({result})")
-            mail.logout()
-            return emails_found
+            # mail.logout() will be called in finally block
+            return {"emails": emails_found, "connection_error": connection_error}
         
         message_numbers = _safe_search_result(mail.search(None, f'(SINCE {since_date})'))
         nums = message_numbers[0].split()
@@ -984,19 +985,49 @@ def _fetch_all_from_folder_sync(
                 logger.warning(f"[Webmail Sync] Traceback: {traceback.format_exc()}")
                 continue
         
-        mail.logout()
         logger.info(f"[Webmail Sync] {len(emails_found)} emails extraídos de {folder} ({account.name})")
         
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"[Webmail Sync] Erro ao conectar IMAP {account.name}: {error_msg}")
-        # Detectar erros de autenticação para mensagem mais clara
-        if "login failed" in error_msg.lower() or "authentication failed" in error_msg.lower() or "invalid username or password" in error_msg.lower():
+        
+        # Detectar policy violation / rate limiting — WARNING em vez de ERROR
+        # para evitar inundar os logs quando o servidor IMAP bloqueia o IP
+        lower_msg = error_msg.lower()
+        is_policy_violation = any(kw in lower_msg for kw in [
+            "policy violation",
+            "temporarily refused",
+            "too many",
+            "rate limit",
+            "connection limit",
+            "abuse",
+            "blocked",
+        ])
+        
+        if is_policy_violation:
+            logger.warning(f"[Webmail Sync] Servidor IMAP bloqueou ligação para {account.name} (rate limit/policy): {error_msg[:200]}")
+        elif "login failed" in lower_msg or "authentication failed" in lower_msg or "invalid username or password" in lower_msg:
+            logger.warning(f"[Webmail Sync] Autenticação IMAP falhou para {account.email}")
+        elif "connection refused" in lower_msg or "timed out" in lower_msg:
+            logger.warning(f"[Webmail Sync] Ligação IMAP falhou para {account.email} — servidor inatingível ({account.imap_server}:{account.imap_port})")
+        else:
+            logger.error(f"[Webmail Sync] Erro ao conectar IMAP {account.name}: {error_msg}")
+        
+        # Mensagens de erro para o caller
+        if "login failed" in lower_msg or "authentication failed" in lower_msg or "invalid username or password" in lower_msg:
             connection_error = f"Autenticação IMAP falhou para {account.email} — verifique email/password nas Configurações do Perfil"
-        elif "connection refused" in error_msg.lower() or "timed out" in error_msg.lower():
+        elif "connection refused" in lower_msg or "timed out" in lower_msg:
             connection_error = f"Ligação IMAP falhou para {account.email} — servidor inatingível ({account.imap_server}:{account.imap_port})"
+        elif is_policy_violation:
+            connection_error = f"Servidor IMAP bloqueou ligação para {account.email} (policy violation / rate limit)"
         else:
             connection_error = f"Erro IMAP para {account.email}: {error_msg}"
+    finally:
+        # Garantir que a ligação IMAP é sempre fechada (evitar leaks)
+        if mail:
+            try:
+                mail.logout()
+            except Exception:
+                pass
     
     return {"emails": emails_found, "connection_error": connection_error}
 
@@ -1032,6 +1063,19 @@ async def sync_webmail_emails(
     total_errors = 0
     results = {}
     
+    def _is_policy_violation(error_str: str) -> bool:
+        """Detectar erros de policy violation / rate limiting do servidor IMAP."""
+        lower = error_str.lower()
+        return any(kw in lower for kw in [
+            "policy violation",
+            "temporarily refused",
+            "too many",
+            "rate limit",
+            "connection limit",
+            "abuse",
+            "blocked",
+        ])
+    
     for account in accounts:
         try:
             all_emails = []
@@ -1045,8 +1089,15 @@ async def sync_webmail_emails(
             
             # Verificar erro de conexão IMAP
             if inbox_result.get("connection_error"):
-                logger.warning(f"[Webmail Sync] Erro IMAP para {account.name}: {inbox_result['connection_error']}")
-                results[account.name] = {"error": inbox_result["connection_error"], "synced": 0, "duplicates": 0, "total_fetched": 0}
+                conn_err = inbox_result['connection_error']
+                if _is_policy_violation(conn_err):
+                    logger.warning(f"[Webmail Sync] Conta {account.name} bloqueada por rate limit — a saltar: {conn_err[:200]}")
+                    results[account.name] = {"error": conn_err, "synced": 0, "duplicates": 0, "total_fetched": 0}
+                    total_errors += 1
+                    # Parar de tentar mais contas — o IP está bloqueado
+                    break
+                logger.warning(f"[Webmail Sync] Erro IMAP para {account.name}: {conn_err}")
+                results[account.name] = {"error": conn_err, "synced": 0, "duplicates": 0, "total_fetched": 0}
                 total_errors += 1
                 continue
             
@@ -1279,9 +1330,20 @@ async def sync_webmail_emails(
             logger.info(f"[Webmail Sync] Conta {account.name}: {synced} novos, {duplicates} duplicados")
             
         except Exception as e:
-            logger.error(f"[Webmail Sync] Erro ao sincronizar conta {account.name}: {e}")
-            results[account.name] = {"error": str(e)}
-            total_errors += 1
+            error_str = str(e)
+            if _is_policy_violation(error_str):
+                logger.warning(f"[Webmail Sync] Conta {account.name} bloqueada por rate limit — a parar iteração: {error_str[:200]}")
+                results[account.name] = {"error": f"Rate limit / policy violation: {error_str[:100]}"}
+                total_errors += 1
+                break  # IP bloqueado — não vale a pena tentar mais contas
+            else:
+                logger.error(f"[Webmail Sync] Erro ao sincronizar conta {account.name}: {e}")
+                results[account.name] = {"error": str(e)}
+                total_errors += 1
+        
+        # Delay entre contas para evitar ligações IMAP simultâneas (3s)
+        if account != accounts[-1]:  # Não esperar após a última conta
+            await asyncio.sleep(3)
     
     return {
         "success": total_errors == 0 or total_synced > 0,
@@ -1353,14 +1415,24 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
         
         # Verificar erro de conexão IMAP
         if inbox_result.get("connection_error"):
-            logger.error(f"[User Email Sync] Erro IMAP: {inbox_result['connection_error']}")
+            conn_err = inbox_result["connection_error"]
+            # Usar WARNING para policy violations, ERROR para outros
+            lower_err = conn_err.lower()
+            is_policy = any(kw in lower_err for kw in [
+                "policy violation", "temporarily refused", "too many",
+                "rate limit", "connection limit", "abuse", "blocked",
+            ])
+            if is_policy:
+                logger.warning(f"[User Email Sync] Rate limit IMAP para {account.email}: {conn_err[:200]}")
+            else:
+                logger.error(f"[User Email Sync] Erro IMAP: {conn_err}")
             return {
                 "success": False,
                 "total_synced": 0,
                 "total_duplicates": 0,
                 "total_errors": 1,
                 "user_id": user_id,
-                "error": inbox_result["connection_error"],
+                "error": conn_err,
             }
         
         inbox_emails = inbox_result.get("emails", [])

@@ -216,12 +216,13 @@ async def scheduler_loop():
                 await task_queue.add_task("match_leads", {})
                 last_runs["matching"] = now
 
-            # Sincronização Webmail (a cada 15 minutos)
+            # Sincronização Webmail (a cada 20 minutos)
             # ISOLAMENTO DE DADOS: Em vez de descarregar emails da conta global "geral",
             # itera APENAS pelos utilizadores com email_config.is_configured == True
             # e sincroniza as suas caixas pessoais de email.
             # INCLUÍDO: Sincronização de caixas partilhadas via Gmail API (ex: indexacao)
-            if now - last_runs["webmail"] > 900:
+            # PROTEÇÃO: 3s de delay entre contas para evitar rate-limiting do servidor IMAP
+            if now - last_runs["webmail"] > 1200:
                 logger.info("Agendando sincronização de webmail por utilizador...")
                 try:
                     from services.email_service import sync_user_emails
@@ -241,8 +242,24 @@ async def scheduler_loop():
                                 synced = result.get("total_synced", 0)
                                 if synced > 0:
                                     logger.info(f"Webmail sync user {user_id}: {synced} novos emails")
+                                # Se houve policy violation, parar de iterar
+                                if result.get("error") and any(kw in result["error"].lower() for kw in [
+                                    "policy violation", "temporarily refused", "rate limit",
+                                    "too many", "blocked", "connection limit", "abuse"
+                                ]):
+                                    logger.warning(f"Webmail sync: policy violation para {user_id} — a parar iteração")
+                                    break
                             except Exception as user_err:
+                                err_str = str(user_err)
+                                if any(kw in err_str.lower() for kw in [
+                                    "policy violation", "temporarily refused", "rate limit",
+                                    "too many", "blocked", "connection limit", "abuse"
+                                ]):
+                                    logger.warning(f"Webmail sync: policy violation para {user_id} — a parar iteração: {err_str[:200]}")
+                                    break
                                 logger.warning(f"Erro ao sincronizar webmail do user {user_id}: {user_err}")
+                            # Delay entre contas para evitar ligações IMAP simultâneas (3s)
+                            await asyncio.sleep(3)
                         logger.info(f"Sincronização webmail pessoal concluída ({len(configured_users)} utilizadores)")
                     else:
                         logger.debug("Nenhum utilizador com email pessoal configurado")
