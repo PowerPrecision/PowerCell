@@ -1430,42 +1430,10 @@ class ScheduledTasksService:
 
 
 async def run_email_auto_sync(interval_seconds: int = 900):
-    """
-    Loop de auto-sync de emails que corre em background.
-    
-    Por defeito, sincroniza a cada 15 minutos (900s). Esta função
-    é registada como tarefa de background no startup do FastAPI.
-    
-    IMPORTANTE: O intervalo foi aumentado de 3min para 15min para evitar
-    rate-limiting do servidor IMAP (policy violation / IP blocking).
-    
-    Args:
-        interval_seconds: Intervalo entre sincronizações (default 900s = 15min)
-    """
-    # KILL SWITCH — SÓ PRODUÇÃO PERMITE SYNC LOOP (proteção RAM em DEV)
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        logger.info("[run_email_auto_sync] BLOCKED — ENVIRONMENT != production — IMAP loop will NOT start")
-        return
-
-    # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
-    await asyncio.sleep(30)
-    
-    service = ScheduledTasksService()
-    
-    while True:
-        try:
-            await service.connect()
-            await service.auto_sync_emails()
-        except Exception as e:
-            logger.error(f"[Email Auto-Sync] Erro no ciclo: {e}")
-        finally:
-            await service.disconnect()
-        
-        # Jitter: adicionar variação aleatória de 0-60s para evitar que
-        # múltiplas instâncias sincronizem ao mesmo tempo
-        jitter = random.randint(0, 60)
-        await asyncio.sleep(interval_seconds + jitter)
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning("🛑 AMPUTAÇÃO DE EMERGÊNCIA: Auto-Sync de Email COMPLETAMENTE DESATIVADO para salvar a RAM do Render em DEV.")
+    return # O loop infinito morre imediatamente aqui!
 
 
 async def run_daemon(interval_hours: int = 24):

@@ -761,23 +761,21 @@ async def startup():
         logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
 
     # ==========================================
-    # TAREFAS PESADAS — SÓ PRODUÇÃO (ENVIRONMENT=production)
+    # TAREFAS PESADAS — 🛑 DESATIVADO POR HARDCODE
     # ==========================================
     # O loop IMAP (Email Sync) e o Playwright (Gov Scraper) consomem
     # muita RAM. Em DEV (Render 512MB), estes serviços causam OOM.
-    # Apenas arrancam quando ENVIRONMENT=production.
-    if os.environ.get('ENVIRONMENT') == 'production':
-        # --- Email Auto-Sync: IMAP polling a cada 15 minutos ---
-        try:
-            from services.scheduled_tasks import run_email_auto_sync
-            email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=900))
-            _background_tasks.add(email_sync_task)
-            email_sync_task.add_done_callback(_background_tasks.discard)
-            logger.info("📧 Auto-Sync Email iniciado - sincronização a cada 15 minutos")
-        except (IOError, OSError, ValueError, ImportError) as email_sync_err:
-            logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
-    else:
-        logger.warning("🛑 MODO DEV: Playwright e Email Sync totalmente desativados para evitar OOM.")
+    # HARDCODE: Comentado para impedir arranque independente de ENVIRONMENT.
+    # Iniciar Auto-Sync de Emails (sincronização periódica IMAP → BD + WebSocket)
+    try:
+        from services.scheduled_tasks import run_email_auto_sync
+        # 🛑 DESATIVADO POR HARDCODE
+        # email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=900))
+        # _background_tasks.add(email_sync_task)
+        # email_sync_task.add_done_callback(_background_tasks.discard)
+        logger.warning("🛑 Tarefa de email_sync anulada no server.py!")
+    except Exception as email_sync_err:
+        logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

@@ -230,15 +230,9 @@ async def scheduler_loop():
                 await task_queue.add_task("match_leads", {})
                 last_runs["matching"] = now
 
-            # Sincronização Webmail (a cada 20 minutos)
-            # BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
-            import os
-            is_production = os.environ.get('ENVIRONMENT', 'dev') == 'production'
-            if not is_production:
-                if now - last_runs["webmail"] > 3600:  # Log apenas a cada hora para não encher os logs
-                    logger.info(f"Webmail sync RADICAL BLOCK — ENVIRONMENT != production — usar sincronização on-demand")
-                    last_runs["webmail"] = now
-            elif now - last_runs["webmail"] > 1200:
+            # Sincronização Webmail — 🛑 DESATIVADO POR HARDCODE
+            # if now - last_runs["webmail"] > 900:
+            if False: # 🛑 DESATIVADO POR HARDCODE: Bloqueio do worker
                 logger.info("Agendando sincronização de webmail por utilizador...")
                 try:
                     from services.email_service import sync_user_emails
