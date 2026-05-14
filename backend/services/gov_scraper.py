@@ -251,6 +251,16 @@ async def fetch_financas_documents(
     Returns:
         ScraperResult com documentos obtidos ou erro
     """
+    # DEV MODE: Mock do scraper — NÃO lança o browser em ambientes de dev
+    # O Playwright/Chromium consome ~150-300MB RAM, inviável em 512MB
+    if os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview'):
+        logger.info("[GOV_SCRAPER] DEV MODE: Mocking Finanças scraper — browser will NOT launch")
+        return ScraperResult(
+            success=True,
+            documents=[],
+            error="MOCK: Documentos Finanças obtidos (DEV)",
+        )
+
     masked_nif = _mask_identifier(nif)
     logger.info(f"[GOV_SCRAPER] Iniciando scraper Finanças para NIF {masked_nif}")
 
@@ -609,6 +619,16 @@ async def fetch_seg_social_documents(
     Returns:
         ScraperResult com documentos obtidos ou erro
     """
+    # DEV MODE: Mock do scraper — NÃO lança o browser em ambientes de dev
+    # O Playwright/Chromium consome ~150-300MB RAM, inviável em 512MB
+    if os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview'):
+        logger.info("[GOV_SCRAPER] DEV MODE: Mocking Seg. Social scraper — browser will NOT launch")
+        return ScraperResult(
+            success=True,
+            documents=[],
+            error="MOCK: Documentos Seg. Social obtidos (DEV)",
+        )
+
     masked_niss = _mask_identifier(niss)
     logger.info(f"[GOV_SCRAPER] Iniciando scraper Seg. Social para NISS {masked_niss}")
 
@@ -939,6 +959,15 @@ async def check_playwright_available() -> Dict[str, Any]:
     Retorna informações sobre o estado da instalação para diagnóstico.
     Inclui o PLAYWRIGHT_BROWSERS_PATH para ajudar a debugar problemas de path.
     """
+    # DEV MODE: Não tenta lançar o browser em ambientes de dev
+    if os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview'):
+        return {
+            "playwright_installed": False,
+            "chromium_available": False,
+            "dev_mode": True,
+            "error": "MOCK: Playwright check skipped (DEV mode)",
+        }
+
     browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "(default: ~/.cache/ms-playwright)")
 
     result = {
