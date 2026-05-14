@@ -1037,6 +1037,9 @@ async def sync_webmail_emails(
     days: int = 30,
     max_emails: int = 100
 ) -> Dict[str, Any]:
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
+        return {"success": True, "error": "Bypass em DEV", "total_synced": 0, "total_duplicates": 0, "total_errors": 0, "accounts": {}}
     """
     Sincronizar TODOS os emails recentes do IMAP para o webmail.
     Sem filtro de processo — guarda todos os emails recebidos e enviados.
@@ -1049,22 +1052,7 @@ async def sync_webmail_emails(
     Returns:
         Dict com resultado da sincronização
     """
-    # ============================================================
-    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
-    # ============================================================
-    # REGRA ABSOLUTA: Email sync SÓ corre em ENVIRONMENT=production.
-    # Qualquer outro valor (dev, development, local, preview, vazio)
-    # bloqueia IMEDiatamente sem abrir ligação IMAP.
-    # Isto previne OOM crashes no Render free tier (512MB RAM) e
-    # policy violations do servidor de webmail.
-    # Em dev, usa-se sync on-demand via POST /api/emails/webmail/sync.
-    # ============================================================
-    _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
-    _email_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    if (not _is_production) or _email_disabled:
-        reason = 'ENVIRONMENT != production' if not _is_production else 'DISABLE_EMAIL_SYNC=true'
-        logger.warning(f"[RADICAL BLOCK] sync_webmail_emails BLOCKED — {reason}")
-        return {"success": False, "error": f"Email sync HARD DISABLED ({reason})", "total_synced": 0}
+    # (Kill switch moved to first line of function — see above)
 
     accounts = await get_email_accounts_async()
     if not accounts:
@@ -1372,6 +1360,9 @@ async def sync_webmail_emails(
 
 
 async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) -> Dict[str, Any]:
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
+        return {"success": True, "error": "Bypass em DEV", "total_synced": 0}
     """
     Sincronizar emails para um utilizador específico usando a sua configuração pessoal.
     
@@ -1383,13 +1374,7 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
     Returns:
         Dict com resultado da sincronização
     """
-    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
-    _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
-    _email_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    if (not _is_production) or _email_disabled:
-        reason = 'ENVIRONMENT != production' if not _is_production else 'DISABLE_EMAIL_SYNC=true'
-        logger.warning(f"[RADICAL BLOCK] sync_user_emails BLOCKED — {reason}")
-        return {"success": False, "error": f"Email sync HARD DISABLED ({reason})", "total_synced": 0}
+    # (Kill switch moved to first line of function — see above)
 
     from services.encryption import encryption_service
     
@@ -1649,6 +1634,9 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
 
 
 async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 200) -> Dict[str, Any]:
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
+        return {"success": True, "error": "Bypass em DEV", "total_synced": 0}
     """
     Sincronizar emails para um role partilhado (indexacao, suporte, etc.)
     usando a conta de email partilhada do departamento.
@@ -1664,13 +1652,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
     Returns:
         Dict com resultado da sincronização
     """
-    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
-    _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
-    _email_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    if (not _is_production) or _email_disabled:
-        reason = 'ENVIRONMENT != production' if not _is_production else 'DISABLE_EMAIL_SYNC=true'
-        logger.warning(f"[RADICAL BLOCK] sync_shared_role_emails BLOCKED — {reason}")
-        return {"success": False, "error": f"Email sync HARD DISABLED ({reason})", "total_synced": 0}
+    # (Kill switch moved to first line of function — see above)
 
     from services.encryption import encryption_service
     
@@ -1909,6 +1891,9 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
 
 
 async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
+        return {"success": True, "error": "Bypass em DEV", "total_synced": 0, "users_synced": 0}
     """
     Sincronizar emails para TODOS os utilizadores com configuração ativa.
     Usa asyncio.gather para execução concorrente.
@@ -1916,13 +1901,7 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     Returns:
         Dict com resumo global da sincronização
     """
-    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
-    _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
-    _email_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    if (not _is_production) or _email_disabled:
-        reason = 'ENVIRONMENT != production' if not _is_production else 'DISABLE_EMAIL_SYNC=true'
-        logger.warning(f"[RADICAL BLOCK] sync_all_user_emails BLOCKED — {reason}")
-        return {"success": False, "error": f"Email sync HARD DISABLED ({reason})", "total_synced": 0, "users_synced": 0}
+    # (Kill switch moved to first line of function — see above)
 
     # Query: utilizadores com email_config.is_configured == True
     # Excluir roles com email partilhado (indexacao, suporte) — esses usam sync_shared_role_emails

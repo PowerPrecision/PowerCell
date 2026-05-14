@@ -730,78 +730,50 @@ async def startup():
     except (ImportError, ValueError, KeyError) as trello_err:
         logger.debug(f"Trello não configurado: {trello_err}")
     
-    # ==================================================================
-    # KILL SWITCH — Tarefas de Background (BLOQUEIO RADICAL)
-    # ==================================================================
-    # REGRA ABSOLUTA: Tarefas de background SÓ arrancam em PRODUÇÃO.
-    # Qualquer ambiente que NÃO seja "production" é tratado como dev,
-    # e TODOS os schedulers/pollers/loops são bloqueados no arranque.
-    #
-    # Isto resolve OOM crashes no Render (512MB RAM) causados por:
-    #   - IMAP sync a cada 3/15 min (~200MB por ciclo)
-    #   - Playwright/Chromium (~150-300MB)
-    #   - Redis DNS errors ("Name or service not known")
-    #   - Backup scheduler + CDC + job monitor (cada um consome RAM)
-    #
-    # Em dev, utiliza-se sincronização on-demand:
-    #   - POST /api/emails/webmail/sync-user
-    #   - POST /api/emails/webmail/sync
-    # ==================================================================
+    # ==========================================
+    # KILL SWITCH PARA AMBIENTE DEV (RENDER OOM FIX)
+    # ==========================================
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
+        logger.warning("🛑 MODO DEV: Tarefas pesadas de background (Email Sync, CDC, Backups, Monitor) DESATIVADAS para poupar RAM!")
+        return
+    # ==========================================
+
+    # Iniciar scheduler para monitorização de jobs stuck
     import asyncio
-    _env = os.environ.get('ENVIRONMENT', '').lower()
-    _is_production = _env == 'production'
-    _email_sync_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    _bg_disabled = (not _is_production) or _email_sync_disabled
+    monitor_task = asyncio.create_task(background_job_monitor())
+    _background_tasks.add(monitor_task)
+    monitor_task.add_done_callback(_background_tasks.discard)
 
-    if _bg_disabled:
-        logger.info("=" * 60)
-        logger.info("🛑 RADICAL KILL SWITCH: Background tasks HARD-DISABLED")
-        logger.info("   ENVIRONMENT = '%s' (only 'production' enables bg tasks)", _env or '(empty)')
-        if _email_sync_disabled:
-            logger.info("   DISABLE_EMAIL_SYNC = true")
-        logger.info("   ALL background tasks BLOCKED at startup:")
-        logger.info("   - Email Auto-Sync   → use POST /api/emails/webmail/sync-user")
-        logger.info("   - Backup Scheduler  → run manually when needed")
-        logger.info("   - CDC Audit Listener → disabled")
-        logger.info("   - Job Monitor        → disabled")
-        logger.info("   - Scraper (Playwright) → mocked (no browser launch)")
-        logger.info("   - Redis cache        → in-memory fallback (no DNS errors)")
-        logger.info("=" * 60)
-    else:
-        # --- Job Monitor: detecção de jobs stuck (a cada 30 min) ---
-        monitor_task = asyncio.create_task(background_job_monitor())
-        _background_tasks.add(monitor_task)
-        monitor_task.add_done_callback(_background_tasks.discard)
+    # --- Backup Scheduler: backup diário às 03:00 UTC ---
+    try:
+        from services.backup import start_backup_scheduler
+        backup_task = asyncio.create_task(start_backup_scheduler())
+        _background_tasks.add(backup_task)
+        backup_task.add_done_callback(_background_tasks.discard)
+        logger.info("💾 Backup scheduler iniciado - backup diário às 03:00 UTC")
+    except (IOError, OSError, ValueError, ImportError) as backup_err:
+        logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
 
-        # --- Backup Scheduler: backup diário às 03:00 UTC ---
-        try:
-            from services.backup import start_backup_scheduler
-            backup_task = asyncio.create_task(start_backup_scheduler())
-            _background_tasks.add(backup_task)
-            backup_task.add_done_callback(_background_tasks.discard)
-            logger.info("💾 Backup scheduler iniciado - backup diário às 03:00 UTC")
-        except (IOError, OSError, ValueError, ImportError) as backup_err:
-            logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
+    # --- CDC Audit Listener: Change Data Capture para compliance ---
+    try:
+        from services.audit_cdc import cdc_listener
+        cdc_task = asyncio.create_task(cdc_listener.start())
+        _background_tasks.add(cdc_task)
+        cdc_task.add_done_callback(_background_tasks.discard)
+        logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
+    except (IOError, OSError, ValueError, ImportError) as cdc_err:
+        logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
 
-        # --- CDC Audit Listener: Change Data Capture para compliance ---
-        try:
-            from services.audit_cdc import cdc_listener
-            cdc_task = asyncio.create_task(cdc_listener.start())
-            _background_tasks.add(cdc_task)
-            cdc_task.add_done_callback(_background_tasks.discard)
-            logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
-        except (IOError, OSError, ValueError, ImportError) as cdc_err:
-            logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
-
-        # --- Email Auto-Sync: sincronização periódica IMAP → BD ---
-        try:
-            from services.scheduled_tasks import run_email_auto_sync
-            email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=900))
-            _background_tasks.add(email_sync_task)
-            email_sync_task.add_done_callback(_background_tasks.discard)
-            logger.info("📧 Auto-Sync Email iniciado - sincronização a cada 15 minutos")
-        except (IOError, OSError, ValueError, ImportError) as email_sync_err:
-            logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
+    # --- Email Auto-Sync: sincronização periódica IMAP → BD ---
+    try:
+        from services.scheduled_tasks import run_email_auto_sync
+        email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=900))
+        _background_tasks.add(email_sync_task)
+        email_sync_task.add_done_callback(_background_tasks.discard)
+        logger.info("📧 Auto-Sync Email iniciado - sincronização a cada 15 minutos")
+    except (IOError, OSError, ValueError, ImportError) as email_sync_err:
+        logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

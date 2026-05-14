@@ -1302,12 +1302,10 @@ class ScheduledTasksService:
             Dict com resumo da sincronização
         """
         # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
-        _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
-        _email_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-        if (not _is_production) or _email_disabled:
-            reason = 'ENVIRONMENT != production' if not _is_production else 'DISABLE_EMAIL_SYNC=true'
-            logger.warning(f"[RADICAL BLOCK] auto_sync_emails BLOCKED — {reason}")
-            return {"success": False, "error": f"Email sync HARD DISABLED ({reason})", "total_synced": 0}
+        import os
+        if os.environ.get('ENVIRONMENT', 'dev') != 'production':
+            logger.warning("[RADICAL BLOCK] auto_sync_emails BLOCKED — ENVIRONMENT != production")
+            return {"success": False, "error": "Email sync HARD DISABLED (ENVIRONMENT != production)", "total_synced": 0}
 
         logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
         
@@ -1445,11 +1443,9 @@ async def run_email_auto_sync(interval_seconds: int = 900):
         interval_seconds: Intervalo entre sincronizações (default 900s = 15min)
     """
     # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC LOOP
-    _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
-    _email_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    if (not _is_production) or _email_disabled:
-        reason = 'ENVIRONMENT != production' if not _is_production else 'DISABLE_EMAIL_SYNC=true'
-        logger.warning(f"[RADICAL BLOCK] run_email_auto_sync BLOCKED — {reason} — IMAP loop will NOT start")
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
+        logger.warning("[RADICAL BLOCK] run_email_auto_sync BLOCKED — ENVIRONMENT != production — IMAP loop will NOT start")
         return
 
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
@@ -1478,8 +1474,8 @@ async def run_daemon(interval_hours: int = 24):
     Por defeito, executa a cada 24 horas.
     """
     # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE DAEMON
-    _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
-    if not _is_production:
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
         logger.warning("[RADICAL BLOCK] run_daemon BLOCKED — ENVIRONMENT != production — daemon will NOT start")
         return
 

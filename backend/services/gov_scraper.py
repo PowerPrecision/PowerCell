@@ -253,8 +253,8 @@ async def fetch_financas_documents(
     """
     # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
     # REGRA ABSOLUTA: Se ENVIRONMENT != 'production', o Chromium NÃO lança.
-    # O Playwright/Chromium consome ~150-300MB RAM, inviável em 512MB.
-    if os.environ.get('ENVIRONMENT', '').lower() != 'production':
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
         logger.info("[GOV_SCRAPER] BLOCKED: ENVIRONMENT != production — browser will NOT launch")
         return ScraperResult(
             success=True,
@@ -621,7 +621,8 @@ async def fetch_seg_social_documents(
         ScraperResult com documentos obtidos ou erro
     """
     # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
-    if os.environ.get('ENVIRONMENT', '').lower() != 'production':
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
         logger.info("[GOV_SCRAPER] BLOCKED: ENVIRONMENT != production — browser will NOT launch")
         return ScraperResult(
             success=True,
@@ -960,7 +961,8 @@ async def check_playwright_available() -> Dict[str, Any]:
     Inclui o PLAYWRIGHT_BROWSERS_PATH para ajudar a debugar problemas de path.
     """
     # DEV MODE: SÓ PRODUÇÃO tenta lançar o browser
-    if os.environ.get('ENVIRONMENT', '').lower() != 'production':
+    import os
+    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
         return {
             "playwright_installed": False,
             "chromium_available": False,

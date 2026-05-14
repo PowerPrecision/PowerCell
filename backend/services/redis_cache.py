@@ -43,8 +43,9 @@ def _is_dev_mode() -> bool:
     REGRA ABSOLUTA: Só ENVIRONMENT=production usa Redis real.
     Qualquer outro valor (dev, development, local, preview, vazio)
     usa o fallback em memória para evitar DNS errors e log spam.
+    Default: 'dev' se ENVIRONMENT não estiver definido.
     """
-    return os.environ.get('ENVIRONMENT', '').lower() != 'production'
+    return os.environ.get('ENVIRONMENT', 'dev') != 'production'
 
 
 # ====================================================================
