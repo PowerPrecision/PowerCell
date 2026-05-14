@@ -455,6 +455,16 @@ const WebmailPage = () => {
     }
   }, [token, activeFolder, account, activeBox, user?.role]);
 
+  // Auto-sync emails on page mount (on-demand model — no background polling in dev)
+  // Only triggers once when the user navigates to the Webmail page
+  const hasAutoSynced = useRef(false);
+  useEffect(() => {
+    if (token && !hasAutoSynced.current && !syncing) {
+      hasAutoSynced.current = true;
+      handleSyncEmails();
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Carregar emails quando muda pasta, página ou label
   useEffect(() => {
     if (activeCustomFolder) {

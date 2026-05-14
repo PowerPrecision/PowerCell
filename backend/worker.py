@@ -217,12 +217,19 @@ async def scheduler_loop():
                 last_runs["matching"] = now
 
             # Sincronização Webmail (a cada 20 minutos)
+            # DESATIVADO em dev/preview: consome ~200MB de RAM no arranque,
+            # excedendo os 512MB do Render free tier. Em dev, usa-se sync on-demand.
             # ISOLAMENTO DE DADOS: Em vez de descarregar emails da conta global "geral",
             # itera APENAS pelos utilizadores com email_config.is_configured == True
             # e sincroniza as suas caixas pessoais de email.
             # INCLUÍDO: Sincronização de caixas partilhadas via Gmail API (ex: indexacao)
             # PROTEÇÃO: 3s de delay entre contas para evitar rate-limiting do servidor IMAP
-            if now - last_runs["webmail"] > 1200:
+            is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
+            if is_dev:
+                if now - last_runs["webmail"] > 3600:  # Log apenas a cada hora para não encher os logs
+                    logger.info("Webmail sync DESATIVADO em dev — usar sincronização on-demand")
+                    last_runs["webmail"] = now
+            elif now - last_runs["webmail"] > 1200:
                 logger.info("Agendando sincronização de webmail por utilizador...")
                 try:
                     from services.email_service import sync_user_emails
