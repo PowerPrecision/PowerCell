@@ -251,10 +251,11 @@ async def fetch_financas_documents(
     Returns:
         ScraperResult com documentos obtidos ou erro
     """
-    # DEV MODE: Mock do scraper — NÃO lança o browser em ambientes de dev
-    # O Playwright/Chromium consome ~150-300MB RAM, inviável em 512MB
-    if os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview'):
-        logger.info("[GOV_SCRAPER] DEV MODE: Mocking Finanças scraper — browser will NOT launch")
+    # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
+    # REGRA ABSOLUTA: Se ENVIRONMENT != 'production', o Chromium NÃO lança.
+    # O Playwright/Chromium consome ~150-300MB RAM, inviável em 512MB.
+    if os.environ.get('ENVIRONMENT', '').lower() != 'production':
+        logger.info("[GOV_SCRAPER] BLOCKED: ENVIRONMENT != production — browser will NOT launch")
         return ScraperResult(
             success=True,
             documents=[],
@@ -619,10 +620,9 @@ async def fetch_seg_social_documents(
     Returns:
         ScraperResult com documentos obtidos ou erro
     """
-    # DEV MODE: Mock do scraper — NÃO lança o browser em ambientes de dev
-    # O Playwright/Chromium consome ~150-300MB RAM, inviável em 512MB
-    if os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview'):
-        logger.info("[GOV_SCRAPER] DEV MODE: Mocking Seg. Social scraper — browser will NOT launch")
+    # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
+    if os.environ.get('ENVIRONMENT', '').lower() != 'production':
+        logger.info("[GOV_SCRAPER] BLOCKED: ENVIRONMENT != production — browser will NOT launch")
         return ScraperResult(
             success=True,
             documents=[],
@@ -959,13 +959,13 @@ async def check_playwright_available() -> Dict[str, Any]:
     Retorna informações sobre o estado da instalação para diagnóstico.
     Inclui o PLAYWRIGHT_BROWSERS_PATH para ajudar a debugar problemas de path.
     """
-    # DEV MODE: Não tenta lançar o browser em ambientes de dev
-    if os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview'):
+    # DEV MODE: SÓ PRODUÇÃO tenta lançar o browser
+    if os.environ.get('ENVIRONMENT', '').lower() != 'production':
         return {
             "playwright_installed": False,
             "chromium_available": False,
             "dev_mode": True,
-            "error": "MOCK: Playwright check skipped (DEV mode)",
+            "error": "BLOCKED: ENVIRONMENT != production — Playwright check skipped",
         }
 
     browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "(default: ~/.cache/ms-playwright)")

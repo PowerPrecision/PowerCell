@@ -731,37 +731,41 @@ async def startup():
         logger.debug(f"Trello não configurado: {trello_err}")
     
     # ==================================================================
-    # KILL SWITCH — Tarefas de Background
+    # KILL SWITCH — Tarefas de Background (BLOQUEIO RADICAL)
     # ==================================================================
-    # DUPLA PROTECÇÃO: Duas flags independentes desativam TUDO:
-    #   1. ENVIRONMENT=dev|development|local|preview  → desativa por ambiente
-    #   2. DISABLE_EMAIL_SYNC=true                     → kill switch explícito
+    # REGRA ABSOLUTA: Tarefas de background SÓ arrancam em PRODUÇÃO.
+    # Qualquer ambiente que NÃO seja "production" é tratado como dev,
+    # e TODOS os schedulers/pollers/loops são bloqueados no arranque.
     #
-    # Em ambientes de dev/preview (Render free tier, 512MB RAM), TODAS as
-    # tarefas de fundo são desativadas para evitar OOM no arranque.
-    # O email sync sozinho consome ~200MB; com backup scheduler + CDC +
-    # job monitor, ultrapassa os 512MB disponíveis.
+    # Isto resolve OOM crashes no Render (512MB RAM) causados por:
+    #   - IMAP sync a cada 3/15 min (~200MB por ciclo)
+    #   - Playwright/Chromium (~150-300MB)
+    #   - Redis DNS errors ("Name or service not known")
+    #   - Backup scheduler + CDC + job monitor (cada um consome RAM)
     #
-    # Em dev, utiliza-se sincronização on-demand (POST /api/emails/webmail/sync-user)
-    # e os backups/CDC são executados manualmente quando necessário.
+    # Em dev, utiliza-se sincronização on-demand:
+    #   - POST /api/emails/webmail/sync-user
+    #   - POST /api/emails/webmail/sync
     # ==================================================================
     import asyncio
-    is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
-    email_sync_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    _bg_disabled = is_dev or email_sync_disabled
+    _env = os.environ.get('ENVIRONMENT', '').lower()
+    _is_production = _env == 'production'
+    _email_sync_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
+    _bg_disabled = (not _is_production) or _email_sync_disabled
 
     if _bg_disabled:
         logger.info("=" * 60)
-        logger.info("🛑 KILL SWITCH: Background tasks DISABLED")
-        if is_dev:
-            logger.info("   Reason: ENVIRONMENT=%s", os.environ.get('ENVIRONMENT', 'development'))
-        if email_sync_disabled:
-            logger.info("   Reason: DISABLE_EMAIL_SYNC=true")
-        logger.info("   ALL background tasks BLOCKED:")
+        logger.info("🛑 RADICAL KILL SWITCH: Background tasks HARD-DISABLED")
+        logger.info("   ENVIRONMENT = '%s' (only 'production' enables bg tasks)", _env or '(empty)')
+        if _email_sync_disabled:
+            logger.info("   DISABLE_EMAIL_SYNC = true")
+        logger.info("   ALL background tasks BLOCKED at startup:")
         logger.info("   - Email Auto-Sync   → use POST /api/emails/webmail/sync-user")
-        logger.info("   - Backup Scheduler   → run manually when needed")
+        logger.info("   - Backup Scheduler  → run manually when needed")
         logger.info("   - CDC Audit Listener → disabled")
         logger.info("   - Job Monitor        → disabled")
+        logger.info("   - Scraper (Playwright) → mocked (no browser launch)")
+        logger.info("   - Redis cache        → in-memory fallback (no DNS errors)")
         logger.info("=" * 60)
     else:
         # --- Job Monitor: detecção de jobs stuck (a cada 30 min) ---

@@ -1301,13 +1301,13 @@ class ScheduledTasksService:
         Returns:
             Dict com resumo da sincronização
         """
-        # KILL SWITCH — HARD DISABLE via ENVIRONMENT=dev or DISABLE_EMAIL_SYNC
-        _is_dev = os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview')
+        # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
+        _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
         _email_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-        if _is_dev or _email_disabled:
-            reason = 'ENVIRONMENT=dev' if _is_dev else 'DISABLE_EMAIL_SYNC=true'
-            logger.warning(f"[HARD DISABLE] auto_sync_emails BLOCKED — {reason}")
-            return {"success": False, "error": f"Email sync is HARD DISABLED ({reason})", "total_synced": 0}
+        if (not _is_production) or _email_disabled:
+            reason = 'ENVIRONMENT != production' if not _is_production else 'DISABLE_EMAIL_SYNC=true'
+            logger.warning(f"[RADICAL BLOCK] auto_sync_emails BLOCKED — {reason}")
+            return {"success": False, "error": f"Email sync HARD DISABLED ({reason})", "total_synced": 0}
 
         logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
         
@@ -1444,15 +1444,12 @@ async def run_email_auto_sync(interval_seconds: int = 900):
     Args:
         interval_seconds: Intervalo entre sincronizações (default 900s = 15min)
     """
-    # KILL SWITCH — HARD DISABLE via ENVIRONMENT=dev or DISABLE_EMAIL_SYNC
-    # Esta é a GUARDA MAIS ALTA: mesmo que outra parte do código tente
-    # chamar run_email_auto_sync(), ela retorna imediatamente sem entrar
-    # no loop. Isto corta o problema pela raiz — o loop IMAP nem arranca.
-    _is_dev = os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview')
+    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC LOOP
+    _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
     _email_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    if _is_dev or _email_disabled:
-        reason = 'ENVIRONMENT=dev' if _is_dev else 'DISABLE_EMAIL_SYNC=true'
-        logger.warning(f"[HARD DISABLE] run_email_auto_sync BLOCKED — {reason} — IMAP loop will NOT start")
+    if (not _is_production) or _email_disabled:
+        reason = 'ENVIRONMENT != production' if not _is_production else 'DISABLE_EMAIL_SYNC=true'
+        logger.warning(f"[RADICAL BLOCK] run_email_auto_sync BLOCKED — {reason} — IMAP loop will NOT start")
         return
 
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
@@ -1480,10 +1477,10 @@ async def run_daemon(interval_hours: int = 24):
     Executar tarefas em loop (modo daemon).
     Por defeito, executa a cada 24 horas.
     """
-    # KILL SWITCH — HARD DISABLE em ambiente DEV
-    _is_dev = os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview')
-    if _is_dev:
-        logger.warning("[HARD DISABLE] run_daemon BLOCKED — ENVIRONMENT=dev — daemon will NOT start")
+    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE DAEMON
+    _is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
+    if not _is_production:
+        logger.warning("[RADICAL BLOCK] run_daemon BLOCKED — ENVIRONMENT != production — daemon will NOT start")
         return
 
     service = ScheduledTasksService()

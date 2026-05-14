@@ -175,7 +175,13 @@ async def run_scheduled_tasks():
     """
     Executa as tarefas agendadas (carrega o serviço apenas quando necessário).
     LAZY LOADING: O módulo pesado scheduled_tasks só é carregado aqui.
+    BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE EXECUÇÃO.
     """
+    # KILL SWITCH — SÓ PRODUÇÃO PERMITE TAREFAS AGENDADAS
+    if os.environ.get('ENVIRONMENT', '').lower() != 'production':
+        logger.warning("[RADICAL BLOCK] run_scheduled_tasks BLOCKED — ENVIRONMENT != production")
+        return
+
     try:
         # LAZY IMPORT: Carrega o serviço de tarefas agendadas
         from services.scheduled_tasks import ScheduledTasksService
@@ -189,7 +195,13 @@ async def run_scheduled_tasks():
 async def scheduler_loop():
     """
     Loop para tarefas agendadas (Cron jobs).
+    BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE O SCHEDULER.
     """
+    # KILL SWITCH — SÓ PRODUÇÃO PERMITE SCHEDULER LOOP
+    if os.environ.get('ENVIRONMENT', '').lower() != 'production':
+        logger.warning("[RADICAL BLOCK] scheduler_loop BLOCKED — ENVIRONMENT != production — scheduler will NOT start")
+        return
+
     logger.info("Agendador iniciado.")
     
     # Horários da última execução
@@ -217,13 +229,13 @@ async def scheduler_loop():
                 last_runs["matching"] = now
 
             # Sincronização Webmail (a cada 20 minutos)
-            # DUPLA PROTECÇÃO: DESATIVADO se ENVIRONMENT=dev OU DISABLE_EMAIL_SYNC=true
-            is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
+            # BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE SYNC
+            is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
             email_sync_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-            if is_dev or email_sync_disabled:
+            if (not is_production) or email_sync_disabled:
                 if now - last_runs["webmail"] > 3600:  # Log apenas a cada hora para não encher os logs
-                    reason = "ENVIRONMENT=dev" if is_dev else "DISABLE_EMAIL_SYNC=true"
-                    logger.info(f"Webmail sync DESATIVADO ({reason}) — usar sincronização on-demand")
+                    reason = 'ENVIRONMENT != production' if not is_production else 'DISABLE_EMAIL_SYNC=true'
+                    logger.info(f"Webmail sync RADICAL BLOCK — {reason} — usar sincronização on-demand")
                     last_runs["webmail"] = now
             elif now - last_runs["webmail"] > 1200:
                 logger.info("Agendando sincronização de webmail por utilizador...")
@@ -353,30 +365,24 @@ async def main():
     """Ponto de entrada principal do worker."""
 
     # ==================================================================
-    # KILL SWITCH — Worker em DEV / DISABLE_EMAIL_SYNC
+    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE WORKER
     # ==================================================================
-    # DUPLA PROTECÇÃO: Duas flags independentes desativam o worker:
-    #   1. ENVIRONMENT=dev|development|local|preview  → desativa por ambiente
-    #   2. DISABLE_EMAIL_SYNC=true                     → kill switch explícito
-    #
-    # Em ambientes de dev/preview (Render free tier, 512MB RAM), o worker
-    # NÃO arranca. Isto poupa ~150MB de RAM que o processo Python consome
-    # em idle (mesmo com lazy loading, a base Motor + asyncio event loop
-    # + MongoDB connection pool reservam memória significativa).
+    # REGRA ABSOLUTA: O worker SÓ arranca em ENVIRONMENT=production.
+    # Qualquer outro valor bloqueia o worker inteiro — sem event loop,
+    # sem DB connection, sem RAM consumption.
     # ==================================================================
-    is_dev = os.environ.get('ENVIRONMENT', 'development').lower() in ['development', 'dev', 'local', 'preview']
+    is_production = os.environ.get('ENVIRONMENT', '').lower() == 'production'
     email_sync_disabled = os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true'
-    _worker_disabled = is_dev or email_sync_disabled
+    _worker_disabled = (not is_production) or email_sync_disabled
 
     if _worker_disabled:
         logger.info("=" * 60)
-        logger.info("🛑 KILL SWITCH: Worker process NOT starting")
-        if is_dev:
-            logger.info("   Reason: ENVIRONMENT=%s", os.environ.get('ENVIRONMENT', 'development'))
+        logger.info("🛑 RADICAL KILL SWITCH: Worker process NOT starting")
+        logger.info("   ENVIRONMENT = '%s' (only 'production' enables worker)", os.environ.get('ENVIRONMENT', ''))
         if email_sync_disabled:
-            logger.info("   Reason: DISABLE_EMAIL_SYNC=true")
+            logger.info("   DISABLE_EMAIL_SYNC = true")
         logger.info("   All scheduled tasks (webmail sync, matching, etc.)")
-        logger.info("   are disabled. Use on-demand endpoints instead.")
+        logger.info("   are BLOCKED. Use on-demand endpoints instead.")
         logger.info("=" * 60)
         return  # Exit immediately — no event loop, no DB connection, no RAM
 

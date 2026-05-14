@@ -38,8 +38,13 @@ logger = logging.getLogger(__name__)
 # ====================================================================
 
 def _is_dev_mode() -> bool:
-    """Verifica se estamos em ambiente de desenvolvimento."""
-    return os.environ.get('ENVIRONMENT', '').lower() in ('dev', 'development', 'local', 'preview')
+    """Verifica se estamos em ambiente NÃO-produção.
+    
+    REGRA ABSOLUTA: Só ENVIRONMENT=production usa Redis real.
+    Qualquer outro valor (dev, development, local, preview, vazio)
+    usa o fallback em memória para evitar DNS errors e log spam.
+    """
+    return os.environ.get('ENVIRONMENT', '').lower() != 'production'
 
 
 # ====================================================================
