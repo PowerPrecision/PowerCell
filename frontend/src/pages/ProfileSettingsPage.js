@@ -98,7 +98,7 @@ const AVAILABLE_ACTIONS = [
   { key: "manage_ai", label: "Gerir Configurações IA" },
 ];
 
-const ProfileSettingsPage = () => {
+const ProfileSettingsPage = ({ embedded = false }) => {
   const { token } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -268,9 +268,9 @@ const ProfileSettingsPage = () => {
     u.role?.toLowerCase().includes(search.toLowerCase())
   );
 
-  return (
-    <DashboardLayout>
-      <div className="space-y-6" data-testid="profile-settings-page">
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
+  return wrapLayout(
+    <div className="space-y-6" data-testid="profile-settings-page">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -530,7 +530,7 @@ const ProfileSettingsPage = () => {
           </DialogContent>
         </Dialog>
       </div>
-    </DashboardLayout>
+    </div>
   );
 };
 

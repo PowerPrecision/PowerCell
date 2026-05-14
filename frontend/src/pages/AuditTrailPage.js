@@ -85,7 +85,8 @@ function truncate(str, maxLen = 60) {
   return str.substring(0, maxLen) + "...";
 }
 
-const AuditTrailPage = () => {
+const AuditTrailPage = ({ embedded = false }) => {
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout title="Auditoria">{children}</DashboardLayout>;
   const [events, setEvents] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -225,8 +226,7 @@ const AuditTrailPage = () => {
     setFilterAction("");
   };
 
-  return (
-    <DashboardLayout title="Auditoria">
+  return wrapLayout(
     <div className="space-y-6">
       {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -517,7 +517,6 @@ const AuditTrailPage = () => {
         </CardContent>
       </Card>
     </div>
-    </DashboardLayout>
   );
 };
 

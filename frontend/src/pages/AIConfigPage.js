@@ -81,7 +81,8 @@ const PROVIDER_COLORS = {
   anthropic: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
 };
 
-const AIConfigPage = () => {
+const AIConfigPage = ({ embedded = false }) => {
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
   const { token } = useAuth();
   
   // Estado da configuração
@@ -465,8 +466,7 @@ const AIConfigPage = () => {
   };
 
   if (loading) {
-    return (
-      <DashboardLayout>
+    return wrapLayout(
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div className="space-y-1.5">
@@ -480,12 +480,10 @@ const AIConfigPage = () => {
             {[1,2,3,4].map(i => <div key={i} className="h-40 bg-muted animate-pulse rounded-lg" />)}
           </div>
         </div>
-      </DashboardLayout>
     );
   }
 
-  return (
-    <DashboardLayout>
+  return wrapLayout(
       <div className="space-y-6" data-testid="ai-config-page">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1182,7 +1180,6 @@ const AIConfigPage = () => {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
   );
 };
 

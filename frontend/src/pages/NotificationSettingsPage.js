@@ -72,7 +72,8 @@ const PREFERENCE_LABELS = {
   is_test_user: { label: "Utilizador de Teste (não recebe emails)", category: "special" },
 };
 
-export default function NotificationSettingsPage() {
+export default function NotificationSettingsPage({ embedded = false }) {
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
   const { token, user } = useAuth();
   
   const [loading, setLoading] = useState(true);
@@ -232,8 +233,7 @@ export default function NotificationSettingsPage() {
   };
 
   if (loading) {
-    return (
-      <DashboardLayout>
+    return wrapLayout(
         <div className="space-y-6">
           <div className="space-y-1.5">
             <div className="h-7 w-56 bg-muted animate-pulse rounded" />
@@ -243,12 +243,10 @@ export default function NotificationSettingsPage() {
             {[1,2,3].map(i => <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />)}
           </div>
         </div>
-      </DashboardLayout>
     );
   }
 
-  return (
-    <DashboardLayout>
+  return wrapLayout(
       <div className="space-y-6" data-testid="notification-settings-page">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -536,6 +534,5 @@ export default function NotificationSettingsPage() {
           </DialogContent>
         </Dialog>
       </div>
-    </DashboardLayout>
   );
 }

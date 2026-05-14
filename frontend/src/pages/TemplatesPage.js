@@ -8,11 +8,10 @@ import React from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import TemplatesPanel from "../components/TemplatesPanel";
 
-const TemplatesPage = () => {
-  return (
-    <DashboardLayout title="Destinatários">
-      <TemplatesPanel />
-    </DashboardLayout>
+const TemplatesPage = ({ embedded = false }) => {
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
+  return wrapLayout(
+    <TemplatesPanel />
   );
 };
 

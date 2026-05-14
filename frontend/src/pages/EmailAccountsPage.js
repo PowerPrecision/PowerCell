@@ -1075,25 +1075,23 @@ const CompanyEmailCard = () => {
 // Main Page Component
 // ====================================================================
 
-const EmailAccountsPage = () => {
+const EmailAccountsPage = ({ embedded = false }) => {
   const { token, user } = useAuth();
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
 
   if (!hasAnyRole(user, ["admin", "ceo"])) {
-    return (
-      <DashboardLayout>
-        <div className="text-center py-12">
-          <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold">Acesso Restrito</h2>
-          <p className="text-muted-foreground">
-            Apenas administradores podem aceder à gestão de contas de email.
-          </p>
-        </div>
-      </DashboardLayout>
+    return wrapLayout(
+      <div className="text-center py-12">
+        <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold">Acesso Restrito</h2>
+        <p className="text-muted-foreground">
+          Apenas administradores podem aceder à gestão de contas de email.
+        </p>
+      </div>
     );
   }
 
-  return (
-    <DashboardLayout>
+  return wrapLayout(
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -1127,7 +1125,7 @@ const EmailAccountsPage = () => {
           </div>
         </div>
       </div>
-    </DashboardLayout>
+    </div>
   );
 };
 

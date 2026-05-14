@@ -352,7 +352,7 @@ const CompactFieldCard = ({ field, isDragging, dragHandleProps }) => (
 
 // ─── Main Component ────────────────────────────────────────────────
 
-const FormManagementPage = () => {
+const FormManagementPage = ({ embedded = false }) => {
   const { token } = useAuth();
 
   // ── Core state (single source of truth) ──
@@ -1016,10 +1016,10 @@ const FormManagementPage = () => {
   }, [previewData]);
 
   // ── Render ──
-  return (
-    <DashboardLayout>
-      <TooltipProvider delayDuration={300}>
-      <div className="space-y-6" data-testid="form-management-page">
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
+  return wrapLayout(
+    <TooltipProvider delayDuration={300}>
+    <div className="space-y-6" data-testid="form-management-page">
 
         {/* ── Header ── */}
         <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2070,9 +2070,8 @@ const FormManagementPage = () => {
           </DialogContent>
         </Dialog>
 
-      </div>
-      </TooltipProvider>
-    </DashboardLayout>
+    </div>
+    </TooltipProvider>
   );
 };
 

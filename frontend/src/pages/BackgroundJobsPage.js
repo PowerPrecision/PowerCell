@@ -293,7 +293,8 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
   );
 };
 
-const BackgroundJobsPage = () => {
+const BackgroundJobsPage = ({ embedded = false }) => {
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
   const [jobs, setJobs] = useState([]);
   const [counts, setCounts] = useState({ running: 0, success: 0, failed: 0, paused: 0, total: 0 });
   const [loading, setLoading] = useState(true);
@@ -557,8 +558,7 @@ const BackgroundJobsPage = () => {
     setShowJobDetails(true);
   };
 
-  return (
-    <DashboardLayout>
+  return wrapLayout(
       <div className="space-y-6">
         {/* Alerta de Jobs Stuck */}
         {stuckNotifications.length > 0 && (
@@ -946,7 +946,6 @@ const BackgroundJobsPage = () => {
           </DialogContent>
         </Dialog>
       </div>
-    </DashboardLayout>
   );
 };
 

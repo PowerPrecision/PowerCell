@@ -1245,17 +1245,17 @@ const MinutaTemplateTab = () => {
 
 // ============ PÁGINA PRINCIPAL ============
 
-const RGPDAdminPage = () => {
+const RGPDAdminPage = ({ embedded = false }) => {
+  const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
   const { user } = useAuth();
 
   // Verificar acesso
   const accessDenied = <AccessRestricted userRole={user?.role} allowedRoles={["admin", "staff"]} />;
   if (accessDenied) {
-    return <DashboardLayout>{accessDenied}</DashboardLayout>;
+    return wrapLayout(accessDenied);
   }
 
-  return (
-    <DashboardLayout>
+  return wrapLayout(
       <div className="space-y-6">
         {/* Header */}
         <PageHeader
@@ -1295,7 +1295,6 @@ const RGPDAdminPage = () => {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
   );
 };
 

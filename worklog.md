@@ -136,3 +136,26 @@ Stage Summary:
 - Fix 1: PermissionsTab.js — proper top-level import + hook call
 - Fix 2: ClientPortal.jsx — stable useMemo dependency (consultor?.name instead of consultor)
 - Commit 92b83f3 pushed to origin/dev
+
+## Task 3-b: Add embedded prop to pages group B
+**Date:** 2026-03-04
+**Files modified:**
+1. `frontend/src/pages/NotificationSettingsPage.js` — Added `{ embedded = false }` prop to `export default function` signature. Added `wrapLayout` helper. Converted 2 DashboardLayout returns (loading skeleton + main content) to use `wrapLayout()`.
+2. `frontend/src/pages/RGPDAdminPage.js` — Added `{ embedded = false }` prop to `const RGPDAdminPage` arrow function. Added `wrapLayout` helper. Converted 2 DashboardLayout returns (access denied + main content) to use `wrapLayout()`.
+3. `frontend/src/pages/AuditTrailPage.js` — Added `{ embedded = false }` prop to `const AuditTrailPage` arrow function. Added `wrapLayout` helper preserving `title="Auditoria"` prop on DashboardLayout. Converted 1 DashboardLayout return to use `wrapLayout()`.
+4. `frontend/src/pages/AIConfigPage.js` — Added `{ embedded = false }` prop to `const AIConfigPage` arrow function. Added `wrapLayout` helper. Converted 2 DashboardLayout returns (loading skeleton + main content) to use `wrapLayout()`.
+5. `frontend/src/pages/BackgroundJobsPage.js` — Added `{ embedded = false }` prop to `const BackgroundJobsPage` arrow function. Added `wrapLayout` helper. Converted 1 DashboardLayout return to use `wrapLayout()`.
+
+**Pattern applied:** Each component now has `const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;` (or with title prop for AuditTrailPage). All DashboardLayout import statements preserved.
+
+## Task 3-a: Add embedded prop to pages group A
+**Date:** 2026-03-05
+**Files modified:**
+1. `frontend/src/pages/WorkflowStatusesPage.js` — Added `{ embedded = false }` prop to `const WorkflowStatusesPage` arrow function. Added `wrapLayout` helper. Converted 2 DashboardLayout returns (access denied + main content) to use `wrapLayout()`. Dropped `title` props ("Acesso Negado", "Estados do Workflow") when embedded.
+2. `frontend/src/pages/FormManagementPage.js` — Added `{ embedded = false }` prop to `const FormManagementPage` arrow function. Added `wrapLayout` helper. Converted 1 DashboardLayout return (main content with TooltipProvider wrapper) to use `wrapLayout()`.
+3. `frontend/src/pages/ProfileSettingsPage.js` — Added `{ embedded = false }` prop to `const ProfileSettingsPage` arrow function. Added `wrapLayout` helper. Converted 1 DashboardLayout return (main content) to use `wrapLayout()`.
+4. `frontend/src/pages/TemplatesPage.js` — Added `{ embedded = false }` prop to `const TemplatesPage` arrow function. Added `wrapLayout` helper. Converted 1 DashboardLayout return (with `title="Destinatários"` prop, dropped when embedded) to use `wrapLayout()`.
+5. `frontend/src/pages/EmailAccountsPage.js` — Added `{ embedded = false }` prop to `const EmailAccountsPage` arrow function. Added `wrapLayout` helper. Converted 2 DashboardLayout returns (access denied + main content) to use `wrapLayout()`.
+
+**Pattern applied:** Each component now has `const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;`. DashboardLayout title props are dropped when embedded=true. All DashboardLayout import statements preserved.
+
