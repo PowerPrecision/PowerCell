@@ -530,7 +530,6 @@ const ProfileSettingsPage = ({ embedded = false }) => {
           </DialogContent>
         </Dialog>
       </div>
-    </div>
   );
 };
 

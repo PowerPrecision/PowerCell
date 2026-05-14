@@ -1125,7 +1125,6 @@ const EmailAccountsPage = ({ embedded = false }) => {
           </div>
         </div>
       </div>
-    </div>
   );
 };
 
