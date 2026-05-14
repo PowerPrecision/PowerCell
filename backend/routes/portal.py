@@ -1606,19 +1606,7 @@ def _get_all_assigned_user_ids(process: dict) -> list:
 # DIAGNÓSTICO — Verificar estado do scraper
 # ====================================================================
 
-@router.get("/scraper-status")
-async def get_scraper_status(
-    client_data: dict = Depends(get_current_client),
-):
-    """
-    Verifica se o motor de automação (Playwright + Chromium) está disponível.
-
-    Endpoint de diagnóstico para confirmar que o scraper está funcional.
-    Requer autenticação via portal token (qualquer cliente autenticado).
-    """
-    from services.gov_scraper import check_playwright_available
-    status = await check_playwright_available()
-    return {
-        "scraper_available": status.get("playwright_installed") and status.get("chromium_available"),
-        "details": status,
-    }
+# NOTE: The public scraper-status endpoint is already defined above (line ~985).
+# A previous duplicate with auth was removed — the endpoint is intentionally
+# public so the client portal can check availability before prompting for
+# credentials. See check_scraper_status() above.

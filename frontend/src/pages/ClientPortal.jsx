@@ -603,10 +603,17 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
     (async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/portal/scraper-status`);
+        // 401 means the endpoint is auth-protected (shouldn't be, but handle gracefully)
+        // 503 means server is still starting — don't assume scraper is down
+        if (!res.ok) {
+          if (!cancelled) setScraperAvailable(res.status === 503 ? null : false);
+          return;
+        }
         const data = await res.json();
         if (!cancelled) setScraperAvailable(data.available === true);
       } catch {
-        if (!cancelled) setScraperAvailable(false);
+        // Network error — server might be waking up, don't assume it's down
+        if (!cancelled) setScraperAvailable(null);
       }
     })();
     return () => { cancelled = true; };
@@ -618,10 +625,17 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
       setCheckingScraper(true);
       try {
         const res = await fetch(`${BACKEND_URL}/portal/scraper-status`);
-        const data = await res.json();
-        const available = data.available === true;
-        setScraperAvailable(available);
-        if (available) {
+        if (res.ok) {
+          const data = await res.json();
+          const available = data.available === true;
+          setScraperAvailable(available);
+          if (available) {
+            setCredDialogSource(source);
+          }
+        } else {
+          // Server responding but not 200 — might be waking up
+          // Still let user try (they'll get a clear error if scraper is truly down)
+          setScraperAvailable(null);
           setCredDialogSource(source);
         }
       } catch {
