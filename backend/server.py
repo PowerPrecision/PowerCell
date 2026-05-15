@@ -741,20 +741,18 @@ async def startup():
         logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
 
     # Iniciar Auto-Sync de Emails
-    # 🛑 KILL SWITCH: Se DISABLE_EMAIL_SYNC=true, NENHUMA ligação IMAP é feita.
-    # Render dev tem DISABLE_EMAIL_SYNC=true. Produção NÃO define esta variável.
     import os
-    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
-        logger.warning("🛑 Email Sync DESATIVADO — DISABLE_EMAIL_SYNC=true. Nenhuma ligação IMAP será feita.")
-    else:
+    if os.environ.get('ENVIRONMENT') == 'production':
         try:
             from services.scheduled_tasks import run_email_auto_sync
             email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=180))
             _background_tasks.add(email_sync_task)
             email_sync_task.add_done_callback(_background_tasks.discard)
-            logger.info("✅ Auto-sync de email iniciado (DISABLE_EMAIL_SYNC não está definido).")
+            logger.info("✅ Auto-sync de email iniciado (Apenas Produção).")
         except Exception as email_sync_err:
             logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
+    else:
+        logger.warning("🛑 MODO DEV: Tarefas de background (Email/Scraper) DESATIVADAS para poupar RAM.")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
