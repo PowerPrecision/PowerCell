@@ -371,9 +371,14 @@ async def run_migration_task(dry_run: bool, started_by: str):
         # ── Passo 5: Criar índices ────────────────────────────────────────
         if not dry_run:
             logger.info("📇 Passo 5: Criar/verificar índices...")
-            await db.processes.create_index("client_id", name="idx_client_id")
-            await db.clients.create_index("dados_pessoais.nif_hash", name="idx_nif_hash", sparse=True)
-            await db.clients.create_index("contacto.email", name="idx_email", sparse=True)
+            # NOTA: Os nomes dos índices DEVEM corresponder aos definidos em
+            # services/db_indexes.py para evitar IndexOptionsConflict (code 85).
+            from services.db_indexes import _create_index_safe
+            idx_results = {"created": [], "skipped": [], "errors": []}
+            await _create_index_safe(db.processes, {"keys": [("client_id", 1)], "name": "idx_client_id"}, "processes", idx_results)
+            await _create_index_safe(db.clients, {"keys": [("dados_pessoais.nif_hash", 1)], "name": "idx_client_nif_hash", "sparse": True}, "clients", idx_results)
+            await _create_index_safe(db.clients, {"keys": [("contacto.email_hash", 1)], "name": "idx_client_email_hash", "sparse": True}, "clients", idx_results)
+            logger.info(f"   Índices: {idx_results}")
 
         # ── Relatório final ────────────────────────────────────────────────
         logger.info("=" * 70)

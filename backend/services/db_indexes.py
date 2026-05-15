@@ -25,6 +25,99 @@ from pymongo.errors import OperationFailure
 logger = logging.getLogger(__name__)
 
 
+async def _create_index_safe(collection, idx: dict, collection_name: str, results: dict) -> None:
+    """
+    Cria um índice MongoDB com tratamento robusto de conflitos.
+
+    Lida com:
+    - Índice já existe com o mesmo nome (skip)
+    - Índice já existe com nome diferente na mesma key pattern (code 85 — drop & recreate)
+    - Índice com o mesmo nome mas key pattern diferente (code 86 — drop & recreate)
+    - Outros erros (regista e continua)
+
+    Opções suportadas no dict idx:
+    - keys: list of (field, direction) tuples (obrigatório)
+    - name: nome do índice (obrigatório)
+    - unique: bool
+    - sparse: bool
+    - expireAfterSeconds: int (para TTL indexes)
+    - partialFilterExpression: dict (para partial indexes)
+    """
+    idx_name = idx["name"]
+    idx_key = idx["keys"]
+    label = f"{collection_name}.{idx_name}"
+
+    try:
+        create_kwargs = {
+            "name": idx_name,
+            "background": True,
+        }
+        if idx.get("unique"):
+            create_kwargs["unique"] = True
+        if idx.get("sparse"):
+            create_kwargs["sparse"] = True
+        if idx.get("expireAfterSeconds") is not None:
+            create_kwargs["expireAfterSeconds"] = idx["expireAfterSeconds"]
+        if idx.get("partialFilterExpression"):
+            create_kwargs["partialFilterExpression"] = idx["partialFilterExpression"]
+
+        await collection.create_index(idx_key, **create_kwargs)
+        results["created"].append(label)
+        logger.info(f"Índice criado: {label}")
+
+    except OperationFailure as e:
+        error_code = e.code
+
+        # Code 85: Index already exists with different options / different name
+        # Code 86: Index already exists with same name but different key pattern
+        if error_code in (85, 86):
+            logger.warning(
+                f"⚠️ Índice {label} já existe com parâmetros diferentes (code {error_code}). "
+                f"Tentando remover e recriar..."
+            )
+            try:
+                # Tentar remover o índice pelo nome desejado
+                try:
+                    await collection.drop_index(idx_name)
+                    logger.info(f"🗑️ Índice antigo removido pelo nome: {label}")
+                except OperationFailure:
+                    # Se não existe pelo nome, procurar pelo key pattern
+                    # e remover o índice conflituoso
+                    existing = await collection.index_information()
+                    for existing_name, existing_info in existing.items():
+                        if existing_name == "_id_":
+                            continue
+                        existing_key = existing_info.get("key", [])
+                        # Comparar key patterns (normalizar para comparação)
+                        desired_key = [(k, v) for k, v in idx_key] if isinstance(idx_key, list) else [(idx_key[0], idx_key[1])]
+                        if existing_key == desired_key:
+                            await collection.drop_index(existing_name)
+                            logger.info(f"🗑️ Índice conflituoso removido: {collection_name}.{existing_name} (key={existing_key})")
+                            break
+
+                # Recriar com os parâmetros correctos
+                await collection.create_index(idx_key, **create_kwargs)
+                results["created"].append(f"{label} (recriado)")
+                logger.info(f"✅ Índice recriado: {label}")
+
+            except Exception as retry_error:
+                results["errors"].append(f"{label}: Falha ao recriar: {str(retry_error)}")
+                logger.error(f"Erro ao recriar índice {label}: {retry_error}")
+
+        elif "already exists" in str(e).lower():
+            results["skipped"].append(label)
+        else:
+            results["errors"].append(f"{label}: {str(e)}")
+            logger.error(f"Erro ao criar índice {label}: {e}")
+
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            results["skipped"].append(label)
+        else:
+            results["errors"].append(f"{label}: {str(e)}")
+            logger.error(f"Erro ao criar índice {label}: {e}")
+
+
 # Lista de índices antigos/incorretos que devem ser removidos
 DEPRECATED_INDEXES = {
     "properties": [
@@ -40,6 +133,8 @@ DEPRECATED_INDEXES = {
     "clients": [
         # Índices em campos encriptados que possam ter sido criados anteriormente
         "idx_nif_plain",  # Se existir algum índice em dados_pessoais.nif plain text
+        "idx_nif_hash",   # Nome antigo do blind index de NIF — agora é idx_client_nif_hash (causa code 85)
+        "idx_email",      # Nome antigo do índice de email — agora é idx_client_email_hash (causa code 85)
     ],
     "system_error_logs": [
         "idx_ttl",  # Índice TTL antigo (90 dias) em campo ISO string - não funciona. Substituído por ttl_system_error_logs
@@ -185,21 +280,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in process_indexes:
-        try:
-            await db.processes.create_index(
-                idx["keys"],
-                name=idx["name"],
-                sparse=idx.get("sparse", False),
-                background=True  # Não bloqueia operações durante criação
-            )
-            results["created"].append(f"processes.{idx['name']}")
-            logger.info(f"Índice criado: processes.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"processes.{idx['name']}")
-            else:
-                results["errors"].append(f"processes.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice processes.{idx['name']}: {e}")
+        await _create_index_safe(db.processes, idx, "processes", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'users'
@@ -219,22 +300,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in user_indexes:
-        try:
-            await db.users.create_index(
-                idx["keys"],
-                name=idx["name"],
-                unique=idx.get("unique", False),
-                sparse=idx.get("sparse", False),
-                background=True
-            )
-            results["created"].append(f"users.{idx['name']}")
-            logger.info(f"Índice criado: users.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"users.{idx['name']}")
-            else:
-                results["errors"].append(f"users.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice users.{idx['name']}: {e}")
+        await _create_index_safe(db.users, idx, "users", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'system_error_logs'
@@ -257,23 +323,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in log_indexes:
-        try:
-            create_options = {
-                "name": idx["name"],
-                "background": True
-            }
-            if "expireAfterSeconds" in idx:
-                create_options["expireAfterSeconds"] = idx["expireAfterSeconds"]
-            
-            await db.system_error_logs.create_index(idx["keys"], **create_options)
-            results["created"].append(f"system_error_logs.{idx['name']}")
-            logger.info(f"Índice criado: system_error_logs.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"system_error_logs.{idx['name']}")
-            else:
-                results["errors"].append(f"system_error_logs.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice system_error_logs.{idx['name']}: {e}")
+        await _create_index_safe(db.system_error_logs, idx, "system_error_logs", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'properties' (Imóveis)
@@ -287,22 +337,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in property_indexes:
-        try:
-            await db.properties.create_index(
-                idx["keys"],
-                name=idx["name"],
-                unique=idx.get("unique", False),
-                sparse=idx.get("sparse", False),
-                background=True
-            )
-            results["created"].append(f"properties.{idx['name']}")
-            logger.info(f"Índice criado: properties.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"properties.{idx['name']}")
-            else:
-                results["errors"].append(f"properties.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice properties.{idx['name']}: {e}")
+        await _create_index_safe(db.properties, idx, "properties", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'tasks'
@@ -316,20 +351,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in task_indexes:
-        try:
-            await db.tasks.create_index(
-                idx["keys"],
-                name=idx["name"],
-                background=True
-            )
-            results["created"].append(f"tasks.{idx['name']}")
-            logger.info(f"Índice criado: tasks.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"tasks.{idx['name']}")
-            else:
-                results["errors"].append(f"tasks.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice tasks.{idx['name']}: {e}")
+        await _create_index_safe(db.tasks, idx, "tasks", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'chat_messages'
@@ -361,21 +383,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in chat_message_indexes:
-        try:
-            await db.chat_messages.create_index(
-                idx["keys"],
-                name=idx["name"],
-                sparse=idx.get("sparse", False),
-                background=True
-            )
-            results["created"].append(f"chat_messages.{idx['name']}")
-            logger.info(f"Índice criado: chat_messages.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"chat_messages.{idx['name']}")
-            else:
-                results["errors"].append(f"chat_messages.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice chat_messages.{idx['name']}: {e}")
+        await _create_index_safe(db.chat_messages, idx, "chat_messages", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'chat_groups'
@@ -392,20 +400,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in chat_group_indexes:
-        try:
-            await db.chat_groups.create_index(
-                idx["keys"],
-                name=idx["name"],
-                background=True
-            )
-            results["created"].append(f"chat_groups.{idx['name']}")
-            logger.info(f"Índice criado: chat_groups.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"chat_groups.{idx['name']}")
-            else:
-                results["errors"].append(f"chat_groups.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice chat_groups.{idx['name']}: {e}")
+        await _create_index_safe(db.chat_groups, idx, "chat_groups", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'document_annotations' (Anotações Contextuais)
@@ -428,20 +423,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in annotation_indexes:
-        try:
-            await db.document_annotations.create_index(
-                idx["keys"],
-                name=idx["name"],
-                background=True
-            )
-            results["created"].append(f"document_annotations.{idx['name']}")
-            logger.info(f"Índice criado: document_annotations.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"document_annotations.{idx['name']}")
-            else:
-                results["errors"].append(f"document_annotations.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice document_annotations.{idx['name']}: {e}")
+        await _create_index_safe(db.document_annotations, idx, "document_annotations", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'clients' - BLIND INDEXES (RGPD)
@@ -476,22 +458,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in client_indexes:
-        try:
-            await db.clients.create_index(
-                idx["keys"],
-                name=idx["name"],
-                unique=idx.get("unique", False),
-                sparse=idx.get("sparse", False),
-                background=True
-            )
-            results["created"].append(f"clients.{idx['name']}")
-            logger.info(f"Índice criado: clients.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"clients.{idx['name']}")
-            else:
-                results["errors"].append(f"clients.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice clients.{idx['name']}: {e}")
+        await _create_index_safe(db.clients, idx, "clients", results)
     
     # ====================================================================
     # ÍNDICES ADICIONAIS PARA BLIND INDEXES EM 'processes'
@@ -504,21 +471,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in process_blind_indexes:
-        try:
-            await db.processes.create_index(
-                idx["keys"],
-                name=idx["name"],
-                sparse=idx.get("sparse", False),
-                background=True
-            )
-            results["created"].append(f"processes.{idx['name']}")
-            logger.info(f"Índice criado: processes.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"processes.{idx['name']}")
-            else:
-                results["errors"].append(f"processes.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice processes.{idx['name']}: {e}")
+        await _create_index_safe(db.processes, idx, "processes", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'history' - HISTÓRICO DEDICADO
@@ -547,21 +500,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in history_indexes:
-        try:
-            await db.history.create_index(
-                idx["keys"],
-                name=idx["name"],
-                sparse=idx.get("sparse", False),
-                background=True
-            )
-            results["created"].append(f"history.{idx['name']}")
-            logger.info(f"Índice criado: history.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"history.{idx['name']}")
-            else:
-                results["errors"].append(f"history.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice history.{idx['name']}: {e}")
+        await _create_index_safe(db.history, idx, "history", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'announcements'
@@ -572,20 +511,7 @@ async def create_indexes(db) -> dict:
     ]
     
     for idx in announcement_indexes:
-        try:
-            await db.announcements.create_index(
-                idx["keys"],
-                name=idx["name"],
-                background=True
-            )
-            results["created"].append(f"announcements.{idx['name']}")
-            logger.info(f"Índice criado: announcements.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"announcements.{idx['name']}")
-            else:
-                results["errors"].append(f"announcements.{idx['name']}: {str(e)}")
-                logger.error(f"Erro ao criar índice announcements.{idx['name']}: {e}")
+        await _create_index_safe(db.announcements, idx, "announcements", results)
     
     # Resumo
     logger.info(
@@ -643,66 +569,24 @@ async def create_ttl_indexes(db) -> dict:
                 results["skipped"].append(f"{collection_name}.{name} (coleção não existe)")
                 continue
             
-            # Construir opções do índice
-            index_options = {
+            # Construir dict de índice para _create_index_safe
+            idx_dict = {
+                "keys": [(field, 1)],
                 "name": name,
                 "expireAfterSeconds": seconds,
-                "background": True,
             }
-            
-            # Adicionar partial filter expression se especificado
             if partial_filter:
-                index_options["partialFilterExpression"] = partial_filter
+                idx_dict["partialFilterExpression"] = partial_filter
             
-            # Criar índice TTL
-            await collection.create_index(
-                [(field, 1)],
-                **index_options
-            )
+            await _create_index_safe(collection, idx_dict, collection_name, results)
             
-            results["created"].append(f"{collection_name}.{name}")
-            logger.info(
-                f"⏱️ Índice TTL criado: {collection_name}.{name} "
-                f"(campo: {field}, TTL: {seconds}s / {seconds // 86400} dias) - {description}"
-            )
-            
-        except OperationFailure as e:
-            error_code = e.code
-            
-            # Código 85: Index already exists with different options
-            # Código 86: Index already exists with same name but different key
-            if error_code == 85 or error_code == 86:
-                # O índice já existe mas com parâmetros diferentes
-                logger.warning(
-                    f"⚠️ Índice TTL {collection_name}.{name} já existe com parâmetros diferentes. "
-                    f"Tentando remover e recriar..."
+            # Log descritivo para TTL indexes
+            label = f"{collection_name}.{name}"
+            if label in results.get("created", []) or f"{label} (recriado)" in results.get("created", []):
+                logger.info(
+                    f"⏱️ Índice TTL criado: {label} "
+                    f"(campo: {field}, TTL: {seconds}s / {seconds // 86400} dias) - {description}"
                 )
-                
-                try:
-                    # Remover índice antigo e recriar
-                    await collection.drop_index(name)
-                    logger.info(f"🗑️ Índice antigo removido: {collection_name}.{name}")
-                    
-                    # Recriar com novos parâmetros
-                    await collection.create_index(
-                        [(field, 1)],
-                        **index_options
-                    )
-                    results["created"].append(f"{collection_name}.{name} (recriado)")
-                    logger.info(f"✅ Índice TTL recriado: {collection_name}.{name}")
-                    
-                except Exception as retry_error:
-                    results["errors"].append(
-                        f"{collection_name}.{name}: Falha ao recriar: {str(retry_error)}"
-                    )
-                    logger.error(
-                        f"Erro ao recriar índice TTL {collection_name}.{name}: {retry_error}"
-                    )
-            elif "already exists" in str(e).lower():
-                results["skipped"].append(f"{collection_name}.{name}")
-            else:
-                results["errors"].append(f"{collection_name}.{name}: {str(e)}")
-                logger.error(f"Erro ao criar índice TTL {collection_name}.{name}: {e}")
                 
         except Exception as e:
             if "already exists" in str(e).lower():
@@ -735,21 +619,7 @@ async def create_ttl_indexes(db) -> dict:
     ]
     
     for idx in oauth_indexes:
-        try:
-            await db.oauth_states.create_index(
-                idx["keys"],
-                name=idx["name"],
-                unique=idx.get("unique", False),
-                background=True,
-                expireAfterSeconds=idx.get("expireAfterSeconds"),
-            )
-            results["created"].append(f"oauth_states.{idx['name']}")
-            logger.info(f"Índice criado: oauth_states.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"oauth_states.{idx['name']}")
-            else:
-                results["errors"].append(f"oauth_states.{idx['name']}: {str(e)}")
+        await _create_index_safe(db.oauth_states, idx, "oauth_states", results)
 
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'company_email_configs'
@@ -758,20 +628,7 @@ async def create_ttl_indexes(db) -> dict:
         {"keys": [("company_name", 1)], "name": "idx_company_name", "unique": True},
     ]
     for idx in company_email_indexes:
-        try:
-            await db.company_email_configs.create_index(
-                idx["keys"],
-                name=idx["name"],
-                unique=idx.get("unique", False),
-                background=True,
-            )
-            results["created"].append(f"company_email_configs.{idx['name']}")
-            logger.info(f"Índice criado: company_email_configs.{idx['name']}")
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                results["skipped"].append(f"company_email_configs.{idx['name']}")
-            else:
-                results["errors"].append(f"company_email_configs.{idx['name']}: {str(e)}")
+        await _create_index_safe(db.company_email_configs, idx, "company_email_configs", results)
 
     return results
 
