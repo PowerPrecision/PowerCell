@@ -3,6 +3,38 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-06] — Fase 1: Refatoração Arquitetural — Separação Cliente ↔ Processo
+
+### Alterado
+- **Refatoração arquitetural: Separação estrita da entidade Cliente da entidade Processo** (`refactor` — **CRÍTICO**): Os dados pessoais/fiscais do Cliente foram separados dos dados de negócio do Processo. Antes, os dados estavam misturados — o Cliente tinha dados financeiros e o Processo duplicava dados pessoais. Agora:
+  - **Cliente**: Entidade pessoa/fiscal — contém APENAS dados pessoais (nome, NIF, email, telefone, estado civil, profissão, morada fiscal, etc.) e de contacto. Removidos `dados_financeiros`, `co_buyers` e `co_applicants` do modelo.
+  - **Processo**: Entidade de negócio/dossier — contém dados de negócio (financial_data, real_estate_data, credit_data), atribuições (consultor, mediador), e campos de negócio ao nível raiz (`property_value`, `loan_value`, `bank_assigned`, `honorarios`, `comissao_banco`). `client_id` passa a ser OBRIGATÓRIO.
+  - `ClientFinancialData` foi removido. Dados financeiros pertencem exclusivamente ao Processo.
+  - `compra_tipo` e `menor_35_anos` marcados como `[DEPRECATED]` no ClientPersonalData (campos de negócio — migrar para Processo na Fase 2).
+  - `ProcessType` expandido com novos tipos: `CREDITO_PESSOAL`, `SEGUROS`, `OUTRO`.
+  - `ProcessStatusEnum` adicionado ao modelo de processo (centralizado).
+  - Novo `ClientResponse` schema (sem dados financeiros).
+  - Novo `ProcessResponse` com campos de negócio ao nível raiz (`property_value`, `loan_value`, `bank_assigned`, `honorarios`, `comissao_banco`).
+  - `ProcessUpdate` suporta atualização dos campos de negócio ao nível raiz.
+  - `ProcessCreate` requer `client_id` obrigatório.
+
+### Adicionado
+- **Script de Migração Segura** (`feat` — `backend/scripts/migrate_clients_to_processes.py`): Script standalone para migrar dados existentes do MongoDB para a nova arquitetura:
+  - Dry-run por defeito (usa `--apply` para executar de verdade)
+  - Deduplicação de clientes por NIF/Email/Nome (chave única)
+  - Extração de dados pessoais dos processos para criar/encontrar clientes
+  - Adição de `client_id` obrigatório a todos os processos
+  - Campos de negócio extraídos para o nível raiz (`property_value`, `loan_value`, `bank_assigned`, `honorarios`)
+  - Backup automático das coleções originais (`clients_legacy`, `processes_legacy`)
+  - Validação de integridade pós-migração
+  - Rollback disponível (`--rollback`)
+  - Criação de índices (`client_id`, `nif_hash`, `email`)
+
+### Notas
+- **Fase 1 apenas**: Modelos e migração. Rotas do backend e frontend NÃO foram alterados — compatibilidade backward é mantida.
+- **Fase 2 (futura)**: Adaptar rotas do backend para usar a nova separação. Remover campos deprecados. Atualizar frontend.
+- **Fase 3 (futura)**: Remover `personal_data` do Processo (usar apenas referência ao Cliente via `client_id`).
+
 ## [2026-03-05] — KILL SWITCH: DISABLE_EMAIL_SYNC (variável existente no Render)
 
 ### Corrigido

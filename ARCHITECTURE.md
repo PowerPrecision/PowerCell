@@ -470,6 +470,109 @@ erDiagram
 
 ---
 
+## Refatoração Fase 1: Separação Cliente ↔ Processo
+
+### Princípio
+
+A entidade **Cliente** representa a pessoa/fiscal entity — dados que são intrínsecos à pessoa e não mudam entre processos (nome, NIF, email, telefone, estado civil, etc.).
+
+A entidade **Processo** representa o negócio/dossier — dados específicos de cada operação de crédito ou intermediação (valores, banco atribuído, dados financeiros, imobiliários, etc.).
+
+### Diagrama da Nova Arquitetura
+
+```mermaid
+erDiagram
+    CLIENTS {
+        string id PK
+        string nome
+        object contacto
+        object dados_pessoais
+        list process_ids FK
+        string fonte
+        list tags
+        string notas
+        datetime created_at
+        datetime updated_at
+    }
+
+    PROCESSES {
+        string id PK
+        string client_id FK "OBRIGATÓRIO"
+        int process_number
+        string process_type "CH, Pessoal, Seguros..."
+        string status "Coluna Kanban"
+        float property_value
+        float loan_value
+        string bank_assigned
+        float honorarios
+        float comissao_banco
+        object personal_data "SNAPSHOT (denormalizado)"
+        object titular2_data
+        object financial_data
+        object real_estate_data
+        object credit_data
+        string consultor_id FK
+        string mediador_id FK
+        list co_buyers
+        list co_applicants
+        string s3_folder
+        datetime created_at
+        datetime updated_at
+    }
+
+    DOCUMENTS {
+        string id PK
+        string process_id FK
+        string client_id FK
+        string filename
+        string category
+    }
+
+    TASKS {
+        string id PK
+        string process_id FK
+        string assigned_to FK
+        string status
+    }
+
+    CLIENTS ||--o{ PROCESSES : "tem"
+    PROCESSES ||--o{ DOCUMENTS : "tem"
+    PROCESSES ||--o{ TASKS : "tem"
+```
+
+### O que mudou
+
+| Antes (misturado) | Depois (separado) |
+|---|---|
+| Cliente tinha `dados_financeiros` | ❌ Removido — financeiros pertencem ao Processo |
+| Cliente tinha `co_buyers`, `co_applicants` | ❌ Removido — pertencem ao Processo |
+| Processo tinha `client_id` opcional | ✅ `client_id` agora é **OBRIGATÓRIO** |
+| Processo sem campos de negócio raiz | ✅ Adicionados: `property_value`, `loan_value`, `bank_assigned`, `honorarios`, `comissao_banco` |
+| `ClientFinancialData` existia | ❌ Removido — financeiros estão em `Process.financial_data` |
+| `personal_data` no Processo era fonte de verdade | ⚠️ Agora é SNAPSHOT (denormalizado) — fonte de verdade é `clients.dados_pessoais` |
+
+### Script de Migração
+
+O script `backend/scripts/migrate_clients_to_processes.py` executa a migração segura:
+
+1. **Backup** automático das coleções originais (`clients_legacy`, `processes_legacy`)
+2. **Deduplicação** de clientes por NIF/Email/Nome
+3. **Extração** de dados pessoais dos processos → criar/encontrar Clientes
+4. **client_id** obrigatório adicionado a todos os processos
+5. **Campos de negócio** extraídos para o nível raiz do processo
+6. **Validação** de integridade pós-migração
+7. **Rollback** disponível com `--rollback`
+
+### Fases Futuras
+
+| Fase | Descrição | Estado |
+|------|-----------|--------|
+| **Fase 1** | Modelos + Migração | ✅ Concluída |
+| **Fase 2** | Adaptar rotas backend + remover campos deprecados | 🔜 Pendente |
+| **Fase 3** | Remover `personal_data` do Processo (apenas referência) | 🔜 Pendente |
+
+---
+
 ## Componentes e Tecnologias
 
 | Camada | Tecnologia | Finalidade |

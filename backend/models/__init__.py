@@ -3,8 +3,15 @@ from .auth import (
     UserCreate, UserUpdate
 )
 from .process import (
-    ProcessType, PersonalData, Titular2Data, FinancialData, RealEstateData, CreditData,
+    ProcessType, ProcessStatusEnum, ServiceTypeEnum,
+    PersonalData, Titular2Data, FinancialData, RealEstateData, CreditData,
     ProcessCreate, ProcessUpdate, ProcessResponse, PublicClientRegistration
+)
+from .client import (
+    Client, ClientCreate, ClientUpdate, ClientResponse,
+    ClientContact, ClientPersonalData, ClientProcessLink,
+    validate_nif as validate_client_nif,
+    find_or_create_client_key
 )
 from .deadline import DeadlineCreate, DeadlineUpdate, DeadlineResponse
 from .workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse

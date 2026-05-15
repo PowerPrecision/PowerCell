@@ -1,8 +1,28 @@
+"""
+Modelo de Processo — Entidade de Negócio / Dossier
+
+O Processo representa o negócio (intermediação de crédito, compra imobiliária, etc.).
+Contém TODOS os dados de negócio: financeiros, imobiliários, de crédito e atribuições.
+
+REFATORAÇÃO FASE 1:
+- client_id passa a ser OBRIGATÓRIO (referência ao Cliente)
+- Dados pessoais do cliente NÃO são duplicados aqui — ficam na entidade Cliente
+- personal_data mantém-se como SNAPSHOT/denormalização para compatibilidade,
+  mas a fonte de verdade é a coleção `clients`
+- co_buyers e co_applicants pertencem ao Processo (são específicos do negócio)
+- Adicionados campos de negócio ao nível raiz: property_value, loan_value,
+  bank_assigned, honorarios, comissao_banco
+"""
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List, Any
 from enum import Enum
 import re
 
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
 
 class ServiceTypeEnum(str, Enum):
     """
@@ -14,106 +34,120 @@ class ServiceTypeEnum(str, Enum):
     COMPLETO = "completo"                   # Ambos os serviços
 
 
-class ProcessType:
-    CREDITO = "credito"
-    IMOBILIARIA = "imobiliaria"
-    AMBOS = "ambos"
+class ProcessType(str, Enum):
+    """
+    Tipo de processo — categoriza a natureza do negócio.
+    """
+    CREDITO_HABITACAO = "credito_habitacao"     # Crédito Habitação (CH)
+    CREDITO_PESSOAL = "credito_pessoal"         # Crédito Pessoal
+    REFINANCIAMENTO = "refinanciamento"         # Refinanciamento
+    COMPRA_DIRETA = "compra_direta"             # Compra Direta
+    ARRENDAMENTO = "arrendamento"               # Arrendamento
+    CONSULTORIA = "consultoria"                 # Consultoria
+    SEGUROS = "seguros"                         # Seguros
+    OUTRO = "outro"                             # Outro
 
+    @classmethod
+    def all_values(cls) -> list:
+        return [t.value for t in cls]
+
+
+class ProcessStatusEnum(str, Enum):
+    """
+    Status do processo no workflow de 14 fases.
+    Valores correspondem aos nomes das colunas do Kanban.
+    """
+    # Fase 1-3: Início
+    CLIENTES_ESPERA = "clientes_espera"
+    DOCUMENTACAO = "documentacao"
+    ANALISE = "analise"
+    
+    # Fase 4-7: Aprovação
+    PRE_APROVACAO = "pre_aprovacao"
+    CREDITO_APROVADO = "credito_aprovado"
+    PEDIDO_AVALIACAO = "pedido_avaliacao"
+    AVALIACAO = "avaliacao"
+    
+    # Fase 8-10: Contrato
+    CPCV = "cpcv"
+    MINUTA = "minuta"
+    ESCRITURA = "escritura"
+    
+    # Fase 11-14: Conclusão
+    CONCLUIDO = "concluido"
+    ARQUIVO = "arquivo"
+    PERDIDO = "perdido"
+    DESISTENCIAS = "desistencias"
+
+    @classmethod
+    def active_statuses(cls) -> list:
+        return [s.value for s in cls if s.value not in ("concluido", "arquivo", "perdido", "desistencias")]
+
+
+# ---------------------------------------------------------------------------
+# Validadores
+# ---------------------------------------------------------------------------
 
 def validate_nif_checksum(nif: str) -> bool:
     """
     Valida o checksum (dígito de controlo) de um NIF português.
-    
-    Algoritmo:
-    1. Multiplicar os 8 primeiros dígitos por 9,8,7,6,5,4,3,2 respectivamente
-    2. Somar todos os produtos
-    3. Calcular resto da divisão por 11
-    4. Dígito de controlo = 11 - resto (se >= 10, usar 0)
-    5. Comparar com o 9º dígito
-    
-    Returns:
-        True se o checksum for válido, False caso contrário
     """
     if not nif or len(nif) != 9 or not nif.isdigit():
         return False
     
     digits = [int(d) for d in nif]
-    
-    # Calcular soma ponderada dos primeiros 8 dígitos
     weights = [9, 8, 7, 6, 5, 4, 3, 2]
     total_sum = sum(d * w for d, w in zip(digits[:8], weights))
-    
-    # Calcular dígito de controlo
     remainder = total_sum % 11
     check_digit = 11 - remainder if remainder > 1 else 0
-    
     return check_digit == digits[8]
 
 
 def validate_nif(nif: str, allow_company: bool = False, validate_checksum: bool = True) -> str:
     """
     Validar NIF português (9 dígitos numéricos) com checksum.
-    Por defeito, não permite NIFs de empresas (começam por 5).
-    
-    Args:
-        nif: O NIF a validar
-        allow_company: Se True, permite NIFs de empresas (5xxxxxxxx)
-        validate_checksum: Se True, valida o dígito de controlo
-    
-    Returns:
-        O NIF limpo se válido
-        
-    Raises:
-        ValueError: Se o NIF for inválido
     """
     if not nif:
         return nif
-    
-    # Remover espaços e caracteres especiais
     nif_clean = re.sub(r'[^\d]', '', nif)
-    
     if len(nif_clean) != 9:
         raise ValueError(f"NIF deve ter 9 dígitos (recebido: {len(nif_clean)})")
-    
     if not nif_clean.isdigit():
         raise ValueError("NIF deve conter apenas dígitos")
-    
-    # Validar primeiro dígito - prefixos válidos para NIF português
     first_digit = nif_clean[0]
     valid_prefixes = ['1', '2', '3', '5', '6', '7', '8', '9']
     if first_digit not in valid_prefixes:
         raise ValueError(f"NIF com prefixo inválido: {first_digit}")
-    
-    # NIFs que começam com 5 são de empresas
     if not allow_company and nif_clean.startswith('5'):
         raise ValueError("NIF de empresa (começado por 5) não é permitido para clientes particulares")
-    
-    # Validar checksum (dígito de controlo)
     if validate_checksum and not validate_nif_checksum(nif_clean):
         raise ValueError("NIF inválido: dígito de controlo incorreto")
-    
     return nif_clean
 
 
+# ---------------------------------------------------------------------------
+# Sub-modelos de dados do Processo
+# ---------------------------------------------------------------------------
+
 class PersonalData(BaseModel):
     """
-    Dados pessoais do titular.
+    SNAPSHOT dos dados pessoais do titular no momento do processo.
     
-    Campos activos:
-    - nome_completo (sincronizado com client_name do processo)
-    - nif (validado: 9 dígitos), documento_id, naturalidade, nacionalidade, morada_fiscal
-    - birth_date/data_nascimento, estado_civil, compra_tipo, menor_35_anos
-    - data_validade_cc, sexo, altura, nome_pai, nome_mae
-    - email, phone, profissao, morada, codigo_postal (extraídos por IA)
+    A FONTE DE VERDADE é a coleção `clients`. Este sub-modelo existe para:
+    1. Backward compatibility com dados existentes no MongoDB
+    2. Permitir que dados pessoais possam divergir entre processos
+       (ex: cliente mudou de morada entre dois processos)
+    
+    Na Fase 2, estes campos serão apenas leitura (preenchidos a partir do Cliente).
     """
     model_config = ConfigDict(extra="allow")
     
-    # Nome completo (sincronizado com client_name)
+    # Nome completo (denormalizado do Cliente para quick access)
     nome_completo: Optional[str] = Field(None, max_length=200, description="Nome completo do cliente")
     nome: Optional[str] = Field(None, max_length=200, description="Nome completo (alias)")
-    # Dados básicos (activos) com constraints
+    # Dados básicos com constraints
     nif: Optional[str] = Field(None, max_length=9, description="NIF - 9 dígitos")
-    niss: Optional[str] = Field(None, max_length=11, description="NISS - Nº de Identificação na Segurança Social (11 dígitos)")
+    niss: Optional[str] = Field(None, max_length=11, description="NISS - Nº Segurança Social")
     documento_id: Optional[str] = Field(None, max_length=30, description="Número do documento de ID")
     naturalidade: Optional[str] = Field(None, max_length=100, description="Local de nascimento")
     nacionalidade: Optional[str] = Field(None, max_length=50, description="Nacionalidade")
@@ -122,12 +156,10 @@ class PersonalData(BaseModel):
     data_nascimento: Optional[str] = Field(None, max_length=20, description="Data de nascimento (alias)")
     estado_civil: Optional[str] = Field(None, max_length=30, description="Estado civil")
     compra_tipo: Optional[str] = Field(None, max_length=50, description="Tipo de compra")
-    menor_35_anos: Optional[bool] = None  # Checkbox apoio ao estado
-    # Novos campos - Identificação completa
+    menor_35_anos: Optional[bool] = None
     data_validade_cc: Optional[str] = Field(None, max_length=20, description="Validade do CC")
     sexo: Optional[str] = Field(None, max_length=1, description="M ou F")
     altura: Optional[str] = Field(None, max_length=10, description="Altura em metros")
-    # Filiação
     nome_pai: Optional[str] = Field(None, max_length=200, description="Nome do pai")
     nome_mae: Optional[str] = Field(None, max_length=200, description="Nome da mãe")
     # Campos extraídos por IA / usados em formulários
@@ -142,18 +174,11 @@ class PersonalData(BaseModel):
     def validate_nif_field(cls, v):
         if v is None or v == '':
             return None
-        # Converter para string se for número
         if isinstance(v, (int, float)):
             v = str(int(v))
-        # Validar formato básico (9 dígitos, prefixo válido) sem bloquear por checksum
-        # O checksum é verificado no frontend (aviso) mas não impede a gravação
-        # para evitar perda de dados quando o utilizador insere um NIF válido
-        # que o algoritmo não reconhece (ex: NIFs estrangeiros com formato PT)
         try:
             return validate_nif(v, validate_checksum=False)
         except ValueError:
-            # Se mesmo sem checksum falhar (formato inválido), limpar o campo
-            # para não bloquear a gravação dos restantes dados
             import logging
             logging.getLogger(__name__).warning(f"NIF inválido ignorado em PersonalData: {v}")
             return None
@@ -190,7 +215,6 @@ class PersonalData(BaseModel):
     @classmethod
     def sync_birth_date(cls, v, info):
         """Sincroniza data_nascimento com birth_date se não fornecido."""
-        # Se data_nascimento não foi fornecido, usar birth_date
         if v is None and info.data.get('birth_date'):
             return info.data.get('birth_date')
         return v
@@ -199,14 +223,13 @@ class PersonalData(BaseModel):
     @classmethod
     def sync_data_nascimento(cls, v, info):
         """Sincroniza birth_date com data_nascimento se não fornecido."""
-        # Se birth_date não foi fornecido, usar data_nascimento
         if v is None and info.data.get('data_nascimento'):
             return info.data.get('data_nascimento')
         return v
 
 
 class Titular2Data(BaseModel):
-    """Dados do segundo titular."""
+    """Dados do segundo titular (co-titular do processo)."""
     model_config = ConfigDict(extra="allow")
     name: Optional[str] = None
     email: Optional[str] = None
@@ -229,10 +252,8 @@ class Titular2Data(BaseModel):
     def validate_nif_field(cls, v):
         if v is None or v == '':
             return None
-        # Converter para string se for número
         if isinstance(v, (int, float)):
             v = str(int(v))
-        # Validar formato básico sem bloquear por checksum (mesma lógica que PersonalData)
         try:
             return validate_nif(v, validate_checksum=False)
         except ValueError:
@@ -243,14 +264,7 @@ class Titular2Data(BaseModel):
 
 class RealEstateData(BaseModel):
     """
-    Dados imobiliários.
-    
-    Campos activos:
-    - tipo_imovel, num_quartos, localizacao, caracteristicas
-    - outras_caracteristicas, outras_informacoes
-    - ja_tem_imovel (indica se o cliente já tem imóvel identificado)
-    - Dados do proprietário: owner_name, owner_email, owner_phone
-    - Dados do CPCV: valor_imovel, datas, etc.
+    Dados imobiliários do processo.
     """
     model_config = ConfigDict(extra="allow")
     
@@ -260,17 +274,15 @@ class RealEstateData(BaseModel):
     caracteristicas: Optional[List[str]] = None
     outras_caracteristicas: Optional[str] = None
     outras_informacoes: Optional[str] = None
-    ja_tem_imovel: Optional[bool] = None  # Indica se cliente já tem imóvel identificado
+    ja_tem_imovel: Optional[bool] = None
     has_property: Optional[bool] = None   # Alias para ja_tem_imovel
-    # Novos campos - área, valor e finalidade
-    area_pretendida: Optional[float] = None           # Área pretendida em m²
-    valor_maximo_imovel: Optional[float] = None       # Valor máximo do imóvel em euros
-    finalidade: Optional[str] = None                # compra_imovel, refinanciamento
-    ja_tem_casa_escolhida: Optional[bool] = None    # Se já tem casa escolhida
-    proprietario_nome: Optional[str] = None         # Nome do proprietário (se já tem casa)
-    proprietario_contacto: Optional[str] = None     # Contacto do proprietário
-    caracteristicas_imovel: Optional[str] = None    # Características básicas do imóvel escolhido
-    # Dados do proprietário do imóvel (antigos)
+    area_pretendida: Optional[float] = None
+    valor_maximo_imovel: Optional[float] = None
+    finalidade: Optional[str] = None
+    ja_tem_casa_escolhida: Optional[bool] = None
+    proprietario_nome: Optional[str] = None
+    proprietario_contacto: Optional[str] = None
+    caracteristicas_imovel: Optional[str] = None
     owner_name: Optional[str] = None
     owner_email: Optional[str] = None
     owner_phone: Optional[str] = None
@@ -292,12 +304,10 @@ class RealEstateData(BaseModel):
     arrecadacao: Optional[str] = None
     descricao_imovel: Optional[str] = None
     valor_patrimonial: Optional[float] = None
-    # Datas do CPCV
     data_cpcv: Optional[str] = None
     data_escritura_prevista: Optional[str] = None
     prazo_escritura_dias: Optional[int] = None
     data_entrega_chaves: Optional[str] = None
-    # Condições
     condicao_suspensiva: Optional[str] = None
     observacoes_cpcv: Optional[str] = None
 
@@ -305,7 +315,6 @@ class RealEstateData(BaseModel):
                      'valor_maximo_imovel', mode='before')
     @classmethod
     def coerce_float_fields(cls, v):
-        """Converte strings para float graciosamente."""
         if v is None or v == '':
             return None
         if isinstance(v, (int, float)):
@@ -320,7 +329,6 @@ class RealEstateData(BaseModel):
     @field_validator('prazo_escritura_dias', mode='before')
     @classmethod
     def coerce_int_fields(cls, v):
-        """Converte strings para int graciosamente."""
         if v is None or v == '':
             return None
         if isinstance(v, int):
@@ -337,7 +345,6 @@ class RealEstateData(BaseModel):
     @field_validator('ja_tem_imovel', 'has_property', 'ja_tem_casa_escolhida', mode='before')
     @classmethod
     def coerce_bool_fields(cls, v):
-        """Converte strings para bool graciosamente."""
         if v is None or v == '':
             return None
         if isinstance(v, bool):
@@ -355,16 +362,10 @@ class RealEstateData(BaseModel):
 
 class FinancialData(BaseModel):
     """
-    Dados financeiros.
+    Dados financeiros do PROCESSO (não do cliente).
     
-    Campos activos:
-    - acesso_portal_financas, chave_movel_digital, renda_habitacao_atual
-    - precisa_vender_casa, efetivo, fiador, bancos_creditos
-    - capital_proprio, valor_financiado
-    - Dados do CPCV: valor_entrada, valor_pretendido, etc.
-    - Situação profissional: employment_type, employment_duration, employer_name
-    - Credenciais de portais: portal_financas_utilizador, portal_financas_senha, etc.
-    - Campos extraídos por IA: rendimento_mensal, rendimento_bruto, empresa, etc.
+    Cada processo pode ter dados financeiros diferentes para o mesmo cliente,
+    pois cada negociação é distinta (diferentes montantes, bancos, condições).
     """
     model_config = ConfigDict(extra="allow")
     
@@ -374,49 +375,47 @@ class FinancialData(BaseModel):
     precisa_vender_casa: Optional[str] = None
     efetivo: Optional[str] = None
     fiador: Optional[str] = None
-    bancos_creditos: Optional[List[Any]] = None  # [{banco: "CGD", valor: 150000}] ou ["CGD"] (legacy)
-    bancos_simulacoes: Optional[List[str]] = None  # Bancos onde efetuou simulações de crédito
-    tempo_restante_credito: Optional[str] = None  # Tempo restante do crédito atual (refinanciamento)
+    bancos_creditos: Optional[List[Any]] = None
+    bancos_simulacoes: Optional[List[str]] = None
+    tempo_restante_credito: Optional[str] = None
     capital_proprio: Optional[float] = None
     valor_financiado: Optional[str] = None
     # Situação Profissional
-    employment_type: Optional[str] = None  # efetivo, termo, independente, empresario, reformado, desempregado
-    employment_duration: Optional[str] = None  # Tempo de emprego
-    employer_name: Optional[str] = None  # Entidade empregadora
-    employer_nif: Optional[str] = None  # NIF da entidade empregadora
-    trabalha_estrangeiro: Optional[str] = None  # Trabalha no estrangeiro (sim/nao)
-    monthly_income: Optional[float] = None  # Rendimento mensal
+    employment_type: Optional[str] = None
+    employment_duration: Optional[str] = None
+    employer_name: Optional[str] = None
+    employer_nif: Optional[str] = None
+    trabalha_estrangeiro: Optional[str] = None
+    monthly_income: Optional[float] = None
     # Dados do CPCV - Valores
     valor_pretendido: Optional[float] = None
     valor_entrada: Optional[float] = None
     data_sinal: Optional[str] = None
     reforco_sinal: Optional[float] = None
     comissao_mediacao: Optional[float] = None
-    # Credenciais de Portais Oficiais (preenchidos posteriormente pelo utilizador)
+    # Credenciais de Portais Oficiais
     portal_financas_utilizador: Optional[str] = Field(None, max_length=100, description="Utilizador do Portal das Finanças")
     portal_financas_senha: Optional[str] = Field(None, max_length=100, description="Senha de acesso ao Portal das Finanças")
     seg_social_utilizador: Optional[str] = Field(None, max_length=100, description="Utilizador da Segurança Social Direta")
     seg_social_senha: Optional[str] = Field(None, max_length=100, description="Senha de acesso à Segurança Social Direta")
     # Campos extraídos por IA / recibos de vencimento
-    rendimento_mensal: Optional[float] = None      # Rendimento líquido mensal (IA)
-    rendimento_bruto: Optional[float] = None       # Rendimento bruto mensal (IA)
-    rendimento_agregado: Optional[float] = None    # Rendimento agregado familiar (IA)
-    salario_liquido: Optional[float] = None        # Salário líquido (alias)
-    salario_bruto: Optional[float] = None          # Salário bruto (alias)
-    empresa: Optional[str] = None                   # Nome da empresa (IA)
-    tipo_contrato: Optional[str] = None             # Tipo de contrato (IA)
-    categoria_profissional: Optional[str] = None    # Categoria profissional (IA)
-    subsidiario_alimentacao: Optional[float] = None  # Subsídio alimentação (IA)
-    data_referencia: Optional[str] = None           # Data de referência do recibo (IA)
-    nr_dependentes: Optional[int] = None            # Número de dependentes
-    number_of_dependents: Optional[int] = None      # Número de dependentes (alias)
-    rendimento_co_titular: Optional[float] = None  # Rendimento do co-titular
-    creditos_existentes: Optional[float] = None     # Valor de créditos existentes
-    prestacao_creditos_mensal: Optional[float] = None  # Prestação mensal de créditos
-    # Contas abertas (Créditos e Capital) — bancos com contas de crédito abertas
-    tem_creditos_activos: Optional[List[str]] = None  # Bancos com contas abertas (mesmo formato que bancos_creditos)
-    valor_creditos_activos: Optional[float] = None     # [Deprecated] Valor total — mantido para backward compat
-    # Outros rendimentos e despesas (aliases portugueses para compatibilidade)
+    rendimento_mensal: Optional[float] = None
+    rendimento_bruto: Optional[float] = None
+    rendimento_agregado: Optional[float] = None
+    salario_liquido: Optional[float] = None
+    salario_bruto: Optional[float] = None
+    empresa: Optional[str] = None
+    tipo_contrato: Optional[str] = None
+    categoria_profissional: Optional[str] = None
+    subsidiario_alimentacao: Optional[float] = None
+    data_referencia: Optional[str] = None
+    nr_dependentes: Optional[int] = None
+    number_of_dependents: Optional[int] = None
+    rendimento_co_titular: Optional[float] = None
+    creditos_existentes: Optional[float] = None
+    prestacao_creditos_mensal: Optional[float] = None
+    tem_creditos_activos: Optional[List[str]] = None
+    valor_creditos_activos: Optional[float] = None     # [Deprecated] — backward compat
     outros_rendimentos: Optional[float] = None
     despesas_mensais: Optional[float] = None
     rendimento_anual: Optional[float] = None
@@ -431,14 +430,12 @@ class FinancialData(BaseModel):
                      'rendimento_anual', mode='before')
     @classmethod
     def coerce_float_fields(cls, v):
-        """Converte strings para float e trata valores inválidos graciosamente."""
         if v is None or v == '':
             return None
         if isinstance(v, (int, float)):
             return float(v)
         if isinstance(v, str):
             try:
-                # Tentar converter string para float (ex: "1500.50" → 1500.5)
                 cleaned = v.replace(',', '.').strip()
                 return float(cleaned)
             except (ValueError, TypeError):
@@ -448,7 +445,6 @@ class FinancialData(BaseModel):
     @field_validator('nr_dependentes', 'number_of_dependents', mode='before')
     @classmethod
     def coerce_int_fields(cls, v):
-        """Converte strings para int e trata valores inválidos graciosamente."""
         if v is None or v == '':
             return None
         if isinstance(v, int):
@@ -465,10 +461,7 @@ class FinancialData(BaseModel):
 
 class CreditData(BaseModel):
     """
-    Dados de crédito e aprovação bancária.
-    
-    Inclui campos de avaliação bancária para alertas automáticos
-    quando valor de avaliação < valor de compra.
+    Dados de crédito e aprovação bancária do processo.
     """
     model_config = ConfigDict(extra="allow")
     
@@ -479,18 +472,16 @@ class CreditData(BaseModel):
     bank_name: Optional[str] = None
     bank_approval_date: Optional[str] = None
     bank_approval_notes: Optional[str] = None
-    
-    # Campos de avaliação bancária (novos)
-    valuation_value: Optional[float] = None        # Valor da avaliação bancária
-    valuation_date: Optional[str] = None           # Data da avaliação
-    valuation_bank: Optional[str] = None           # Banco que fez a avaliação
-    valuation_notes: Optional[str] = None          # Observações da avaliação
+    # Campos de avaliação bancária
+    valuation_value: Optional[float] = None
+    valuation_date: Optional[str] = None
+    valuation_bank: Optional[str] = None
+    valuation_notes: Optional[str] = None
 
     @field_validator('requested_amount', 'interest_rate', 'monthly_payment',
                      'valuation_value', mode='before')
     @classmethod
     def coerce_float_fields(cls, v):
-        """Converte strings para float graciosamente."""
         if v is None or v == '':
             return None
         if isinstance(v, (int, float)):
@@ -505,7 +496,6 @@ class CreditData(BaseModel):
     @field_validator('loan_term_years', mode='before')
     @classmethod
     def coerce_int_fields(cls, v):
-        """Converte strings para int graciosamente."""
         if v is None or v == '':
             return None
         if isinstance(v, int):
@@ -519,21 +509,25 @@ class CreditData(BaseModel):
                 return None
         return v
     
-    # Campo calculado para alerta
     @property
     def has_valuation_alert(self) -> bool:
-        """
-        Verifica se há alerta de avaliação (valor avaliação < valor compra).
-        Nota: Este é um property calculado, precisa de acesso ao valor de compra externamente.
-        """
-        return False  # Implementação real feita no serviço de alertas
+        return False
 
+
+# ---------------------------------------------------------------------------
+# Schemas de entrada
+# ---------------------------------------------------------------------------
 
 class ProcessCreate(BaseModel):
-    process_type: str
-    client_id: Optional[str] = None  # ID de cliente existente (opcional)
-    client_name: Optional[str] = None
-    client_email: Optional[str] = None
+    """
+    Schema para criar um novo processo.
+    
+    client_id é OBRIGATÓRIO — o cliente deve existir antes de criar o processo.
+    """
+    process_type: str = Field(..., description="Tipo de processo (credito_habitacao, credito_pessoal, etc.)")
+    client_id: str = Field(..., description="ID do cliente (obrigatório — referência à entidade Cliente)")
+    client_name: Optional[str] = Field(None, description="Nome do cliente (denormalizado, preenchido automaticamente)")
+    client_email: Optional[str] = Field(None, description="Email do cliente (denormalizado)")
     personal_data: Optional[PersonalData] = None
     financial_data: Optional[FinancialData] = None
 
@@ -542,7 +536,7 @@ class PublicClientRegistration(BaseModel):
     """
     Modelo para registo público de clientes.
     
-    Inclui validação e sanitização de inputs para segurança.
+    Cria simultaneamente o Cliente e o Processo associado.
     """
     name: str = Field(
         ...,
@@ -570,19 +564,17 @@ class PublicClientRegistration(BaseModel):
     titular2_data: Optional[Titular2Data] = None
     real_estate_data: Optional[RealEstateData] = None
     financial_data: Optional[FinancialData] = None
-    custom_fields: Optional[dict] = None  # Campos personalizados dinâmicos
+    custom_fields: Optional[dict] = None
     
     @field_validator('name', mode='before')
     @classmethod
     def sanitize_name(cls, v):
-        """Sanitiza o nome removendo HTML e caracteres perigosos."""
         if not v:
             return v
         try:
             from utils.input_sanitization import sanitize_name
             return sanitize_name(v, max_length=200)
         except ImportError:
-            # Fallback básico se módulo não disponível
             import re
             v = re.sub(r'<[^>]+>', '', str(v))
             return v.strip()[:200]
@@ -590,7 +582,6 @@ class PublicClientRegistration(BaseModel):
     @field_validator('phone', mode='before')
     @classmethod
     def sanitize_phone(cls, v):
-        """Sanitiza o telefone."""
         if not v:
             return v
         try:
@@ -602,100 +593,150 @@ class PublicClientRegistration(BaseModel):
 
 
 class ProcessUpdate(BaseModel):
-    personal_data: Optional[PersonalData] = None
+    """
+    Schema para actualizar um processo.
+    
+    Dados pessoais do cliente NÃO devem ser actualizados aqui — usar o endpoint
+    de clientes. Este schema actualiza apenas dados de negócio do processo.
+    """
+    personal_data: Optional[PersonalData] = None  # [DEPRECATED] Usar endpoint de clientes na Fase 2
     titular2_data: Optional[Titular2Data] = None
     financial_data: Optional[FinancialData] = None
     real_estate_data: Optional[RealEstateData] = None
     credit_data: Optional[CreditData] = None
     status: Optional[str] = None
+    # Campos de negócio (nível raiz)
+    property_value: Optional[float] = None
+    loan_value: Optional[float] = None
+    bank_assigned: Optional[str] = None
+    honorarios: Optional[float] = None
+    comissao_banco: Optional[float] = None
+    # Contacto do cliente (denormalizado)
     client_email: Optional[str] = None
     client_phone: Optional[str] = None
-    # Campos adicionais para CPCV e documentos com múltiplos compradores
-    co_buyers: Optional[List[dict]] = None  # Co-compradores do CPCV
-    co_applicants: Optional[List[dict]] = None  # Co-proponentes de simulação/IRS
-    vendedor: Optional[dict] = None  # Dados do vendedor do CPCV
-    mediador: Optional[dict] = None  # Dados do mediador imobiliário
-    monitored_emails: Optional[List[str]] = None  # Emails adicionais monitorizados
-    # Metadados do processo (Fase 3)
-    notes: Optional[str] = None  # Notas gerais do consultor
-    prioridade: Optional[str] = None  # Nível de prioridade: baixa, media, alta
-    labels: Optional[List[str]] = None  # Etiquetas de categorização
+    # Co-compradores e co-proponentes (pertencem ao processo)
+    co_buyers: Optional[List[dict]] = None
+    co_applicants: Optional[List[dict]] = None
+    vendedor: Optional[dict] = None
+    mediador: Optional[dict] = None
+    monitored_emails: Optional[List[str]] = None
+    # Metadados do processo
+    notes: Optional[str] = None
+    prioridade: Optional[str] = None
+    labels: Optional[List[str]] = None
     
     @field_validator('client_email', 'client_phone', mode='before')
     @classmethod
     def coerce_to_string(cls, v):
-        """Converter valores para string para evitar erros de validação."""
         if v is None:
             return None
         return str(v)
 
+    @field_validator('property_value', 'loan_value', 'honorarios', 'comissao_banco', mode='before')
+    @classmethod
+    def coerce_float_fields(cls, v):
+        """Converte strings para float graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v.replace(',', '.').strip())
+            except (ValueError, TypeError):
+                return None
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Schema de resposta
+# ---------------------------------------------------------------------------
 
 class ProcessResponse(BaseModel):
     """
     Modelo de resposta para dados de processo.
+    
+    REFATORAÇÃO FASE 1:
+    - client_id é OBRIGATÓRIO (referência ao Cliente)
+    - Adicionados campos de negócio ao nível raiz
+    - personal_data continua como snapshot/denormalização
 
     NOTA: ConfigDict(extra="ignore") garante que campos extra no MongoDB
-    (adicionados por $set directo ou migrações) não causam 422 ao
-    serializar a resposta. Campos desconhecidos são simplesmente ignorados.
+    não causam 422 ao serializar a resposta.
     """
     model_config = ConfigDict(extra="ignore")
     id: str
-    process_number: Optional[int] = None  # Número sequencial único do processo
-    # Suporte a múltiplos clientes por processo (relação N:M)
-    client_ids: Optional[List[str]] = None  # Lista de IDs de clientes associados
-    client_id: Optional[str] = None  # ID do cliente principal (compatibilidade)
-    client_name: Optional[str] = None  # Tolerar ausência em documentos antigos
+    process_number: Optional[int] = None
+    
+    # ── Referência ao Cliente (OBRIGATÓRIA) ──────────────────────────
+    client_id: str = Field(..., description="ID do cliente associado (obrigatório)")
+    client_ids: Optional[List[str]] = None  # Suporte a múltiplos clientes (N:M)
+    client_name: Optional[str] = None       # Denormalizado para quick access
     client_email: Optional[str] = None
     client_phone: Optional[str] = None
     client_nif: Optional[str] = None
-    process_type: Optional[str] = None
-    type: Optional[str] = None  # Alias for process_type (from Trello import)
-    status: Optional[str] = None  # Tolerar ausência em documentos antigos
-    personal_data: Optional[dict] = None
+    
+    # ── Dados de Negócio (nível raiz) ────────────────────────────────
+    process_type: Optional[str] = None      # CH, Pessoal, Seguros, etc.
+    type: Optional[str] = None              # Alias for process_type
+    status: Optional[str] = None            # Coluna do Kanban
+    property_value: Optional[float] = None  # Valor do imóvel
+    loan_value: Optional[float] = None      # Valor do empréstimo
+    bank_assigned: Optional[str] = None     # Banco atribuído
+    honorarios: Optional[float] = None      # Honorários da intermediação
+    comissao_banco: Optional[float] = None  # Comissão do banco
+    
+    # ── Sub-modelos de dados ─────────────────────────────────────────
+    personal_data: Optional[dict] = None    # Snapshot dos dados pessoais
     titular2_data: Optional[dict] = None
     financial_data: Optional[dict] = None
     real_estate_data: Optional[dict] = None
     credit_data: Optional[dict] = None
-    # Suporte a múltiplos consultores e intermediários
-    assigned_consultor_ids: Optional[List[str]] = None  # Lista de IDs de consultores (novo)
-    assigned_mediador_ids: Optional[List[str]] = None  # Lista de IDs de intermediários (novo)
-    assigned_consultor_id: Optional[str] = None  # Compatibilidade - primeiro consultor
-    assigned_mediador_id: Optional[str] = None  # Compatibilidade - primeiro intermediário
-    consultor_names: Optional[List[str]] = None  # Nomes dos consultores
-    mediador_names: Optional[List[str]] = None  # Nomes dos intermediários
-    consultor_name: Optional[str] = None  # Compatibilidade
-    mediador_name: Optional[str] = None  # Compatibilidade
-    assigned_indexacao_id: Optional[str] = None  # Utilizador responsável pela indexação de documentos
-    indexacao_name: Optional[str] = None  # Nome do utilizador de indexação
-    # Parceiro (utilizador fantasma para tracking)
-    assigned_parceiro_id: Optional[str] = None  # ID do parceiro atribuído
-    parceiro_name: Optional[str] = None  # Nome do parceiro
+    
+    # ── Atribuições ──────────────────────────────────────────────────
+    assigned_consultor_ids: Optional[List[str]] = None
+    assigned_mediador_ids: Optional[List[str]] = None
+    assigned_consultor_id: Optional[str] = None
+    assigned_mediador_id: Optional[str] = None
+    consultor_names: Optional[List[str]] = None
+    mediador_names: Optional[List[str]] = None
+    consultor_name: Optional[str] = None
+    mediador_name: Optional[str] = None
+    assigned_indexacao_id: Optional[str] = None
+    indexacao_name: Optional[str] = None
+    assigned_parceiro_id: Optional[str] = None
+    parceiro_name: Optional[str] = None
+    
+    # ── Co-compradores e co-proponentes (do processo) ────────────────
+    co_buyers: Optional[List[dict]] = None
+    co_applicants: Optional[List[dict]] = None
+    vendedor: Optional[dict] = None
+    mediador: Optional[dict] = None
+    
+    # ── Documentos e referências ─────────────────────────────────────
+    documents: Optional[List[dict]] = None  # Referências a documentos do processo
+    s3_folder: Optional[str] = None
+    
+    # ── Metadados ────────────────────────────────────────────────────
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     notes: Optional[str] = None
     valor_financiado: Optional[str] = None
     idade_menos_35: Optional[bool] = None
-    prioridade: Optional[str] = None  # baixa, media, alta (Fase 3: alterado de bool para str)
+    has_property: Optional[bool] = None
+    prioridade: Optional[str] = None
     labels: Optional[List[str]] = None
     onedrive_links: Optional[List[dict]] = None
-    has_property: Optional[bool] = None  # Flag para indicar se cliente já tem imóvel
-    trello_card_id: Optional[str] = None  # ID do card no Trello
-    trello_list_id: Optional[str] = None  # ID da lista no Trello
-    source: Optional[str] = None  # Origem do processo (trello_import, web_form, etc.)
-    monitored_emails: Optional[List[str]] = None  # Emails adicionais para monitorizar
-    # Campos do CPCV
-    co_buyers: Optional[List[dict]] = None  # Co-compradores
-    co_applicants: Optional[List[dict]] = None  # Co-proponentes
-    vendedor: Optional[dict] = None  # Dados do vendedor
-    mediador: Optional[dict] = None  # Dados do mediador imobiliário
-    # TAREFA 2: Conflitos de Dados IA
-    is_data_confirmed: Optional[bool] = None  # Se True, IA não sobrepõe dados de perfil
-    ai_suggestions: Optional[List[dict]] = None  # Sugestões de dados extraídos pela IA em conflito
+    trello_card_id: Optional[str] = None
+    trello_list_id: Optional[str] = None
+    source: Optional[str] = None
+    monitored_emails: Optional[List[str]] = None
+    is_data_confirmed: Optional[bool] = None
+    ai_suggestions: Optional[List[dict]] = None
 
     @field_validator('idade_menos_35', 'has_property', 'is_data_confirmed', mode='before')
     @classmethod
     def coerce_bool_fields(cls, v):
-        """Coerce string booleans ('true'/'false') to actual bool for MongoDB compatibility."""
         if v is None:
             return None
         if isinstance(v, bool):
@@ -705,4 +746,19 @@ class ProcessResponse(BaseModel):
                 return True
             if v.lower() in ('false', '0', 'no', ''):
                 return False
+        return v
+
+    @field_validator('property_value', 'loan_value', 'honorarios', 'comissao_banco', mode='before')
+    @classmethod
+    def coerce_float_fields(cls, v):
+        """Converte strings para float graciosamente."""
+        if v is None or v == '':
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v.replace(',', '.').strip())
+            except (ValueError, TypeError):
+                return None
         return v
