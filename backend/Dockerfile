@@ -30,7 +30,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     UVICORN_HOST=0.0.0.0 \
     UVICORN_PORT=8001 \
-    UVICORN_WORKERS=4 \
+    UVICORN_WORKERS=1 \
     APP_ENV=production \
     PORT=8001
 
@@ -72,6 +72,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 EXPOSE 8001
 
 # ── Comando de arranque ──
-# Produção: múltiplos workers
-# Render: usa a variável PORT se definida, senão usa UVICORN_PORT
-CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-${UVICORN_PORT}} --workers ${UVICORN_WORKERS}"]
+# DEV: 1 worker (poupar RAM — 512MB no Render)
+# PROD: múltiplos workers (definir UVICORN_WORKERS no Render)
+# Se ENVIRONMENT=dev, força 1 worker independentemente de UVICORN_WORKERS.
+CMD ["sh", "-c", "if [ \"$ENVIRONMENT\" = 'dev' ] || [ \"$ENVIRONMENT\" = 'development' ]; then WORKERS=1; else WORKERS=${UVICORN_WORKERS:-1}; fi && uvicorn server:app --host 0.0.0.0 --port ${PORT:-${UVICORN_PORT}} --workers $WORKERS"]

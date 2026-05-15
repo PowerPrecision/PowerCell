@@ -683,7 +683,11 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    import os as _os_diag
     logger.info("🚀 Iniciando aplicação...")
+    logger.info(f"📋 ENVIRONMENT = '{_os_diag.environ.get('ENVIRONMENT', '(não definido)')}' | "
+                f"APP_ENV = '{_os_diag.environ.get('APP_ENV', '(não definido)')}' | "
+                f"UVICORN_WORKERS = '{_os_diag.environ.get('UVICORN_WORKERS', '(não definido)')}'")
     
     # Criar índices de BD para optimização de performance
     try:
@@ -711,38 +715,52 @@ async def startup():
         logger.debug(f"Trello não configurado: {trello_err}")
     
     # ==========================================
-    # TAREFAS DE BACKGROUND (leves — correm sempre)
+    # TAREFAS DE BACKGROUND
     # ==========================================
+    # 🛑 EM DEV (ENVIRONMENT != production): Só corre o job monitor (leve).
+    # Backup, CDC e Email Sync são BLOQUEADOS para poupar RAM no Render (512MB).
     import asyncio
+    import os as _os
+    _is_production = _os.environ.get('ENVIRONMENT') == 'production'
 
-    # Iniciar scheduler para monitorização de jobs stuck
+    if _is_production:
+        logger.info("🟢 PRODUÇÃO: Todas as tarefas de background ativadas.")
+    else:
+        logger.warning("🟡 MODO DEV: Tarefas pesadas de background DESATIVADAS para poupar RAM.")
+
+    # Iniciar scheduler para monitorização de jobs stuck (leve — corre sempre)
     monitor_task = asyncio.create_task(background_job_monitor())
     _background_tasks.add(monitor_task)
     monitor_task.add_done_callback(_background_tasks.discard)
 
     # --- Backup Scheduler: backup diário às 03:00 UTC ---
-    try:
-        from services.backup import start_backup_scheduler
-        backup_task = asyncio.create_task(start_backup_scheduler())
-        _background_tasks.add(backup_task)
-        backup_task.add_done_callback(_background_tasks.discard)
-        logger.info("💾 Backup scheduler iniciado - backup diário às 03:00 UTC")
-    except (IOError, OSError, ValueError, ImportError) as backup_err:
-        logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
+    if _is_production:
+        try:
+            from services.backup import start_backup_scheduler
+            backup_task = asyncio.create_task(start_backup_scheduler())
+            _background_tasks.add(backup_task)
+            backup_task.add_done_callback(_background_tasks.discard)
+            logger.info("💾 Backup scheduler iniciado - backup diário às 03:00 UTC")
+        except (IOError, OSError, ValueError, ImportError) as backup_err:
+            logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
+    else:
+        logger.info("💾 Backup scheduler: DESATIVADO em DEV")
 
     # --- CDC Audit Listener: Change Data Capture para compliance ---
-    try:
-        from services.audit_cdc import cdc_listener
-        cdc_task = asyncio.create_task(cdc_listener.start())
-        _background_tasks.add(cdc_task)
-        cdc_task.add_done_callback(_background_tasks.discard)
-        logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
-    except (IOError, OSError, ValueError, ImportError) as cdc_err:
-        logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
+    if _is_production:
+        try:
+            from services.audit_cdc import cdc_listener
+            cdc_task = asyncio.create_task(cdc_listener.start())
+            _background_tasks.add(cdc_task)
+            cdc_task.add_done_callback(_background_tasks.discard)
+            logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
+        except (IOError, OSError, ValueError, ImportError) as cdc_err:
+            logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
+    else:
+        logger.info("🔍 CDC Audit Listener: DESATIVADO em DEV")
 
     # Iniciar Auto-Sync de Emails
-    import os
-    if os.environ.get('ENVIRONMENT') == 'production':
+    if _is_production:
         try:
             from services.scheduled_tasks import run_email_auto_sync
             email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=180))
