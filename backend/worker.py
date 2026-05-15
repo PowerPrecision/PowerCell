@@ -230,9 +230,9 @@ async def scheduler_loop():
                 await task_queue.add_task("match_leads", {})
                 last_runs["matching"] = now
 
-            # Sincronização Webmail — 🛑 DESATIVADO POR HARDCODE
+            # Sincronização Webmail — 🛑 Requer ENABLE_EMAIL_SYNC=true
             # if now - last_runs["webmail"] > 900:
-            if False: # 🛑 DESATIVADO POR HARDCODE: Bloqueio do worker
+            if os.environ.get('ENABLE_EMAIL_SYNC') == 'true' and now - last_runs["webmail"] > 900:
                 logger.info("Agendando sincronização de webmail por utilizador...")
                 try:
                     from services.email_service import sync_user_emails

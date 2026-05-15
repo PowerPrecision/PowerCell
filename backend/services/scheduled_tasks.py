@@ -1301,11 +1301,11 @@ class ScheduledTasksService:
         Returns:
             Dict com resumo da sincronização
         """
-        # KILL SWITCH — SÓ PRODUÇÃO PERMITE SYNC (proteção RAM em DEV)
+        # 🛑 KILL SWITCH: Requer ENABLE_EMAIL_SYNC=true explicitamente.
         import os
-        if os.environ.get('ENVIRONMENT') != 'production':
-            logger.info("[auto_sync_emails] BLOCKED — ENVIRONMENT != production — uso on-demand")
-            return {"success": True, "error": "Email sync desativado em DEV (ENVIRONMENT != production)", "total_synced": 0}
+        if os.environ.get('ENABLE_EMAIL_SYNC') != 'true':
+            logger.info("[auto_sync_emails] BLOCKED — ENABLE_EMAIL_SYNC != true")
+            return {"success": True, "error": "Email sync desativado (ENABLE_EMAIL_SYNC != true)", "total_synced": 0}
 
         logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
         
@@ -1430,8 +1430,9 @@ class ScheduledTasksService:
 
 
 async def run_email_auto_sync(interval_seconds: int = 900):
+    # 🛑 KILL SWITCH: Requer ENABLE_EMAIL_SYNC=true explicitamente.
     import os
-    if os.environ.get('ENVIRONMENT') != 'production':
+    if os.environ.get('ENABLE_EMAIL_SYNC') != 'true':
         return
 
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
