@@ -21,10 +21,9 @@ import re
 import uuid
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from datetime import datetime, timezone
-from typing import Optional
 
 from database import db
-from services.auth import get_current_user, require_roles
+from services.auth import require_roles
 from models.auth import UserRole
 from services.system_error_logger import system_error_logger
 
@@ -333,12 +332,27 @@ async def run_migration_task(dry_run: bool, started_by: str):
 
             stats["processes_migrated"] += 1
 
-            # Referências
-            stats["documents_referenced"] += await db.documents.count_documents({"process_id": old_process_id})
-            stats["tasks_referenced"] += await db.tasks.count_documents({"process_id": old_process_id})
-            stats["history_referenced"] += await db.history.count_documents({"process_id": old_process_id})
-            stats["activities_referenced"] += await db.activities.count_documents({"process_id": old_process_id})
-            stats["annotations_referenced"] += await db.annotations.count_documents({"process_id": old_process_id})
+            # Referências (coleções podem não existir)
+            try:
+                stats["documents_referenced"] += await db.documents.count_documents({"process_id": old_process_id})
+            except Exception:
+                pass
+            try:
+                stats["tasks_referenced"] += await db.tasks.count_documents({"process_id": old_process_id})
+            except Exception:
+                pass
+            try:
+                stats["history_referenced"] += await db.history.count_documents({"process_id": old_process_id})
+            except Exception:
+                pass
+            try:
+                stats["activities_referenced"] += await db.activities.count_documents({"process_id": old_process_id})
+            except Exception:
+                pass
+            try:
+                stats["annotations_referenced"] += await db.annotations.count_documents({"process_id": old_process_id})
+            except Exception:
+                pass
 
         # ── Passo 4: Validação de integridade ─────────────────────────────
         logger.info("✅ Passo 4: Validação de integridade...")
@@ -420,8 +434,14 @@ async def get_migration_status(
     total_clients = await db.clients.count_documents({})
     total_processes = await db.processes.count_documents({})
 
-    # Processos com client_id
-    processes_with_client_id = await db.processes.count_documents({"client_id": {"$exists": True, "$ne": None, "$ne": ""}})
+    # Processos com client_id (query corrigida: $and para evitar chaves duplicadas)
+    processes_with_client_id = await db.processes.count_documents({
+        "$and": [
+            {"client_id": {"$exists": True}},
+            {"client_id": {"$ne": None}},
+            {"client_id": {"$ne": ""}},
+        ]
+    })
     processes_without_client_id = total_processes - processes_with_client_id
 
     # Processos com campos de negócio no nível raiz
@@ -432,11 +452,19 @@ async def get_migration_status(
     # Processos migrados (com _migration_version)
     processes_migrated = await db.processes.count_documents({"_migration_version": "phase1"})
 
-    # Backups existentes
-    has_clients_backup = await db.clients_legacy.count_documents({}) > 0
-    has_processes_backup = await db.processes_legacy.count_documents({}) > 0
-    clients_backup_count = await db.clients_legacy.count_documents({}) if has_clients_backup else 0
-    processes_backup_count = await db.processes_legacy.count_documents({}) if has_processes_backup else 0
+    # Backups existentes (coleções legacy podem não existir)
+    try:
+        clients_backup_count = await db.clients_legacy.count_documents({})
+        has_clients_backup = clients_backup_count > 0
+    except Exception:
+        has_clients_backup = False
+        clients_backup_count = 0
+    try:
+        processes_backup_count = await db.processes_legacy.count_documents({})
+        has_processes_backup = processes_backup_count > 0
+    except Exception:
+        has_processes_backup = False
+        processes_backup_count = 0
 
     # Clientes com dados financeiros (ainda não limpos)
     clients_with_financial = await db.clients.count_documents({"dados_financeiros": {"$exists": True}})
