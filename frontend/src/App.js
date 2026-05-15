@@ -75,7 +75,7 @@ const ClientRegistrationsPage = React.lazy(() => import("./pages/ClientRegistrat
 const WorkflowStatusesPage = React.lazy(() => import("./pages/WorkflowStatusesPage"));
 const AutomationPage = React.lazy(() => import("./pages/AutomationPage"));
 const ProfilePage = React.lazy(() => import("./pages/ProfilePage"));
-const ProfileSettingsPage = React.lazy(() => import("./pages/ProfileSettingsPage"));
+
 const FormManagementPage = React.lazy(() => import("./pages/FormManagementPage"));
 const AuditTrailPage = React.lazy(() => import("./pages/AuditTrailPage"));
 const FinanceDashboard = React.lazy(() => import("./pages/FinanceDashboard"));
@@ -515,18 +515,6 @@ function App() {
               <ProtectedRoute allowedRoles={ADMIN_ROLES}>
                 <RouteBoundary name="Automação">
                   <AutomationPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
-          />
-          
-          {/* Profile Settings - Admin and CEO */}
-          <Route
-            path="/configuracoes-perfis"
-            element={
-              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
-                <RouteBoundary name="Configurações de Perfis">
-                  <ProfileSettingsPage />
                 </RouteBoundary>
               </ProtectedRoute>
             }

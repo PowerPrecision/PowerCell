@@ -43,7 +43,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   Users, Settings, Zap, Lock, ArrowLeft,
   // Customização
-  Palette, GitBranch, FileText, LayoutTemplate, UserCircle,
+  Palette, GitBranch, FileText, LayoutTemplate,
   // Comunicações
   MessageSquare, Mail, Bell,
   // Compliance
@@ -64,7 +64,7 @@ import PermissionsTab from "../components/admin/PermissionsTab";
 import WorkflowStatusesPage from "./WorkflowStatusesPage";
 import FormManagementPage from "./FormManagementPage";
 import TemplatesPage from "./TemplatesPage";
-import ProfileSettingsPage from "./ProfileSettingsPage";
+
 
 // Embedded pages — Comunicações
 import EmailAccountsPage from "./EmailAccountsPage";
@@ -258,11 +258,7 @@ const SystemAdminPanel = () => {
                     <span className="hidden sm:inline">Templates</span>
                     <span className="sm:hidden">Tmpl</span>
                   </TabsTrigger>
-                  <TabsTrigger value="profile-settings" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <UserCircle className="h-4 w-4" />
-                    <span className="hidden sm:inline">Perfis</span>
-                    <span className="sm:hidden">Perfis</span>
-                  </TabsTrigger>
+
                 </TabsList>
               </div>
               <TabsContent value="workflow-statuses" className="mt-4">
@@ -274,9 +270,7 @@ const SystemAdminPanel = () => {
               <TabsContent value="templates" className="mt-4">
                 <TemplatesPage embedded={true} />
               </TabsContent>
-              <TabsContent value="profile-settings" className="mt-4">
-                <ProfileSettingsPage embedded={true} />
-              </TabsContent>
+
             </Tabs>
           </TabsContent>
 
