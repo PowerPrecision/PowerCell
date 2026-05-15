@@ -1037,11 +1037,12 @@ async def sync_webmail_emails(
     days: int = 30,
     max_emails: int = 100
 ) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Requer ENABLE_EMAIL_SYNC=true explicitamente.
+    # 🛑 KILL SWITCH: Se DISABLE_EMAIL_SYNC=true, saltar sincronização IMAP.
+    # Render dev tem DISABLE_EMAIL_SYNC=true. Produção NÃO define esta variável.
     import os
-    if os.environ.get('ENABLE_EMAIL_SYNC') != 'true':
-        logger.info("[sync_webmail_emails] BLOCKED — ENABLE_EMAIL_SYNC != true — nenhuma ligação IMAP")
-        return {"success": True, "message": "Ignorado (ENABLE_EMAIL_SYNC != true)", "accounts": {}}
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        logger.info("[sync_webmail_emails] BLOCKED — DISABLE_EMAIL_SYNC=true — nenhuma ligação IMAP")
+        return {"success": True, "message": "Ignorado (DISABLE_EMAIL_SYNC=true)", "accounts": {}}
     """
     Sincronizar TODOS os emails recentes do IMAP para o webmail.
     Sem filtro de processo — guarda todos os emails recebidos e enviados.
@@ -1362,10 +1363,11 @@ async def sync_webmail_emails(
 
 
 async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Requer ENABLE_EMAIL_SYNC=true explicitamente.
+    # 🛑 KILL SWITCH: Se DISABLE_EMAIL_SYNC=true, saltar sincronização IMAP.
+    # Render dev tem DISABLE_EMAIL_SYNC=true. Produção NÃO define esta variável.
     import os
-    if os.environ.get('ENABLE_EMAIL_SYNC') != 'true':
-        return {"success": True, "message": "Ignorado (ENABLE_EMAIL_SYNC != true)", "accounts": {}}
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        return {"success": True, "message": "Ignorado (DISABLE_EMAIL_SYNC=true)", "accounts": {}}
     """
     Sincronizar emails para um utilizador específico usando a sua configuração pessoal.
     
@@ -1637,10 +1639,11 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
 
 
 async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 200) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Requer ENABLE_EMAIL_SYNC=true explicitamente.
+    # 🛑 KILL SWITCH: Se DISABLE_EMAIL_SYNC=true, saltar sincronização IMAP.
+    # Render dev tem DISABLE_EMAIL_SYNC=true. Produção NÃO define esta variável.
     import os
-    if os.environ.get('ENABLE_EMAIL_SYNC') != 'true':
-        return {"success": True, "message": "Ignorado (ENABLE_EMAIL_SYNC != true)", "accounts": {}}
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        return {"success": True, "message": "Ignorado (DISABLE_EMAIL_SYNC=true)", "accounts": {}}
     """
     Sincronizar emails para um role partilhado (indexacao, suporte, etc.)
     usando a conta de email partilhada do departamento.
@@ -1895,10 +1898,11 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
 
 
 async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Requer ENABLE_EMAIL_SYNC=true explicitamente.
+    # 🛑 KILL SWITCH: Se DISABLE_EMAIL_SYNC=true, saltar sincronização IMAP.
+    # Render dev tem DISABLE_EMAIL_SYNC=true. Produção NÃO define esta variável.
     import os
-    if os.environ.get('ENABLE_EMAIL_SYNC') != 'true':
-        return {"success": True, "message": "Ignorado (ENABLE_EMAIL_SYNC != true)", "accounts": {}}
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+        return {"success": True, "message": "Ignorado (DISABLE_EMAIL_SYNC=true)", "accounts": {}}
     """
     Sincronizar emails para TODOS os utilizadores com configuração ativa.
     Usa asyncio.gather para execução concorrente.

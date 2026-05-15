@@ -3,6 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-05] — KILL SWITCH: DISABLE_EMAIL_SYNC (variável existente no Render)
+
+### Corrigido
+- **KILL SWITCH usa agora `DISABLE_EMAIL_SYNC` (variável que JÁ EXISTE no Render dev)** (`fix` — **CRÍTICO**): Todos os guards foram alterados de `ENABLE_EMAIL_SYNC` (opt-in) para `DISABLE_EMAIL_SYNC` (opt-out). O Render dev já tem `DISABLE_EMAIL_SYNC=true` configurado. Em produção, a variável NÃO existe → sync corre normalmente.
+- **8 pontos de proteção com `DISABLE_EMAIL_SYNC`** (`fix`):
+  - **`server.py` startup**: Se `DISABLE_EMAIL_SYNC=true`, email_sync_task NÃO é criado
+  - **`scheduled_tasks.py` `run_email_auto_sync()`**: return imediato se `DISABLE_EMAIL_SYNC=true`
+  - **`scheduled_tasks.py` `auto_sync_emails()`**: return mock se `DISABLE_EMAIL_SYNC=true`
+  - **`email_service.py` `sync_webmail_emails()`**: return mock se `DISABLE_EMAIL_SYNC=true`
+  - **`email_service.py` `sync_user_emails()`**: return mock se `DISABLE_EMAIL_SYNC=true`
+  - **`email_service.py` `sync_shared_role_emails()`**: return mock se `DISABLE_EMAIL_SYNC=true`
+  - **`email_service.py` `sync_all_user_emails()`**: return mock se `DISABLE_EMAIL_SYNC=true`
+  - **`worker.py`**: webmail sync saltado se `DISABLE_EMAIL_SYNC=true`
+
+### Notas
+- **Render dev**: Já tem `DISABLE_EMAIL_SYNC=true` — zero ligações IMAP.
+- **Produção**: NÃO definir `DISABLE_EMAIL_SYNC` — o sync corre normalmente.
+- Commit anterior: `cd42b1b` (ENABLE_EMAIL_SYNC), este commit migra para DISABLE_EMAIL_SYNC.
+
 ## [2026-03-05] — KILL SWITCH DEFINITIVO: ENABLE_EMAIL_SYNC + ensure_libmagic REMOVIDO
 
 ### Corrigido

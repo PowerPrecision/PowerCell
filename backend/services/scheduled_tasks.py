@@ -1301,11 +1301,12 @@ class ScheduledTasksService:
         Returns:
             Dict com resumo da sincronização
         """
-        # 🛑 KILL SWITCH: Requer ENABLE_EMAIL_SYNC=true explicitamente.
+        # 🛑 KILL SWITCH: Se DISABLE_EMAIL_SYNC=true, saltar sincronização.
+        # Render dev tem DISABLE_EMAIL_SYNC=true. Produção NÃO define esta variável.
         import os
-        if os.environ.get('ENABLE_EMAIL_SYNC') != 'true':
-            logger.info("[auto_sync_emails] BLOCKED — ENABLE_EMAIL_SYNC != true")
-            return {"success": True, "error": "Email sync desativado (ENABLE_EMAIL_SYNC != true)", "total_synced": 0}
+        if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
+            logger.info("[auto_sync_emails] BLOCKED — DISABLE_EMAIL_SYNC=true")
+            return {"success": True, "error": "Email sync desativado (DISABLE_EMAIL_SYNC=true)", "total_synced": 0}
 
         logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
         
@@ -1430,9 +1431,10 @@ class ScheduledTasksService:
 
 
 async def run_email_auto_sync(interval_seconds: int = 900):
-    # 🛑 KILL SWITCH: Requer ENABLE_EMAIL_SYNC=true explicitamente.
+    # 🛑 KILL SWITCH: Se DISABLE_EMAIL_SYNC=true, saltar sincronização.
+    # Render dev tem DISABLE_EMAIL_SYNC=true. Produção NÃO define esta variável.
     import os
-    if os.environ.get('ENABLE_EMAIL_SYNC') != 'true':
+    if os.environ.get('DISABLE_EMAIL_SYNC', '').lower() == 'true':
         return
 
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
