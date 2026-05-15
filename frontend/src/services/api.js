@@ -869,5 +869,11 @@ export const toggleAnnouncementLike = (id) => api.post(`/announcements/${id}/lik
 export const markAnnouncementRead = (id) => api.post(`/announcements/${id}/read`);
 export const getAnnouncementReaders = (id) => api.get(`/announcements/readers/${id}`);
 
+// ===== PROCESS MIGRATION (Fase 1: Separação Cliente ↔ Processo) =====
+export const getProcessMigrationStatus = () => api.get("/admin/process-migration/status");
+export const dryRunProcessMigration = () => api.post("/admin/process-migration/dry-run");
+export const runProcessMigration = () => api.post("/admin/process-migration/run");
+export const rollbackProcessMigration = () => api.post("/admin/process-migration/rollback");
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;

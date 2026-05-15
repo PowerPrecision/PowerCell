@@ -3,6 +3,28 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-06] — Fase 1: Refatoração Arquitetural — Separação Cliente ↔ Processo (Atualização)
+
+### Adicionado
+- **Endpoint de migração Fase 1 via API REST** (`feat` — `backend/routes/admin_process_migration.py`): Novos endpoints para executar e monitorizar a migração de separação Cliente ↔ Processo diretamente no painel de administração:
+  - `GET /api/admin/process-migration/status` — Estado actual da migração (processos com/sem client_id, backups, dados financeiros nos clientes)
+  - `POST /api/admin/process-migration/dry-run` — Simulação sem modificar a BD
+  - `POST /api/admin/process-migration/run` — Executar migração (com backup automático)
+  - `POST /api/admin/process-migration/rollback` — Reverter migração usando backups
+- **Tab "Migração" no Painel de Administração** (`feat` — `frontend/src/components/admin/ProcessMigrationTab.js`): Nova tab no SystemAdminPanel (secção "Técnico", apenas admin) com:
+  - Diagrama visual Cliente → Processo (relação 1:N)
+  - Estatísticas em tempo real (total clientes, processos, com/sem client_id)
+  - Estado dos backups (clients_legacy, processes_legacy)
+  - Botão de simulação (dry-run) com confirmação
+  - Botão de execução com dupla confirmação (escrever "MIGRAR")
+  - Botão de rollback com dupla confirmação (escrever "REVERTER")
+  - Auto-refresh durante migração em execução
+  - Relatório da última execução (clientes processados, criados, processos migrados, erros)
+- **Funções de API no frontend** (`feat` — `frontend/src/services/api.js`): Adicionadas `getProcessMigrationStatus`, `dryRunProcessMigration`, `runProcessMigration`, `rollbackProcessMigration`
+
+### Alterado
+- **server.py**: Registo da nova rota `admin_process_migration_router`
+
 ## [2026-03-06] — Fase 1: Refatoração Arquitetural — Separação Cliente ↔ Processo
 
 ### Alterado

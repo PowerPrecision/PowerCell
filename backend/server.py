@@ -77,6 +77,7 @@ from routes.companies import router as companies_router
 from routes.portal_settings import router as portal_settings_router
 from routes.ai_analysis import router as ai_analysis_router
 from routes.announcements import router as announcements_router
+from routes.admin_process_migration import router as admin_process_migration_router
 
 # Configuração Sentry
 if SENTRY_DSN:
@@ -516,6 +517,7 @@ app.include_router(companies_router, prefix="/api")
 app.include_router(portal_settings_router, prefix="/api")
 app.include_router(ai_analysis_router, prefix="/api")
 app.include_router(announcements_router, prefix="/api")
+app.include_router(admin_process_migration_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():

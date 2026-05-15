@@ -52,6 +52,7 @@ graph TB
             TempLinksR["/upload, /download<br/>(Links Temporários)"]
             WSR["/ws<br/>(WebSocket Endpoint)"]
             AdminR["/admin<br/>(Utilizadores, Impersonate)"]
+            AdminMigrationR["/admin/process-migration<br/>(Migração Fase 1: Cliente ↔ Processo)"]
             AuditR["/audit<br/>(Trilha de Auditoria)"]
             BackupR["/backup<br/>(Backups Automáticos)"]
             SyncDBR["/admin/sync-database<br/>(Prod→Dev Restore)"]
@@ -787,6 +788,7 @@ Componentes com suporte `embedded`:
 - `BackupsPage` — Backups da base de dados
 - `UnifiedLogsPage` — Logs unificados
 - `DiagnosticsPage` — Diagnósticos do sistema
+- `ProcessMigrationTab` — Migração Fase 1 (Separação Cliente ↔ Processo)
 
 ---
 

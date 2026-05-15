@@ -49,7 +49,7 @@ import {
   // Compliance
   ShieldCheck, Scale, ClipboardList,
   // Técnico
-  Shield, AlertTriangle, Database, Brain, Activity
+  Shield, AlertTriangle, Database, Brain, Activity, ArrowRightLeft
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { hasRole } from "../utils/roleUtils";
@@ -80,6 +80,7 @@ import UnifiedLogsPage from "./UnifiedLogsPage";
 import DiagnosticsPage from "./DiagnosticsPage";
 import AIConfigPage from "./AIConfigPage";
 import BackgroundJobsPage from "./BackgroundJobsPage";
+import ProcessMigrationTab from "../components/admin/ProcessMigrationTab";
 
 const SystemAdminPanel = () => {
   const navigate = useNavigate();
@@ -359,6 +360,11 @@ const SystemAdminPanel = () => {
                       <span className="hidden sm:inline">Processos BG</span>
                       <span className="sm:hidden">BG Jobs</span>
                     </TabsTrigger>
+                    <TabsTrigger value="migration" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                      <ArrowRightLeft className="h-4 w-4" />
+                      <span className="hidden sm:inline">Migração</span>
+                      <span className="sm:hidden">Migr</span>
+                    </TabsTrigger>
                   </TabsList>
                 </div>
 
@@ -397,6 +403,11 @@ const SystemAdminPanel = () => {
                 {/* Processos BG — BackgroundJobsPage em modo embedded */}
                 <TabsContent value="bg-jobs" className="mt-4">
                   <BackgroundJobsPage embedded={true} />
+                </TabsContent>
+
+                {/* Migração Fase 1 — Separação Cliente ↔ Processo */}
+                <TabsContent value="migration" className="mt-4">
+                  <ProcessMigrationTab embedded={true} />
                 </TabsContent>
               </Tabs>
             </TabsContent>
