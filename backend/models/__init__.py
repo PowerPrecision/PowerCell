@@ -3,8 +3,7 @@ from .auth import (
     UserCreate, UserUpdate
 )
 from .process import (
-    ProcessType, ProcessStatusEnum, ServiceTypeEnum,
-    PersonalData, Titular2Data, FinancialData, RealEstateData, CreditData,
+    ProcessType, ProcessStatus,
     ProcessCreate, ProcessUpdate, ProcessResponse, PublicClientRegistration
 )
 from .client import (

@@ -239,45 +239,23 @@ async def create_process_document(
     process_number = await get_next_process_number()
     process_ref = f"PROC-{process_number:04d}"
     
-    # Sanitizar email
-    clean_email = ""
-    if data.client_email:
-        clean_email = sanitize_email(data.client_email)
-    
-    # Construir documento
+    # Construir documento — modelo limpo (sem dados pessoais do cliente)
     process_doc = {
         "id": process_id,
         "process_number": process_number,
         "process_ref": process_ref,
-        "client_name": data.client_name,
-        "client_email": clean_email,
-        "client_phone": data.client_phone or "",
-        "status": data.status or "clientes_espera",
+        "client_id": data.client_id,
+        "status": "clientes_espera",
         "process_type": data.process_type or "credito_habitacao",
         "service_type": data.service_type or "completo",
-        "consultant_id": data.consultant_id or user.get("id"),
-        "mediador_id": data.mediador_id,
-        "priority": data.priority or "normal",
+        "value": data.value,
+        "loan_amount": data.loan_amount,
         "notes": data.notes or "",
-        "assigned_users": [],
-        "created_by": user.get("id"),
+        "is_active": True,
+        "documents": [],
+        "created_by": user.get("email", user.get("id")),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        # NOTA: history foi REMOVIDO do documento embebido
-        # O histórico agora é guardado na coleção dedicada 'history'
-        # através do serviço services/history.py
-        # Isto evita:
-        # - Limite de 16MB do documento MongoDB
-        # - Degradação de I/O com arrays grandes
-        # - Memory bloat nas listagens
-        # Dados estruturados (inicialmente vazios)
-        "personal_data": data.personal_data.model_dump() if data.personal_data else {},
-        "titular2_data": data.titular2_data.model_dump() if data.titular2_data else {},
-        "financial_data": data.financial_data.model_dump() if data.financial_data else {},
-        "property_data": data.property_data.model_dump() if data.property_data else {},
-        "credit_data": data.credit_data.model_dump() if data.credit_data else {},
-        "documents": [],
-        "tags": data.tags or [],
     }
     
     # Encriptar campos sensíveis antes de guardar
@@ -305,11 +283,17 @@ async def update_process_document(
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     changes = []
     
-    # Iterar sobre campos que podem ser actualizados
+    # Iterar sobre campos actualizáveis do modelo limpo
     updatable_fields = [
-        "client_name", "client_phone", "status", "process_type",
-        "service_type", "priority", "notes", "consultant_id", "mediador_id",
-        "tags"
+        "type", "process_type", "service_type", "status",
+        "value", "loan_amount", "interest_rate", "monthly_payment",
+        "loan_term_years", "bank_assigned", "honorarios", "comissao_banco",
+        "capital_proprio", "bank_approval_date", "bank_approval_notes",
+        "valuation_value", "valuation_date", "valuation_bank",
+        "assigned_consultor_id", "assigned_mediador_id",
+        "assigned_indexacao_id", "assigned_parceiro_id",
+        "has_property", "notes", "prioridade", "is_active",
+        "source", "s3_folder", "monitored_emails",
     ]
     
     for field in updatable_fields:
@@ -323,49 +307,25 @@ async def update_process_document(
                 "new": value
             })
     
-    # Email precisa de sanitização
-    if data.client_email is not None:
-        clean_email = sanitize_email(data.client_email)
-        if clean_email != process.get("client_email"):
-            update_data["client_email"] = clean_email
-            changes.append({
-                "field": "client_email",
-                "old": process.get("client_email"),
-                "new": clean_email
-            })
+    # Co-compradores e contrapartes (listas — substituição completa)
+    for list_field in ["co_buyers", "co_applicants", "vendedor", "mediador"]:
+        value = getattr(data, list_field, None)
+        if value is not None:
+            update_data[list_field] = value
+            changes.append({"field": list_field, "old": "...", "new": "atualizado"})
     
-    # Dados estruturados — merge com dados existentes para evitar sobreposição
-    if data.personal_data:
-        incoming = data.personal_data.model_dump(exclude_unset=True, exclude_none=True)
-        existing = process.get("personal_data") or {}
-        update_data["personal_data"] = {**existing, **incoming}
-        changes.append({"field": "personal_data", "old": "...", "new": "atualizado"})
-        
-    if data.titular2_data:
-        incoming = data.titular2_data.model_dump(exclude_unset=True, exclude_none=True)
-        existing = process.get("titular2_data") or {}
-        update_data["titular2_data"] = {**existing, **incoming}
-        changes.append({"field": "titular2_data", "old": "...", "new": "atualizado"})
-        
-    if data.financial_data:
-        incoming = data.financial_data.model_dump(exclude_unset=True, exclude_none=True)
-        existing = process.get("financial_data") or {}
-        update_data["financial_data"] = {**existing, **incoming}
-        changes.append({"field": "financial_data", "old": "...", "new": "atualizado"})
-        
-    if data.real_estate_data:
-        incoming = data.real_estate_data.model_dump(exclude_unset=True, exclude_none=True)
-        existing = process.get("real_estate_data") or {}
-        update_data["real_estate_data"] = {**existing, **incoming}
-        changes.append({"field": "real_estate_data", "old": "...", "new": "atualizado"})
-        
-    if data.credit_data:
-        incoming = data.credit_data.model_dump(exclude_unset=True, exclude_none=True)
-        existing = process.get("credit_data") or {}
-        update_data["credit_data"] = {**existing, **incoming}
-        changes.append({"field": "credit_data", "old": "...", "new": "atualizado"})
+    # Documentos e OneDrive
+    for doc_field in ["documents", "onedrive_links"]:
+        value = getattr(data, doc_field, None)
+        if value is not None:
+            update_data[doc_field] = value
+            changes.append({"field": doc_field, "old": "...", "new": "atualizado"})
     
-    return update_data, changes
+    # Labels (lista — substituição completa)
+    if data.labels is not None:
+        update_data["labels"] = data.labels
+        changes.append({"field": "labels", "old": "...", "new": "atualizado"})
+
 
 
 # ==== QUERIES COMUNS ====
