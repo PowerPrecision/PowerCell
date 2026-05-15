@@ -79,10 +79,12 @@ from routes.ai_analysis import router as ai_analysis_router
 from routes.announcements import router as announcements_router
 try:
     from routes.admin_process_migration import router as admin_process_migration_router
-except ImportError as e:
+    _admin_process_migration_import_error = None
+except Exception as e:
     import logging as _mig_log
-    _mig_log.getLogger(__name__).error(f"⚠️ Falha ao importar admin_process_migration: {e}")
+    _mig_log.getLogger(__name__).error(f"⚠️ Falha ao importar admin_process_migration: {type(e).__name__}: {e}")
     admin_process_migration_router = None
+    _admin_process_migration_import_error = f"{type(e).__name__}: {e}"
 
 # Configuração Sentry
 if SENTRY_DSN:
@@ -524,6 +526,19 @@ app.include_router(ai_analysis_router, prefix="/api")
 app.include_router(announcements_router, prefix="/api")
 if admin_process_migration_router:
     app.include_router(admin_process_migration_router, prefix="/api")
+else:
+    # Rota de diagnóstico — se o import falhou, esta rota explica o porquê
+    _diag_router = APIRouter(prefix="/admin/process-migration", tags=["Admin Process Migration (Diagnostic)"])
+
+    @_diag_router.get("/status")
+    async def migration_diagnostic():
+        return {
+            "error": "O módulo admin_process_migration falhou ao importar",
+            "import_error": _admin_process_migration_import_error,
+            "hint": "Verifique os logs do servidor para detalhes do erro de importação"
+        }
+
+    app.include_router(_diag_router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
