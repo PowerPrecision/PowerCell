@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from database import db
 from models.client import (
     Client, ClientCreate, ClientUpdate, 
-    ClientContact, ClientPersonalData, ClientFinancialData,
+    ClientContact, ClientPersonalData,
     find_or_create_client_key
 )
 from services.auth import get_current_user, require_roles, get_effective_role
@@ -1232,10 +1232,6 @@ async def update_client(
         update_dict["contacto"] = sanitized_contacto
     if sanitized_dados_pessoais:
         update_dict["dados_pessoais"] = sanitized_dados_pessoais
-    if client_data.dados_financeiros:
-        incoming_financeiros = client_data.dados_financeiros.model_dump(exclude_unset=True)
-        existing_financeiros = client.get("dados_financeiros") or {}
-        update_dict["dados_financeiros"] = {**existing_financeiros, **incoming_financeiros}
     if client_data.tags is not None:
         update_dict["tags"] = client_data.tags
     if sanitized_notas is not None:
