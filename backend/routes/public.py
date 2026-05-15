@@ -113,8 +113,9 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         )
 
     # Verificar se já existe cliente com o mesmo NIF
-    raw_nif = data.personal_data.nif if data.personal_data else None
-    clean_nif = sanitize_nif(raw_nif) if raw_nif else None
+    # NOTA: NIF já não vem no PublicClientRegistration (removido na Fase 1)
+    # O NIF será recolhido depois pelo consultor durante o processo
+    clean_nif = None
     if clean_nif:
         # Usar blind index (nif_hash) para dados encriptados, fallback para plain text
         nif_hash = generate_nif_hash(clean_nif)
@@ -153,47 +154,19 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     now = datetime.now(timezone.utc).isoformat()
     
     # Processar dados do formulário
-    real_estate_data = data.real_estate_data.model_dump() if data.real_estate_data else {}
-    has_property = bool(real_estate_data.get("ja_tem_imovel") or real_estate_data.get("has_property"))
+    has_property = data.has_property or False
     
-    personal_data = data.personal_data.model_dump() if data.personal_data else {}
+    personal_data = {
+        "nome": clean_name,
+        "email": clean_email,
+        "telefone": clean_phone,
+    }
     
-    # Garantir que campos críticos ficam também em personal_data para consistência
-    if clean_email and not personal_data.get("email"):
-        personal_data["email"] = clean_email
-    if clean_name and not personal_data.get("nome"):
-        personal_data["nome"] = clean_name
-    if clean_phone and not personal_data.get("telefone"):
-        personal_data["telefone"] = clean_phone
-    
-    # Sanitizar campos de texto no personal_data
-    for text_field in ["nome", "naturalidade", "nacionalidade", "profissao", "empresa"]:
-        if personal_data.get(text_field):
-            personal_data[text_field] = sanitize_string(personal_data[text_field], max_length=200)
-    
-    birth_date = personal_data.get("birth_date")
+    birth_date = None  # Não recolhido no formulário público
     idade_menos_35 = False
     
-    if birth_date:
-        try:
-            birth = datetime.strptime(birth_date, "%Y-%m-%d")
-            age = (datetime.now() - birth).days // 365
-            idade_menos_35 = age < 35
-        except (ValueError, TypeError):
-            pass
-    
-    # Verificar se checkbox menor_35_anos foi marcado
-    if personal_data.get("menor_35_anos"):
-        idade_menos_35 = True
-    
-    # Obter nome do segundo titular se existir
-    titular2_data_dict = data.titular2_data.model_dump() if data.titular2_data else None
+    # Segundo titular já não vem no formulário (removido Titular2Data)
     second_client_name = None
-    if titular2_data_dict:
-        second_client_name = titular2_data_dict.get("nome") or titular2_data_dict.get("name")
-        # Sanitizar nome do segundo titular
-        if second_client_name:
-            second_client_name = sanitize_name(second_client_name)
     
     # =========================================
     # CRIAR FICHA DE CLIENTE (tabela clients)
@@ -207,14 +180,12 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             "telefone": clean_phone
         },
         "dados_pessoais": personal_data,
-        "dados_financeiros": data.financial_data.model_dump() if data.financial_data else {},
-        "dados_imobiliarios": real_estate_data,  # Novo campo para dados do imóvel
-        "titular2_data": titular2_data_dict,
+        "dados_financeiros": {},  # Dados financeiros pertencem ao Processo
+        "dados_imobiliarios": {},  # Dados do imóvel recolhidos depois
         "process_ids": [],  # Vazio até ser criado o processo
         "fonte": "public_form",
         "has_property": has_property,
         "idade_menos_35": idade_menos_35,
-        "second_client_name": second_client_name,
         "created_at": now,
         "updated_at": now,
         "registration_completed": True,  # Marcar que completou o registo

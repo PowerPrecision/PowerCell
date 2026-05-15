@@ -508,17 +508,6 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     process_number = await get_next_process_number()
     now = datetime.now(timezone.utc).isoformat()
     
-    # Processar personal_data e garantir que email está incluído
-    personal_data = data.personal_data.model_dump() if data.personal_data else {}
-    if user.get("email") and not personal_data.get("email"):
-        personal_data["email"] = sanitize_email(user["email"])
-    if user.get("name") and not personal_data.get("nome"):
-        personal_data["nome"] = sanitize_name(user["name"])
-    if user.get("phone") and not personal_data.get("telefone"):
-        sanitized_phone = sanitize_phone(user.get("phone"))
-        if sanitized_phone:
-            personal_data["telefone"] = sanitized_phone
-    
     # Construir documento do processo
     sanitized_client_name = sanitize_name(user["name"])
     sanitized_client_email = sanitize_email(user["email"])
@@ -531,8 +520,6 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         "process_type": data.process_type,
         "status": initial_status,
         "is_active": True,  # Novos processos são ativos por defeito
-        "personal_data": personal_data,
-        "financial_data": data.financial_data.model_dump() if data.financial_data else None,
         "real_estate_data": None,
         "credit_data": None,
         "assigned_consultor_id": None,
@@ -635,34 +622,11 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     process_number = await get_next_process_number()
     now = datetime.now(timezone.utc).isoformat()
     
-    # Extrair nome e email dos dados pessoais - garantir que o nome é sempre preenchido
-    personal = data.personal_data.model_dump() if data.personal_data else {}
-    # Tentar várias fontes para o nome do cliente
-    raw_client_name = (
-        personal.get("nome_completo") or 
-        personal.get("nome") or 
-        data.client_name or 
-        personal.get("name") or
-        None  # Se não houver nome, vamos extrair do email
-    )
-    # Se ainda não temos nome, extrair do email (parte antes do @)
-    client_email = sanitize_email(personal.get("email") or data.client_email or "")
-    client_name = None
-    if raw_client_name:
-        client_name = sanitize_name(raw_client_name)
-    if not client_name and client_email:
-        # Extrair nome do email: "joao.silva@example.com" -> "Joao Silva"
-        email_name = client_email.split("@")[0]
-        # Converter separadores comuns em espaços e capitalizar
-        client_name = email_name.replace(".", " ").replace("_", " ").replace("-", " ").title()
-    elif not client_name:
-        # Último recurso: usar "Cliente" com timestamp para evitar duplicados
-        client_name = f"Cliente {datetime.now().strftime('%Y%m%d%H%M%S')}"
-    
-    raw_phone = personal.get("telefone") or personal.get("phone") or ""
-    client_phone = sanitize_phone(raw_phone)
-    raw_nif = personal.get("nif")
-    client_nif = sanitize_nif(raw_nif)
+    # Inicializar dados do cliente (serão preenchidos a partir do registo do cliente)
+    client_name = ""
+    client_email = ""
+    client_phone = ""
+    client_nif = None
     
     # ============================================================
     # VERIFICAR/CRIAR CLIENTE NA TABELA CLIENTS
@@ -689,7 +653,6 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         nif_val = decrypted.get("dados_pessoais", {}).get("nif", "")
         if nif_val:
             client_nif = nif_val
-            personal["nif"] = nif_val
         logger.info(f"Cliente existente usado via client_id: {client_id}")
     else:
         # Esta ramificação não deve ser alcançada devido à validação acima,
@@ -737,7 +700,6 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
             "dados_pessoais": {
                 "nif": client_nif,
                 "nome_completo": sanitize_name(client_name),
-                **{k: v for k, v in personal.items() if k not in ["nif", "email", "telefone", "phone"]}
             },
             "process_ids": [],  # Será atualizado após criar o processo
             "fonte": "staff_created",
@@ -767,8 +729,6 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         "process_type": data.process_type,
         "status": initial_status,
         "is_active": True,  # Novos processos são ativos por defeito
-        "personal_data": personal,
-        "financial_data": data.financial_data.model_dump() if data.financial_data else None,
         "real_estate_data": None,
         "credit_data": None,
         "created_at": now,
@@ -2185,68 +2145,8 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     if role == UserRole.CLIENTE:
         if process.get("client_id") != user["id"]:
             raise HTTPException(status_code=403, detail="Acesso negado")
-        if data.personal_data:
-            incoming_personal = data.personal_data.model_dump(exclude_unset=True, exclude_none=True)
-            _pd = process.get("personal_data")
-            existing_personal = _pd if isinstance(_pd, dict) else {}
-            merged_personal = {**existing_personal, **incoming_personal}
-            await log_data_changes(process_id, user, existing_personal, incoming_personal, "dados pessoais")
-            # Registar no audit trail enriquecido
-            await log_audit_event(process_id, user, "Alterou dados pessoais", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["personal_data"] = merged_personal
-        if data.financial_data:
-            incoming_financial = data.financial_data.model_dump(exclude_unset=True, exclude_none=True)
-            _fd = process.get("financial_data")
-            existing_financial = _fd if isinstance(_fd, dict) else {}
-            merged_financial = {**existing_financial, **incoming_financial}
-            await log_data_changes(process_id, user, existing_financial, incoming_financial, "dados financeiros")
-            await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["financial_data"] = merged_financial
     else:
         # Staff updates
-        if data.personal_data and can_update_personal:
-            personal_dict = data.personal_data.model_dump(exclude_unset=True, exclude_none=True)
-            _pd = process.get("personal_data")
-            existing_personal = _pd if isinstance(_pd, dict) else {}
-            merged_personal = {**existing_personal, **personal_dict}
-            logger.info(f"Updating personal_data for process {process_id} by {user.get('email')} (role={role}): {list(personal_dict.keys())}")
-            await log_data_changes(process_id, user, existing_personal, personal_dict, "dados pessoais")
-            await log_audit_event(process_id, user, "Alterou dados pessoais", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["personal_data"] = merged_personal
-            
-            # Actualizar client_name se nome_completo ou nome for fornecido
-            new_name = personal_dict.get("nome_completo") or personal_dict.get("nome")
-            if new_name:
-                sanitized_name = sanitize_name(new_name)
-                if not sanitized_name:
-                    raise HTTPException(status_code=400, detail="Nome do cliente inválido após sanitização")
-                update_data["client_name"] = sanitized_name
-
-            # Sincronizar personal_data.email → client_email para manter consistência
-            new_email = personal_dict.get("email")
-            if new_email:
-                sanitized_new_email = sanitize_email(new_email)
-                if sanitized_new_email:
-                    update_data["client_email"] = sanitized_new_email
-
-            # Sincronizar personal_data.nif → client_nif para manter consistência
-            new_nif = personal_dict.get("nif")
-            if new_nif:
-                sanitized_nif = sanitize_nif(new_nif)
-                if sanitized_nif:
-                    update_data["client_nif"] = sanitized_nif
-        elif not data.personal_data and not is_indexacao:
-            logger.debug(f"No personal_data in update for process {process_id} by {user.get('email')} (role={role})")
-        
-        if data.financial_data and can_update_financial:
-            incoming_financial = data.financial_data.model_dump(exclude_unset=True, exclude_none=True)
-            _fd = process.get("financial_data")
-            existing_financial = _fd if isinstance(_fd, dict) else {}
-            merged_financial = {**existing_financial, **incoming_financial}
-            await log_data_changes(process_id, user, existing_financial, incoming_financial, "dados financeiros")
-            await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["financial_data"] = merged_financial
-        
         if data.real_estate_data and can_update_real_estate:
             incoming_re = data.real_estate_data.model_dump(exclude_unset=True, exclude_none=True)
             _re = process.get("real_estate_data")
@@ -2278,22 +2178,6 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             await log_data_changes(process_id, user, existing_credit, incoming_credit, "dados de crédito")
             await log_audit_event(process_id, user, "Alterou dados de crédito", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["credit_data"] = merged_credit
-        
-        # 2º Titular (dados de co-proponente)
-        if data.titular2_data and can_update_personal:
-            incoming_t2 = data.titular2_data.model_dump(exclude_unset=True, exclude_none=True)
-            _t2 = process.get("titular2_data")
-            existing_t2 = _t2 if isinstance(_t2, dict) else {}
-            merged_t2 = {**existing_t2, **incoming_t2}
-            await log_data_changes(process_id, user, existing_t2, incoming_t2, "dados 2º titular")
-            await log_audit_event(process_id, user, "Alterou dados do 2º titular", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["titular2_data"] = merged_t2
-        
-        # Actualizar email e telefone do cliente
-        if data.client_email is not None:
-            update_data["client_email"] = sanitize_email(data.client_email)
-        if data.client_phone is not None:
-            update_data["client_phone"] = sanitize_phone(data.client_phone)
         
         # Campos adicionais do CPCV
         if data.co_buyers is not None:
@@ -2355,17 +2239,9 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     
     # === SYNC CLIENT DATA: Email/Phone/NIF changes must propagate to clients collection ===
     client_id = process.get("client_id")
-    if client_id and (data.client_email is not None or data.client_phone is not None or
-                      (update_data.get("client_nif") is not None)):
+    if client_id and (update_data.get("client_nif") is not None):
         client_update = {}
-        if data.client_email is not None:
-            sanitized_email = sanitize_email(data.client_email)
-            client_update["contacto.email"] = sanitized_email
-            from services.encryption import generate_email_hash
-            client_update["contacto.email_hash"] = generate_email_hash(sanitized_email)
-        if data.client_phone is not None:
-            client_update["contacto.telefone"] = sanitize_phone(data.client_phone)
-        # NIF sync: se client_nif foi atualizado (via personal_data.nif), propagar para clients
+        # NIF sync: se client_nif foi atualizado, propagar para clients
         if update_data.get("client_nif") is not None:
             # Obter valor desencriptado (update_data já pode estar encriptado neste ponto,
             # mas client_nif no update vem de sanitize_nif que retorna plaintext)
