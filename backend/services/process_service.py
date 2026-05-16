@@ -382,6 +382,155 @@ async def get_user_name(user_id: str) -> str:
     return user.get("name", "") if user else ""
 
 
+async def populate_client_data(process: dict) -> dict:
+    """
+    Popula o processo com dados do cliente (retrocompatibilidade Fase 2→3).
+
+    Lê o documento do cliente na coleção `clients` via client_id e injeta
+    os dados pessoais na estrutura antiga (personal_data, titular2_data,
+    financial_data) que o Frontend ainda espera.
+
+    Isto garante que o Frontend NÃO quebra durante a Fase 3 (refactor do FE).
+    Quando o FE for migrado, este helper deixa de ser necessário.
+
+    Args:
+        process: Documento do processo (já desencriptado)
+
+    Returns:
+        Processo com dados do cliente populados (cópia)
+    """
+    result = copy.deepcopy(process)
+    client_id = result.get("client_id")
+    if not client_id:
+        return result
+
+    # Buscar cliente na coleção clients
+    client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client_doc:
+        logger.warning(f"Cliente {client_id} não encontrado para processo {result.get('id')}")
+        return result
+
+    # Desencriptar dados do cliente
+    try:
+        from services.encryption import decrypt_client_data
+        client_doc = decrypt_client_data(client_doc)
+    except Exception as e:
+        logger.warning(f"Erro ao desencriptar dados do cliente {client_id}: {e}")
+
+    contacto = client_doc.get("contacto") or {}
+    dados_pessoais = client_doc.get("dados_pessoais") or {}
+
+    # ── Preencher campos de nível raiz (retrocompatibilidade) ──────────
+    result.setdefault("client_name", client_doc.get("nome", ""))
+    result.setdefault("client_email", contacto.get("email", ""))
+    result.setdefault("client_phone", contacto.get("telefone", ""))
+    result.setdefault("client_nif", dados_pessoais.get("nif", ""))
+
+    # ── Montar personal_data (estrutura antiga do Frontend) ────────────
+    # Só preencher se NÃO existir personal_data no processo
+    # (dados antigos no processo têm precedência — migração gradual)
+    if not result.get("personal_data") or not isinstance(result["personal_data"], dict):
+        result["personal_data"] = {}
+    pd = result["personal_data"]
+
+    # Preencher campos em falta com dados do cliente
+    pd.setdefault("nome", client_doc.get("nome", ""))
+    pd.setdefault("name", client_doc.get("nome", ""))
+    pd.setdefault("email", contacto.get("email", ""))
+    pd.setdefault("phone", contacto.get("telefone", ""))
+    pd.setdefault("telefone", contacto.get("telefone", ""))
+    pd.setdefault("nif", dados_pessoais.get("nif", ""))
+    pd.setdefault("documento_id", dados_pessoais.get("documento_id", ""))
+    pd.setdefault("data_nascimento", dados_pessoais.get("data_nascimento", ""))
+    pd.setdefault("birth_date", dados_pessoais.get("birth_date", dados_pessoais.get("data_nascimento", "")))
+    pd.setdefault("morada_fiscal", dados_pessoais.get("morada_fiscal", ""))
+    pd.setdefault("estado_civil", dados_pessoais.get("estado_civil", ""))
+    pd.setdefault("profissao", dados_pessoais.get("profissao", ""))
+    pd.setdefault("nacionalidade", dados_pessoais.get("nacionalidade", ""))
+    pd.setdefault("naturalidade", dados_pessoais.get("naturalidade", ""))
+    pd.setdefault("sexo", dados_pessoais.get("sexo", ""))
+    pd.setdefault("nome_pai", dados_pessoais.get("nome_pai", ""))
+    pd.setdefault("nome_mae", dados_pessoais.get("nome_mae", ""))
+    pd.setdefault("data_validade_cc", dados_pessoais.get("data_validade_cc", ""))
+    pd.setdefault("menor_35_anos", dados_pessoais.get("menor_35_anos"))
+    pd.setdefault("altura", dados_pessoais.get("altura", ""))
+
+    # ── Montar titular2_data (se existir no cliente) ───────────────────
+    if not result.get("titular2_data"):
+        result["titular2_data"] = client_doc.get("titular2_data", {})
+
+    # ── Montar financial_data (vazio — dados financeiros estão no processo) ──
+    if not result.get("financial_data"):
+        result["financial_data"] = {}
+
+    return result
+
+
+def extract_client_updates_from_body(body: dict) -> dict:
+    """
+    Extrai campos de dados pessoais do body do update (PUT).
+
+    Na Fase 2, o Frontend ainda pode enviar dados pessoais no update do
+    processo. Esta função separa os campos que pertencem ao Cliente
+    daqueles que pertencem ao Processo.
+
+    Args:
+        body: Body raw do pedido PUT
+
+    Returns:
+        Dict com campos a atualizar no cliente (formato MongoDB $set)
+    """
+    client_updates = {}
+
+    # personal_data → dados_pessoais do cliente
+    pd = body.get("personal_data")
+    if isinstance(pd, dict):
+        dp_updates = {}
+        field_map = {
+            "nif": "nif",
+            "documento_id": "documento_id",
+            "data_nascimento": "data_nascimento",
+            "birth_date": "data_nascimento",
+            "morada_fiscal": "morada_fiscal",
+            "estado_civil": "estado_civil",
+            "profissao": "profissao",
+            "nacionalidade": "nacionalidade",
+            "naturalidade": "naturalidade",
+            "sexo": "sexo",
+            "nome_pai": "nome_pai",
+            "nome_mae": "nome_mae",
+            "data_validade_cc": "data_validade_cc",
+            "phone": "telefone",
+            "telefone": "telefone",
+        }
+        for src_key, dst_key in field_map.items():
+            val = pd.get(src_key)
+            if val is not None:
+                dp_updates[dst_key] = val
+
+        if dp_updates:
+            for k, v in dp_updates.items():
+                client_updates[f"dados_pessoais.{k}"] = v
+
+        # Nome do cliente
+        nome = pd.get("nome") or pd.get("name")
+        if nome:
+            client_updates["nome"] = nome
+            client_updates["dados_pessoais.nome_completo"] = nome
+
+        # Email
+        email = pd.get("email")
+        if email:
+            client_updates["contacto.email"] = email.lower().strip()
+
+    # titular2_data → titular2_data do cliente
+    t2 = body.get("titular2_data")
+    if isinstance(t2, dict):
+        client_updates["titular2_data"] = t2
+
+    return client_updates
+
+
 # ==== FUNÇÕES DE ENCRIPTAÇÃO ====
 
 def _add_process_blind_indexes(data: dict) -> None:

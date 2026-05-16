@@ -65,6 +65,8 @@ from services.process_service import (
     encrypt_sensitive_data,
     decrypt_sensitive_data,
     decrypt_processes_list,
+    populate_client_data,
+    extract_client_updates_from_body,
     PROCESS_LIST_PROJECTION,
     PROCESS_KANBAN_PROJECTION,
     PROCESS_MY_CLIENTS_PROJECTION,
@@ -477,27 +479,35 @@ async def send_magic_link_email(
 @router.post("", response_model=ProcessResponse)
 async def create_process(data: ProcessCreate, user: dict = Depends(get_current_user)):
     """
-    Criar um novo processo.
-    
-    Este endpoint é utilizado quando um cliente autenticado
-    submete um novo pedido de crédito/imobiliário.
-    
+    Criar um novo processo (endpoint para clientes autenticados).
+
+    FASE 2 — Refatoração relacional:
+    - Recebe client_id em vez de dados pessoais embutidos
+    - Valida que o cliente existe na coleção `clients` (HTTP 404 se não)
+    - Após criar o processo, atualiza o array process_ids do cliente
+
     NOTA: Para registos públicos (sem autenticação),
     utilize o endpoint /api/public/register
-    
+
     Args:
-        data: Dados do processo (tipo, dados pessoais, financeiros)
+        data: Dados do processo (process_type + client_id obrigatório)
         user: Utilizador autenticado (deve ser cliente)
-    
+
     Returns:
-        ProcessResponse: Processo criado
-    
-    Raises:
-        HTTPException 403: Se não for cliente
+        ProcessResponse: Processo criado com dados do cliente populados
     """
     # Apenas clientes podem criar processos por este endpoint
     if user["role"] != UserRole.CLIENTE:
         raise HTTPException(status_code=403, detail="Apenas clientes podem criar processos")
+    
+    # ── FASE 2: Validar que o client_id existe ──────────────────────────
+    client_doc = await db.clients.find_one({"id": data.client_id})
+    if not client_doc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Cliente com ID '{data.client_id}' não encontrado. "
+                   "O processo deve estar associado a um cliente existente."
+        )
     
     # Obter o primeiro estado do workflow (Clientes em Espera)
     first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
@@ -508,18 +518,19 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     process_number = await get_next_process_number()
     now = datetime.now(timezone.utc).isoformat()
     
-    # Construir documento do processo
-    sanitized_client_name = sanitize_name(user["name"])
-    sanitized_client_email = sanitize_email(user["email"])
+    # Desencriptar dados do cliente para popular o processo
+    decrypted_client = decrypt_client_data(client_doc)
+    client_name = decrypted_client.get("nome", "")
+    client_email = decrypted_client.get("contacto", {}).get("email", "")
+    
+    # Construir documento do processo — SEM dados pessoais do cliente
     process_doc = {
         "id": process_id,
         "process_number": process_number,
-        "client_id": user["id"],
-        "client_name": sanitized_client_name,
-        "client_email": sanitized_client_email,
+        "client_id": data.client_id,
         "process_type": data.process_type,
         "status": initial_status,
-        "is_active": True,  # Novos processos são ativos por defeito
+        "is_active": True,
         "real_estate_data": None,
         "credit_data": None,
         "assigned_consultor_id": None,
@@ -534,6 +545,16 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     # Inserir na base de dados
     await db.processes.insert_one(process_doc)
     
+    # ── FASE 2: Atualizar process_ids do cliente ($push) ────────────────
+    await db.clients.update_one(
+        {"id": data.client_id},
+        {
+            "$addToSet": {"process_ids": process_id},
+            "$set": {"updated_at": now}
+        }
+    )
+    logger.info(f"Processo {process_id} criado e associado ao cliente {data.client_id}")
+    
     # === CACHE INVALIDATION: Novo processo afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
     
@@ -545,7 +566,7 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         event_type=WSEventType.PROCESS_CREATED,
         process_id=process_id,
         process_number=process_number,
-        client_name=sanitized_client_name,
+        client_name=client_name,
         status=initial_status,
         process_type=data.process_type,
         updated_at=now
@@ -554,12 +575,13 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     # Notificar administradores e CEO (com verificação de preferências)
     await send_to_admins(
         "Novo Processo Criado",
-        f"O cliente {user['name']} criou um novo processo de {data.process_type}.",
+        f"O cliente {client_name} criou um novo processo de {data.process_type}.",
         notification_type="new_process"
     )
     
-    # Desencriptar para a resposta
+    # Desencriptar para a resposta e popular com dados do cliente (retrocompatibilidade)
     response_doc = decrypt_sensitive_data(process_doc)
+    response_doc = await populate_client_data(response_doc)
     return ProcessResponse(**{k: v for k, v in response_doc.items() if k != "_id"})
 
 
@@ -1989,20 +2011,22 @@ async def get_dsti_high_risk_processes(
 async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     """Obtém os detalhes completos de um processo.
 
+    FASE 2 — Refatoração relacional:
+    - Lê o processo da coleção `processes`
+    - Via client_id, busca os dados pessoais na coleção `clients`
+    - Junta (popula) personal_data, titular2_data, financial_data
+      dinamicamente na resposta para retrocompatibilidade com o Frontend
+
     Verifica permissões de visualização (can_view_process) antes de
     devolver os dados. Dados sensíveis (NIF, telefone, email do cliente)
     são desencriptados antes da resposta.
-
-    Porquê a verificação de permissões: um intermediário só pode ver
-    processos que lhe estão atribuídos, enquanto um admin pode ver
-    todos os processos.
 
     Args:
         process_id: ID do processo.
         user: Utilizador autenticado (injetado).
 
     Returns:
-        ProcessResponse: Dados completos do processo (desencriptados).
+        ProcessResponse: Dados completos do processo (desencriptados + cliente populado).
 
     Raises:
         HTTPException(404): Se processo não encontrado.
@@ -2015,22 +2039,13 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     if not can_view_process(user, process):
         raise HTTPException(status_code=403, detail="Acesso negado")
     
-    # Desencriptar dados sensíveis
+    # Desencriptar dados sensíveis do processo
     process = decrypt_sensitive_data(process)
     
-    # Auto-sync: se personal_data.email existe mas client_email está vazio, sincronizar
-    pd = process.get("personal_data") or {}
-    pd_email = pd.get("email", "").strip() if pd.get("email") else ""
-    current_client_email = process.get("client_email", "").strip() if process.get("client_email") else ""
-    if pd_email and not current_client_email:
-        sanitized = sanitize_email(pd_email)
-        if sanitized:
-            await db.processes.update_one(
-                {"id": process_id},
-                {"$set": {"client_email": sanitized}}
-            )
-            process["client_email"] = sanitized
-            logger.info(f"Auto-sync: client_email atualizado para '{sanitized}' no processo {process_id}")
+    # ── FASE 2: Popular dados do cliente (retrocompatibilidade) ──────────
+    # Buscar cliente na coleção clients via client_id e injetar
+    # personal_data, titular2_data, financial_data na resposta
+    process = await populate_client_data(process)
     
     return ProcessResponse(**process)
 
@@ -2069,6 +2084,13 @@ async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_
 async def update_process(process_id: str, data: ProcessUpdate, request: Request, user: dict = Depends(get_current_user)):
     """Atualiza os dados de um processo existente com controlo de acesso por role.
 
+    FASE 2 — Refatoração relacional:
+    - Dados de NEGÓCIO (status, imobiliário, crédito, atribuições) → coleção `processes`
+    - Dados PESSOAIS (personal_data, titular2_data) → coleção `clients`
+    - Se o Frontend envia dados pessoais no body, são extraídos e aplicados
+      ao cliente via `extract_client_updates_from_body()`
+    - A resposta final é populada com dados do cliente (retrocompatibilidade)
+
     Este endpoint implementa controlo granular de edição por role:
     - **Admin/CEO**: Podem editar todos os campos.
     - **Consultor/Diretor**: Podem editar dados pessoais, imóvel e crédito.
@@ -2089,7 +2111,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         user: Utilizador autenticado (injetado).
 
     Returns:
-        ProcessResponse: Processo atualizado (desencriptado).
+        ProcessResponse: Processo atualizado (desencriptado + cliente populado).
 
     Raises:
         HTTPException(404): Se processo não encontrado.
@@ -2113,12 +2135,87 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     # Extrair campos opcionais do body para auditoria (não são parte do modelo ProcessUpdate)
     audit_reason = None
     ai_suggested = False
+    raw_body = {}
     try:
-        body = await request.json()
-        audit_reason = body.get("audit_reason")
-        ai_suggested = bool(body.get("ai_suggested", False))
+        raw_body = await request.json()
+        audit_reason = raw_body.get("audit_reason")
+        ai_suggested = bool(raw_body.get("ai_suggested", False))
     except Exception:
         pass
+    
+    # ── FASE 2: Extrair dados pessoais do body e aplicar ao cliente ──────
+    # O Frontend ainda envia personal_data/titular2_data no PUT.
+    # Extraímos esses campos e atualizamos a coleção `clients` em vez de `processes`.
+    client_id = process.get("client_id")
+    client_updates = extract_client_updates_from_body(raw_body)
+    if client_updates and client_id:
+        # Gerar blind indexes para NIF/email se foram atualizados
+        if "dados_pessoais.nif" in client_updates:
+            nif_val = client_updates["dados_pessoais.nif"]
+            nif_hash = generate_nif_hash(nif_val)
+            if nif_hash:
+                client_updates["dados_pessoais.nif_hash"] = nif_hash
+        if "contacto.email" in client_updates:
+            email_val = client_updates["contacto.email"]
+            email_hash = generate_email_hash(email_val)
+            if email_hash:
+                client_updates["contacto.email_hash"] = email_hash
+        
+        # Encriptar dados sensíveis do cliente antes de guardar
+        try:
+            from services.encryption import encrypt_client_data
+            # Construir doc temporário para encriptação seletiva
+            temp_client_update = {}
+            for k, v in client_updates.items():
+                if k.startswith("dados_pessoais."):
+                    if "dados_pessoais" not in temp_client_update:
+                        temp_client_update["dados_pessoais"] = {}
+                    temp_client_update["dados_pessoais"][k.replace("dados_pessoais.", "")] = v
+                elif k.startswith("contacto."):
+                    if "contacto" not in temp_client_update:
+                        temp_client_update["contacto"] = {}
+                    temp_client_update["contacto"][k.replace("contacto.", "")] = v
+                else:
+                    temp_client_update[k] = v
+            
+            encrypted = encrypt_client_data(temp_client_update)
+            # Reconverter para formato dot-notation
+            final_client_updates = {}
+            for k, v in client_updates.items():
+                if k.startswith("dados_pessoais.") and "dados_pessoais" in encrypted:
+                    field = k.replace("dados_pessoais.", "")
+                    if field in encrypted["dados_pessoais"]:
+                        final_client_updates[k] = encrypted["dados_pessoais"][field]
+                    else:
+                        final_client_updates[k] = v
+                elif k.startswith("contacto.") and "contacto" in encrypted:
+                    field = k.replace("contacto.", "")
+                    if field in encrypted["contacto"]:
+                        final_client_updates[k] = encrypted["contacto"][field]
+                    else:
+                        final_client_updates[k] = v
+                elif k in encrypted:
+                    final_client_updates[k] = encrypted[k]
+                else:
+                    final_client_updates[k] = v
+            
+            # Adicionar hash indexes que não precisam de encriptação
+            if "dados_pessoais.nif_hash" in client_updates:
+                final_client_updates["dados_pessoais.nif_hash"] = client_updates["dados_pessoais.nif_hash"]
+            if "contacto.email_hash" in client_updates:
+                final_client_updates["contacto.email_hash"] = client_updates["contacto.email_hash"]
+            
+            client_updates = final_client_updates
+        except Exception as e:
+            logger.warning(f"Erro ao encriptar dados do cliente: {e}")
+        
+        now_iso = datetime.now(timezone.utc).isoformat()
+        client_updates["updated_at"] = now_iso
+        await db.clients.update_one(
+            {"id": client_id},
+            {"$set": client_updates}
+        )
+        logger.info(f"Dados pessoais do cliente {client_id} atualizados via PUT processo: {list(client_updates.keys())}")
     
     # Indexação só pode actualizar dados financeiros (restante é bloqueado mais abaixo)
     is_indexacao = role == UserRole.INDEXACAO
@@ -2146,7 +2243,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         if process.get("client_id") != user["id"]:
             raise HTTPException(status_code=403, detail="Acesso negado")
     else:
-        # Staff updates
+        # Staff updates — APENAS dados de negócio (não dados pessoais)
         if data.real_estate_data and can_update_real_estate:
             incoming_re = data.real_estate_data.model_dump(exclude_unset=True, exclude_none=True)
             _re = process.get("real_estate_data")
@@ -2193,7 +2290,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         if data.monitored_emails is not None:
             update_data["monitored_emails"] = data.monitored_emails
         
-        # Metadados do processo (Fase 3)
+        # Metadados do processo
         if data.notes is not None:
             update_data["notes"] = data.notes
         if data.prioridade is not None:
@@ -2237,38 +2334,6 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
-    # === SYNC CLIENT DATA: Email/Phone/NIF changes must propagate to clients collection ===
-    client_id = process.get("client_id")
-    if client_id and (update_data.get("client_nif") is not None):
-        client_update = {}
-        # NIF sync: se client_nif foi atualizado, propagar para clients
-        if update_data.get("client_nif") is not None:
-            # Obter valor desencriptado (update_data já pode estar encriptado neste ponto,
-            # mas client_nif no update vem de sanitize_nif que retorna plaintext)
-            # O client_nif em update_data ainda é plaintext aqui porque encrypt_sensitive_data
-            # já foi chamado, mas vamos usar o valor que sabemos estar correto
-            nif_val = update_data.get("client_nif")
-            # Se está encriptado, desencriptar; caso contrário usar diretamente
-            if isinstance(nif_val, str) and nif_val.startswith("ENC:"):
-                from services.encryption import encryption_service
-                try:
-                    nif_val = encryption_service.decrypt(nif_val)
-                except Exception:
-                    nif_val = None
-            if nif_val:
-                client_update["dados_pessoais.nif"] = nif_val
-                from services.encryption import generate_nif_hash
-                nif_hash = generate_nif_hash(nif_val)
-                if nif_hash:
-                    client_update["dados_pessoais.nif_hash"] = nif_hash
-        
-        if client_update:
-            await db.clients.update_one(
-                {"id": client_id},
-                {"$set": client_update}
-            )
-            logger.info(f"Sincronizados dados de contacto para cliente {client_id}: {list(client_update.keys())}")
-    
     # === CACHE INVALIDATION: Actualização de processo pode alterar KPIs ===
     # Invalidar apenas se houve mudança de status (afeta contadores)
     if data.status:
@@ -2306,6 +2371,9 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     except Exception as e:
         logger.error(f"Erro ao desencriptar dados do processo {process_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Erro interno ao desencriptar dados do processo")
+    
+    # ── FASE 2: Popular dados do cliente na resposta (retrocompatibilidade) ──
+    updated = await populate_client_data(updated)
     
     # Sincronizar com Trello (nome e descrição do card)
     await sync_process_to_trello(updated)
