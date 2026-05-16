@@ -11,13 +11,25 @@ Permissões:
 """
 
 import logging
+import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from database import db
 from models.auth import UserRole
+from models.finance import (
+    FinanceConfigCreate as FinanceConfigCreateSchema,
+    FinanceConfigUpdate as FinanceConfigUpdateSchema,
+    FinanceConfigResponse,
+    ProcessFinanceCreate,
+    ProcessFinanceUpdate,
+    ProcessFinanceResponse,
+    ProcessFinanceSummary,
+    FeeType,
+    FinanceStatus,
+)
 from services.auth import get_current_user, require_roles
 
 
@@ -247,8 +259,8 @@ def _calc_area_metrics(processes: list, area: str, config: dict) -> dict:
 # CONFIG ENDPOINTS
 # ====================================================================
 
-class FinanceConfigUpdate(BaseModel):
-    """Schema para actualizar as configurações financeiras."""
+class DashboardFinanceConfigUpdate(BaseModel):
+    """Schema para actualizar as configurações financeiras (dashboard legacy)."""
     imobiliaria: Optional[dict] = Field(None, description="Configurações da área de Imobiliária")
     credito: Optional[dict] = Field(None, description="Configurações da área de Crédito")
 
@@ -274,7 +286,7 @@ async def get_finance_config(
 
 @router.put("/finance/config")
 async def update_finance_config(
-    body: FinanceConfigUpdate,
+    body: DashboardFinanceConfigUpdate,
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
@@ -702,3 +714,502 @@ async def get_finance_performance(
             "cred_lucro": _calc_variation(current["cred_lucro"], previous["cred_lucro"]),
         },
     }
+
+
+# ====================================================================
+# NEW CRUD: FinanceConfig (collection: finance_configs)
+# ====================================================================
+
+def _doc_to_config_response(doc: dict) -> dict:
+    """Converte documento MongoDB para resposta FinanceConfig (remove _id)."""
+    if doc is None:
+        return {}
+    doc.pop("_id", None)
+    return doc
+
+
+@router.post("/finance/configs")
+async def create_finance_config(
+    body: FinanceConfigCreateSchema,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Cria uma configuração financeira para uma empresa.
+
+    Verifica se já existe uma configuração para o company_id fornecido
+    antes de criar (uma config por empresa).
+
+    Permissões: apenas Admin e CEO.
+    """
+    # Verificar duplicado: uma config por company_id
+    existing = await db.finance_configs.find_one({"company_id": body.company_id})
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Já existe uma configuração financeira para a empresa '{body.company_id}'. "
+                   f"Use PUT /finance/configs/{{config_id}} para actualizar.",
+        )
+
+    config_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    doc = {
+        "id": config_id,
+        "company_id": body.company_id,
+        "fee_type": body.fee_type,
+        "default_value": body.default_value,
+        "tax_rate": body.tax_rate,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await db.finance_configs.insert_one(doc)
+
+    logger.info(
+        f"FinanceConfig criada: id={config_id}, company_id={body.company_id}, "
+        f"fee_type={body.fee_type}, por {user.get('email', 'unknown')}"
+    )
+
+    return _doc_to_config_response(doc)
+
+
+@router.get("/finance/configs")
+async def list_finance_configs(
+    company_id: Optional[str] = Query(None, description="Filtrar por company_id"),
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
+):
+    """
+    Lista configurações financeiras, opcionalmente filtradas por company_id.
+
+    Permissões: todos os roles de leitura financeira.
+    """
+    query = {}
+    if company_id:
+        query["company_id"] = company_id
+
+    configs = await db.finance_configs.find(query, {"_id": 0}).to_list(1000)
+    return {"configs": configs, "total": len(configs)}
+
+
+@router.get("/finance/configs/{config_id}")
+async def get_finance_config_by_id(
+    config_id: str,
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
+):
+    """
+    Obtém uma configuração financeira específica por ID.
+
+    Permissões: todos os roles de leitura financeira.
+    """
+    doc = await db.finance_configs.find_one({"id": config_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Configuração financeira não encontrada")
+    return doc
+
+
+@router.put("/finance/configs/{config_id}")
+async def update_finance_config_by_id(
+    config_id: str,
+    body: FinanceConfigUpdateSchema,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Actualiza uma configuração financeira existente.
+
+    Apenas os campos fornecidos no body serão actualizados.
+
+    Permissões: apenas Admin e CEO.
+    """
+    existing = await db.finance_configs.find_one({"id": config_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Configuração financeira não encontrada")
+
+    update_fields = body.model_dump(exclude_none=True)
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="Nenhum campo fornecido para actualização")
+
+    # Validação cruzada: se fee_type='percentage', default_value ≤ 100
+    new_fee_type = update_fields.get("fee_type", existing.get("fee_type"))
+    new_default_value = update_fields.get("default_value", existing.get("default_value"))
+    if new_fee_type == FeeType.PERCENTAGE.value and new_default_value > 100:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Com percentagem, default_value não pode ultrapassar 100 (recebido: {new_default_value})",
+        )
+
+    update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    await db.finance_configs.update_one(
+        {"id": config_id},
+        {"$set": update_fields},
+    )
+
+    # Buscar documento actualizado
+    updated = await db.finance_configs.find_one({"id": config_id}, {"_id": 0})
+
+    logger.info(
+        f"FinanceConfig actualizada: id={config_id}, campos={list(update_fields.keys())}, "
+        f"por {user.get('email', 'unknown')}"
+    )
+
+    return updated
+
+
+@router.delete("/finance/configs/{config_id}")
+async def delete_finance_config(
+    config_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Elimina uma configuração financeira.
+
+    Permissões: apenas Admin e CEO.
+    """
+    existing = await db.finance_configs.find_one({"id": config_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Configuração financeira não encontrada")
+
+    await db.finance_configs.delete_one({"id": config_id})
+
+    logger.info(
+        f"FinanceConfig eliminada: id={config_id}, company_id={existing.get('company_id')}, "
+        f"por {user.get('email', 'unknown')}"
+    )
+
+    return {"success": True, "message": "Configuração financeira eliminada com sucesso"}
+
+
+# ====================================================================
+# NEW CRUD: ProcessFinance (collection: process_finances)
+# ====================================================================
+
+def _doc_to_process_finance_response(doc: dict) -> dict:
+    """Converte documento MongoDB para resposta ProcessFinance (remove _id)."""
+    if doc is None:
+        return {}
+    doc.pop("_id", None)
+    return doc
+
+
+# NOTA: /finance/processes/summary deve ser definido ANTES de
+# /finance/processes/{finance_id} para evitar que "summary" seja
+# interpretado como um finance_id pelo FastAPI.
+
+
+@router.get("/finance/processes/summary")
+async def get_process_finance_summary(
+    company_id: str = Query(..., description="Empresa para filtrar (obrigatório)"),
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
+):
+    """
+    Resumo financeiro agregado dos registos ProcessFinance.
+
+    Agrega totais por status para uma empresa.
+
+    Permissões: todos os roles de leitura financeira.
+    """
+    # Pipeline de agregação por status
+    pipeline = [
+        {"$match": {"company_id": company_id}},
+        {"$group": {
+            "_id": "$status",
+            "total_commission": {"$sum": "$expected_commission"},
+            "total_with_tax": {"$sum": "$total_with_tax"},
+            "count": {"$sum": 1},
+        }},
+    ]
+
+    results = await db.process_finances.aggregate(pipeline).to_list(100)
+
+    # Inicializar resumo com zeros
+    summary = ProcessFinanceSummary()
+
+    status_map = {
+        FinanceStatus.PENDING.value: "pending",
+        FinanceStatus.INVOICED.value: "invoiced",
+        FinanceStatus.PAID.value: "paid",
+        FinanceStatus.CANCELLED.value: "cancelled",
+    }
+
+    for row in results:
+        status_key = row["_id"]
+        total_commission = _safe_float(row.get("total_commission"))
+        total_tax = _safe_float(row.get("total_with_tax"))
+        count = row.get("count", 0)
+
+        if status_key == FinanceStatus.PENDING.value:
+            summary.total_pending = round(total_commission, 2)
+            summary.count_pending = count
+        elif status_key == FinanceStatus.INVOICED.value:
+            summary.total_invoiced = round(total_commission, 2)
+            summary.count_invoiced = count
+        elif status_key == FinanceStatus.PAID.value:
+            summary.total_paid = round(total_commission, 2)
+            summary.count_paid = count
+        elif status_key == FinanceStatus.CANCELLED.value:
+            summary.total_cancelled = round(total_commission, 2)
+            summary.count_cancelled = count
+
+    # Totais de registos activos (não cancelados)
+    active_statuses = FinanceStatus.active_statuses()
+    active_pipeline = [
+        {"$match": {"company_id": company_id, "status": {"$in": active_statuses}}},
+        {"$group": {
+            "_id": None,
+            "total_expected": {"$sum": "$expected_commission"},
+            "total_with_tax": {"$sum": "$total_with_tax"},
+        }},
+    ]
+    active_results = await db.process_finances.aggregate(active_pipeline).to_list(1)
+
+    if active_results:
+        summary.total_expected = round(_safe_float(active_results[0].get("total_expected")), 2)
+        summary.total_with_tax = round(_safe_float(active_results[0].get("total_with_tax")), 2)
+
+    return summary.model_dump()
+
+
+@router.post("/finance/processes")
+async def create_process_finance(
+    body: ProcessFinanceCreate,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+):
+    """
+    Cria um registo financeiro para um processo.
+
+    Calcula automaticamente expected_commission, tax_amount e total_with_tax
+    usando ProcessFinanceCreate.compute_finance(), a menos que os valores
+    sejam fornecidos explicitamente.
+
+    Permissões: Admin, CEO e Diretor.
+    """
+    # Verificar se já existe registo financeiro para este processo
+    existing = await db.process_finances.find_one({
+        "process_id": body.process_id,
+        "company_id": body.company_id,
+    })
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Já existe um registo financeiro para o processo '{body.process_id}' "
+                   f"na empresa '{body.company_id}'.",
+        )
+
+    # Calcular valores financeiros automáticos
+    computed = body.compute_finance()
+
+    finance_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    doc = {
+        "id": finance_id,
+        "process_id": body.process_id,
+        "client_id": body.client_id,
+        "company_id": body.company_id,
+        "base_business_value": body.base_business_value,
+        "applied_fee_type": body.applied_fee_type,
+        "applied_fee_value": body.applied_fee_value,
+        "expected_commission": computed["expected_commission"],
+        "tax_amount": computed["tax_amount"],
+        "total_with_tax": computed["total_with_tax"],
+        "status": body.status or FinanceStatus.PENDING.value,
+        "invoice_link": body.invoice_link,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await db.process_finances.insert_one(doc)
+
+    logger.info(
+        f"ProcessFinance criado: id={finance_id}, process_id={body.process_id}, "
+        f"company_id={body.company_id}, commission={computed['expected_commission']}, "
+        f"por {user.get('email', 'unknown')}"
+    )
+
+    return _doc_to_process_finance_response(doc)
+
+
+@router.get("/finance/processes")
+async def list_process_finances(
+    company_id: Optional[str] = Query(None, description="Filtrar por company_id"),
+    process_id: Optional[str] = Query(None, description="Filtrar por process_id"),
+    client_id: Optional[str] = Query(None, description="Filtrar por client_id"),
+    status: Optional[str] = Query(None, description="Filtrar por status (pending|invoiced|paid|cancelled)"),
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
+):
+    """
+    Lista registos financeiros de processos, com filtros opcionais.
+
+    Filtros disponíveis: company_id, process_id, client_id, status.
+
+    Permissões: todos os roles de leitura financeira.
+    """
+    query = {}
+    if company_id:
+        query["company_id"] = company_id
+    if process_id:
+        query["process_id"] = process_id
+    if client_id:
+        query["client_id"] = client_id
+    if status:
+        if status not in FinanceStatus.all_values():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Status inválido: '{status}'. Valores permitidos: {FinanceStatus.all_values()}",
+            )
+        query["status"] = status
+
+    finances = await db.process_finances.find(query, {"_id": 0}).to_list(1000)
+    return {"finances": finances, "total": len(finances)}
+
+
+@router.get("/finance/processes/{finance_id}")
+async def get_process_finance_by_id(
+    finance_id: str,
+    user: dict = Depends(require_roles(FINANCE_READ_ROLES))
+):
+    """
+    Obtém um registo financeiro de processo específico por ID.
+
+    Permissões: todos os roles de leitura financeira.
+    """
+    doc = await db.process_finances.find_one({"id": finance_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Registo financeiro não encontrado")
+    return doc
+
+
+@router.put("/finance/processes/{finance_id}")
+async def update_process_finance(
+    finance_id: str,
+    body: ProcessFinanceUpdate,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+):
+    """
+    Actualiza um registo financeiro de processo.
+
+    Apenas os campos fornecidos no body serão actualizados.
+    Se campos financeiros forem alterados, recalcular valores derivados.
+
+    Permissões: Admin, CEO e Diretor.
+    """
+    existing = await db.process_finances.find_one({"id": finance_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Registo financeiro não encontrado")
+
+    update_fields = body.model_dump(exclude_none=True)
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="Nenhum campo fornecido para actualização")
+
+    # Se campos financeiros relevantes foram alterados, recalcular
+    financial_fields_changed = any(
+        f in update_fields
+        for f in ["base_business_value", "applied_fee_type", "applied_fee_value"]
+    )
+
+    if financial_fields_changed:
+        # Obter valores actuais + updates para recalcular
+        base = _safe_float(update_fields.get("base_business_value", existing.get("base_business_value")))
+        fee_type = update_fields.get("applied_fee_type", existing.get("applied_fee_type"))
+        fee_value = _safe_float(update_fields.get("applied_fee_value", existing.get("applied_fee_value")))
+        tax_rate = _safe_float(existing.get("tax_rate", 23.0))
+
+        # Recalcular expected_commission
+        if fee_type == FeeType.PERCENTAGE.value:
+            expected_commission = round(base * (fee_value / 100), 2)
+        else:
+            expected_commission = fee_value
+
+        # Recalcular tax_amount e total_with_tax (se não fornecidos explicitamente)
+        if "expected_commission" not in update_fields:
+            update_fields["expected_commission"] = expected_commission
+        if "tax_amount" not in update_fields:
+            update_fields["tax_amount"] = round(update_fields.get("expected_commission", expected_commission) * (tax_rate / 100), 2)
+        if "total_with_tax" not in update_fields:
+            ec = update_fields.get("expected_commission", expected_commission)
+            ta = update_fields.get("tax_amount", update_fields["tax_amount"])
+            update_fields["total_with_tax"] = round(ec + ta, 2)
+
+    update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    await db.process_finances.update_one(
+        {"id": finance_id},
+        {"$set": update_fields},
+    )
+
+    # Buscar documento actualizado
+    updated = await db.process_finances.find_one({"id": finance_id}, {"_id": 0})
+
+    logger.info(
+        f"ProcessFinance actualizado: id={finance_id}, campos={list(update_fields.keys())}, "
+        f"por {user.get('email', 'unknown')}"
+    )
+
+    return updated
+
+
+@router.patch("/finance/processes/{finance_id}/status")
+async def update_process_finance_status(
+    finance_id: str,
+    status: str = Query(..., description="Novo status: pending|invoiced|paid|cancelled"),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+):
+    """
+    Actualiza apenas o status de um registo financeiro.
+
+    Útil para marcações rápidas (ex: marcar como pago).
+
+    Permissões: Admin, CEO e Diretor.
+    """
+    if status not in FinanceStatus.all_values():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Status inválido: '{status}'. Valores permitidos: {FinanceStatus.all_values()}",
+        )
+
+    existing = await db.process_finances.find_one({"id": finance_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Registo financeiro não encontrado")
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.process_finances.update_one(
+        {"id": finance_id},
+        {"$set": {"status": status, "updated_at": now}},
+    )
+
+    logger.info(
+        f"ProcessFinance status actualizado: id={finance_id}, "
+        f"status={existing.get('status')} → {status}, "
+        f"por {user.get('email', 'unknown')}"
+    )
+
+    return {
+        "id": finance_id,
+        "previous_status": existing.get("status"),
+        "new_status": status,
+        "updated_at": now,
+    }
+
+
+@router.delete("/finance/processes/{finance_id}")
+async def delete_process_finance(
+    finance_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Elimina um registo financeiro de processo.
+
+    Permissões: apenas Admin e CEO.
+    """
+    existing = await db.process_finances.find_one({"id": finance_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Registo financeiro não encontrado")
+
+    await db.process_finances.delete_one({"id": finance_id})
+
+    logger.info(
+        f"ProcessFinance eliminado: id={finance_id}, process_id={existing.get('process_id')}, "
+        f"company_id={existing.get('company_id')}, por {user.get('email', 'unknown')}"
+    )
+
+    return {"success": True, "message": "Registo financeiro eliminado com sucesso"}

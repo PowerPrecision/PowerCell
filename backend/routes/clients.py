@@ -1054,8 +1054,17 @@ async def get_client(
     if client.get("process_ids"):
         processes = await db.processes.find(
             {"id": {"$in": client["process_ids"]}},
-            {"_id": 0, "id": 1, "process_number": 1, "status": 1, "process_type": 1, "created_at": 1}
+            {"_id": 0, "id": 1, "process_number": 1, "status": 1, "process_type": 1, "prioridade": 1, "created_at": 1, "is_active": 1}
         ).to_list(length=50)
+    
+    # Enriquecer processos com labels e cores do workflow
+    if processes:
+        statuses = await db.workflow_statuses.find({}, {"_id": 0}).to_list(100)
+        status_map = {s["name"]: s for s in statuses}
+        for p in processes:
+            status_info = status_map.get(p.get("status"), {})
+            p["status_label"] = status_info.get("label", p.get("status", ""))
+            p["status_color"] = status_info.get("color", "#6B7280")
     
     client["processes"] = processes
     

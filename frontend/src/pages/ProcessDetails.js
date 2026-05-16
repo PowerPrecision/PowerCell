@@ -2035,15 +2035,21 @@ const ProcessDetails = () => {
             </Button>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-xl font-semibold truncate">{safeString(process?.client_name, 'Cliente')}</h2>
+                <h2 className="text-xl font-semibold truncate">Processo #{safeString(process?.process_number, '—')}</h2>
                 <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
                   {safeLabel(currentStatusInfo.label)}
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
-                #{safeString(process?.process_number, '—')} • {typeLabels[process.process_type]}
+                {safeString(process?.client_data?.personal_data?.nome || process?.client_name, '') && (
+                  <>
+                    <span>{safeString(process?.client_data?.personal_data?.nome || process?.client_name, '')}</span>
+                    <span className="mx-1">•</span>
+                  </>
+                )}
+                {typeLabels[process.process_type]}
                 {process.id && (
-                  <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono" title="ID único do cliente">
+                  <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono" title="ID único do processo">
                     ID: {safeString(process?.id).slice(0, 8)}
                   </span>
                 )}

@@ -376,7 +376,7 @@ const MyClientsPage = () => {
                         key={client.id} 
                         className="cursor-pointer hover:bg-gray-50"
                         data-testid={`client-row-${client.id}`}
-                        onClick={() => navigate(`/processo/${client.id}`)}
+                        onClick={() => navigate(`/cliente/${client.client_id || client.id}`)}
                       >
                         <TableCell className="font-medium text-gray-500">
                           #{client.process_number || "-"}
@@ -447,7 +447,7 @@ const MyClientsPage = () => {
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigate(`/processo/${client.id}`);
+                              navigate(`/cliente/${client.client_id || client.id}`);
                             }}
                             data-testid={`view-client-${client.id}`}
                           >

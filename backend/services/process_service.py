@@ -813,6 +813,7 @@ PROCESS_KANBAN_PROJECTION = {
 PROCESS_MY_CLIENTS_PROJECTION = {
     "_id": 0,
     "id": 1,
+    "client_id": 1,
     "process_number": 1,
     "client_name": 1,
     "client_email": 1,

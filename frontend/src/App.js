@@ -65,6 +65,7 @@ const PropertiesPage = React.lazy(() => import("./pages/PropertiesPage"));
 const ClientsPage = React.lazy(() => import("./pages/ClientsPage"));
 const LeadsPage = React.lazy(() => import("./pages/LeadsPage"));
 const MyClientsPage = React.lazy(() => import("./pages/MyClientsPage"));
+const ClientDetailPage = React.lazy(() => import("./pages/ClientDetailPage"));
 const BackupsPage = React.lazy(() => import("./pages/BackupsPage"));
 const MinutasPage = React.lazy(() => import("./pages/MinutasPage"));
 const AIInsightsPage = React.lazy(() => import("./pages/AIInsightsPage"));
@@ -449,6 +450,18 @@ function App() {
               <ProtectedRoute allowedRoles={["consultor", "intermediario", "admin", "ceo", "indexacao"]}>
                 <RouteBoundary name="Meus Clientes">
                   <MyClientsPage />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Client Detail Page - Staff and Admin */}
+          <Route
+            path="/cliente/:id"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <RouteBoundary name="Ficha do Cliente">
+                  <ClientDetailPage />
                 </RouteBoundary>
               </ProtectedRoute>
             }

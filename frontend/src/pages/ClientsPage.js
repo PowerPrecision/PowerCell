@@ -623,8 +623,7 @@ export default function ClientsPage() {
                         <div className="min-w-0">
                           <button
                             className={`text-sm text-left hover:text-primary truncate block max-w-full ${isAlta ? 'font-bold' : 'font-medium'}`}
-                            onClick={() => client.process_ids?.[0] && navigate(`/process/${client.process_ids[0]}`)}
-                            disabled={!client.process_ids?.length}
+                            onClick={() => navigate(`/cliente/${client.id}`)}
                           >
                             {isAlta && <span className="mr-1">🔥</span>}
                             {client.nome}
@@ -670,8 +669,7 @@ export default function ClientsPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            onClick={() => client.process_ids?.[0] && navigate(`/process/${client.process_ids[0]}`)}
-                            disabled={!client.process_ids?.length}
+                            onClick={() => navigate(`/cliente/${client.id}`)}
                           >
                             <Eye className="h-4 w-4 mr-2" />
                             Ver Ficha
@@ -761,8 +759,7 @@ export default function ClientsPage() {
                             <div className="flex items-center gap-2">
                               <button
                                 className={`text-left hover:text-primary hover:underline transition-colors cursor-pointer ${isAlta ? 'font-bold' : 'font-medium'}`}
-                                onClick={() => client.process_ids?.[0] && navigate(`/process/${client.process_ids[0]}`)}
-                                disabled={!client.process_ids?.length}
+                                onClick={() => navigate(`/cliente/${client.id}`)}
                                 data-testid={`client-name-${client.id}`}
                               >
                                 {isAlta && <span className="mr-1">🔥</span>}
@@ -843,11 +840,7 @@ export default function ClientsPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() =>
-                                client.process_ids?.[0] &&
-                                navigate(`/process/${client.process_ids[0]}`)
-                              }
-                              disabled={!client.process_ids?.length}
+                              onClick={() => navigate(`/cliente/${client.id}`)}
                             >
                               <Eye className="h-4 w-4 mr-2" />
                               Ver Ficha

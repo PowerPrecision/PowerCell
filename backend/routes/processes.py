@@ -1743,6 +1743,7 @@ async def get_my_clients(
         
         clients_list.append({
             "id": p["id"],
+            "client_id": p.get("client_id"),
             "process_number": p.get("process_number"),
             "client_name": p.get("client_name", "Sem nome"),
             "client_email": p.get("client_email"),
