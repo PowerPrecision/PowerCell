@@ -1,12 +1,12 @@
 /**
  * CreateProcessModal — Modal de criação de processo associado a um cliente.
  *
- * REGRAS DE NEGÓCIO:
- * - É PROIBIDO criar um processo sem associar a um cliente existente.
- * - O campo "Selecionar Cliente" é obrigatório e o botão de submeter
- *   permanece desativado até que um cliente seja selecionado.
- * - Quando chamado com `preSelectedClient`, o campo fica pré-preenchido
- *   e bloqueado (usado no atalho "Adicionar Processo" da ficha do cliente).
+ * FASE 3 — Paradigma Relacional:
+ * - Um processo NUNCA existe sem um client_id obrigatório.
+ * - Se chamado com `preSelectedClient`, o campo fica pré-preenchido e bloqueado
+ *   (usado no atalho "Adicionar Processo" da ficha do cliente).
+ * - Se sem preSelectedClient, permite pesquisar/criar cliente via SmartClientSearch.
+ * - Utiliza POST /processes/create-client com { client_id, process_type }.
  *
  * @props {boolean} open          — Controla visibilidade do modal
  * @props {Function} onOpenChange — Callback ao fechar o modal
@@ -22,24 +22,22 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "../components/ui/dialog";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { Badge } from "../components/ui/badge";
+} from "./ui/dialog";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Badge } from "./ui/badge";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../components/ui/select";
-import { Loader2, Search, FileText, X, UserPlus, CheckCircle } from "lucide-react";
-import { createClientProcess, searchClients } from "../services/api";
+} from "./ui/select";
+import { Loader2, Search, FileText, X, UserPlus, CheckCircle, Users } from "lucide-react";
+import { createClientProcess, createClient, searchClients } from "../services/api";
 import { toast } from "sonner";
-import { PROCESS_TYPE_LABELS } from "../components/SmartClientSearch";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { PROCESS_TYPE_LABELS } from "./SmartClientSearch";
 
 const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }) => {
   const navigate = useNavigate();
@@ -52,8 +50,17 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
   const [processType, setProcessType] = useState("credito_habitacao");
   const [submitting, setSubmitting] = useState(false);
 
+  // ── Novo Cliente (quando não há preSelectedClient) ───────────────
+  const [clientMode, setClientMode] = useState(null); // 'existing' | 'new' | null
+  const [newClientData, setNewClientData] = useState({
+    nome: '',
+    email: '',
+    telefone: '',
+    nif: '',
+  });
+
   const isClientLocked = !!preSelectedClient?.id;
-  const canSubmit = selectedClient?.id && !submitting;
+  const canSubmit = (selectedClient?.id || (clientMode === 'new' && newClientData.nome.trim().length >= 2)) && !submitting;
 
   // Reset state when modal opens/closes
   React.useEffect(() => {
@@ -63,6 +70,8 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
       setSearchQuery("");
       setSearchResults([]);
       setShowDropdown(false);
+      setClientMode(preSelectedClient ? 'existing' : null);
+      setNewClientData({ nome: '', email: '', telefone: '', nif: '' });
     }
   }, [open, preSelectedClient]);
 
@@ -109,40 +118,72 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
     setSearchQuery("");
     setSearchResults([]);
     setShowDropdown(false);
+    setClientMode('existing');
   };
 
   const handleClearClient = () => {
     setSelectedClient(null);
+    setClientMode(null);
   };
 
-  // ── Submit ─────────────────────────────────────────────────────────
+  // ── Submit (Paradigma Relacional) ──────────────────────────────────
   const handleSubmit = async () => {
-    if (!selectedClient?.id || !processType) return;
+    if (!processType) return;
+
+    let clientId = selectedClient?.id;
+
+    // Se é novo cliente (sem ID), criar primeiro na BD
+    if (clientMode === 'new' && !clientId) {
+      setSubmitting(true);
+      try {
+        const newClientRes = await createClient({
+          nome: newClientData.nome.trim(),
+          email: newClientData.email.trim() || undefined,
+          telefone: newClientData.telefone.trim() || undefined,
+          nif: newClientData.nif.trim() || undefined,
+          fonte: 'staff_created',
+        });
+        clientId = newClientRes.data?.id || newClientRes.data?.client?.id;
+        if (!clientId) {
+          toast.error('Erro ao criar cliente: resposta sem ID');
+          setSubmitting(false);
+          return;
+        }
+        toast.success(`Cliente "${newClientData.nome}" criado com sucesso!`);
+      } catch (createErr) {
+        console.error('Erro ao criar cliente:', createErr);
+        toast.error(createErr.response?.data?.detail || 'Erro ao criar cliente na base de dados');
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    // Agora criar o processo com o client_id obrigatório
+    if (!clientId) {
+      toast.error('Selecione ou crie um cliente antes de criar o processo');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(
-        `${API_URL}/api/clients/${selectedClient.id}/create-process?process_type=${processType}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        toast.success(`Processo #${data.process_number} criado com sucesso`);
-        onOpenChange(false);
-        if (onSuccess) onSuccess(data);
-        // Navegar para o novo processo
-        if (data.process_id) {
-          navigate(`/process/${data.process_id}`);
-        }
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || "Erro ao criar processo");
+      // FASE 3: Enviar APENAS { client_id, process_type } — sem personal_data
+      const payload = {
+        client_id: clientId,
+        process_type: processType,
+      };
+
+      const res = await createClientProcess(payload);
+      const data = res.data;
+      toast.success(`Processo #${data.process_number} criado com sucesso`);
+      onOpenChange(false);
+      if (onSuccess) onSuccess(data);
+      // Navegar para o novo processo
+      if (data.id) {
+        navigate(`/process/${data.id}`);
       }
     } catch (err) {
-      toast.error("Erro de ligação ao servidor");
+      const errMsg = err.response?.data?.detail || err.message || 'Erro ao criar processo';
+      toast.error(errMsg);
     } finally {
       setSubmitting(false);
     }
@@ -152,7 +193,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
   React.useEffect(() => {
     if (!showDropdown) return;
     const handler = (e) => {
-      const container = document.getElementById("client-search-container");
+      const container = document.getElementById("cpm-client-search-container");
       if (container && !container.contains(e.target)) {
         setShowDropdown(false);
       }
@@ -170,36 +211,231 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
             Novo Processo
           </DialogTitle>
           <DialogDescription>
-            Crie um novo processo associado a um cliente existente.
+            Crie um novo processo associado a um cliente.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* ── Client Selection (Obrigatório) ──────────────────── */}
-          <div className="space-y-2" id="client-search-container" className="relative">
-            <Label>
-              Selecionar Cliente <span className="text-red-500 font-bold">*</span>
-            </Label>
-
-            {selectedClient ? (
-              <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg border">
-                <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-medium text-primary">
-                    {selectedClient.name?.charAt(0)?.toUpperCase() || "?"}
-                  </span>
+          {/* ── Cliente pré-selecionado (bloqueado) ─────────────────── */}
+          {isClientLocked && selectedClient ? (
+            <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg border">
+              <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <span className="text-sm font-medium text-primary">
+                  {selectedClient.name?.charAt(0)?.toUpperCase() || "?"}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm truncate">{selectedClient.name}</p>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {selectedClient.nif && <span>NIF: {selectedClient.nif}</span>}
+                  {selectedClient.email && <span>· {selectedClient.email}</span>}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{selectedClient.name}</p>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    {selectedClient.nif && <span>NIF: {selectedClient.nif}</span>}
-                    {selectedClient.email && <span>· {selectedClient.email}</span>}
+              </div>
+              <Badge className="bg-emerald-100 text-emerald-800 text-xs shrink-0">
+                <CheckCircle className="h-3 w-3 mr-1" />
+                Associado
+              </Badge>
+              <Badge variant="secondary" className="text-[10px] shrink-0">Bloqueado</Badge>
+            </div>
+          ) : (
+            <>
+              {/* ── Seleção de Modo ────────────────────────────────── */}
+              {!selectedClient && clientMode === null && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Associar a:</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setClientMode('existing')}
+                      className="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-muted hover:border-teal-500/50 hover:bg-teal-50 dark:hover:bg-teal-950/20 transition-all"
+                    >
+                      <Users className="h-6 w-6 text-teal-600" />
+                      <span className="text-sm font-medium">Cliente Existente</span>
+                      <span className="text-xs text-muted-foreground">Pesquisar e selecionar</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClientMode('new')}
+                      className="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-muted hover:border-teal-500/50 hover:bg-teal-50 dark:hover:bg-teal-950/20 transition-all"
+                    >
+                      <UserPlus className="h-6 w-6 text-teal-600" />
+                      <span className="text-sm font-medium">Novo Cliente</span>
+                      <span className="text-xs text-muted-foreground">Criar e associar</span>
+                    </button>
                   </div>
                 </div>
-                <Badge className="bg-emerald-100 text-emerald-800 text-xs shrink-0">
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Associado
-                </Badge>
-                {!isClientLocked && (
+              )}
+
+              {/* ── Modo: Cliente Existente (Autocomplete) ──────────── */}
+              {clientMode === 'existing' && !selectedClient && (
+                <div className="space-y-2" id="cpm-client-search-container">
+                  <div className="flex items-center justify-between">
+                    <Label>
+                      Selecionar Cliente <span className="text-red-500 font-bold">*</span>
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => { setClientMode(null); setSearchQuery(''); setSearchResults([]); }}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      ← Voltar
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Pesquisar por nome, email ou NIF (mín. 2 chars)..."
+                      value={searchQuery}
+                      onChange={handleSearchChange}
+                      onFocus={() => searchQuery.length >= 2 && setShowDropdown(true)}
+                      className="pl-10 pr-10"
+                      autoComplete="off"
+                      autoFocus
+                    />
+                    {searchLoading && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                    )}
+                  </div>
+
+                  {/* Search Dropdown */}
+                  {showDropdown && (
+                    <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                      {searchResults.length > 0 ? (
+                        <>
+                          {searchResults.map((client) => (
+                            <button
+                              key={client.id}
+                              type="button"
+                              className="w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-muted/50 transition-colors"
+                              onClick={() => handleSelectClient(client)}
+                            >
+                              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                <span className="text-xs font-medium text-primary">
+                                  {(client.nome || "?").charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-sm truncate">{client.nome}</p>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  {client.nif && <span>NIF: {client.nif}</span>}
+                                  {client.email && <span>· {client.email}</span>}
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                          <div className="border-t px-3 py-2">
+                            <button
+                              type="button"
+                              className="w-full text-left text-sm text-primary hover:underline flex items-center gap-2"
+                              onClick={() => {
+                                setClientMode('new');
+                                setNewClientData(prev => ({ ...prev, nome: searchQuery }));
+                                setSearchQuery('');
+                                setSearchResults([]);
+                                setShowDropdown(false);
+                              }}
+                            >
+                              <UserPlus className="h-4 w-4" />
+                              Criar novo cliente &quot;{searchQuery}&quot;
+                            </button>
+                          </div>
+                        </>
+                      ) : !searchLoading && searchQuery.length >= 2 ? (
+                        <div className="px-3 py-4 text-center">
+                          <p className="text-sm text-muted-foreground mb-2">
+                            Nenhum cliente encontrado para &quot;{searchQuery}&quot;
+                          </p>
+                          <button
+                            type="button"
+                            className="text-sm text-primary hover:underline flex items-center gap-2 mx-auto"
+                            onClick={() => {
+                              setClientMode('new');
+                              setNewClientData(prev => ({ ...prev, nome: searchQuery }));
+                              setSearchQuery('');
+                              setSearchResults([]);
+                              setShowDropdown(false);
+                            }}
+                          >
+                            <UserPlus className="h-4 w-4" />
+                            Criar novo cliente &quot;{searchQuery}&quot;
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Modo: Novo Cliente ──────────────────────────────── */}
+              {clientMode === 'new' && !selectedClient && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium flex items-center gap-2">
+                      <UserPlus className="h-4 w-4 text-teal-600" />
+                      Dados do Novo Cliente
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => { setClientMode(null); setNewClientData({ nome: '', email: '', telefone: '', nif: '' }); }}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      ← Voltar
+                    </button>
+                  </div>
+                  <div className="border rounded-lg p-3 bg-muted/20 space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Estes dados serão guardados na ficha do Cliente. O processo será criado automaticamente.
+                    </p>
+                    <Input
+                      placeholder="Nome completo *"
+                      value={newClientData.nome}
+                      onChange={(e) => setNewClientData(prev => ({ ...prev, nome: e.target.value }))}
+                      autoFocus
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <Input
+                        placeholder="NIF"
+                        value={newClientData.nif}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^\d]/g, '').slice(0, 9);
+                          setNewClientData(prev => ({ ...prev, nif: v }));
+                        }}
+                      />
+                      <Input
+                        placeholder="Email"
+                        type="email"
+                        value={newClientData.email}
+                        onChange={(e) => setNewClientData(prev => ({ ...prev, email: e.target.value }))}
+                      />
+                      <Input
+                        placeholder="Telefone"
+                        value={newClientData.telefone}
+                        onChange={(e) => setNewClientData(prev => ({ ...prev, telefone: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Cliente Selecionado (removível) ──────────────────── */}
+              {selectedClient && !isClientLocked && (
+                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg border">
+                  <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="text-sm font-medium text-primary">
+                      {selectedClient.name?.charAt(0)?.toUpperCase() || "?"}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{selectedClient.name}</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {selectedClient.nif && <span>NIF: {selectedClient.nif}</span>}
+                      {selectedClient.email && <span>· {selectedClient.email}</span>}
+                    </div>
+                  </div>
+                  <Badge className="bg-emerald-100 text-emerald-800 text-xs shrink-0">
+                    <CheckCircle className="h-3 w-3 mr-1" />
+                    Associado
+                  </Badge>
                   <button
                     type="button"
                     onClick={handleClearClient}
@@ -208,66 +444,24 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
                   >
                     <X className="h-4 w-4 text-muted-foreground" />
                   </button>
-                )}
-                {isClientLocked && (
-                  <Badge variant="secondary" className="text-[10px] shrink-0">Bloqueado</Badge>
-                )}
-              </div>
-            ) : (
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Pesquisar por nome, email ou NIF (mín. 2 chars)..."
-                  value={searchQuery}
-                  onChange={handleSearchChange}
-                  onFocus={() => searchQuery.length >= 2 && setShowDropdown(true)}
-                  className="pl-10 pr-10"
-                  autoComplete="off"
-                />
-                {searchLoading && (
-                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-                )}
-              </div>
-            )}
+                </div>
+              )}
 
-            {/* Search Dropdown */}
-            {showDropdown && !selectedClient && (
-              <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-56 overflow-y-auto">
-                {searchResults.length > 0 ? (
-                  searchResults.map((client) => (
-                    <button
-                      key={client.id}
-                      type="button"
-                      className="w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-muted/50 transition-colors"
-                      onClick={() => handleSelectClient(client)}
-                    >
-                      <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <span className="text-xs font-medium text-primary">
-                          {(client.nome || "?").charAt(0).toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm truncate">{client.nome}</p>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          {client.nif && <span>NIF: {client.nif}</span>}
-                          {client.email && <span>· {client.email}</span>}
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                ) : !searchLoading && searchQuery.length >= 2 ? (
-                  <div className="px-3 py-4 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Nenhum cliente encontrado para "{searchQuery}"
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Crie o cliente primeiro na página de Clientes.
+              {/* ── Info ────────────────────────────────────────────── */}
+              {!selectedClient?.id && clientMode === null && (
+                <div className="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <UserPlus className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div className="text-xs text-amber-700 dark:text-amber-300">
+                    <p className="font-medium">Regra de negócio</p>
+                    <p className="mt-0.5">
+                      É obrigatório associar um cliente para criar um processo.
+                      Selecione um cliente existente ou crie um novo.
                     </p>
                   </div>
-                ) : null}
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+            </>
+          )}
 
           {/* ── Process Type ────────────────────────────────────── */}
           <div className="space-y-2">
@@ -285,20 +479,6 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
               </SelectContent>
             </Select>
           </div>
-
-          {/* ── Info ────────────────────────────────────────────── */}
-          {!selectedClient?.id && (
-            <div className="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-              <UserPlus className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-              <div className="text-xs text-amber-700 dark:text-amber-300">
-                <p className="font-medium">Regra de negócio</p>
-                <p className="mt-0.5">
-                  É obrigatório associar um cliente existente para criar um processo.
-                  Se o cliente não existe, crie-o primeiro na secção "Clientes".
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
         <DialogFooter>

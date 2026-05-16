@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Loader2, LayoutGrid, Plus } from "lucide-react";
 import { getUsers } from "../services/api";
 import { toast } from "sonner";
-import CreateProcessModal from "../components/CreateProcessModal";
+import CreateClientModal from "../components/kanban/CreateClientModal";
 import { filterByAnyRole, filterByRole, hasRole } from "../utils/roleUtils";
 
 const KanbanPage = () => {
@@ -179,8 +179,8 @@ const KanbanPage = () => {
         </Card>
       </div>
 
-      {/* Create Process Modal */}
-      <CreateProcessModal
+      {/* Create Process Modal — Fase 3: paradigma relacional */}
+      <CreateClientModal
         open={showCreateProcess}
         onOpenChange={setShowCreateProcess}
         onSuccess={() => fetchUsers()}

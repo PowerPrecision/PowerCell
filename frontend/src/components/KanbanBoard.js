@@ -120,8 +120,8 @@ const KanbanBoard = ({
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [assigningProcess, setAssigningProcess] = useState(null);
   
-  // Verificar se o utilizador pode criar clientes
-  const canCreateClient = hasAnyRole(user, ['intermediario']);
+  // Verificar se o utilizador pode criar processos (qualquer staff)
+  const canCreateProcess = hasAnyRole(user, ['admin', 'ceo', 'consultor', 'intermediario', 'administrativo', 'diretor', 'indexacao']);
 
   // === REACT QUERY - DATA FETCHING ===
   // Memoize filters to prevent infinite re-renders in dependent hooks
@@ -394,7 +394,7 @@ const KanbanBoard = ({
         lockedBy={selectedProcess ? lockedProcesses[selectedProcess.id]?.user_name : undefined}
       />
 
-      {canCreateClient && (
+      {canCreateProcess && (
         <CreateClientModal
           open={showCreateDialog}
           onOpenChange={setShowCreateDialog}
