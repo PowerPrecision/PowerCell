@@ -2036,8 +2036,7 @@ const ProcessDetails = () => {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-xl font-semibold truncate">
-                  Processo #{process?.process_number || ''} — {process?.client_name || process?.personal_data?.nome_completo || process?.client_data?.name || 'Cliente'}
-                </h2>
+                  Processo #{process?.process_number || ''} — {process?.client_name || process?.personal_data?.nome_completo || process?.client_data?.name || 'Cliente'}                </h2>
                 <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
                   {safeLabel(currentStatusInfo.label)}
                 </Badge>
