@@ -44,7 +44,7 @@ import {
   Loader2, Save, Pencil, X
 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
-import { getClient, updateClient, updateProcess } from '../../../services/api';
+import { getClient, updateClient, updateProcess } from '../../services/api';
 import { toast } from 'sonner';
 
 // ── Helpers ────────────────────────────────────────────────────────

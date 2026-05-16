@@ -41,7 +41,7 @@ import {
 } from '../ui/select';
 import { Loader2, Plus, UserPlus, Users, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { createClientProcess, createClient, searchClients } from '../../../services/api';
+import { createClientProcess, createClient, searchClients } from '../../services/api';
 import { PROCESS_TYPE_LABELS } from '../SmartClientSearch';
 
 const INITIAL_FORM_STATE = {
