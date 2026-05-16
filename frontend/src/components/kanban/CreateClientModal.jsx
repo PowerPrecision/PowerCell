@@ -28,17 +28,17 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '../../ui/dialog';
-import { Button } from '../../ui/button';
-import { Label } from '../../ui/label';
-import { Input } from '../../ui/input';
+} from '../ui/dialog';
+import { Button } from '../ui/button';
+import { Label } from '../ui/label';
+import { Input } from '../ui/input';
 import { 
   Select, 
   SelectContent, 
   SelectItem, 
   SelectTrigger, 
   SelectValue 
-} from '../../ui/select';
+} from '../ui/select';
 import { Loader2, Plus, UserPlus, Users, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClientProcess, createClient, searchClients } from '../../../services/api';
