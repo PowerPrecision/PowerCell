@@ -1368,81 +1368,36 @@ const ProcessDetails = () => {
 
   // Função para executar o save após confirmação
   // FASE 3: Gravação separada — dados pessoais vão para /clients/{id}, dados de negócio para /processes/{id}
+  // Função para executar o save após confirmação
   const executeSave = async (statusToSave) => {
     setSaving(true);
     try {
       const processUpdateData = {};
-      let clientUpdateData = null;
-
-      // Limpar dados financeiros (remover campos não válidos no backend)
+      const clientUpdateData = {};
+      
+      // 1. LIMPAR DADOS
+      const cleanedPersonalData = cleanPersonalDataForSubmit(personalData);
       const cleanedFinancialData = cleanFinancialDataForSubmit(financialData);
 
-      // ════════════════════════════════════════════════════════════════
-      // FASE 3: Dados Pessoais → PUT /clients/{client_id}
-      // Se temos client_id, os dados pessoais pertencem ao Cliente.
-      // Se NÃO temos client_id (processo antigo), enviamos como antes para retrocompatibilidade.
-      // ════════════════════════════════════════════════════════════════
-      const cleanedPersonalData = cleanPersonalDataForSubmit(personalData);
-
-      if (clientId && !hasRole(user, "indexacao")) {
-        // ── PARADIGMA NOVO: Dados pessoais vão para o Cliente ──
-        clientUpdateData = {
-          nome: personalData.nome_completo || process?.client_name || '',
-          contacto: {
-            email: personalData.email || process?.client_email || '',
-            telefone: personalData.telefone || process?.client_phone || '',
-          },
-          dados_pessoais: {
-            ...cleanedPersonalData,
-          },
-        };
-        // Limpar blind indexes do payload do cliente
-        delete clientUpdateData.dados_pessoais.nif_hash;
-        delete clientUpdateData.dados_pessoais.email_hash;
-        delete clientUpdateData.dados_pessoais.telefone_hash;
-        // Remover campos duplicados do dados_pessoais (já estão em nome/contacto)
-        delete clientUpdateData.dados_pessoais.nome_completo;
-        delete clientUpdateData.dados_pessoais.email;
-        delete clientUpdateData.dados_pessoais.telefone;
-
-        // No processo, NÃO enviamos mais personal_data
-        // Mas enviamos client_name, client_email, client_phone para retrocompatibilidade do Kanban
-        processUpdateData.client_name = personalData.nome_completo || process?.client_name || '';
-        processUpdateData.client_email = String(personalData.email || process?.client_email || '');
-        processUpdateData.client_phone = String(personalData.telefone || process?.client_phone || '');
-      } else if (!hasRole(user, "indexacao")) {
-        // ── FALLBACK: Processo antigo sem client_id — enviar tudo para o processo ──
-        processUpdateData.personal_data = cleanedPersonalData;
-        processUpdateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
-        if (process?.client_email !== undefined && process?.client_email !== null) {
-          processUpdateData.client_email = String(process.client_email || '');
-        }
-        if (process?.client_phone !== undefined && process?.client_phone !== null) {
-          processUpdateData.client_phone = String(process.client_phone || '');
-        }
+      // 2. PREPARAR DADOS DO CLIENTE
+      if (process?.client_email !== undefined && process?.client_email !== null) {
+        clientUpdateData.email = String(process.client_email || '');
       }
-
-      // ════════════════════════════════════════════════════════════════
-      // Dados de Negócio → PUT /processes/{id}
-      // ════════════════════════════════════════════════════════════════
-
-      // Dados financeiros (pertencem ao processo)
-      if (!hasRole(user, "indexacao")) {
-        processUpdateData.financial_data = cleanedFinancialData;
-        // titular2_data só se NÃO temos client_id (senão vai para o cliente)
-        if (!clientId) {
-          processUpdateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
-        }
-      } else {
-        processUpdateData.financial_data = cleanedFinancialData;
+      if (process?.client_phone !== undefined && process?.client_phone !== null) {
+        clientUpdateData.phone = String(process.client_phone || '');
       }
+      if (cleanedPersonalData.nome_completo) clientUpdateData.name = cleanedPersonalData.nome_completo;
+      if (cleanedPersonalData.nif) clientUpdateData.nif = cleanedPersonalData.nif;
+      
+      clientUpdateData.personal_data = cleanedPersonalData;
+      clientUpdateData.financial_data = cleanedFinancialData;
+      clientUpdateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
 
-      // Consultor e admin podem editar dados do imóvel
+      // 3. PREPARAR DADOS DO PROCESSO
       if (hasAnyRole(user, ["consultor", "admin"])) {
         processUpdateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
       }
 
-      // Mediador pode editar dados de crédito em fases avançadas
       if (hasAnyRole(user, ["intermediario", "admin"])) {
         const allowedStatuses = workflowStatuses.filter(s => s.order >= 3).map(s => s.name);
         if (allowedStatuses.includes(process.status) || process.status === "ch_aprovado" || process.status === "fase_bancaria") {
@@ -1454,123 +1409,46 @@ const ProcessDetails = () => {
         processUpdateData.status = statusToSave;
       }
 
-      // Campos de topo do processo (vendedor, mediador, monitored_emails)
       if (process.vendedor) processUpdateData.vendedor = process.vendedor;
       if (process.mediador) processUpdateData.mediador = process.mediador;
       if (process.monitored_emails && process.monitored_emails.length > 0) {
         processUpdateData.monitored_emails = process.monitored_emails;
       }
-      // Metadados do processo (Fase 3)
       if (process.notes !== undefined) processUpdateData.notes = process.notes;
       if (process.prioridade) processUpdateData.prioridade = process.prioridade;
       if (process.labels !== undefined) processUpdateData.labels = process.labels;
 
-      // ════════════════════════════════════════════════════════════════
-      // GRAVAÇÃO CONCORRENTE: Promise.all para clientes + processos
-      // ════════════════════════════════════════════════════════════════
-      const savePromises = [];
-
-      // 1. PUT /clients/{client_id} — se houver dados do cliente para atualizar
-      if (clientId && clientUpdateData) {
-        savePromises.push(
-          updateClient(clientId, clientUpdateData)
-            .catch(err => {
-              console.error('Erro ao guardar dados do cliente:', err);
-              throw err;  // Re-throw para que o Promise.all falhe
-            })
+      // 4. DISPARAR OS DOIS REQUESTS EM SIMULTÂNEO (PROMISE.ALL)
+      const promises = [];
+      
+      // Update do Processo
+      promises.push(updateProcess(id, processUpdateData));
+      
+      // Update do Cliente (apenas se houver client_id e não for role de indexação)
+      if (process.client_id && !hasRole(user, "indexacao")) {
+        const token = localStorage.getItem('token');
+        promises.push(
+          fetch(`${API_URL}/api/clients/${process.client_id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify(clientUpdateData)
+          }).then(res => {
+            if (!res.ok) throw new Error("Falha ao atualizar dados do cliente");
+            return res.json();
+          })
         );
       }
+      
+      await Promise.all(promises);
 
-      // 2. PUT /processes/{id} — dados de negócio
-      savePromises.push(
-        updateProcess(id, processUpdateData)
-          .catch(err => {
-            console.error('Erro ao guardar dados do processo:', err);
-            throw err;
-          })
-      );
-
-      await Promise.all(savePromises);
-      toast.success("Dados guardados com sucesso!");
+      toast.success("Processo e Cliente atualizados com sucesso!");
       fetchData();
     } catch (error) {
-      console.error("Error saving process:", error);
-      // Handle validation errors properly with field-specific messages
-      let errorMessage = "Erro ao guardar processo";
-      
-      // Mapeamento de campos para nomes amigáveis em português
-      const fieldLabels = {
-        "client_email": "Email do Cliente",
-        "client_phone": "Telefone do Cliente",
-        "nif": "NIF",
-        "nome": "Nome",
-        "data_nascimento": "Data de Nascimento",
-        "nacionalidade": "Nacionalidade",
-        "morada": "Morada",
-        "codigo_postal": "Código Postal",
-        "valor_pretendido": "Valor Pretendido",
-        "valor_entrada": "Valor de Entrada",
-        "capital_proprio": "Capital Próprio",
-        "personal_data": "Dados Pessoais",
-        "financial_data": "Dados Financeiros",
-        "real_estate_data": "Dados do Imóvel",
-        "credit_data": "Dados de Crédito",
-      };
-      
-      if (error.response?.data?.detail) {
-        const detail = error.response.data.detail;
-        if (typeof detail === 'string') {
-          errorMessage = detail;
-        } else if (Array.isArray(detail)) {
-          // Pydantic validation errors come as array with field location
-          const errorMessages = detail.map(err => {
-            // Get the field path (e.g., ["body", "personal_data", "nif"])
-            const fieldPath = err.loc || [];
-            const fieldName = fieldPath[fieldPath.length - 1] || "campo";
-            const friendlyName = fieldLabels[fieldName] || fieldName;
-            
-            // Build user-friendly message
-            let msg = err.msg || "Valor inválido";
-            
-            // Translate common Pydantic messages
-            if (msg.includes("Input should be a valid string")) {
-              msg = "deve ser texto";
-            } else if (msg.includes("Input should be a valid number")) {
-              msg = "deve ser um número";
-            } else if (msg.includes("unable to parse string as a number")) {
-              msg = "formato de número inválido";
-            } else if (msg.includes("Input should be a valid email")) {
-              msg = "email inválido";
-            } else if (msg.includes("Field required")) {
-              msg = "campo obrigatório";
-            } else if (msg.includes("String should have at")) {
-              msg = "tamanho inválido";
-            }
-            
-            return `${friendlyName}: ${msg}`;
-          });
-          
-          errorMessage = errorMessages.join('\n');
-        } else if (typeof detail === 'object') {
-          errorMessage = detail.msg || detail.message || JSON.stringify(detail);
-        }
-      }
-      
-      // Show toast with multi-line support for multiple errors
-      if (errorMessage.includes('\n')) {
-        const errors = errorMessage.split('\n');
-        toast.error(
-          <div>
-            <strong>Erro ao guardar:</strong>
-            <ul style={{margin: '8px 0 0 0', paddingLeft: '16px'}}>
-              {errors.map((e, i) => <li key={i}>{e}</li>)}
-            </ul>
-          </div>,
-          { duration: 6000 }
-        );
-      } else {
-        toast.error(errorMessage);
-      }
+      console.error("Error saving:", error);
+      toast.error(error.message || "Erro ao guardar alterações");
     } finally {
       setSaving(false);
     }
