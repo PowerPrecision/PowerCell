@@ -2,7 +2,7 @@ from .auth import (
     UserRole, UserRegister, UserLogin, UserResponse, TokenResponse,
     UserCreate, UserUpdate
 )
-from .enums import ProcessType, ProcessStatus
+from .enums import ProcessType, ProcessStatus, FeeType, FinanceStatus
 from .process import (
     ProcessCategory, ServiceTypeEnum, RealEstateData, CreditData,
     ProcessCreate, ProcessUpdate, ProcessResponse, PublicClientRegistration
@@ -19,4 +19,9 @@ from .activity import ActivityCreate, ActivityResponse, HistoryResponse
 from .onedrive import OneDriveFile
 from .task_log import (
     TaskStatus, TaskType, TaskLogCreate, TaskLogUpdate, TaskLogResponse, TaskLogListResponse
+)
+from .finance import (
+    FinanceConfig, FinanceConfigCreate, FinanceConfigUpdate, FinanceConfigResponse,
+    ProcessFinance, ProcessFinanceCreate, ProcessFinanceUpdate, ProcessFinanceResponse,
+    ProcessFinanceSummary
 )

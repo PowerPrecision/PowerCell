@@ -253,6 +253,38 @@ class EmailStatus(str, Enum):
         return [s.value for s in cls]
 
 
+class FeeType(str, Enum):
+    """Tipo de comissão/honorário."""
+    FIXED = "fixed"
+    PERCENTAGE = "percentage"
+    
+    @classmethod
+    def all_values(cls) -> List[str]:
+        return [t.value for t in cls]
+
+
+class FinanceStatus(str, Enum):
+    """Status do registo financeiro do processo."""
+    PENDING = "pending"
+    INVOICED = "invoiced"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+    
+    @classmethod
+    def active_statuses(cls) -> List[str]:
+        """Status que representam registos activos (não cancelados)."""
+        return [cls.PENDING.value, cls.INVOICED.value, cls.PAID.value]
+    
+    @classmethod
+    def completed_statuses(cls) -> List[str]:
+        """Status que representam registos finalizados."""
+        return [cls.PAID.value, cls.CANCELLED.value]
+    
+    @classmethod
+    def all_values(cls) -> List[str]:
+        return [s.value for s in cls]
+
+
 # Exportar todos os enums
 __all__ = [
     "ProcessStatus",
@@ -264,4 +296,6 @@ __all__ = [
     "ActivityType",
     "TaskPriority",
     "EmailStatus",
+    "FeeType",
+    "FinanceStatus",
 ]
