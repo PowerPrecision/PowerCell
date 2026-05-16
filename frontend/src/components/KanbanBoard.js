@@ -72,7 +72,17 @@ const hasUrgentTag = (process) => {
   });
 };
 
-const sortProcessesByPriority = (processes) => {
+const sortProcessesByPriority = (processes, columnId) => {
+  // For completed/closed columns, sort only by date (most recent first)
+  if (columnId === 'concluidos' || columnId === 'desistencias') {
+    return [...processes].sort((a, b) => {
+      const dateA = a.updated_at || a.created_at || '';
+      const dateB = b.updated_at || b.created_at || '';
+      return dateB.localeCompare(dateA);
+    });
+  }
+
+  // For active columns, sort by priority then date
   return [...processes].sort((a, b) => {
     // Peso de prioridade (campo prioridade/priority)
     let weightA = PRIORITY_WEIGHT[(a.prioridade || a.priority || '').toLowerCase()] || 0;
@@ -162,10 +172,12 @@ const KanbanBoard = ({
 
   // === AUTO-COLLAPSE EMPTY COLUMNS ===
   // Este efeito é local, não precisa de React Query
+  // Never auto-collapse completed/desistencia columns — users need to see them
   useEffect(() => {
     if (columns.length > 0 && collapsedColumns.size === 0) {
+      const PRESERVED_COLUMNS = new Set(['concluidos', 'desistencias']);
       const emptyColumnIds = columns
-        .filter(col => col.count === 0)
+        .filter(col => col.count === 0 && !PRESERVED_COLUMNS.has(col.id))
         .map(col => col.id);
       if (emptyColumnIds.length > 0) {
         setCollapsedColumns(new Set(emptyColumnIds));
@@ -289,7 +301,8 @@ const KanbanBoard = ({
         }
 
         return matchesSearch && matchesDate && matchesUrgency;
-      })
+      }),
+      column.id
     ),
   }));
 

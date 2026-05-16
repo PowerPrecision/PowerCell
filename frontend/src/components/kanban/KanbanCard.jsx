@@ -26,6 +26,7 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
+import { format } from 'date-fns';
 
 // Comparador customizado para React.memo
 // Só re-renderiza se o processo ou estado de drag mudar
@@ -39,6 +40,7 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.prioridade === nextProps.process.prioridade &&
     prevProps.process.priority === nextProps.process.priority &&
     prevProps.process.under_35 === nextProps.process.under_35 &&
+    prevProps.process.updated_at === nextProps.process.updated_at &&
     prevProps.process.labels === nextProps.process.labels &&
     prevProps.isDragging === nextProps.isDragging &&
     prevProps.isLocked === nextProps.isLocked &&
@@ -223,6 +225,12 @@ const KanbanCard = memo(({
               <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 truncate max-w-[100px]">
                 {process.process_type.replace(/_/g, ' ')}
               </Badge>
+            )}
+            {/* Completion date badge for concluded processes */}
+            {(columnName === 'concluidos' || columnName === 'desistencias') && process.updated_at && (
+              <span className="text-[9px] bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 px-2 py-0.5 rounded-full font-medium whitespace-nowrap border border-emerald-200 dark:border-emerald-800">
+                ✓ {format(new Date(process.updated_at), "dd/MM/yyyy")}
+              </span>
             )}
           </div>
           

@@ -4,7 +4,7 @@
  * PORQUÊ: Antes desta página, o botão "Ver Ficha" nos clientes navegava para o
  * primeiro processo do cliente, não para uma página própria do cliente. Esta página
  * centraliza todos os dados do cliente (pessoais, contacto, processos associados)
- * numa vista dedicada, seguindo o padrão visual do PowerCell.
+ * numa vista dedicada, seguindo o padrão visual premium CRM do PowerCell.
  *
  * ROTA: /cliente/:id (ID do cliente, não do processo)
  *
@@ -14,18 +14,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
 import {
   ArrowLeft,
   User,
@@ -38,11 +30,13 @@ import {
   Calendar,
   Tag,
   FileText,
-  ExternalLink,
+  ArrowRight,
   Loader2,
   AlertCircle,
   RefreshCw,
   Info,
+  StickyNote,
+  FolderOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getClient } from "../services/api";
@@ -116,6 +110,45 @@ const formatDate = (dateString) => {
     return dateString;
   }
 };
+
+/**
+ * Returns a left-border color class based on process status color.
+ */
+const getStatusBorderClass = (statusColor) => {
+  if (!statusColor) return "border-l-gray-400 dark:border-l-gray-600";
+  // Convert common named colors to tailwind border classes
+  const colorMap = {
+    yellow: "border-l-yellow-500",
+    orange: "border-l-orange-500",
+    blue: "border-l-blue-500",
+    green: "border-l-green-500",
+    red: "border-l-red-500",
+    purple: "border-l-purple-500",
+    gray: "border-l-gray-400",
+    grey: "border-l-gray-400",
+  };
+  const lower = statusColor.toLowerCase();
+  if (colorMap[lower]) return colorMap[lower];
+  // For hex colors, use inline style instead
+  return null;
+};
+
+/**
+ * Contact info row component for the profile card.
+ */
+function ContactRow({ icon: Icon, label, children }) {
+  return (
+    <div className="flex items-center gap-3 py-2.5 px-3 rounded-lg transition-all duration-200 hover:bg-muted/60 group">
+      <div className="flex-shrink-0 p-2 rounded-md bg-muted/80 group-hover:bg-teal-50 dark:group-hover:bg-teal-900/20 transition-colors duration-200">
+        <Icon className="h-4 w-4 text-muted-foreground group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors duration-200" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-muted-foreground leading-none mb-0.5">{label}</p>
+        <div className="font-medium text-sm truncate">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 export default function ClientDetailPage() {
   const { id } = useParams();
@@ -208,402 +241,269 @@ export default function ClientDetailPage() {
     <DashboardLayout title="Ficha do Cliente">
       <div className="space-y-6" data-testid="client-detail-page">
         {/* Header with back button */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <div className="flex items-center justify-between">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate("/clientes")}
-            className="gap-2"
+            className="gap-2 text-muted-foreground hover:text-foreground transition-colors duration-200"
           >
             <ArrowLeft className="h-4 w-4" />
             Voltar
           </Button>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-lg font-semibold text-primary">
-                  {client.nome?.charAt(0)?.toUpperCase() || "?"}
-                </span>
-              </div>
-              {client.nome}
-            </h1>
-            <p className="text-muted-foreground text-sm mt-1 ml-[52px]">
-              Ficha do Cliente
-            </p>
-          </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={fetchClientData}
-            className="gap-2"
+            className="gap-2 text-muted-foreground hover:text-foreground transition-colors duration-200"
           >
             <RefreshCw className="h-4 w-4" />
             Atualizar
           </Button>
         </div>
 
+        {/* Main 2-column grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Client Info Card - spans 2 columns on large screens */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <User className="h-5 w-5 text-primary" />
-                Dados do Cliente
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Contact & Personal Data Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-                {/* NIF */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <Hash className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">NIF</p>
-                    <p className="font-medium font-mono">{dadosPessoais.nif || "-"}</p>
-                  </div>
-                </div>
+          {/* ─── LEFT COLUMN: Profile Card (1/3) ─── */}
+          <div className="lg:col-span-1">
+            <Card className="rounded-xl shadow-sm overflow-hidden">
+              {/* Gradient header with avatar */}
+              <div className="bg-gradient-to-br from-teal-500 to-emerald-600 px-6 pt-8 pb-6 text-center relative">
+                {/* Decorative circles */}
+                <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full -translate-y-8 translate-x-8" />
+                <div className="absolute bottom-0 left-0 w-16 h-16 bg-white/10 rounded-full translate-y-6 -translate-x-6" />
 
-                {/* Email */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
+                <div className="relative">
+                  <div className="h-20 w-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto ring-4 ring-white/30 shadow-lg">
+                    <span className="text-3xl font-bold text-white">
+                      {client.nome?.charAt(0)?.toUpperCase() || "?"}
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Email</p>
+                  <h1 className="text-2xl font-bold text-white mt-4 leading-tight">
+                    {client.nome}
+                  </h1>
+                  <p className="text-teal-100 text-sm mt-1">
+                    Ficha do Cliente
+                  </p>
+                </div>
+              </div>
+
+              <CardContent className="p-0">
+                {/* Contact info rows */}
+                <div className="px-2 pt-4 pb-2 space-y-0.5">
+                  <ContactRow icon={Mail} label="Email">
                     {contato.email ? (
                       <a
                         href={`mailto:${contato.email}`}
-                        className="font-medium text-primary hover:underline"
+                        className="text-teal-600 dark:text-teal-400 hover:underline transition-all duration-200"
                       >
                         {contato.email}
                       </a>
                     ) : (
-                      <p className="font-medium">-</p>
+                      <span className="text-muted-foreground">-</span>
                     )}
-                  </div>
-                </div>
+                  </ContactRow>
 
-                {/* Telefone */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <Phone className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Telefone</p>
+                  <ContactRow icon={Phone} label="Telefone">
                     {contato.telefone ? (
                       <a
                         href={`tel:${contato.telefone}`}
-                        className="font-medium text-primary hover:underline"
+                        className="text-teal-600 dark:text-teal-400 hover:underline transition-all duration-200"
                       >
                         {contato.telefone}
                       </a>
                     ) : (
-                      <p className="font-medium">-</p>
+                      <span className="text-muted-foreground">-</span>
                     )}
-                  </div>
+                  </ContactRow>
+
+                  <ContactRow icon={Hash} label="NIF">
+                    <span className="font-mono">{dadosPessoais.nif || "-"}</span>
+                  </ContactRow>
+
+                  <ContactRow icon={Heart} label="Estado Civil">
+                    {dadosPessoais.estado_civil || <span className="text-muted-foreground">-</span>}
+                  </ContactRow>
+
+                  <ContactRow icon={Briefcase} label="Profissão">
+                    {dadosPessoais.profissao || <span className="text-muted-foreground">-</span>}
+                  </ContactRow>
+
+                  <ContactRow icon={MapPin} label="Morada Fiscal">
+                    {dadosPessoais.morada_fiscal || <span className="text-muted-foreground">-</span>}
+                  </ContactRow>
                 </div>
 
-                {/* Estado Civil */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <Heart className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Estado Civil</p>
-                    <p className="font-medium">{dadosPessoais.estado_civil || "-"}</p>
-                  </div>
+                <div className="px-6">
+                  <Separator />
                 </div>
 
-                {/* Profissão */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <Briefcase className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Profissão</p>
-                    <p className="font-medium">{dadosPessoais.profissao || "-"}</p>
-                  </div>
-                </div>
-
-                {/* Morada Fiscal */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <MapPin className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Morada Fiscal</p>
-                    <p className="font-medium">{dadosPessoais.morada_fiscal || "-"}</p>
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Fonte & Tags row */}
-              <div className="flex flex-col sm:flex-row gap-6">
-                {/* Fonte */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <Info className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Fonte</p>
+                {/* Fonte, Tags, Data de criação */}
+                <div className="px-6 py-4 space-y-4">
+                  {/* Fonte */}
+                  <div className="flex items-center gap-3">
+                    <Info className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span className="text-sm text-muted-foreground">Fonte</span>
                     {client.fonte ? (
-                      <Badge variant="outline" className="mt-0.5">
+                      <Badge variant="outline" className="ml-auto text-xs border-teal-300 text-teal-700 dark:border-teal-700 dark:text-teal-300">
                         {client.fonte}
                       </Badge>
                     ) : (
-                      <p className="font-medium">-</p>
+                      <span className="ml-auto text-sm text-muted-foreground">-</span>
                     )}
                   </div>
-                </div>
 
-                {/* Tags */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <Tag className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Tags</p>
-                    <div className="flex flex-wrap gap-1 mt-0.5">
+                  {/* Tags */}
+                  <div className="flex items-start gap-3">
+                    <Tag className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                    <span className="text-sm text-muted-foreground flex-shrink-0">Tags</span>
+                    <div className="flex flex-wrap gap-1.5 ml-auto justify-end">
                       {client.tags && client.tags.length > 0 ? (
                         client.tags.map((tag, idx) => (
-                          <Badge key={idx} variant="secondary" className="text-xs">
+                          <Badge
+                            key={idx}
+                            variant="secondary"
+                            className="text-xs bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                          >
                             {tag}
                           </Badge>
                         ))
                       ) : (
-                        <p className="font-medium">-</p>
+                        <span className="text-sm text-muted-foreground">-</span>
                       )}
                     </div>
                   </div>
-                </div>
 
-                {/* Data de Criação */}
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg mt-0.5">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Data de Criação</p>
-                    <p className="font-medium">{formatDate(client.created_at)}</p>
+                  {/* Data de criação */}
+                  <div className="flex items-center gap-3">
+                    <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span className="text-sm text-muted-foreground">Data de Criação</span>
+                    <span className="ml-auto text-sm font-medium">{formatDate(client.created_at)}</span>
                   </div>
                 </div>
-              </div>
 
-              {/* Notas */}
-              {client.notas && (
-                <>
-                  <Separator />
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Notas</p>
-                    <div className="bg-muted/50 rounded-lg p-3 text-sm whitespace-pre-wrap">
-                      {client.notas}
+                {/* Notes section */}
+                {client.notas && (
+                  <>
+                    <div className="px-6">
+                      <Separator />
                     </div>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Side info card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <FileText className="h-5 w-5 text-primary" />
-                Resumo
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                  <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{processes.length}</p>
-                  <p className="text-xs text-muted-foreground">Processos Associados</p>
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                  <FileText className="h-5 w-5 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">
-                    {processes.filter((p) => p.is_active !== false).length}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Processos Ativos</p>
-                </div>
-              </div>
-
-              {client.process_ids && client.process_ids.length > 0 && (
-                <>
-                  <Separator />
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
-                      IDs dos Processos
-                    </p>
-                    <div className="space-y-1">
-                      {client.process_ids.map((pid, idx) => (
-                        <p key={idx} className="text-xs font-mono text-muted-foreground">
-                          {pid}
-                        </p>
-                      ))}
+                    <div className="px-6 py-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <StickyNote className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Notas</span>
+                      </div>
+                      <div className="bg-muted/50 rounded-lg p-3 text-sm whitespace-pre-wrap leading-relaxed border border-border/50">
+                        {client.notas}
+                      </div>
                     </div>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
-        {/* Associated Processes Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" />
-              Processos Associados
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+          {/* ─── RIGHT COLUMN: Process History (2/3) ─── */}
+          <div className="lg:col-span-2">
+            {/* Section header */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <FolderOpen className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                <h2 className="text-lg font-semibold">Histórico de Processos</h2>
+                <Badge className="bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300 border-0 text-xs font-medium px-2.5 py-0.5">
+                  {processes.length}
+                </Badge>
+              </div>
+              {processes.length > 0 && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                  {processes.filter((p) => p.is_active !== false).length} ativos
+                </div>
+              )}
+            </div>
+
             {processes.length === 0 ? (
-              <div className="text-center py-12">
-                <FileText className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground">
-                  Este cliente ainda não tem processos associados.
-                </p>
-              </div>
+              /* Empty state */
+              <Card className="rounded-xl shadow-sm">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="p-4 bg-muted/50 rounded-full mb-4">
+                    <FolderOpen className="h-10 w-10 text-muted-foreground/40" />
+                  </div>
+                  <p className="text-muted-foreground font-medium">Sem processos associados</p>
+                  <p className="text-muted-foreground/70 text-sm mt-1">
+                    Este cliente ainda não tem processos registados.
+                  </p>
+                </CardContent>
+              </Card>
             ) : (
-              <>
-                {/* Desktop Table */}
-                <div className="hidden md:block overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/50">
-                        <TableHead>Nº Processo</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Prioridade</TableHead>
-                        <TableHead>Data Criação</TableHead>
-                        <TableHead className="text-right">Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {processes.map((process) => (
-                        <TableRow key={process.id}>
-                          <TableCell>
-                            <span className="font-mono font-medium">
-                              {process.process_number || process.id?.substring(0, 8) || "-"}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="text-xs">
-                              {formatProcessType(process.process_type)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {process.status_label || process.status ? (
-                              <Badge
-                                className="text-xs"
-                                style={getStatusBadgeClasses(process.status_color)}
-                              >
-                                {process.status_label || process.status}
-                              </Badge>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {process.prioridade || process.priority ? (
-                              <Badge
-                                variant="outline"
-                                className={`text-xs ${getPriorityBadge(process.prioridade || process.priority)}`}
-                              >
-                                {process.prioridade || process.priority}
-                              </Badge>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {formatDate(process.created_at)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => navigate(`/process/${process.id}`)}
-                              className="gap-1"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                              Abrir
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+              <div className="space-y-3">
+                {processes.map((process) => {
+                  const borderClass = getStatusBorderClass(process.status_color);
+                  const hasInlineBorder = borderClass === null;
 
-                {/* Mobile Card View */}
-                <div className="md:hidden space-y-3">
-                  {processes.map((process) => (
-                    <div
+                  return (
+                    <Card
                       key={process.id}
-                      className="border rounded-lg p-4 space-y-3 bg-card"
+                      className={`rounded-xl shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 border-l-4 ${borderClass || ""}`}
+                      style={hasInlineBorder ? { borderLeftColor: process.status_color } : undefined}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono font-medium text-sm">
-                          Nº {process.process_number || process.id?.substring(0, 8) || "-"}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => navigate(`/process/${process.id}`)}
-                          className="gap-1 h-8"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          Abrir
-                        </Button>
-                      </div>
+                      <CardContent className="p-5">
+                        {/* Top row: Process number + badges */}
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <span className="font-mono font-semibold text-sm text-foreground/80">
+                            #{process.process_number || process.id?.substring(0, 8) || "-"}
+                          </span>
 
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          {formatProcessType(process.process_type)}
-                        </Badge>
-                        {process.status_label || process.status ? (
-                          <Badge
-                            className="text-xs"
-                            style={getStatusBadgeClasses(process.status_color)}
-                          >
-                            {process.status_label || process.status}
+                          <Badge variant="outline" className="text-xs font-medium">
+                            {formatProcessType(process.process_type)}
                           </Badge>
-                        ) : null}
+
+                          {process.status_label || process.status ? (
+                            <Badge
+                              className="text-xs font-medium"
+                              style={getStatusBadgeClasses(process.status_color)}
+                            >
+                              {process.status_label || process.status}
+                            </Badge>
+                          ) : null}
+                        </div>
+
+                        {/* Middle: Priority */}
                         {(process.prioridade || process.priority) && (
-                          <Badge
-                            variant="outline"
-                            className={`text-xs ${getPriorityBadge(process.prioridade || process.priority)}`}
-                          >
-                            {process.prioridade || process.priority}
-                          </Badge>
+                          <div className="mb-3">
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${getPriorityBadge(process.prioridade || process.priority)}`}
+                            >
+                              Prioridade: {process.prioridade || process.priority}
+                            </Badge>
+                          </div>
                         )}
-                      </div>
 
-                      <p className="text-xs text-muted-foreground">
-                        Criado em {formatDate(process.created_at)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </>
+                        {/* Bottom row: Date + Action */}
+                        <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Calendar className="h-3.5 w-3.5" />
+                            Criado em {formatDate(process.created_at)}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate(`/process/${process.id}`)}
+                            className="gap-1.5 text-teal-600 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-all duration-200 font-medium text-xs h-8"
+                          >
+                            Abrir Processo
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </DashboardLayout>
   );
