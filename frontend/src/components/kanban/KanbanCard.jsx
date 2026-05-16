@@ -181,10 +181,10 @@ const KanbanCard = memo(({
               isAlta ? 'font-bold text-red-900 dark:text-red-100' : 'font-semibold'
             }`} 
             style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
-            title={process.client_name}
+            title={process.client_name || process.client_id || ''}
           >
             {isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
-            {safeString(process.client_name)}
+            {safeString(process.client_name) || (process.client_id ? 'Cliente #' + process.client_id.slice(0,6) : '—')}
           </p>
           
           {/* Linha 3: Consultor (se existir) */}

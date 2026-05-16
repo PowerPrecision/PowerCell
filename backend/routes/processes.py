@@ -1428,6 +1428,7 @@ async def get_kanban_board(
         "_id": 0,
         "id": 1,
         "process_number": 1,
+        "client_id": 1,
         "client_name": 1,
         "client_email": 1,
         "client_phone": 1,
@@ -1459,7 +1460,47 @@ async def get_kanban_board(
         processes, 
         fields_to_decrypt=["client_phone"]
     )
-    
+
+    # ====================================================================
+    # ENRIQUECIMENTO BATCH: client_name/client_email/client_phone
+    # Processos criados no paradigma relacional (Fase 3) NÃO guardam
+    # dados pessoais no documento do processo — estão na coleção clients.
+    # Este passo preenche os campos em falta via batch lookup.
+    # ====================================================================
+    client_ids_to_fetch = set()
+    for p in processes:
+        if p.get("client_id") and not p.get("client_name"):
+            client_ids_to_fetch.add(p["client_id"])
+
+    client_map = {}
+    if client_ids_to_fetch:
+        client_docs = await db.clients.find(
+            {"id": {"$in": list(client_ids_to_fetch)}},
+            {"_id": 0, "id": 1, "nome": 1, "contacto": 1}
+        ).to_list(len(client_ids_to_fetch))
+        # Desencriptar dados dos clientes
+        try:
+            from services.encryption import decrypt_client_data
+            client_docs = [decrypt_client_data(c) for c in client_docs]
+        except Exception:
+            pass  # Se não houver encriptação, dados já estão legíveis
+        for c in client_docs:
+            contacto = c.get("contacto") or {}
+            client_map[c["id"]] = {
+                "nome": c.get("nome", ""),
+                "email": contacto.get("email", ""),
+                "telefone": contacto.get("telefone", ""),
+            }
+
+    # Preencher campos em falta com setdefault (não sobrescreve valores existentes)
+    for p in processes:
+        cid = p.get("client_id")
+        if cid and cid in client_map:
+            cinfo = client_map[cid]
+            p.setdefault("client_name", cinfo["nome"])
+            p.setdefault("client_email", cinfo["email"])
+            p.setdefault("client_phone", cinfo["telefone"])
+
     # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
     user_map = {u["id"]: u for u in users}
