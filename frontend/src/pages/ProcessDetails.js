@@ -72,6 +72,8 @@ import {
 import {
   getProcess,
   updateProcess,
+  getClient,
+  updateClient,
   getDeadlines,
   createDeadline,
   updateDeadline,
@@ -270,6 +272,9 @@ const ProcessDetails = () => {
     },
   });
   const [process, setProcess] = useState(null);
+  // ── Fase 3: Estado separado do Cliente (entidade independente) ──
+  const [clientData, setClientData] = useState(null);   // Dados completos do cliente (GET /clients/{id})
+  const [clientId, setClientId] = useState(null);       // FK para a coleção clients
   // Guardar os dados originais do processo (da BD) para componentes
   // que precisam dos valores guardados (ex: email para notificações)
   const savedProcessRef = useRef(null);
@@ -990,15 +995,52 @@ const ProcessDetails = () => {
       setHistory(Array.isArray(historyRes.data) ? historyRes.data : []);
       setWorkflowStatuses(Array.isArray(statusesRes.data) ? statusesRes.data : []);
       setStatus(processData.status);
-      // Clean nif_hash from personal_data and titular2_data before setting state
-      // (these are internal blind-index fields that should never be displayed)
-      const cleanPersonalData = { ...(processData.personal_data || {}) };
-      delete cleanPersonalData.nif_hash;
-      delete cleanPersonalData.email_hash;
-      delete cleanPersonalData.telefone_hash;
+
+      // ── FASE 3: Carregar dados do Cliente via client_id ──
+      // O processo tem uma FK (client_id) para a coleção clients.
+      // Os dados pessoais (nome, email, telefone, NIF, estado civil) pertencem ao Cliente.
+      if (processData.client_id) {
+        setClientId(processData.client_id);
+        try {
+          const clientRes = await getClient(processData.client_id);
+          const cData = clientRes.data;
+          setClientData(cData);
+          
+          // Preencher personalData a partir dos dados do Cliente (fonte de verdade)
+          const clientPersonal = { ...(cData.dados_pessoais || {}) };
+          // Limpar blind indexes
+          delete clientPersonal.nif_hash;
+          delete clientPersonal.email_hash;
+          delete clientPersonal.telefone_hash;
+          // Adicionar nome e contacto do cliente
+          clientPersonal.nome_completo = cData.nome || processData.client_name || '';
+          clientPersonal.email = cData.contacto?.email || processData.client_email || '';
+          clientPersonal.telefone = cData.contacto?.telefone || processData.client_phone || '';
+          // Manover NIF do cliente se existir
+          if (cData.dados_pessoais?.nif) {
+            clientPersonal.nif = cData.dados_pessoais.nif;
+          }
+          setPersonalData(clientPersonal);
+        } catch (clientErr) {
+          console.warn('Não foi possível carregar dados do cliente via client_id:', clientErr);
+          // Fallback: usar dados antigos do processo (personal_data no documento do processo)
+          const fallbackPersonal = { ...(processData.personal_data || {}) };
+          delete fallbackPersonal.nif_hash;
+          delete fallbackPersonal.email_hash;
+          delete fallbackPersonal.telefone_hash;
+          setPersonalData(fallbackPersonal);
+        }
+      } else {
+        // Sem client_id (processo antigo) — usar dados embutidos no processo
+        const cleanPersonalData = { ...(processData.personal_data || {}) };
+        delete cleanPersonalData.nif_hash;
+        delete cleanPersonalData.email_hash;
+        delete cleanPersonalData.telefone_hash;
+        setPersonalData(cleanPersonalData);
+      }
+      
       const cleanTitular2Data = { ...(processData.titular2_data || {}) };
       delete cleanTitular2Data.nif_hash;
-      setPersonalData(cleanPersonalData);
       setTitular2Data(cleanTitular2Data);  // Carregar dados do 2º titular
       setFinancialData(processData.financial_data || {});
       setRealEstateData(processData.real_estate_data || {});
@@ -1325,65 +1367,131 @@ const ProcessDetails = () => {
   };
 
   // Função para executar o save após confirmação
+  // FASE 3: Gravação separada — dados pessoais vão para /clients/{id}, dados de negócio para /processes/{id}
   const executeSave = async (statusToSave) => {
     setSaving(true);
     try {
-      const updateData = {};
-      
-      // Limpar dados pessoais antes de enviar
-      const cleanedPersonalData = cleanPersonalDataForSubmit(personalData);
-      
+      const processUpdateData = {};
+      let clientUpdateData = null;
+
       // Limpar dados financeiros (remover campos não válidos no backend)
       const cleanedFinancialData = cleanFinancialDataForSubmit(financialData);
 
-      // Sempre incluir email e telefone do cliente - garantir que são strings
-      if (process?.client_email !== undefined && process?.client_email !== null) {
-        updateData.client_email = String(process.client_email || '');
-      }
-      if (process?.client_phone !== undefined && process?.client_phone !== null) {
-        updateData.client_phone = String(process.client_phone || '');
+      // ════════════════════════════════════════════════════════════════
+      // FASE 3: Dados Pessoais → PUT /clients/{client_id}
+      // Se temos client_id, os dados pessoais pertencem ao Cliente.
+      // Se NÃO temos client_id (processo antigo), enviamos como antes para retrocompatibilidade.
+      // ════════════════════════════════════════════════════════════════
+      const cleanedPersonalData = cleanPersonalDataForSubmit(personalData);
+
+      if (clientId && !hasRole(user, "indexacao")) {
+        // ── PARADIGMA NOVO: Dados pessoais vão para o Cliente ──
+        clientUpdateData = {
+          nome: personalData.nome_completo || process?.client_name || '',
+          contacto: {
+            email: personalData.email || process?.client_email || '',
+            telefone: personalData.telefone || process?.client_phone || '',
+          },
+          dados_pessoais: {
+            ...cleanedPersonalData,
+          },
+        };
+        // Limpar blind indexes do payload do cliente
+        delete clientUpdateData.dados_pessoais.nif_hash;
+        delete clientUpdateData.dados_pessoais.email_hash;
+        delete clientUpdateData.dados_pessoais.telefone_hash;
+        // Remover campos duplicados do dados_pessoais (já estão em nome/contacto)
+        delete clientUpdateData.dados_pessoais.nome_completo;
+        delete clientUpdateData.dados_pessoais.email;
+        delete clientUpdateData.dados_pessoais.telefone;
+
+        // No processo, NÃO enviamos mais personal_data
+        // Mas enviamos client_name, client_email, client_phone para retrocompatibilidade do Kanban
+        processUpdateData.client_name = personalData.nome_completo || process?.client_name || '';
+        processUpdateData.client_email = String(personalData.email || process?.client_email || '');
+        processUpdateData.client_phone = String(personalData.telefone || process?.client_phone || '');
+      } else if (!hasRole(user, "indexacao")) {
+        // ── FALLBACK: Processo antigo sem client_id — enviar tudo para o processo ──
+        processUpdateData.personal_data = cleanedPersonalData;
+        processUpdateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
+        if (process?.client_email !== undefined && process?.client_email !== null) {
+          processUpdateData.client_email = String(process.client_email || '');
+        }
+        if (process?.client_phone !== undefined && process?.client_phone !== null) {
+          processUpdateData.client_phone = String(process.client_phone || '');
+        }
       }
 
-      // Todos os roles com permissão de edição enviam dados pessoais
-      // Indexação é a única exceção (só envia dados financeiros)
+      // ════════════════════════════════════════════════════════════════
+      // Dados de Negócio → PUT /processes/{id}
+      // ════════════════════════════════════════════════════════════════
+
+      // Dados financeiros (pertencem ao processo)
       if (!hasRole(user, "indexacao")) {
-        updateData.personal_data = cleanedPersonalData;
-        updateData.financial_data = cleanedFinancialData;
-        updateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
+        processUpdateData.financial_data = cleanedFinancialData;
+        // titular2_data só se NÃO temos client_id (senão vai para o cliente)
+        if (!clientId) {
+          processUpdateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
+        }
       } else {
-        updateData.financial_data = cleanedFinancialData;
+        processUpdateData.financial_data = cleanedFinancialData;
       }
 
       // Consultor e admin podem editar dados do imóvel
       if (hasAnyRole(user, ["consultor", "admin"])) {
-        updateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
+        processUpdateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
       }
 
       // Mediador pode editar dados de crédito em fases avançadas
       if (hasAnyRole(user, ["intermediario", "admin"])) {
         const allowedStatuses = workflowStatuses.filter(s => s.order >= 3).map(s => s.name);
         if (allowedStatuses.includes(process.status) || process.status === "ch_aprovado" || process.status === "fase_bancaria") {
-          updateData.credit_data = cleanCreditDataForSubmit(creditData);
+          processUpdateData.credit_data = cleanCreditDataForSubmit(creditData);
         }
       }
 
       if (!hasRole(user, "cliente") && statusToSave !== process.status) {
-        updateData.status = statusToSave;
+        processUpdateData.status = statusToSave;
       }
 
       // Campos de topo do processo (vendedor, mediador, monitored_emails)
-      if (process.vendedor) updateData.vendedor = process.vendedor;
-      if (process.mediador) updateData.mediador = process.mediador;
+      if (process.vendedor) processUpdateData.vendedor = process.vendedor;
+      if (process.mediador) processUpdateData.mediador = process.mediador;
       if (process.monitored_emails && process.monitored_emails.length > 0) {
-        updateData.monitored_emails = process.monitored_emails;
+        processUpdateData.monitored_emails = process.monitored_emails;
       }
       // Metadados do processo (Fase 3)
-      if (process.notes !== undefined) updateData.notes = process.notes;
-      if (process.prioridade) updateData.prioridade = process.prioridade;
-      if (process.labels !== undefined) updateData.labels = process.labels;
+      if (process.notes !== undefined) processUpdateData.notes = process.notes;
+      if (process.prioridade) processUpdateData.prioridade = process.prioridade;
+      if (process.labels !== undefined) processUpdateData.labels = process.labels;
 
-      await updateProcess(id, updateData);
-      toast.success("Processo atualizado com sucesso!");
+      // ════════════════════════════════════════════════════════════════
+      // GRAVAÇÃO CONCORRENTE: Promise.all para clientes + processos
+      // ════════════════════════════════════════════════════════════════
+      const savePromises = [];
+
+      // 1. PUT /clients/{client_id} — se houver dados do cliente para atualizar
+      if (clientId && clientUpdateData) {
+        savePromises.push(
+          updateClient(clientId, clientUpdateData)
+            .catch(err => {
+              console.error('Erro ao guardar dados do cliente:', err);
+              throw err;  // Re-throw para que o Promise.all falhe
+            })
+        );
+      }
+
+      // 2. PUT /processes/{id} — dados de negócio
+      savePromises.push(
+        updateProcess(id, processUpdateData)
+          .catch(err => {
+            console.error('Erro ao guardar dados do processo:', err);
+            throw err;
+          })
+      );
+
+      await Promise.all(savePromises);
+      toast.success("Dados guardados com sucesso!");
       fetchData();
     } catch (error) {
       console.error("Error saving process:", error);
@@ -2621,10 +2729,12 @@ const ProcessDetails = () => {
               <CardContent>
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
                   <TabsList className="grid w-full grid-cols-3 sm:grid-cols-8 gap-1 h-auto p-1">
-                    <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
+                    {/* ── DADOS DO CLIENTE ── */}
+                    <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
                       <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Pessoais</span>
+                      <span className="hidden sm:inline">Cliente</span>
                     </TabsTrigger>
+                    {/* ── DADOS DO PROCESSO/NEGÓCIO ── */}
                     <TabsTrigger value="financial" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
                       <Briefcase className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Financeiros</span>
@@ -2660,9 +2770,18 @@ const ProcessDetails = () => {
                     </TabsTrigger>
                   </TabsList>
 
-                  {/* Personal Data Tab */}
+                  {/* ── FASE 3: Tab Dados do Cliente ── */}
                   <TabsContent value="personal" className="mt-4">
                     <div className="space-y-4">
+                      {/* Indicador visual: estes dados pertencem ao Cliente */}
+                      {clientId && (
+                        <div className="flex items-center gap-2 p-2.5 bg-teal-50 dark:bg-teal-950/20 border border-teal-200 dark:border-teal-800 rounded-lg">
+                          <User className="h-4 w-4 text-teal-600 shrink-0" />
+                          <p className="text-xs text-teal-700 dark:text-teal-300">
+                            Estes dados pertencem à <strong>ficha do Cliente</strong> e são guardados em <code className="font-mono text-[10px] bg-teal-100 dark:bg-teal-900/40 px-1 rounded">/clients/{clientId.slice(0,8)}…</code>
+                          </p>
+                        </div>
+                      )}
                       {/* Contactos */}
                       <Card className="border-l-4 border-l-blue-500">
                         <CardContent className="pt-4">
