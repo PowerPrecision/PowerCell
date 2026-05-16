@@ -2,8 +2,9 @@ from .auth import (
     UserRole, UserRegister, UserLogin, UserResponse, TokenResponse,
     UserCreate, UserUpdate
 )
+from .enums import ProcessType, ProcessStatus
 from .process import (
-    ProcessType, ProcessStatus,
+    ProcessCategory, ServiceTypeEnum, RealEstateData, CreditData,
     ProcessCreate, ProcessUpdate, ProcessResponse, PublicClientRegistration
 )
 from .client import (

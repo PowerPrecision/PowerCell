@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from database import db
 from models.auth import UserRole
 from models.process import (
-    ProcessType, ProcessCreate, ProcessUpdate, ProcessResponse
+    ProcessCreate, ProcessUpdate, ProcessResponse
 )
 from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles
 from fastapi import Request

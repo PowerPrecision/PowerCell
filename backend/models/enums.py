@@ -72,10 +72,13 @@ class ProcessStatus(str, Enum):
 class ProcessType(str, Enum):
     """Tipo de processo/serviço."""
     CREDITO_HABITACAO = "credito_habitacao"
+    CREDITO_PESSOAL = "credito_pessoal"
     COMPRA_DIRETA = "compra_direta"
     ARRENDAMENTO = "arrendamento"
     CONSULTORIA = "consultoria"
     REFINANCIAMENTO = "refinanciamento"
+    SEGUROS = "seguros"
+    OUTRO = "outro"
     
     @classmethod
     def all_values(cls) -> List[str]:

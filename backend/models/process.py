@@ -21,7 +21,7 @@ Validadores de NIF removidos → pertencem ao modelo de Cliente.
 Um cliente pode ter múltiplos processos de compra/financiamento.
 """
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List, Any
 from enum import Enum
 
@@ -31,7 +31,8 @@ class ServiceTypeEnum(str, Enum):
     IMOBILIARIO_APENAS = "imobiliario_apenas"  
     COMPLETO = "completo"                   
 
-class ProcessType:
+class ProcessCategory:
+    """Categoria do processo: crédito, imobiliário ou ambos."""
     CREDITO = "credito"
     IMOBILIARIA = "imobiliaria"
     AMBOS = "ambos"
@@ -224,3 +225,19 @@ class ProcessResponse(BaseModel):
     co_applicants: Optional[List[dict]] = None  
     vendedor: Optional[dict] = None  
     mediador: Optional[dict] = None
+
+
+class PublicClientRegistration(BaseModel):
+    """
+    DTO para registo público de clientes (sem autenticação).
+
+    Contém dados pessoais mínimos (name, email, phone) para criar o Cliente,
+    e dados de processo (process_type, has_property) para o futuro Processo.
+    Os dados pessoais são encaminhados para a coleção `clients`, NÃO para `processes`.
+    """
+    name: str = Field(..., min_length=2, max_length=200, description="Nome completo do cliente")
+    email: EmailStr = Field(..., max_length=100, description="Email do cliente")
+    phone: str = Field(..., min_length=9, max_length=20, description="Telefone do cliente")
+    process_type: str = Field(..., max_length=50, description="Tipo de processo")
+    has_property: Optional[bool] = None
+    custom_fields: Optional[dict] = None
