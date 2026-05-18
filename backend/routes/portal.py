@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 
 from database import db
 from services.portal_security import get_current_client, PORTAL_ROLE
+from services.auth import get_current_user, require_roles
 from services.s3_storage import s3_service
 from services.redis_cache import invalidate_stats_cache
 from services.notification_service import send_notification_with_preference_check
