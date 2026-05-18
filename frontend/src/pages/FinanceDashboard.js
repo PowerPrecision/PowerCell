@@ -13,7 +13,7 @@
  * @context {AuthContext} — user.company como company_id (multi-tenant)
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   BarChart3,
@@ -39,6 +39,8 @@ import {
   Filter,
   Pencil,
   Cog,
+  Download,
+  Printer,
 } from "lucide-react";
 import {
   Card,
@@ -57,7 +59,13 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-// Dialog imports removed — config modals movidos para FinanceSettingsPage
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "../components/ui/dialog";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { hasRole } from "../utils/roleUtils";
@@ -74,6 +82,7 @@ import {
   updateProcessFinance,
   getProcessFinanceSummary,
   getPoolDistribution,
+  exportPoolDistributionCSV,
 } from "../services/api";
 import {
   BarChart,
@@ -263,16 +272,148 @@ const StatusBadge = ({ status }) => {
 };
 
 // ====================================================================
+// RECEIPT MODAL — Recibo de Vencimento Individual
+// ====================================================================
+
+const ReceiptModal = ({ consultant, poolData, monthNames, onClose }) => {
+  const receiptRef = useRef(null);
+  const { user } = useAuth();
+
+  if (!consultant || !poolData) return null;
+
+  const companyName = user?.company === "power"
+    ? "Power Real Estate"
+    : user?.company === "precision"
+    ? "Precision Crédito"
+    : "PowerCell";
+
+  const logoSrc = user?.company === "power"
+    ? "/PowerLogo-removebg-preview.png"
+    : user?.company === "precision"
+    ? "/logoPrecision-removebg-preview.png"
+    : "/PowerCell-default.png";
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const monthLabel = monthNames[poolData.month] || "";
+  const roleLabel = consultant.role === "consultor" ? "Consultor" : "Intermediário";
+
+  return (
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)] print-modal-content">
+        <DialogHeader className="no-print">
+          <DialogTitle className="flex items-center gap-2">
+            <Receipt className="h-5 w-5" />
+            Recibo de Vencimento
+          </DialogTitle>
+          <DialogDescription>
+            Pré-visualização do recibo para {consultant.name}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Receipt content — this is what gets printed */}
+        <div ref={receiptRef} className="print-receipt">
+          {/* Header */}
+          <div className="text-center border-b-2 border-emerald-600 pb-4 mb-6">
+            <img src={logoSrc} alt="Logo" className="h-12 w-auto mx-auto mb-3" />
+            <h2 className="text-xl font-bold text-emerald-800">{companyName}</h2>
+            <p className="text-sm text-muted-foreground mt-1">Recibo de Vencimento</p>
+          </div>
+
+          {/* Details */}
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Nome</p>
+                <p className="font-semibold text-base">{consultant.name}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Cargo</p>
+                <p className="font-semibold text-base">{roleLabel}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Período</p>
+                <p className="font-semibold text-base">{monthLabel} {poolData.year}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Consultores no Pool</p>
+                <p className="font-semibold text-base">{poolData.total_consultants}</p>
+              </div>
+            </div>
+
+            {/* Values breakdown */}
+            <div className="border rounded-lg overflow-hidden mt-6">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-emerald-50">
+                    <th className="text-left py-3 px-4 font-medium text-emerald-800">Descrição</th>
+                    <th className="text-right py-3 px-4 font-medium text-emerald-800">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-t">
+                    <td className="py-3 px-4">Salário Fixo</td>
+                    <td className="py-3 px-4 text-right font-mono font-medium">
+                      {formatCurrency(consultant.fixed_salary)}
+                    </td>
+                  </tr>
+                  <tr className="border-t">
+                    <td className="py-3 px-4">Comissões / Pool</td>
+                    <td className="py-3 px-4 text-right font-mono font-medium">
+                      {formatCurrency(consultant.variable_pay)}
+                    </td>
+                  </tr>
+                  <tr className="border-t-2 border-emerald-600 bg-emerald-50">
+                    <td className="py-3 px-4 font-bold text-emerald-800">Total a Receber</td>
+                    <td className="py-3 px-4 text-right font-mono font-bold text-emerald-800 text-lg">
+                      {formatCurrency(consultant.total_monthly)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div className="mt-8 pt-4 border-t text-xs text-muted-foreground flex justify-between">
+              <span>Documento gerado automaticamente pelo PowerCell</span>
+              <span>{new Date().toLocaleDateString("pt-PT")}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Print button — hidden when printing */}
+        <div className="flex justify-end gap-2 mt-4 no-print">
+          <Button variant="outline" onClick={onClose}>
+            Fechar
+          </Button>
+          <Button onClick={handlePrint} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+            <Printer className="h-4 w-4" />
+            Imprimir Recibo
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// ====================================================================
 // POOL DISTRIBUTION PANEL — Distribuição do Mês (Modelo Global Pool)
 // ====================================================================
 
 const PoolDistributionPanel = ({ companyId }) => {
+  const { user } = useAuth();
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [poolData, setPoolData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [receiptConsultant, setReceiptConsultant] = useState(null);
+
+  const isAdminOrCeo = hasRole(user, "admin") || hasRole(user, "ceo");
 
   const fetchPoolData = useCallback(async () => {
     if (!companyId) return;
@@ -302,6 +443,31 @@ const PoolDistributionPanel = ({ companyId }) => {
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
   ];
 
+  const handleExportCSV = async () => {
+    setExporting(true);
+    try {
+      const res = await exportPoolDistributionCSV({
+        month: selectedMonth,
+        year: selectedYear,
+        company_id: companyId,
+      });
+      // Create blob from response and trigger download
+      const blob = new Blob([res.data], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `fecho_${monthNames[selectedMonth].toLowerCase()}_${selectedYear}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Erro ao exportar CSV:", err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50/50 to-white">
       <CardHeader>
@@ -315,7 +481,24 @@ const PoolDistributionPanel = ({ companyId }) => {
               Comissões faturadas divididas igualmente pelos consultores ativos
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Export CSV — Admin/CEO only */}
+            {isAdminOrCeo && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                onClick={handleExportCSV}
+                disabled={exporting || loading}
+              >
+                {exporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Exportar para CSV
+              </Button>
+            )}
             <Select value={String(selectedMonth)} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
               <SelectTrigger className="w-[140px]">
                 <SelectValue />
@@ -409,7 +592,7 @@ const PoolDistributionPanel = ({ companyId }) => {
               </div>
             </div>
 
-            {/* Lista de Consultores — com breakdown Fixo + Variável + Total */}
+            {/* Lista de Consultores — com breakdown Fixo + Variável + Total + Recibo */}
             {poolData.consultants && poolData.consultants.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
@@ -424,6 +607,7 @@ const PoolDistributionPanel = ({ companyId }) => {
                         <th className="text-right py-2.5 px-3 font-medium text-muted-foreground">Fixo</th>
                         <th className="text-right py-2.5 px-3 font-medium text-muted-foreground">Comissões/Pool</th>
                         <th className="text-right py-2.5 px-3 font-medium text-emerald-700 font-semibold">Total Mensal</th>
+                        <th className="text-center py-2.5 px-3 font-medium text-muted-foreground">Recibo</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -449,6 +633,18 @@ const PoolDistributionPanel = ({ companyId }) => {
                           <td className="text-right py-2.5 px-3 font-mono text-sm font-semibold text-emerald-700">
                             {formatCurrency(c.total_monthly)}
                           </td>
+                          <td className="text-center py-2.5 px-3">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 h-8"
+                              onClick={() => setReceiptConsultant(c)}
+                              title="Imprimir Recibo"
+                            >
+                              <Printer className="h-4 w-4" />
+                              <span className="hidden sm:inline text-xs">Recibo</span>
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                       {/* Totals row */}
@@ -463,6 +659,7 @@ const PoolDistributionPanel = ({ companyId }) => {
                         <td className="text-right py-2.5 px-3 font-mono text-sm font-bold text-emerald-700">
                           {formatCurrency(poolData.total_grand_monthly)}
                         </td>
+                        <td />
                       </tr>
                     </tbody>
                   </table>
@@ -479,6 +676,16 @@ const PoolDistributionPanel = ({ companyId }) => {
           </div>
         ) : null}
       </CardContent>
+
+      {/* Receipt Modal */}
+      {receiptConsultant && poolData && (
+        <ReceiptModal
+          consultant={receiptConsultant}
+          poolData={poolData}
+          monthNames={monthNames}
+          onClose={() => setReceiptConsultant(null)}
+        />
+      )}
     </Card>
   );
 };

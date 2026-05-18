@@ -10,11 +10,14 @@ Permissões:
 - PUT /finance/config (escrita): apenas Admin e CEO
 """
 
+import csv
+import io
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from database import db
@@ -1049,6 +1052,198 @@ async def get_pool_distribution(
         "total_grand_monthly": round(total_grand, 2),
         "consultants": all_consultants,
     }
+
+
+# ====================================================================
+# POOL DISTRIBUTION EXPORT — CSV para Contabilidade (Admin/CEO only)
+# ====================================================================
+
+@router.get("/finance/pool-distribution/export")
+async def export_pool_distribution_csv(
+    month: int = Query(..., ge=1, le=12, description="Mês (1-12)"),
+    year: int = Query(..., ge=2020, le=2100, description="Ano (ex: 2025)"),
+    company_id: str = Query(..., description="Empresa para filtrar (obrigatório)"),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Exporta a distribuição do Pool Global como ficheiro CSV para a Contabilidade.
+
+    Executa a mesma lógica do endpoint GET /finance/pool-distribution (com
+    Fixo + Variável + Total), mas devolve um ficheiro .csv formatado com:
+      - Colunas: Nome do Consultor, Cargo, Salário Fixo (€), Comissões/Pool (€), Total a Receber (€)
+      - Separador: vírgula
+      - Codificação: UTF-8 com BOM (para Excel abrir correctamente acentos)
+      - Rodapé com totais agregados
+
+    Permissões: apenas Admin e CEO.
+    """
+    # --- Reutilizar toda a lógica de cálculo do pool-distribution ---
+
+    # 1. Verificar modelo de distribuição
+    config_doc = await db.finance_configs.find_one({"company_id": company_id})
+
+    # 2. Calcular total_pool
+    start_of_month = f"{year}-{month:02d}-01T00:00:00.000Z"
+    if month == 12:
+        end_of_month = f"{year + 1}-01-01T00:00:00.000Z"
+    else:
+        end_of_month = f"{year}-{month + 1:02d}-01T00:00:00.000Z"
+
+    pool_statuses = [FinanceStatus.PAID.value, FinanceStatus.INVOICED.value]
+
+    pipeline = [
+        {
+            "$match": {
+                "company_id": company_id,
+                "status": {"$in": pool_statuses},
+                "updated_at": {"$gte": start_of_month, "$lt": end_of_month},
+            }
+        },
+        {
+            "$group": {
+                "_id": None,
+                "total_pool": {"$sum": "$expected_commission"},
+                "count": {"$sum": 1},
+            }
+        },
+    ]
+
+    pool_results = await db.process_finances.aggregate(pipeline).to_list(1)
+    total_pool = _safe_float(pool_results[0].get("total_pool")) if pool_results else 0.0
+
+    # 3. Contar consultores ativos
+    consultant_roles = ["consultor", "intermediario"]
+
+    primary_query = {
+        "company": company_id,
+        "role": {"$in": consultant_roles},
+        "is_active": {"$ne": False},
+    }
+    additional_query = {
+        "company": company_id,
+        "additional_roles": {"$in": consultant_roles},
+        "is_active": {"$ne": False},
+    }
+
+    primary_consultants = await db.users.find(primary_query, {"_id": 0, "id": 1, "name": 1, "role": 1, "base_salary": 1}).to_list(1000)
+    additional_consultants = await db.users.find(additional_query, {"_id": 0, "id": 1, "name": 1, "role": 1, "base_salary": 1}).to_list(1000)
+
+    seen_ids = set()
+    all_consultants = []
+    for u in primary_consultants + additional_consultants:
+        uid = u.get("id", "")
+        if uid and uid not in seen_ids:
+            seen_ids.add(uid)
+            all_consultants.append({
+                "id": uid,
+                "name": u.get("name", ""),
+                "role": u.get("role", ""),
+                "base_salary": _safe_float(u.get("base_salary")),
+            })
+
+    total_consultants = len(all_consultants)
+
+    # 4. Calcular pool_per_consultant + breakdown
+    pool_per_consultant = round(total_pool / total_consultants, 2) if total_consultants > 0 else 0.0
+
+    for c in all_consultants:
+        c["fixed_salary"] = round(c["base_salary"], 2)
+        c["variable_pay"] = round(pool_per_consultant, 2)
+        c["total_monthly"] = round(c["base_salary"] + pool_per_consultant, 2)
+
+    # --- Gerar CSV ---
+
+    month_names = [
+        "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+    ]
+    month_label = month_names[month] if 1 <= month <= 12 else str(month)
+
+    # Obter nome da empresa para o cabeçalho
+    company_name = "PowerCell"
+    try:
+        sys_cfg = await db.system_config.find_one(
+            {"company_id": company_id},
+            {"_id": 0, "config.company_name": 1}
+        )
+        if sys_cfg and sys_cfg.get("config", {}).get("company_name"):
+            company_name = sys_cfg["config"]["company_name"]
+    except Exception:
+        pass
+
+    output = io.StringIO()
+    # BOM UTF-8 para Excel reconhecer acentos correctamente
+    output.write("\ufeff")
+
+    writer = csv.writer(output, delimiter=",", quoting=csv.QUOTE_MINIMAL)
+
+    # Cabeçalho do documento
+    writer.writerow([f"{company_name} — Fecho de {month_label} {year}"])
+    writer.writerow([])
+
+    # Cabeçalho da tabela
+    writer.writerow([
+        "Nome do Consultor",
+        "Cargo",
+        "Salário Fixo (€)",
+        "Comissões/Pool (€)",
+        "Total a Receber (€)"
+    ])
+
+    # Linhas dos consultores
+    total_base = 0.0
+    total_var = 0.0
+    total_grand = 0.0
+
+    for c in all_consultants:
+        role_label = "Consultor" if c["role"] == "consultor" else "Intermediário"
+        fixed = c["fixed_salary"]
+        variable = c["variable_pay"]
+        total = c["total_monthly"]
+
+        writer.writerow([
+            c["name"],
+            role_label,
+            f"{fixed:.2f}",
+            f"{variable:.2f}",
+            f"{total:.2f}",
+        ])
+
+        total_base += fixed
+        total_var += variable
+        total_grand += total
+
+    # Rodapé com totais
+    writer.writerow([])
+    writer.writerow([
+        "TOTAL",
+        f"{total_consultants} consultores",
+        f"{total_base:.2f}",
+        f"{total_var:.2f}",
+        f"{total_grand:.2f}",
+    ])
+
+    # Resumo do pool
+    writer.writerow([])
+    writer.writerow([f"Total Pool do Mês: {total_pool:.2f} €"])
+    writer.writerow([f"Processos Faturados: {pool_results[0].get('count', 0) if pool_results else 0}"])
+    writer.writerow([f"Valor por Consultor: {pool_per_consultant:.2f} €"])
+    writer.writerow([f"Gerado em: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"])
+
+    # Preparar resposta
+    output.seek(0)
+    filename = f"fecho_{month_label.lower()}_{year}.csv"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": "text/csv; charset=utf-8",
+    }
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        headers=headers,
+        media_type="text/csv",
+    )
 
 
 # ====================================================================

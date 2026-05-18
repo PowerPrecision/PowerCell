@@ -779,3 +779,68 @@ h1, .title-truncate {
 
 .dark .border-gray-200 { border-color: hsl(222 14% 24%) !important; }
 .dark .border-gray-300 { border-color: hsl(222 14% 28%) !important; }
+
+/* ============================================
+   PRINT STYLES — Recibo de Vencimento
+   Ao imprimir (window.print()), esconde tudo
+   excepto o conteúdo do modal de recibo.
+   ============================================ */
+@media print {
+  /* Esconder tudo por defeito */
+  body > * {
+    display: none !important;
+  }
+
+  /* Mostrar apenas o conteúdo do recibo */
+  body > *:has(.print-receipt) {
+    display: block !important;
+  }
+
+  .print-receipt {
+    display: block !important;
+    padding: 2rem;
+  }
+
+  /* Esconder elementos que não devem ser impressos */
+  .no-print,
+  .print-modal-content > button,
+  [role="dialog"] > button,
+  .fixed,
+  aside,
+  header,
+  nav,
+  footer,
+  .sticky {
+    display: none !important;
+  }
+
+  /* Resetar estilos para impressão */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* Garantir fundo branco na impressão */
+  body {
+    background: white !important;
+  }
+
+  /* Garantir que o modal ocupa a página toda */
+  [role="dialog"],
+  .print-modal-content {
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: white !important;
+  }
+
+  /* Evitar quebras de página dentro do recibo */
+  .print-receipt {
+    page-break-inside: avoid;
+  }
+}

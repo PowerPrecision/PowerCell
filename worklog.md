@@ -411,3 +411,44 @@ Stage Summary:
 - FinanceDashboard.js limpo: sem modais de config, layout expandido w-full max-w-7xl, tabs flex-wrap
 - Sidebar: "Gestão Financeira" visível só para admin/CEO no grupo "O Meu Negócio"
 - Separação clara: Dashboard = visualização/relatórios, Settings = configuração
+
+---
+Task ID: finance-export-receipt
+Agent: Main Agent
+Task: Implementar Exportação CSV para Contabilidade + Recibo Individual do Consultor
+
+Work Log:
+- Analisou backend/routes/finance.py: endpoint GET /finance/pool-distribution (linhas 920-1054) com lógica completa de cálculo Pool (Fixo + Variável + Total)
+- Analisou frontend/src/pages/FinanceDashboard.js: PoolDistributionPanel com tabela de consultores, KPIs, selectors mês/ano
+- Adicionou imports csv, io, StreamingResponse ao backend/routes/finance.py
+- Criou endpoint GET /finance/pool-distribution/export (admin/CEO only) que:
+  - Reutiliza toda a lógica de cálculo do pool-distribution
+  - Gera CSV com BOM UTF-8, cabeçalho com nome da empresa, colunas (Nome, Cargo, Fixo, Comissões/Pool, Total)
+  - Rodapé com totais agregados + resumo do pool
+  - Headers HTTP para forçar download (Content-Disposition: attachment)
+  - Filename: fecho_{mês}_{ano}.csv
+- Adicionou exportPoolDistributionCSV() ao frontend/src/services/api.js com responseType: "blob"
+- Adicionou ReceiptModal component ao FinanceDashboard.js com:
+  - Logo da empresa (multi-tenant), nome, cargo, período
+  - Tabela com 3 parcelas: Salário Fixo, Comissões/Pool, Total a Receber
+  - Botão "Imprimir Recibo" que usa window.print()
+  - Classe CSS no-print para esconder botões durante impressão
+- Atualizou PoolDistributionPanel:
+  - Adicionou botão "Exportar para CSV" (admin/CEO only) no header ao lado dos selectors
+  - Adicionou coluna "Recibo" na tabela com botão Printer + label por consultor
+  - Estado receiptConsultant para controlar modal
+  - handleExportCSV com blob download no browser
+- Adicionou @media print CSS ao frontend/src/index.css:
+  - Esconde todo o site excepto .print-receipt
+  - Reset de posição/tamanho do modal para ocupar página inteira
+  - print-color-adjust: exact para manter cores na impressão
+  - page-break-inside: avoid no recibo
+- Frontend build passa (vite build ✓)
+- Python syntax check passa ✓
+
+Stage Summary:
+- Backend: Novo endpoint GET /finance/pool-distribution/export (CSV, admin/CEO only)
+- Frontend: Botão "Exportar para CSV" + coluna "Recibo" com modal de impressão
+- 4 ficheiros modificados: backend/routes/finance.py, frontend/src/services/api.js, frontend/src/pages/FinanceDashboard.js, frontend/src/index.css
+- CSV com BOM UTF-8, colunas formatadas, totais e resumo do pool
+- Recibo com Logo, Nome, Cargo, Período, 3 parcelas de valor, data de geração

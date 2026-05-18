@@ -687,6 +687,7 @@ export const getProcessFinanceSummary = (params = {}) => api.get("/finance/proce
 
 // Pool Distribution (modelo global_pool — fecho de mês)
 export const getPoolDistribution = (params = {}) => api.get("/finance/pool-distribution", { params });
+export const exportPoolDistributionCSV = (params = {}) => api.get("/finance/pool-distribution/export", { params, responseType: "blob" });
 
 // ===== RGPD TEMPLATE =====
 export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
