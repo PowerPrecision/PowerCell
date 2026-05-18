@@ -239,3 +239,26 @@ Stage Summary:
 - ProcessStickyHeader: z-30 (abaixo de sidebar/header)
 - Progress bar: 0% → 100% com base em campos obrigatórios visíveis
 - Pushed to origin/dev: commit 31fe28c
+
+---
+Task ID: smart-match-module
+Agent: Main Agent
+Task: Módulo de Cruzamento Imobiliário (Smart Match) — Motor de Match + Envio para Portal + Frontend Consultor + Frontend Cliente
+
+Work Log:
+- Analisou codebase existente: match.py (5 endpoints), client_match.py (scoring), ProcessDetails.js (8 tabs), ClientPortal.jsx (stepper + docs + messages)
+- Backend: Adicionou GET /api/match/process/{process_id} em routes/match.py — Motor de cruzamento que lê real_estate_data do processo, constrói query MongoDB para properties, calcula score de relevância (preço 35%, localização 35%, tipologia 30%, área 10%)
+- Backend: Adicionou POST /api/portal/recommendations em routes/portal.py — Guarda recomendações no campo recommended_properties do processo, sem duplicados, com auditoria no histórico
+- Backend: Adicionou GET /api/portal/recommendations em routes/portal.py — Endpoint consumido pelo Portal do Cliente, marca recomendações como visualizadas
+- Frontend: Adicionou tab "Smart Match" ao ProcessDetails.js (9ª tab, ícone Sparkles, cor purple)
+- Frontend: SmartMatchTab com "Procurar Matches" → grid de imóveis com score badge, foto, preço, tipologia, match reasons, botão "Recomendar ao Cliente"
+- Frontend: Se processo não for de comprador, exibe "Apenas para processos de Comprador"
+- Frontend: Adicionou secção "Imóveis Recomendados" ao ClientPortal.jsx — fetch automático, cards com foto/preço/localização/tipologia, recomendado por + data
+- Syntax check OK para ambos os ficheiros backend
+- Lint OK para ambos os ficheiros frontend (apenas warnings pré-existentes)
+
+Stage Summary:
+- 4 ficheiros alterados: backend/routes/match.py, backend/routes/portal.py, frontend/src/pages/ProcessDetails.js, frontend/src/pages/ClientPortal.jsx
+- Query MongoDB do Smart Match validada: status=disponivel + financials.asking_price ≤ orcamento_max + address.municipality ~ concelho + $or[property_type ~ tipologia, features.bedrooms = N]
+- Fluxo completo: Consultor clica "Procurar Matches" → vê grelha → clica "Recomendar ao Cliente" → imóvel fica disponível no Portal do Cliente
+- Pendente: commit e push para dev

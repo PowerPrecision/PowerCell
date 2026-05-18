@@ -1085,6 +1085,10 @@ export default function ClientPortal() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
 
+  // ── Recommended properties state ──
+  const [recommendations, setRecommendations] = useState([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(true);
+
   const fetchMessages = useCallback(async () => {
     const token = sessionStorage.getItem('portal_token');
     if (!token) return;
@@ -1151,6 +1155,29 @@ export default function ClientPortal() {
     }, 15000);
     return () => clearInterval(interval);
   }, [fetchMessages, fetchUnreadCount]);
+
+  // ── Fetch recommended properties ──
+  const fetchRecommendations = useCallback(async () => {
+    const token = sessionStorage.getItem('portal_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/portal/recommendations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRecommendations(data.recommendations || []);
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setRecommendationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRecommendations();
+  }, [fetchRecommendations]);
 
   // ── Welcome message (from API, already rendered with variables) ──
   // MUST be before early returns (Rules of Hooks)
@@ -1356,6 +1383,86 @@ export default function ClientPortal() {
             )}
 
             <TeamCard team={team} consultor={consultor} />
+
+            {/* ═══ Imóveis Recomendados (Smart Match) ═══ */}
+            {!recommendationsLoading && recommendations.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <h3 className="text-base font-bold text-gray-800 mb-1 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                  </svg>
+                  Imóveis Recomendados
+                </h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  Imóveis seleccionados pelo seu consultor especialmente para si.
+                </p>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {recommendations.map((rec) => (
+                    <div key={rec.property_id} className="border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
+                      {/* Photo */}
+                      {rec.photo ? (
+                        <div className="h-32 bg-gray-100 overflow-hidden">
+                          <img
+                            src={rec.photo}
+                            alt={rec.title}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="h-24 bg-gradient-to-br from-purple-50 to-teal-50 flex items-center justify-center">
+                          <svg className="w-10 h-10 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                          </svg>
+                        </div>
+                      )}
+                      <div className="p-3">
+                        {/* Title */}
+                        <h4 className="font-semibold text-sm text-gray-800 truncate">{rec.title || 'Sem título'}</h4>
+                        {/* Price */}
+                        {rec.price && (
+                          <p className="text-base font-bold text-emerald-600 mt-1">
+                            {new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(rec.price)}
+                          </p>
+                        )}
+                        {/* Location */}
+                        <div className="flex items-center gap-1 text-xs text-gray-500 mt-1">
+                          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                          </svg>
+                          <span className="truncate">{[rec.municipality, rec.district].filter(Boolean).join(', ')}</span>
+                        </div>
+                        {/* Features */}
+                        <div className="flex items-center gap-3 text-xs text-gray-400 mt-1.5">
+                          {rec.bedrooms != null && <span>T{rec.bedrooms}</span>}
+                          {rec.area && <span>{rec.area}m²</span>}
+                          {rec.property_type && <span className="capitalize">{rec.property_type}</span>}
+                        </div>
+                        {/* Recommended by */}
+                        <div className="mt-2 pt-2 border-t border-gray-50">
+                          <p className="text-[10px] text-gray-400">
+                            Recomendado por <span className="font-medium text-purple-600">{rec.recommended_by_name || 'Consultor'}</span>
+                            {rec.recommended_at && (
+                              <> · {new Date(rec.recommended_at).toLocaleDateString('pt-PT')}</>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Loading recommendations */}
+            {recommendationsLoading && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <div className="flex items-center gap-2 text-sm text-gray-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  A carregar imóveis recomendados...
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ═══ RIGHT COLUMN: Mensagens / Chat (Desktop only) ═══ */}

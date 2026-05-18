@@ -377,6 +377,11 @@ const ProcessDetails = () => {
   const [propertySearchLoading, setPropertySearchLoading] = useState(false);
   const [associatingProperty, setAssociatingProperty] = useState(false);
 
+  // Estado para Smart Match tab
+  const [smartMatchResults, setSmartMatchResults] = useState(null);
+  const [smartMatchLoading, setSmartMatchLoading] = useState(false);
+  const [recommendingPropertyId, setRecommendingPropertyId] = useState(null);
+
   // Estado para Mensagens do Portal (cliente ↔ staff)
   const [portalMessages, setPortalMessages] = useState([]);
   const [portalMessagesLoading, setPortalMessagesLoading] = useState(false);
@@ -2093,6 +2098,295 @@ const ProcessDetails = () => {
     </div>
   );
 
+  // ── SmartMatchTab — Motor de Cruzamento Imobiliário ──
+  const SmartMatchTab = () => {
+    const isBuyerProcess = smartMatchResults?.is_buyer !== false && (
+      process?.process_type?.toLowerCase().includes("compra") ||
+      process?.process_type?.toLowerCase().includes("habitacao") ||
+      process?.real_estate_data?.finalidade?.toLowerCase() === "compra"
+    );
+
+    const handleSearchMatches = async () => {
+      setSmartMatchLoading(true);
+      setSmartMatchResults(null);
+      try {
+        const response = await fetch(`${API_URL}/api/match/process/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setSmartMatchResults(data);
+        } else {
+          const err = await response.json();
+          toast.error(err.detail || "Erro ao procurar matches");
+        }
+      } catch (error) {
+        toast.error("Erro de ligação ao servidor");
+      } finally {
+        setSmartMatchLoading(false);
+      }
+    };
+
+    const handleRecommendProperty = async (propertyId) => {
+      setRecommendingPropertyId(propertyId);
+      try {
+        const response = await fetch(`${API_URL}/api/portal/recommendations`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            client_id: process?.client_id,
+            process_id: id,
+            property_ids: [propertyId],
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          toast.success(`Imóvel recomendado ao cliente com sucesso!`);
+        } else {
+          const err = await response.json();
+          toast.error(err.detail || "Erro ao recomendar imóvel");
+        }
+      } catch (error) {
+        toast.error("Erro de ligação ao servidor");
+      } finally {
+        setRecommendingPropertyId(null);
+      }
+    };
+
+    // Se não for processo de comprador
+    if (!isBuyerProcess && smartMatchResults?.is_buyer === false) {
+      return (
+        <div className="space-y-4">
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
+                <Sparkles className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-amber-800 dark:text-amber-200">Smart Match</h3>
+                <p className="text-sm text-amber-600 dark:text-amber-400">
+                  Apenas disponível para processos de Comprador
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-purple-50 to-teal-50 dark:from-purple-900/20 dark:to-teal-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-purple-100 dark:bg-purple-900/40 rounded-lg">
+                <Sparkles className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-purple-800 dark:text-purple-200">Smart Match</h3>
+                <p className="text-sm text-purple-600 dark:text-purple-400">
+                  Encontre imóveis compatíveis com o perfil deste comprador
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              className="gap-1.5 bg-purple-600 hover:bg-purple-700 text-white"
+              onClick={handleSearchMatches}
+              disabled={smartMatchLoading}
+            >
+              {smartMatchLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Procurar Matches
+            </Button>
+          </div>
+        </div>
+
+        {/* Critérios de pesquisa */}
+        {smartMatchResults?.criteria && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {smartMatchResults.criteria.max_price && (
+              <div className="bg-white dark:bg-gray-800 border rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Orçamento Máx.</p>
+                <p className="font-semibold text-sm text-emerald-700 dark:text-emerald-400">
+                  {new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(smartMatchResults.criteria.max_price)}
+                </p>
+              </div>
+            )}
+            {smartMatchResults.criteria.tipologia && (
+              <div className="bg-white dark:bg-gray-800 border rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Tipologia</p>
+                <p className="font-semibold text-sm">{smartMatchResults.criteria.tipologia}</p>
+              </div>
+            )}
+            {smartMatchResults.criteria.concelho && (
+              <div className="bg-white dark:bg-gray-800 border rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Concelho</p>
+                <p className="font-semibold text-sm">{smartMatchResults.criteria.concelho}</p>
+              </div>
+            )}
+            {smartMatchResults.criteria.distrito && (
+              <div className="bg-white dark:bg-gray-800 border rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Distrito</p>
+                <p className="font-semibold text-sm">{smartMatchResults.criteria.distrito}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Loading state */}
+        {smartMatchLoading && (
+          <div className="flex flex-col items-center justify-center py-16">
+            <Loader2 className="h-10 w-10 animate-spin text-purple-500 mb-4" />
+            <p className="text-sm text-muted-foreground">A cruzar critérios com imóveis disponíveis...</p>
+          </div>
+        )}
+
+        {/* Empty state - before search */}
+        {!smartMatchLoading && !smartMatchResults && (
+          <Card className="border-dashed">
+            <CardContent className="py-12 flex flex-col items-center text-center">
+              <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-full mb-4">
+                <Sparkles className="h-8 w-8 text-purple-400" />
+              </div>
+              <h4 className="font-semibold text-lg mb-1">Smart Match</h4>
+              <p className="text-sm text-muted-foreground max-w-md">
+                Clique em &quot;Procurar Matches&quot; para encontrar imóveis compatíveis com os critérios deste comprador.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* No matches */}
+        {!smartMatchLoading && smartMatchResults && smartMatchResults.total_matches === 0 && (
+          <Card className="border-dashed">
+            <CardContent className="py-12 flex flex-col items-center text-center">
+              <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-full mb-4">
+                <AlertCircle className="h-8 w-8 text-amber-400" />
+              </div>
+              <h4 className="font-semibold text-lg mb-1">Sem correspondências</h4>
+              <p className="text-sm text-muted-foreground max-w-md">
+                Nenhum imóvel disponível corresponde aos critérios de pesquisa. Tente alargar os filtros.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Match results grid */}
+        {!smartMatchLoading && smartMatchResults && smartMatchResults.matches.length > 0 && (
+          <>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="bg-purple-50 text-purple-800 border-purple-200">
+                {smartMatchResults.total_matches} resultado{smartMatchResults.total_matches !== 1 ? "s" : ""}
+              </Badge>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {smartMatchResults.matches.map((match) => (
+                <Card key={match.property_id} className="overflow-hidden hover:shadow-lg transition-all group">
+                  {/* Photo */}
+                  <div className="relative h-40 bg-gray-100 dark:bg-gray-800 overflow-hidden">
+                    {match.photo ? (
+                      <img
+                        src={match.photo}
+                        alt={match.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Building2 className="h-12 w-12 text-gray-300" />
+                      </div>
+                    )}
+                    {/* Score badge */}
+                    <div className="absolute top-2 right-2">
+                      <Badge className={`text-xs font-bold ${
+                        match.score >= 80 ? "bg-emerald-500 text-white" :
+                        match.score >= 50 ? "bg-amber-500 text-white" :
+                        "bg-gray-500 text-white"
+                      }`}>
+                        {match.score}% match
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <CardContent className="p-4">
+                    {/* Title & reference */}
+                    <div className="mb-2">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        {match.internal_reference && (
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {match.internal_reference}
+                          </span>
+                        )}
+                      </div>
+                      <h5 className="font-semibold text-sm truncate">{match.title}</h5>
+                    </div>
+
+                    {/* Price */}
+                    <div className="text-lg font-bold text-emerald-700 dark:text-emerald-400 mb-2">
+                      {match.price ? formatPrice(match.price) : "—"}
+                    </div>
+
+                    {/* Location */}
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
+                      <MapPin className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">
+                        {[match.municipality, match.district].filter(Boolean).join(", ")}
+                      </span>
+                    </div>
+
+                    {/* Features */}
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground mb-3">
+                      {match.bedrooms != null && <span>T{match.bedrooms}</span>}
+                      {match.area && <span>{match.area}m²</span>}
+                      {match.property_type && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                          {propertyTypeLabels[match.property_type] || match.property_type}
+                        </Badge>
+                      )}
+                    </div>
+
+                    {/* Match reasons */}
+                    {match.match_reasons && match.match_reasons.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {match.match_reasons.slice(0, 3).map((reason, idx) => (
+                          <span key={idx} className="text-[10px] bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded">
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Recommend button */}
+                    <Button
+                      size="sm"
+                      className="w-full gap-1.5 bg-purple-600 hover:bg-purple-700 text-white"
+                      onClick={() => handleRecommendProperty(match.property_id)}
+                      disabled={recommendingPropertyId === match.property_id}
+                    >
+                      {recommendingPropertyId === match.property_id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                      Recomendar ao Cliente
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <DashboardLayout title="Detalhes do Processo">
       {/* Header Fixo - Sempre visível durante scroll */}
@@ -2720,7 +3014,7 @@ const ProcessDetails = () => {
               </CardHeader>
               <CardContent>
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-8 gap-1 h-auto p-1">
+                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-9 gap-1 h-auto p-1">
                     {/* ── DADOS DO CLIENTE ── */}
                     <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
                       <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -2746,6 +3040,10 @@ const ProcessDetails = () => {
                     <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
                       <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Emails</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="smartmatch" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-purple-50 dark:bg-purple-900/20 data-[state=active]:bg-purple-100 dark:data-[state=active]:bg-purple-900/40">
+                      <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Smart Match</span>
                     </TabsTrigger>
                     <TabsTrigger value="visitas" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-emerald-50 dark:bg-emerald-900/20 data-[state=active]:bg-emerald-100 dark:data-[state=active]:bg-emerald-900/40">
                       <Home className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -4929,6 +5227,11 @@ const ProcessDetails = () => {
                         </CardContent>
                       </Card>
                     </div>
+                  </TabsContent>
+
+                  {/* Smart Match Tab — Motor de Cruzamento Imobiliário */}
+                  <TabsContent value="smartmatch" className="mt-4">
+                    <SmartMatchTab />
                   </TabsContent>
 
                   {/* Visitas / Imóveis Tab */}
