@@ -662,13 +662,28 @@ export const resolveAnnotation = (annotationId, resolved) =>
   api.put(`/annotations/${annotationId}/resolve`, { resolved });
 export const getAnnotationStats = (processId) => api.get(`/annotations/process/${processId}/stats`);
 
-// ===== FINANCEIRO =====
+// ===== FINANCEIRO (Legacy Dashboard) =====
 export const getFinanceSummary = (params = {}) => api.get("/finance/summary", { params });
 export const getFinanceMonthly = (params = {}) => api.get("/finance/monthly", { params });
 export const getFinanceCommissions = (params = {}) => api.get("/finance/commissions", { params });
 export const getFinancePerformance = (params = {}) => api.get("/finance/performance", { params });
 export const getFinanceConfig = () => api.get("/finance/config");
 export const updateFinanceConfig = (config) => api.put("/finance/config", config);
+
+// ===== FINANCEIRO — Módulo Fase 2 (FinanceConfig + ProcessFinance) =====
+// FinanceConfig (configuração de honorários por empresa)
+export const getFinanceConfigs = (params = {}) => api.get("/finance/configs", { params });
+export const getFinanceConfigById = (configId) => api.get(`/finance/configs/${configId}`);
+export const createFinanceConfig = (data) => api.post("/finance/configs", data);
+export const updateFinanceConfigById = (configId, data) => api.put(`/finance/configs/${configId}`, data);
+export const deleteFinanceConfigById = (configId) => api.delete(`/finance/configs/${configId}`);
+
+// ProcessFinance (registos financeiros por processo — snapshots)
+export const getProcessFinances = (params = {}) => api.get("/finance/processes", { params });
+export const getProcessFinanceById = (financeId) => api.get(`/finance/processes/${financeId}`);
+export const createProcessFinance = (data) => api.post("/finance/processes", data);
+export const updateProcessFinance = (financeId, data) => api.put(`/finance/processes/${financeId}`, data);
+export const getProcessFinanceSummary = (params = {}) => api.get("/finance/processes/summary", { params });
 
 // ===== RGPD TEMPLATE =====
 export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
