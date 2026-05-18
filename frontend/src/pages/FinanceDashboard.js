@@ -83,6 +83,7 @@ import {
   getProcessFinanceSummary,
   getPoolDistribution,
   exportPoolDistributionCSV,
+  exportFinanceCommissionsCSV,
 } from "../services/api";
 import {
   BarChart,
@@ -1163,6 +1164,7 @@ const FinanceDashboard = () => {
   const [performance, setPerformance] = useState(null);
   const [config, setConfig] = useState(null);
   const [distributionModel, setDistributionModel] = useState("individual_split");
+  const [commissionsReceiptConsultant, setCommissionsReceiptConsultant] = useState(null);
 
   // Filtros
   const currentYear = new Date().getFullYear();
@@ -1181,7 +1183,7 @@ const FinanceDashboard = () => {
         await Promise.all([
           getFinanceSummary(params),
           getFinanceMonthly(params),
-          getFinanceCommissions(params),
+          getFinanceCommissions({ ...params, company_id: companyId }),
           getFinancePerformance(params),
           getFinanceConfig(),
           getFinanceConfigs({ company_id: companyId }),
@@ -1487,7 +1489,9 @@ const FinanceDashboard = () => {
                   <FinanceStatCard
                     title="Colaboradores Activos"
                     value={commissions.collaborators.length}
-                    subtitle="Consultores e intermediários"
+                    subtitle={commissions.distribution_model === "global_pool"
+                      ? "Modelo: Pool Global"
+                      : "Modelo: Tradicional (Split)"}
                     icon={Users}
                     color="text-blue-600"
                     iconBg="bg-blue-50"
@@ -1508,7 +1512,7 @@ const FinanceDashboard = () => {
                     <FinanceStatCard
                       title="Total Variável"
                       value={formatCurrency(commissions.total_variable_pay || 0)}
-                      subtitle="Comissões + Pool"
+                      subtitle={commissions.distribution_model === "global_pool" ? "Pool Global" : "Comissões Individuais"}
                       icon={Receipt}
                       color="text-orange-600"
                       iconBg="bg-orange-50"
@@ -1526,8 +1530,44 @@ const FinanceDashboard = () => {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Ranking de Colaboradores — {selectedYear}</CardTitle>
-                    <CardDescription>Comissões por área de negócio (modelo híbrido: Fixo + Variável)</CardDescription>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div>
+                        <CardTitle className="text-base">Ranking de Colaboradores — {selectedYear}</CardTitle>
+                        <CardDescription>
+                          Comissões por área de negócio (modelo híbrido: Fixo + Variável)
+                        </CardDescription>
+                      </div>
+                      {/* Exportar para CSV — Admin/CEO only */}
+                      {isAdminOrCeo && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 shrink-0"
+                          onClick={async () => {
+                            try {
+                              const res = await exportFinanceCommissionsCSV({
+                                year: selectedYear,
+                                company_id: companyId,
+                              });
+                              const blob = new Blob([res.data], { type: "text/csv;charset=utf-8;" });
+                              const url = window.URL.createObjectURL(blob);
+                              const link = document.createElement("a");
+                              link.href = url;
+                              link.setAttribute("download", `comissoes_${selectedYear}_${companyId}.csv`);
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                              window.URL.revokeObjectURL(url);
+                            } catch (err) {
+                              console.error("Erro ao exportar CSV:", err);
+                            }
+                          }}
+                        >
+                          <Download className="h-4 w-4" />
+                          Exportar para CSV
+                        </Button>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent>
                     {commissions.collaborators.length === 0 ? (
@@ -1543,9 +1583,10 @@ const FinanceDashboard = () => {
                               <th className="text-right py-2 px-3 font-medium text-muted-foreground">Processos</th>
                               <th className="text-right py-2 px-3 font-medium text-purple-600">Imobiliária</th>
                               <th className="text-right py-2 px-3 font-medium text-blue-600">Crédito</th>
-                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Fixo</th>
-                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Comissões</th>
+                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Salário Fixo</th>
+                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Comissões/Pool</th>
                               <th className="text-right py-2 px-3 font-medium text-emerald-700 font-semibold">Total Mensal</th>
+                              <th className="text-center py-2 px-3 font-medium text-muted-foreground">Recibo</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1569,10 +1610,22 @@ const FinanceDashboard = () => {
                                   {formatCurrency(c.base_salary || 0)}
                                 </td>
                                 <td className="py-2 px-3 text-right font-mono text-orange-600">
-                                  {formatCurrency(c.total_comissao)}
+                                  {formatCurrency(c.commission_share ?? c.total_comissao)}
                                 </td>
                                 <td className="py-2 px-3 text-right font-semibold font-mono text-emerald-700">
-                                  {formatCurrency(c.total_monthly || c.total_comissao)}
+                                  {formatCurrency(c.total_payout ?? c.total_monthly ?? c.total_comissao)}
+                                </td>
+                                <td className="text-center py-2 px-3">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="gap-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 h-8"
+                                    onClick={() => setCommissionsReceiptConsultant(c)}
+                                    title="Imprimir Recibo"
+                                  >
+                                    <Printer className="h-4 w-4" />
+                                    <span className="hidden sm:inline text-xs">Recibo</span>
+                                  </Button>
                                 </td>
                               </tr>
                             ))}
@@ -1593,6 +1646,109 @@ const FinanceDashboard = () => {
             </TabsContent>
           )}
         </Tabs>
+
+        {/* Receipt Modal — Comissões Tab */}
+        {commissionsReceiptConsultant && commissions && (
+          <Dialog open={true} onOpenChange={() => setCommissionsReceiptConsultant(null)}>
+            <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)] print-modal-content">
+              <DialogHeader className="no-print">
+                <DialogTitle className="flex items-center gap-2">
+                  <Receipt className="h-5 w-5" />
+                  Recibo de Vencimento
+                </DialogTitle>
+                <DialogDescription>
+                  Pré-visualização do recibo para {commissionsReceiptConsultant.name}
+                </DialogDescription>
+              </DialogHeader>
+
+              {/* Receipt content — this is what gets printed */}
+              <div className="print-receipt">
+                <div className="text-center border-b-2 border-emerald-600 pb-4 mb-6">
+                  <img
+                    src={user?.company === "power" ? "/PowerLogo-removebg-preview.png" : user?.company === "precision" ? "/logoPrecision-removebg-preview.png" : "/PowerCell-default.png"}
+                    alt="Logo"
+                    className="h-12 w-auto mx-auto mb-3"
+                  />
+                  <h2 className="text-xl font-bold text-emerald-800">
+                    {user?.company === "power" ? "Power Real Estate" : user?.company === "precision" ? "Precision Crédito" : "PowerCell"}
+                  </h2>
+                  <p className="text-sm text-muted-foreground mt-1">Recibo de Vencimento</p>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Nome</p>
+                      <p className="font-semibold text-base">{commissionsReceiptConsultant.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Cargo</p>
+                      <p className="font-semibold text-base">
+                        {commissionsReceiptConsultant.role === "consultor" ? "Consultor" : "Intermediário"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Período</p>
+                      <p className="font-semibold text-base">Ano {selectedYear}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Modelo</p>
+                      <p className="font-semibold text-base">
+                        {commissions.distribution_model === "global_pool" ? "Pool Global" : "Tradicional"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border rounded-lg overflow-hidden mt-6">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-emerald-50">
+                          <th className="text-left py-3 px-4 font-medium text-emerald-800">Descrição</th>
+                          <th className="text-right py-3 px-4 font-medium text-emerald-800">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-t">
+                          <td className="py-3 px-4">Salário Fixo</td>
+                          <td className="py-3 px-4 text-right font-mono font-medium">
+                            {formatCurrency(commissionsReceiptConsultant.base_salary || 0)}
+                          </td>
+                        </tr>
+                        <tr className="border-t">
+                          <td className="py-3 px-4">Comissões / Pool</td>
+                          <td className="py-3 px-4 text-right font-mono font-medium">
+                            {formatCurrency(commissionsReceiptConsultant.commission_share ?? commissionsReceiptConsultant.total_comissao)}
+                          </td>
+                        </tr>
+                        <tr className="border-t-2 border-emerald-600 bg-emerald-50">
+                          <td className="py-3 px-4 font-bold text-emerald-800">Total a Receber</td>
+                          <td className="py-3 px-4 text-right font-mono font-bold text-emerald-800 text-lg">
+                            {formatCurrency(commissionsReceiptConsultant.total_payout ?? commissionsReceiptConsultant.total_monthly ?? commissionsReceiptConsultant.total_comissao)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-8 pt-4 border-t text-xs text-muted-foreground flex justify-between">
+                    <span>Documento gerado automaticamente pelo PowerCell</span>
+                    <span>{new Date().toLocaleDateString("pt-PT")}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 mt-4 no-print">
+                <Button variant="outline" onClick={() => setCommissionsReceiptConsultant(null)}>
+                  Fechar
+                </Button>
+                <Button onClick={() => window.print()} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+                  <Printer className="h-4 w-4" />
+                  Imprimir Recibo
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
     </DashboardLayout>
   );

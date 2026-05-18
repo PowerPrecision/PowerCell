@@ -666,6 +666,7 @@ export const getAnnotationStats = (processId) => api.get(`/annotations/process/$
 export const getFinanceSummary = (params = {}) => api.get("/finance/summary", { params });
 export const getFinanceMonthly = (params = {}) => api.get("/finance/monthly", { params });
 export const getFinanceCommissions = (params = {}) => api.get("/finance/commissions", { params });
+export const exportFinanceCommissionsCSV = (params = {}) => api.get("/finance/commissions/export", { params, responseType: "blob" });
 export const getFinancePerformance = (params = {}) => api.get("/finance/performance", { params });
 export const getFinanceConfig = () => api.get("/finance/config");
 export const updateFinanceConfig = (config) => api.put("/finance/config", config);
