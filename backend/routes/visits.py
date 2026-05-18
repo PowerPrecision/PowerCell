@@ -43,12 +43,9 @@ async def list_visits(
 
     # Filtros
     if status:
-        if status == "agendada":
-            query["status"] = "agendada"
-        elif status == "concluida":
-            query["status"] = "concluida"
-        elif status == "cancelada":
-            query["status"] = "cancelada"
+        valid_statuses = ["solicitada", "agendada", "concluida", "cancelada"]
+        if status in valid_statuses:
+            query["status"] = status
         else:
             query["status"] = status
 
@@ -208,11 +205,13 @@ async def get_visits_kanban(
 
     visits = await db.visits.find(query, {"_id": 0}).sort("scheduled_date", 1).to_list(200)
 
+    solicitadas = [v for v in visits if v.get("status") == "solicitada"]
     agendadas = [v for v in visits if v.get("status") == "agendada"]
     concluidas = [v for v in visits if v.get("status") == "concluida"]
     canceladas = [v for v in visits if v.get("status") == "cancelada"]
 
     return {
+        "solicitadas": solicitadas,
         "agendadas": agendadas,
         "concluidas": concluidas,
         "canceladas": canceladas,
@@ -253,7 +252,7 @@ async def update_visit(
     # Campos actualizáveis
     if "status" in data:
         new_status = data["status"]
-        if new_status not in ["agendada", "concluida", "cancelada"]:
+        if new_status not in ["agendada", "concluida", "cancelada", "solicitada"]:
             raise HTTPException(status_code=400, detail="Status inválido. Use: agendada, concluida, cancelada")
         update_fields["status"] = new_status
 
@@ -277,7 +276,7 @@ async def update_visit(
     if "status" in data and data["status"] != visit.get("status"):
         try:
             from services.history import log_history
-            status_labels = {"agendada": "Agendada", "concluida": "Concluída", "cancelada": "Cancelada"}
+            status_labels = {"solicitada": "Solicitada", "agendada": "Agendada", "concluida": "Concluída", "cancelada": "Cancelada"}
             await log_history(
                 visit.get("client_id", ""),
                 user=user,

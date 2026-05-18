@@ -1089,6 +1089,13 @@ export default function ClientPortal() {
   const [recommendations, setRecommendations] = useState([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(true);
 
+  // ── Visits state ──
+  const [visits, setVisits] = useState([]);
+  const [visitsLoading, setVisitsLoading] = useState(true);
+  const [visitUrl, setVisitUrl] = useState('');
+  const [requestingVisit, setRequestingVisit] = useState(false);
+  const [visitRequestResult, setVisitRequestResult] = useState(null);
+
   const fetchMessages = useCallback(async () => {
     const token = sessionStorage.getItem('portal_token');
     if (!token) return;
@@ -1178,6 +1185,29 @@ export default function ClientPortal() {
   useEffect(() => {
     fetchRecommendations();
   }, [fetchRecommendations]);
+
+  // ── Fetch visits ──
+  const fetchVisits = useCallback(async () => {
+    const token = sessionStorage.getItem('portal_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/portal/visits`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVisits(data.visits || []);
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setVisitsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchVisits();
+  }, [fetchVisits]);
 
   // ── Welcome message (from API, already rendered with variables) ──
   // MUST be before early returns (Rules of Hooks)
@@ -1383,6 +1413,168 @@ export default function ClientPortal() {
             )}
 
             <TeamCard team={team} consultor={consultor} />
+
+            {/* ═══ Visitas e Imóveis (Bidirecional) ═══ */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-base font-bold text-gray-800 mb-1 flex items-center gap-2">
+                <svg className="w-5 h-5 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                </svg>
+                Visitas e Imóveis
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Encontre o imóvel dos seus sonhos e peça uma visita.
+              </p>
+
+              {/* URL Input */}
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="url"
+                  value={visitUrl}
+                  onChange={(e) => setVisitUrl(e.target.value)}
+                  placeholder="Cole aqui o link do imóvel (Idealista, Imovirtual...)"
+                  className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent"
+                  disabled={requestingVisit}
+                />
+                <button
+                  onClick={async () => {
+                    if (!visitUrl.trim()) return;
+                    setRequestingVisit(true);
+                    setVisitRequestResult(null);
+                    try {
+                      const token = sessionStorage.getItem('portal_token');
+                      if (!token) throw new Error('Sessão expirada.');
+                      const res = await fetchWithRetry(`${BACKEND_URL}/portal/visits/request`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ url: visitUrl.trim() }),
+                      });
+                      let data;
+                      try { data = await res.json(); } catch { throw new Error('Erro inesperado do servidor.'); }
+                      if (res.ok) {
+                        setVisitRequestResult({ success: true, message: 'Pedido enviado! A IA está a extrair os dados do imóvel.' });
+                        setVisitUrl('');
+                        // Refresh visits list
+                        const vRes = await fetch(`${BACKEND_URL}/portal/visits`, { headers: { Authorization: `Bearer ${token}` } });
+                        if (vRes.ok) { const vData = await vRes.json(); setVisits(vData.visits || []); }
+                      } else {
+                        setVisitRequestResult({ error: data.detail || 'Erro ao pedir visita.' });
+                      }
+                    } catch (err) {
+                      setVisitRequestResult({ error: err.message || 'Erro de ligação.' });
+                    } finally {
+                      setRequestingVisit(false);
+                    }
+                  }}
+                  disabled={requestingVisit || !visitUrl.trim()}
+                  className="px-4 py-2 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 shrink-0"
+                >
+                  {requestingVisit ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> A extrair...</>
+                  ) : (
+                    <><ExternalLink className="w-4 h-4" /> Pedir Visita</>
+                  )}
+                </button>
+              </div>
+
+              {/* Request result feedback */}
+              {visitRequestResult?.success && (
+                <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-emerald-700">{visitRequestResult.message}</p>
+                </div>
+              )}
+              {visitRequestResult?.error && (
+                <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-4">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>{visitRequestResult.error}</span>
+                </div>
+              )}
+
+              {/* Visits List */}
+              {visitsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  A carregar visitas...
+                </div>
+              ) : visits.length > 0 ? (
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {visits.map((visit) => (
+                    <div key={visit.id} className="border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
+                      {/* Property photo */}
+                      {visit.property_photo ? (
+                        <div className="h-32 bg-gray-100 overflow-hidden">
+                          <img src={visit.property_photo} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                        </div>
+                      ) : (
+                        <div className="h-20 bg-gradient-to-br from-violet-50 to-teal-50 flex items-center justify-center">
+                          <svg className="w-8 h-8 text-violet-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                          </svg>
+                        </div>
+                      )}
+                      <div className="p-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-semibold text-sm text-gray-800 truncate flex-1 mr-2">{visit.property_title || 'Imóvel'}</h4>
+                          {/* Status badge */}
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                            visit.status === 'solicitada' ? 'bg-violet-100 text-violet-700' :
+                            visit.status === 'agendada' ? 'bg-amber-100 text-amber-700' :
+                            visit.status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
+                            visit.status === 'cancelada' ? 'bg-red-100 text-red-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {visit.status_label || visit.status}
+                          </span>
+                        </div>
+                        {/* Price */}
+                        {visit.scraped_data?.price && (
+                          <p className="text-base font-bold text-emerald-600 mt-1">
+                            {typeof visit.scraped_data.price === 'number'
+                              ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(visit.scraped_data.price)
+                              : visit.scraped_data.price}
+                          </p>
+                        )}
+                        {/* Location */}
+                        {visit.property_address?.municipality && (
+                          <div className="flex items-center gap-1 text-xs text-gray-500 mt-1">
+                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                            </svg>
+                            <span className="truncate">{visit.property_address.municipality}</span>
+                          </div>
+                        )}
+                        {/* Typology */}
+                        {visit.scraped_data?.typology && (
+                          <p className="text-xs text-gray-400 mt-1">{visit.scraped_data.typology}</p>
+                        )}
+                        {/* Scheduled date */}
+                        {visit.scheduled_date && (
+                          <div className="flex items-center gap-1.5 text-xs text-amber-600 mt-2 bg-amber-50 rounded-lg px-2 py-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            {visit.status === 'agendada' ? 'Agendada para ' : ''}{new Date(visit.scheduled_date).toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        )}
+                        {/* Source link */}
+                        {visit.scraped_url && (
+                          <a href={visit.scraped_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-violet-500 hover:text-violet-700 mt-1.5 inline-flex items-center gap-0.5">
+                            Ver anúncio original <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-4">
+                  <svg className="w-10 h-10 text-violet-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                  </svg>
+                  <p className="text-sm text-gray-500">Cole o link de um imóvel acima para pedir uma visita</p>
+                </div>
+              )}
+            </div>
 
             {/* ═══ Imóveis Recomendados (Smart Match) ═══ */}
             {!recommendationsLoading && recommendations.length > 0 && (

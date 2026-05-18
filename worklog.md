@@ -262,3 +262,91 @@ Stage Summary:
 - Query MongoDB do Smart Match validada: status=disponivel + financials.asking_price ≤ orcamento_max + address.municipality ~ concelho + $or[property_type ~ tipologia, features.bedrooms = N]
 - Fluxo completo: Consultor clica "Procurar Matches" → vê grelha → clica "Recomendar ao Cliente" → imóvel fica disponível no Portal do Cliente
 - Pendente: commit e push para dev
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Add bidirectional Visit management endpoints (Portal ↔ CRM)
+
+Work Log:
+- Read worklog.md and existing codebase: portal.py (1798 lines), visits.py (313 lines)
+- TASK 1: Added two new Portal Visits endpoints to backend/routes/portal.py:
+  - POST /portal/visits/request — Core endpoint: client requests a visit by pasting a property URL
+    - Receives url (required) + optional process_id and notes
+    - Invokes property_scraper.extract_property_data() to extract title, price, location, typology, photo
+    - Creates visit record in db.visits with status='solicitada'
+    - Stores scraped data (scraped_data, scraped_url, scraper_error) inside visit doc
+    - Sets source='portal_client' to mark bidirectional origin
+    - Logs VISIT_REQUESTED_BY_CLIENT in process history
+    - Notifies all assigned team members (email + in-app realtime notification)
+    - Broadcasts WebSocket event to process room
+  - GET /portal/visits — Lists all visits for the client's process
+    - Returns visits sorted by created_at desc (max 50)
+    - Excludes scraped_data.raw_data to keep payload light
+    - Maps status to client-friendly labels (solicitada→"A aguardar agendamento", etc.)
+- TASK 2: Updated backend/routes/visits.py with 4 changes:
+  - A) PATCH endpoint: Added 'solicitada' to valid status list (was only agendada/concluida/cancelada)
+  - B) Kanban endpoint: Added 'solicitadas' column before 'agendadas' in return dict
+  - C) PATCH endpoint: Added 'solicitada': 'Solicitada' to status_labels dict
+  - D) list_visits: Replaced if/elif chain with valid_statuses list including 'solicitada'
+- Python syntax check passed for both files
+
+Stage Summary:
+- 2 files modified: backend/routes/portal.py, backend/routes/visits.py
+- New endpoints: POST /portal/visits/request, GET /portal/visits
+- Visit lifecycle now supports 4 statuses: solicitada → agendada → concluida / cancelada
+- Bidirectional flow: Client requests visit from Portal → appears as 'solicitada' in CRM kanban → Consultor patches to 'agendada' with scheduled_date
+- Portal visits include scraped property data from external URLs
+
+---
+Task ID: 3
+Agent: Frontend Agent
+Task: Update VisitsPage.js for bidirectional visit management (solicitada status + portal client visits)
+
+Work Log:
+- Read existing VisitsPage.js (658 lines) — Kanban board with 3 columns: Agendadas, Concluídas, Canceladas
+- Added `Inbox` import from lucide-react
+- Added `solicitada` status to STATUS_CONFIG (before `agendada`): violet color scheme, Inbox icon, "Pedidos do Portal" label
+- Updated VisitCard props: added `onSchedule` callback
+- Added "Sugerido pelo Cliente" tag (emerald badge) after status Badge when `visit.source === 'portal_client'`
+- Updated property section in VisitCard: shows property photo (with fallback to Building2 icon), scraped price (formatted as EUR), scraped typology
+- Added `solicitada` action buttons: "Agendar" (amber, triggers onSchedule) + "Recusar" (red, sets status to cancelada)
+- Updated KanbanColumn props: added `onSchedule`, passes it to VisitCard
+- Created ScheduleFromPortalDialog component: dialog for scheduling a portal-requested visit with property preview (photo, price, typology, client name), datetime picker, consultor notes, PATCH to /api/visits/{id}
+- Added `schedulingVisit` state and `handleSchedule` callback to VisitsPage
+- Updated filteredKanban useMemo to include `solicitadas`
+- Updated stats useMemo to include `solicitadas` count
+- Added "Pedidos Portal" stats card (violet) before "Agendadas" — grid changed from 4 to 5 columns
+- Added `solicitada` KanbanColumn as first column in board, with `onSchedule={handleSchedule}`
+- Added ScheduleFromPortalDialog rendering at bottom alongside ScheduleVisitDialog
+
+Stage Summary:
+- VisitsPage.js updated from 3 Kanban columns to 4 (solicitada + agendada + concluida + cancelada)
+- New "solicitada" status supports portal client visit requests with Agendar/Recusar actions
+- ScheduleFromPortalDialog allows consultor to schedule date/time for portal-requested visits
+- Portal visits show "Sugerido pelo Cliente" tag and scraped property data (photo, price, typology)
+- Stats grid expanded to 5 columns with "Pedidos Portal" violet card
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Complete bidirectional Visit management — ClientPortal.jsx updates + worklog
+
+Work Log:
+- Added visits state to ClientPortal.jsx: visits, visitsLoading, visitUrl, requestingVisit, visitRequestResult
+- Added fetchVisits callback + useEffect to fetch from GET /portal/visits
+- Added "Visitas e Imóveis" section in ClientPortal.jsx left column (between TeamCard and Imóveis Recomendados)
+- URL input with "Pedir Visita" button — calls POST /portal/visits/request with scraper working in background
+- Shows success/error feedback after visit request
+- Renders visits list with property cards: photo, title, price (EUR), location, typology
+- Status badge with color coding: solicitada (violet), agendada (amber), concluida (emerald), cancelada (red)
+- Shows scheduled date when visit is agendada
+- Shows original listing link when scraped_url exists
+- Empty state with house icon and helper text
+- Visits list auto-refreshes after successful request
+
+Stage Summary:
+- ClientPortal.jsx fully updated with bidirectional visit management
+- Client can paste property URL → Scraper extracts data → Visit created with status 'solicitada'
+- Client sees all visits (portal-requested and consultant-scheduled) with clear status badges
+- Full bidirectional flow: Client Portal ↔ CRM VisitsPage now operational

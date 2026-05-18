@@ -1796,3 +1796,219 @@ async def get_recommendations_for_client(
 # A previous duplicate with auth was removed — the endpoint is intentionally
 # public so the client portal can check availability before prompting for
 # credentials. See check_scraper_status() above.
+
+
+# ====================================================================
+# VISITS — Pedido de Visita pelo Cliente (bidirecional)
+# ====================================================================
+
+@router.post("/visits/request")
+async def request_portal_visit(
+    data: dict,
+    client_data: dict = Depends(get_current_client),
+):
+    """
+    Cliente pede uma visita a um imóvel através do Portal.
+    
+    Fluxo:
+    1. Recebe URL do anúncio do imóvel
+    2. Invoca o Scraper para extrair dados (Preço, Tipologia, Morada, Foto)
+    3. Cria registo de visita com status 'solicitada'
+    4. Notifica a equipa atribuída
+    
+    Body:
+    - url: Link do imóvel (obrigatório)
+    - process_id: ID do processo (opcional, usa o do token se não fornecido)
+    - notes: Notas adicionais (opcional)
+    """
+    process = client_data["process"]
+    process_id = data.get("process_id") or client_data["process_id"]
+    url = data.get("url", "").strip()
+    notes = data.get("notes", "").strip()
+    
+    if not url:
+        raise HTTPException(status_code=400, detail="O link do imóvel é obrigatório.")
+    
+    # ── 1. Invocar Scraper para extrair dados do anúncio ──
+    scraped_data = None
+    scraper_error = None
+    try:
+        from services.property_scraper import extract_property_data
+        scraped_result = await extract_property_data(url)
+        scraped_data = {
+            "title": scraped_result.title,
+            "price": scraped_result.price,
+            "location": scraped_result.location,
+            "typology": scraped_result.typology,
+            "area": scraped_result.area,
+            "photo_url": scraped_result.photo_url,
+            "source": scraped_result.source,
+            "url": url,
+            "consultant": {
+                "name": scraped_result.consultant.name if scraped_result.consultant else None,
+                "phone": scraped_result.consultant.phone if scraped_result.consultant else None,
+                "email": scraped_result.consultant.email if scraped_result.consultant else None,
+                "agency_name": scraped_result.consultant.agency_name if scraped_result.consultant else None,
+            } if scraped_result.consultant else None,
+            "raw_data": scraped_result.raw_data,
+        }
+        # Se o scraper retornou erro, guardar
+        if scraped_result.source == "error":
+            scraper_error = scraped_result.raw_data.get("error", "Erro desconhecido no scraper")
+    except Exception as e:
+        scraper_error = str(e)
+        logger.warning(f"[PORTAL] Erro no scraper para URL {url}: {e}")
+    
+    # ── 2. Criar registo de visita com status 'solicitada' ──
+    now = datetime.now(timezone.utc).isoformat()
+    visit_id = str(uuid.uuid4())
+    client_name = process.get("client_name", "Cliente")
+    
+    # Dados do imóvel extraídos pelo scraper (ou fallback vazio)
+    property_title = scraped_data.get("title") if scraped_data else None
+    property_price = scraped_data.get("price") if scraped_data else None
+    property_photo = scraped_data.get("photo_url") if scraped_data else None
+    property_location = scraped_data.get("location") if scraped_data else None
+    property_typology = scraped_data.get("typology") if scraped_data else None
+    property_source = scraped_data.get("source") if scraped_data else None
+    
+    # Se o scraper não conseguiu extrair título, usar o URL
+    if not property_title:
+        property_title = f"Imóvel de {url.split('//')[-1][:50]}..."
+    
+    visit_doc = {
+        "id": visit_id,
+        "property_id": None,  # Sem imóvel interno — veio do scraper
+        "property_title": property_title,
+        "property_photo": property_photo,
+        "property_address": {"municipality": property_location, "district": ""} if property_location else {},
+        "client_id": process_id,
+        "client_name": client_name,
+        "client_email": process.get("client_email", ""),
+        "client_phone": process.get("client_phone", ""),
+        "consultor_id": None,  # Ainda sem consultor atribuído
+        "consultor_name": None,
+        "scheduled_date": None,  # Ainda por agendar
+        "status": "solicitada",
+        "notes": notes,
+        "source": "portal_client",  # Marca que veio do portal
+        "scraped_data": scraped_data,  # Dados extraídos pelo scraper
+        "scraped_url": url,  # URL original colada pelo cliente
+        "scraper_error": scraper_error,  # Se houve erro no scraper
+        "created_at": now,
+        "updated_at": now,
+        "created_by": "portal_client",
+        "company_id": process.get("company_id"),
+    }
+    
+    await db.visits.insert_one(visit_doc)
+    
+    # ── 3. Registar no histórico do processo ──
+    try:
+        from services.history import log_history
+        await log_history(
+            process_id,
+            user={"id": None, "name": f"{client_name} (Portal)", "role": "client_portal"},
+            action="VISIT_REQUESTED_BY_CLIENT",
+            field="visita",
+            old_value=None,
+            new_value=f"Pedido de visita a '{property_title}' ({url})"
+        )
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao registar histórico de visita: {e}")
+    
+    # ── 4. Notificar equipa atribuída ──
+    assigned_ids = _get_all_assigned_user_ids(process)
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else process_id[:8]
+    
+    for uid in assigned_ids:
+        try:
+            user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
+            if user:
+                await send_notification_with_preference_check(
+                    user.get("email"),
+                    "Pedido de Visita do Cliente",
+                    f"O cliente {client_name} pediu uma visita a um imóvel no processo {process_ref}.",
+                    notification_type="visit_request"
+                )
+                # In-app notification
+                try:
+                    from services.realtime_notifications import send_realtime_notification
+                    await send_realtime_notification(
+                        user_id=uid,
+                        title="Pedido de Visita do Cliente",
+                        message=f"O cliente {client_name} pediu uma visita a '{property_title}' no processo {process_ref}.",
+                        notification_type="visit_request",
+                        link=f"/visitas",
+                        process_id=process_id,
+                    )
+                except Exception as notif_err:
+                    logger.debug(f"Erro ao enviar notificação in-app para {uid}: {notif_err}")
+        except Exception as e:
+            logger.warning(f"[PORTAL] Erro ao notificar utilizador {uid} sobre pedido de visita: {e}")
+    
+    # Broadcast WebSocket
+    try:
+        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
+            "id": visit_id,
+            "process_id": process_id,
+            "type": "visit_request",
+            "client_name": client_name,
+            "property_title": property_title,
+            "url": url,
+            "created_at": now,
+        })
+        await manager.broadcast_to_room(f"process_{process_id}", ws_message)
+    except Exception as ws_err:
+        logger.debug(f"Erro ao broadcast pedido de visita via WebSocket: {ws_err}")
+    
+    logger.info(
+        f"[PORTAL] Pedido de visita criado: {visit_id} — "
+        f"Cliente {client_name}, URL {url}, Processo {process_ref}"
+    )
+    
+    visit_doc.pop("_id", None)
+    return visit_doc
+
+
+@router.get("/visits")
+async def get_portal_visits(
+    client_data: dict = Depends(get_current_client),
+):
+    """
+    Lista todas as visitas ligadas a este processo/cliente.
+    Inclui visitas pedidas pelo cliente e visitas agendadas pelo consultor.
+    
+    Endpoint consumido pelo Portal do Cliente.
+    """
+    process = client_data["process"]
+    process_id = client_data["process_id"]
+    
+    try:
+        visits = await db.visits.find(
+            {"client_id": process_id},
+            {"_id": 0, "scraped_data.raw_data": 0}  # Não enviar raw_data pesado
+        ).sort("created_at", -1).limit(50).to_list(50)
+        
+        # Mapear status para labels client-friendly
+        status_labels = {
+            "solicitada": "A aguardar agendamento",
+            "agendada": "Agendada",
+            "concluida": "Concluída",
+            "cancelada": "Cancelada",
+        }
+        
+        for visit in visits:
+            visit["status_label"] = status_labels.get(visit.get("status", ""), visit.get("status", ""))
+        
+        return {
+            "visits": visits,
+            "total": len(visits),
+        }
+    except Exception as e:
+        logger.error(f"[PORTAL] Erro ao listar visitas: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao carregar visitas. Tente novamente."
+        )

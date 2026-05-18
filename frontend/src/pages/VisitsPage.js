@@ -53,6 +53,7 @@ import {
   ChevronRight,
   Users,
   ArrowRight,
+  Inbox,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isToday, isTomorrow, isPast } from "date-fns";
@@ -63,6 +64,13 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
 // ── Status config ──
 const STATUS_CONFIG = {
+  solicitada: {
+    label: "Pedidos do Portal",
+    color: "bg-violet-100 text-violet-800 border-violet-200",
+    badge: "bg-violet-500 text-white",
+    icon: Inbox,
+    emptyText: "Nenhum pedido do portal",
+  },
   agendada: {
     label: "Agendadas",
     color: "bg-amber-100 text-amber-800 border-amber-200",
@@ -111,7 +119,7 @@ const isVisitPast = (isoDate) => {
 // ════════════════════════════════════════════════════════════════
 // VISIT CARD — Cartão individual de visita
 // ════════════════════════════════════════════════════════════════
-function VisitCard({ visit, onStatusChange, onEdit }) {
+function VisitCard({ visit, onStatusChange, onEdit, onSchedule }) {
   const status = visit.status || "agendada";
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.agendada;
   const past = isVisitPast(visit.scheduled_date) && status === "agendada";
@@ -128,11 +136,20 @@ function VisitCard({ visit, onStatusChange, onEdit }) {
           <Badge className={`text-[9px] px-1.5 py-0 ${config.badge}`}>
             {config.label.slice(0, -1)}
           </Badge>
+          {visit.source === 'portal_client' && (
+            <span className="text-[9px] px-1.5 py-0 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+              Sugerido pelo Cliente
+            </span>
+          )}
         </div>
 
         {/* Property */}
         <div className="flex items-start gap-2">
-          <Building2 className="h-4 w-4 text-teal-600 mt-0.5 shrink-0" />
+          {visit.property_photo ? (
+            <img src={visit.property_photo} alt="" className="h-10 w-10 rounded-lg object-cover shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
+          ) : (
+            <Building2 className="h-4 w-4 text-teal-600 mt-0.5 shrink-0" />
+          )}
           <div className="min-w-0">
             <p className="text-sm font-medium truncate">{visit.property_title || "Imóvel"}</p>
             {visit.property_address && (
@@ -142,6 +159,16 @@ function VisitCard({ visit, onStatusChange, onEdit }) {
                   .filter(Boolean)
                   .join(", ")}
               </p>
+            )}
+            {visit.scraped_data?.price && (
+              <p className="text-[11px] font-semibold text-amber-700 truncate">
+                {typeof visit.scraped_data.price === 'number' 
+                  ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(visit.scraped_data.price)
+                  : visit.scraped_data.price}
+              </p>
+            )}
+            {visit.scraped_data?.typology && (
+              <p className="text-[10px] text-muted-foreground">{visit.scraped_data.typology}</p>
             )}
           </div>
         </div>
@@ -172,6 +199,27 @@ function VisitCard({ visit, onStatusChange, onEdit }) {
         )}
 
         {/* Actions */}
+        {status === "solicitada" && (
+          <div className="flex gap-1.5 pt-1 border-t border-border/50">
+            <Button
+              size="sm"
+              className="flex-1 h-7 text-[11px] gap-1 bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => onSchedule && onSchedule(visit)}
+            >
+              <CalendarClock className="h-3 w-3" />
+              Agendar
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 h-7 text-[11px] gap-1 text-red-700 border-red-300 hover:bg-red-50"
+              onClick={() => onStatusChange(visit.id, "cancelada")}
+            >
+              <XCircle className="h-3 w-3" />
+              Recusar
+            </Button>
+          </div>
+        )}
         {status === "agendada" && (
           <div className="flex gap-1.5 pt-1 border-t border-border/50">
             <Button
@@ -202,7 +250,7 @@ function VisitCard({ visit, onStatusChange, onEdit }) {
 // ════════════════════════════════════════════════════════════════
 // KANBAN COLUMN — Coluna do Quadro
 // ════════════════════════════════════════════════════════════════
-function KanbanColumn({ status, visits, onStatusChange, onEdit }) {
+function KanbanColumn({ status, visits, onStatusChange, onEdit, onSchedule }) {
   const config = STATUS_CONFIG[status];
   const Icon = config.icon;
 
@@ -233,6 +281,7 @@ function KanbanColumn({ status, visits, onStatusChange, onEdit }) {
               visit={visit}
               onStatusChange={onStatusChange}
               onEdit={onEdit}
+              onSchedule={onSchedule}
             />
           ))
         )}
@@ -413,6 +462,130 @@ function ScheduleVisitDialog({ open, onOpenChange, onSuccess, properties, proces
 // ════════════════════════════════════════════════════════════════
 // VISITS PAGE — Página Principal
 // ════════════════════════════════════════════════════════════════
+function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
+  const { user, token } = useAuth();
+  const [saving, setSaving] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [consultorNotes, setConsultorNotes] = useState("");
+
+  const handleSubmit = async () => {
+    if (!scheduledDate) {
+      toast.error("Escolha a data e hora da visita");
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch(`${API_URL}/api/visits/${visit.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          status: "agendada",
+          scheduled_date: scheduledDate,
+          notes: visit.notes ? `${visit.notes}\n[Consultor]: ${consultorNotes}` : consultorNotes,
+          consultor_id: user?.id,
+        }),
+      });
+      if (response.ok) {
+        toast.success("Visita agendada com sucesso!");
+        setScheduledDate("");
+        setConsultorNotes("");
+        onOpenChange(false);
+        if (onSuccess) onSuccess();
+      } else {
+        const err = await response.json();
+        toast.error(err.detail || "Erro ao agendar visita");
+      }
+    } catch {
+      toast.error("Erro de ligação ao servidor");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!visit) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CalendarClock className="h-5 w-5 text-amber-600" />
+            Agendar Visita Pedida pelo Cliente
+          </DialogTitle>
+          <DialogDescription>
+            O cliente pediu uma visita a este imóvel. Escolha a data e hora.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Property preview */}
+        <div className="flex gap-3 p-3 bg-violet-50 rounded-xl border border-violet-100">
+          {visit.property_photo && (
+            <img src={visit.property_photo} alt="" className="h-16 w-16 rounded-lg object-cover shrink-0" />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold truncate">{visit.property_title || "Imóvel"}</p>
+            {visit.scraped_data?.price && (
+              <p className="text-xs font-semibold text-amber-700">
+                {typeof visit.scraped_data.price === 'number'
+                  ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(visit.scraped_data.price)
+                  : visit.scraped_data.price}
+              </p>
+            )}
+            {visit.scraped_data?.typology && (
+              <p className="text-xs text-muted-foreground">{visit.scraped_data.typology}</p>
+            )}
+            {visit.client_name && (
+              <p className="text-xs text-muted-foreground mt-1">
+                <User className="h-3 w-3 inline mr-0.5" />
+                {visit.client_name}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <Label className="text-sm font-medium">Data e Hora *</Label>
+            <Input
+              type="datetime-local"
+              className="mt-1"
+              value={scheduledDate}
+              onChange={(e) => setScheduledDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-sm font-medium">Notas do Consultor</Label>
+            <Textarea
+              className="mt-1"
+              rows={2}
+              placeholder="Notas adicionais para o cliente..."
+              value={consultorNotes}
+              onChange={(e) => setConsultorNotes(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={saving || !scheduledDate}
+            className="gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
+            Confirmar Agendamento
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const VisitsPage = () => {
   const { user, token } = useAuth();
   const [visits, setVisits] = useState([]);
@@ -423,6 +596,7 @@ const VisitsPage = () => {
   const [users, setUsers] = useState([]);
   const [filterConsultor, setFilterConsultor] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [schedulingVisit, setSchedulingVisit] = useState(null);
 
   // Fetch visits kanban
   const fetchVisits = useCallback(async () => {
@@ -484,6 +658,10 @@ const VisitsPage = () => {
     fetchFormData();
   }, [fetchVisits, fetchFormData]);
 
+  const handleSchedule = useCallback((visit) => {
+    setSchedulingVisit(visit);
+  }, []);
+
   // Status change handler
   const handleStatusChange = async (visitId, newStatus) => {
     try {
@@ -522,6 +700,7 @@ const VisitsPage = () => {
       );
 
     return {
+      solicitadas: filterList(visits.solicitadas),
       agendadas: filterList(visits.agendadas),
       concluidas: filterList(visits.concluidas),
       canceladas: filterList(visits.canceladas),
@@ -532,6 +711,7 @@ const VisitsPage = () => {
   // Stats
   const stats = useMemo(() => ({
     total: filteredKanban.total || 0,
+    solicitadas: (filteredKanban.solicitadas || []).length,
     agendadas: (filteredKanban.agendadas || []).length,
     concluidas: (filteredKanban.concluidas || []).length,
     canceladas: (filteredKanban.canceladas || []).length,
@@ -561,11 +741,17 @@ const VisitsPage = () => {
         </div>
 
         {/* ── Stats Cards ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <Card className="border-l-4 border-l-gray-400">
             <CardContent className="p-3">
               <p className="text-xs text-muted-foreground">Total</p>
               <p className="text-2xl font-bold">{stats.total}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-violet-500">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">Pedidos Portal</p>
+              <p className="text-2xl font-bold text-violet-600">{stats.solicitadas}</p>
             </CardContent>
           </Card>
           <Card className="border-l-4 border-l-amber-500">
@@ -624,6 +810,12 @@ const VisitsPage = () => {
         ) : (
           <div className="flex gap-4 overflow-x-auto pb-4" style={{ scrollbarWidth: "thin" }}>
             <KanbanColumn
+              status="solicitada"
+              visits={filteredKanban.solicitadas || []}
+              onStatusChange={handleStatusChange}
+              onSchedule={handleSchedule}
+            />
+            <KanbanColumn
               status="agendada"
               visits={filteredKanban.agendadas || []}
               onStatusChange={handleStatusChange}
@@ -650,6 +842,14 @@ const VisitsPage = () => {
         properties={properties}
         processes={processes}
         users={users}
+      />
+
+      {/* Schedule from Portal Dialog */}
+      <ScheduleFromPortalDialog
+        open={!!schedulingVisit}
+        onOpenChange={(v) => { if (!v) setSchedulingVisit(null); }}
+        visit={schedulingVisit}
+        onSuccess={fetchVisits}
       />
     </DashboardLayout>
   );
