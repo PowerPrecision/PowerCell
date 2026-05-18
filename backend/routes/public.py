@@ -4,10 +4,16 @@ ROTAS PÚBLICAS - CREDITOIMO
 ====================================================================
 Endpoints públicos (sem autenticação).
 
-FLUXO DE REGISTO:
-1. Formulário público cria ficha de cliente na tabela 'clients'
-2. Quando o cliente é atribuído a um utilizador, cria-se o processo
-3. Um cliente pode ter vários processos
+FLUXO DE REGISTO (Triagem Manual):
+1. Formulário público cria/atualiza ficha de cliente (Upsert por NIF/Email)
+2. Cliente fica com lead_status="new" → aparece na página de Registos
+3. Consultor/Admin faz triagem → clica "Criar Processo" → processo é criado
+4. lead_status muda para "converted" → cliente desaparece dos Registos
+
+REGRAS DE NEGÓCIO:
+- NÃO se cria processo na submissão pública (triagem manual obrigatória)
+- Um cliente pode ter vários processos
+- O processo só existe após aprovação manual pelo staff
 
 SEGURANÇA: Rate limiting aplicado para prevenir abusos.
 ====================================================================
@@ -30,7 +36,7 @@ from models.auth import UserRole
 from models.process import PublicClientRegistration
 from services.email import send_registration_confirmation, send_new_client_notification
 from services.alerts import notify_new_client_registration
-from services.process_service import get_next_process_number
+# NOTA: get_next_process_number removido — processo NÃO é criado na submissão pública
 from services.encryption import (
     encrypt_client_data,
     decrypt_client_data,
@@ -54,10 +60,10 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     """
     Endpoint público para registo de clientes - sem autenticação.
     
-    FLUXO RELACIONAL (Client ↔ Process):
+    FLUXO DE TRIAGEM MANUAL:
     1. Anti-Duplicação: Procura cliente por email/NIF → upsert se existe, cria se não
-    2. Criação Isolada do Processo: Novo documento em `processes` com client_id OBRIGATÓRIO
-    3. Associação: process_id adicionado ao array process_ids do cliente
+    2. Marcação: Cliente fica com lead_status="new" para triagem na página de Registos
+    3. SEM CRIAÇÃO DE PROCESSO — o processo só é criado quando o staff aprova
     
     SEGURANÇA: Rate limiting, sanitização de inputs, encriptação RGPD.
     """
@@ -112,7 +118,12 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             decrypted_existing = existing_client
         
         # Atualizar campos que possam ter mudado ou sido adicionados
-        client_updates = {"updated_at": now}
+        client_updates = {
+            "updated_at": now,
+            # Re-marcar como lead pendente se já tinha sido convertido
+            # (novo registo = nova submissão que precisa de triagem)
+            "lead_status": "new",
+        }
         
         # Atualizar telefone se novo ou vazio
         existing_phone = (decrypted_existing.get("contacto") or {}).get("telefone", "")
@@ -197,7 +208,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             "dados_pessoais": personal_data,
             "dados_financeiros": {},  # Dados financeiros pertencem ao Processo
             "dados_imobiliarios": {},  # Dados do imóvel recolhidos depois
-            "process_ids": [],  # Será preenchido no Passo 3
+            "process_ids": [],  # Será preenchido quando o staff criar o processo
             "fonte": "public_form",
             "has_property": has_property,
             "idade_menos_35": False,
@@ -206,6 +217,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             "registration_completed": True,
             "assigned_to": None,
             "assigned_at": None,
+            "lead_status": "new",  # Pendente de triagem — sem processo associado
             "custom_fields": data.custom_fields if data.custom_fields else {},
         }
         
@@ -251,64 +263,12 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             logger.warning(f"Não foi possível criar pasta S3 para cliente {client_id}: {e}")
     
     # =========================================
-    # PASSO 2: CRIAÇÃO ISOLADA DO PROCESSO
-    # Novo documento em `processes` com client_id OBRIGATÓRIO
+    # NOTA: NÃO se cria processo nesta fase.
+    # O processo só é criado quando o staff aprova
+    # o registo na página de "Registos de Clientes".
+    # Isto garante triagem manual antes de criar
+    # documentos na coleção `processes`.
     # =========================================
-    process_id = str(uuid.uuid4())
-    process_number = await get_next_process_number()
-    
-    process_doc = {
-        "id": process_id,
-        "process_number": process_number,
-        "client_id": client_id,  # OBRIGATÓRIO — ligação relacional
-        "client_name": clean_name,
-        "client_email": clean_email,
-        "client_phone": clean_phone,
-        "status": "novo",
-        "is_active": True,
-        "process_type": process_type,
-        "has_property": has_property,
-        "fonte": "public_form",
-        # Dados de negócio (preenchidos depois pelo consultor)
-        "real_estate_data": {},
-        "credit_data": {},
-        "financial_data": {},
-        # Atribuições (pendentes)
-        "assigned_consultor_id": None,
-        "assigned_consultor_ids": [],
-        "assigned_mediador_id": None,
-        "assigned_mediador_ids": [],
-        "consultor_names": [],
-        "mediador_names": [],
-        "notes": "",
-        "prioridade": "media",
-        "labels": [],
-        "created_at": now,
-        "updated_at": now,
-    }
-    
-    # Encriptar campos sensíveis do processo
-    try:
-        from services.encryption import encrypt_sensitive_data
-        process_doc = encrypt_sensitive_data(process_doc)
-    except Exception as e:
-        logger.warning(f"Falha ao encriptar dados do processo {process_id}: {e}")
-    
-    await db.processes.insert_one(process_doc)
-    logger.info(f"Processo {process_number} criado para cliente {client_id} via formulário público")
-    
-    # =========================================
-    # PASSO 3: ASSOCIAÇÃO (Array de Processos do Cliente)
-    # Adicionar process_id ao array process_ids do cliente
-    # =========================================
-    await db.clients.update_one(
-        {"id": client_id},
-        {
-            "$addToSet": {"process_ids": process_id},
-            "$set": {"updated_at": now}
-        }
-    )
-    logger.info(f"Processo {process_id} associado ao cliente {client_id} (process_ids atualizado)")
     
     # =========================================
     # PÓS-REGISTO: Email, Notificações, Alertas
@@ -327,8 +287,18 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             client_name=clean_name
         )
     
-    # Criar alertas no sistema de notificações (passar dados do processo, não do cliente)
-    await notify_new_client_registration(process_doc, has_property)
+    # Criar alertas no sistema de notificações (passar dados do cliente — SEM processo)
+    client_notification_data = {
+        "id": client_id,
+        "client_id": client_id,
+        "client_name": clean_name,
+        "client_email": clean_email,
+        "client_phone": clean_phone,
+        "nome": clean_name,
+        "contacto": {"email": clean_email, "telefone": clean_phone},
+        "process_type": process_type,
+    }
+    await notify_new_client_registration(client_notification_data, has_property)
     
     # Enviar push notifications para staff
     try:
@@ -369,7 +339,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         staff_job = await task_queue.send_email(
             to=first_admin["email"],
             subject=f"Novo Cliente Registado: {clean_name}",
-            body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\nTipo de Processo: {process_type}\n\nO processo #{process_number} foi criado e aguarda atribuição."
+            body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\nTipo pretendido: {process_type}\n\nO registo aguarda triagem na página de Registos de Clientes."
         )
         
         if not staff_job:
@@ -388,10 +358,9 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         status_code=200,
         content={
             "success": True,
-            "message": "Registo criado com sucesso. Verifique o seu email.",
+            "message": "Registo criado com sucesso. A equipa entrará em contacto.",
             "client_id": client_id,
-            "process_id": process_id,
-            "process_number": process_number,
+            "lead_status": "new",  # Pendente de triagem
             "is_new_client": is_new_client,
             "has_property": has_property,
             "email_queued": bool(job_id)

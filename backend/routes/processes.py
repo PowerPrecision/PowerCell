@@ -1096,13 +1096,16 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # === CACHE INVALIDATION: Novo processo criado por staff afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
     
-    # Actualizar process_ids do cliente
+    # Actualizar process_ids do cliente + marcar lead como convertido
     if client_id:
         await db.clients.update_one(
             {"id": client_id},
             {
                 "$addToSet": {"process_ids": process_id},
-                "$set": {"updated_at": now}
+                "$set": {
+                    "updated_at": now,
+                    "lead_status": "converted"  # Lead já não aparece na página de Registos
+                }
             }
         )
     

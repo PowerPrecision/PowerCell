@@ -279,6 +279,10 @@ async def list_registered_clients(
     sort_field = sanitize_string(sort_field, max_length=50)
     
     # Construir query
+    # REGRAS DE NEGÓCIO (Triagem Manual):
+    # - lead_status="new" → Lead pendente de triagem na página de Registos
+    # - lead_status="converted" → Lead já transformado em Processo → NÃO aparece por defeito
+    # - Sem lead_status → Compatibilidade retroactiva (tratar como "new")
     query = {"registration_completed": True}
 
     # Filtro de pesquisa - ignora acentos no nome
@@ -308,16 +312,29 @@ async def list_registered_clients(
 
         query["$or"] = search_conditions
     
-    # Filtro por ter processo
+    # Filtro por ter processo + lead_status (triagem manual)
+    # Por defeito (has_process=false), mostrar apenas leads pendentes (lead_status="new" ou sem lead_status)
+    # Leads convertidos (lead_status="converted") com processo NÃO aparecem por defeito
     if has_process is not None:
         if has_process:
             query["process_ids"] = {"$exists": True, "$ne": []}
         else:
-            query["$or"] = [
-                {"process_ids": {"$exists": False}},
-                {"process_ids": []},
-                {"process_ids": None}
-            ]
+            query["$and"] = query.get("$and", [])
+            process_filter = {
+                "$or": [
+                    {"process_ids": {"$exists": False}},
+                    {"process_ids": []},
+                    {"process_ids": None}
+                ]
+            }
+            # Também excluir leads convertidos (lead_status="converted")
+            lead_filter = {
+                "$or": [
+                    {"lead_status": {"$exists": False}},  # Retro-compatibilidade
+                    {"lead_status": "new"},
+                ]
+            }
+            query["$and"].extend([process_filter, lead_filter])
     
     # Filtro para assigned_to_me - opcional para qualquer role
     if assigned_to_me:
@@ -407,7 +424,8 @@ async def list_registered_clients(
             "updated_at": c.get("updated_at"),
             "fonte": c.get("fonte"),
             "has_property": c.get("has_property"),
-            "idade_menos_35": c.get("idade_menos_35")
+            "idade_menos_35": c.get("idade_menos_35"),
+            "lead_status": c.get("lead_status", "new")  # "new" = pendente, "converted" = com processo
         })
     
     # Desencriptar dados sensíveis
@@ -579,12 +597,17 @@ async def assign_client_to_user(
         # Inserir processo
         await db.processes.insert_one(process_doc)
     
-    # Actualizar cliente
+    # Actualizar cliente + marcar lead como convertido
     if process_id:
         await db.clients.update_one(
             {"id": client_id},
             {
-                "$set": {"assigned_to": target_user_id, "assigned_at": now, "updated_at": now},
+                "$set": {
+                    "assigned_to": target_user_id,
+                    "assigned_at": now,
+                    "updated_at": now,
+                    "lead_status": "converted"  # Lead já não aparece na página de Registos
+                },
                 "$addToSet": {"process_ids": process_id}
             }
         )

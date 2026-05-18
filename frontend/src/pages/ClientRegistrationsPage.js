@@ -1,14 +1,20 @@
 /**
- * ClientRegistrationsPage - Página de Registo de Clientes
- * Mostra clientes que completaram o formulário de registo público
+ * ClientRegistrationsPage - Página de Registo de Clientes (Triagem Manual)
+ * Mostra leads pendentes de triagem (lead_status="new")
  * 
  * ACESSO: Todos os utilizadores
  * 
  * Funcionalidades:
- * - Listar clientes registados
+ * - Listar leads pendentes (sem processo)
  * - Filtros: com/sem processo, pesquisa
  * - Ordenação por data de registo (defeito)
- * - Atribuir cliente a utilizador (cria processo)
+ * - "Criar Processo" abre CreateProcessModal (triagem manual)
+ * 
+ * FLUXO DE TRIAGEM:
+ * 1. Formulário público cria cliente com lead_status="new"
+ * 2. Consultor/Admin vê a lead aqui e clica "Criar Processo"
+ * 3. CreateProcessModal abre com cliente pré-selecionado
+ * 4. Após criação, lead_status muda para "converted" → desaparece da lista
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -44,7 +50,6 @@ import {
   Phone,
   Hash,
   FileText,
-  UserPlus,
   CheckCircle,
   XCircle,
   ArrowUpDown,
@@ -126,9 +131,8 @@ const ClientRegistrationsPage = () => {
     }, { replace: true });
   }, [setSearchParams]);
   
-  // Assign dialog
-  const [assignDialog, setAssignDialog] = useState({ open: false, client: null });
-  const [assignLoading, setAssignLoading] = useState(false);
+  // CreateProcessModal — Abre com cliente pré-selecionado
+  const [createProcessModal, setCreateProcessModal] = useState({ open: false, client: null });
 
   // Client details dialog
   const [detailsDialog, setDetailsDialog] = useState({ open: false, client: null });
@@ -155,10 +159,6 @@ const ClientRegistrationsPage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-
-  // Create process modal (pre-filled from client details)
-  const [showCreateProcess, setShowCreateProcess] = useState(false);
-  const [preSelectedClient, setPreSelectedClient] = useState(null);
 
   const userRole = user?.role || "";
   const isIndexacao = userRole === "indexacao";
@@ -199,39 +199,6 @@ const ClientRegistrationsPage = () => {
   useEffect(() => {
     fetchClients();
   }, [fetchClients]);
-
-  const handleAssignClient = async (clientId) => {
-    setAssignLoading(true);
-    try {
-      const response = await fetch(
-        `${API_URL}/api/clients/${clientId}/assign?create_process=true`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        toast.success(data.message);
-        setAssignDialog({ open: false, client: null });
-        fetchClients();
-        
-        // Se criou processo, navegar para ele
-        if (data.process_id) {
-          navigate(`/process/${data.process_id}`);
-        }
-      } else {
-        const error = await response.json();
-        toast.error(error.detail || "Erro ao atribuir cliente");
-      }
-    } catch (error) {
-      console.error("Erro:", error);
-      toast.error("Erro ao atribuir cliente");
-    } finally {
-      setAssignLoading(false);
-    }
-  };
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
@@ -293,7 +260,7 @@ const ClientRegistrationsPage = () => {
               Registo de Clientes
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Clientes que completaram o formulário de registo
+              Leads pendentes de triagem — clique "Criar Processo" para aprovar
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -375,7 +342,7 @@ const ClientRegistrationsPage = () => {
                     <p className="text-2xl font-bold">
                       {clients.filter(c => !c.has_process).length}
                     </p>
-                    <p className="text-xs text-muted-foreground">Sem Processo</p>
+                    <p className="text-xs text-muted-foreground">Leads Pendentes</p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -606,12 +573,12 @@ const ClientRegistrationsPage = () => {
                         <Button
                           variant="default"
                           size="sm"
-                          onClick={() => setAssignDialog({ open: true, client })}
-                          title="Atribuir e criar processo"
+                          onClick={() => setCreateProcessModal({ open: true, client })}
+                          title="Criar Processo a partir deste registo"
                           className="h-8"
                         >
-                          <UserPlus className="h-4 w-4 mr-1" />
-                          Atribuir
+                          <FileText className="h-4 w-4 mr-1" />
+                          Criar Processo
                         </Button>
                       )}
                     </div>
@@ -623,63 +590,28 @@ const ClientRegistrationsPage = () => {
         </Card>
       </div>
 
-      {/* Assign Dialog */}
-      <Dialog open={assignDialog.open} onOpenChange={(open) => setAssignDialog({ open, client: assignDialog.client })}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <UserPlus className="h-5 w-5" />
-              Atribuir Cliente
-            </DialogTitle>
-            <DialogDescription>
-              Atribuir {safeString(assignDialog.client?.nome)} a si próprio e criar um novo processo.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="py-4">
-            <div className="space-y-4">
-              <div className="bg-muted/50 rounded-lg p-4">
-                <p className="text-sm font-medium">Dados do Cliente:</p>
-                <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                  {assignDialog.client?.contacto?.email && (
-                    <p>Email: {safeString(assignDialog.client.contacto?.email)}</p>
-                  )}
-                  {assignDialog.client?.contacto?.telefone && (
-                    <p>Telefone: {safeString(assignDialog.client.contacto?.telefone)}</p>
-                  )}
-                  {assignDialog.client?.nif && (
-                    <p>NIF: {safeString(assignDialog.client.nif)}</p>
-                  )}
-                </div>
-              </div>
-
-              <p className="text-sm text-muted-foreground">
-                Ao atribuir este cliente, será criado automaticamente um novo processo de crédito habitação associado ao seu utilizador.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setAssignDialog({ open: false, client: null })}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => handleAssignClient(assignDialog.client?.id)}
-              disabled={assignLoading}
-            >
-              {assignLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <UserPlus className="h-4 w-4 mr-2" />
-              )}
-              Atribuir e Criar Processo
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* CreateProcessModal — Triagem: Criar Processo a partir do Registo */}
+      <CreateProcessModal
+        open={createProcessModal.open}
+        onOpenChange={(open) => setCreateProcessModal({ open, client: open ? createProcessModal.client : null })}
+        onSuccess={(data) => {
+          // Processo criado com sucesso → lead desaparece dos registos
+          setCreateProcessModal({ open: false, client: null });
+          toast.success(`Processo #${data.process_number} criado com sucesso`);
+          fetchClients(); // Atualizar lista (lead convertido já não aparece)
+          // Navegar para o novo processo
+          if (data.id) {
+            navigate(`/process/${data.id}`);
+          }
+        }}
+        preSelectedClient={createProcessModal.client ? {
+          id: createProcessModal.client.id,
+          name: createProcessModal.client.nome,
+          nif: createProcessModal.client.nif || createProcessModal.client.dados_pessoais?.nif || "",
+          email: createProcessModal.client.contacto?.email || "",
+          phone: createProcessModal.client.contacto?.telefone || "",
+        } : null}
+      />
 
       {/* Client Details Dialog */}
       <Dialog open={detailsDialog.open} onOpenChange={(open) => setDetailsDialog({ open, client: detailsDialog.client })}>
@@ -1016,17 +948,6 @@ const ClientRegistrationsPage = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Create Process Modal (pre-filled client from details dialog) */}
-      <CreateProcessModal
-        open={showCreateProcess}
-        onOpenChange={(open) => {
-          setShowCreateProcess(open);
-          if (!open) setPreSelectedClient(null);
-        }}
-        preSelectedClient={preSelectedClient}
-        onSuccess={() => fetchClients()}
-      />
     </DashboardLayout>
   );
 };
