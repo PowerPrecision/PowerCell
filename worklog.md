@@ -371,3 +371,43 @@ Stage Summary:
 - 3-column financial breakdown (Fixo + Variável = Total) appears in both Pool Distribution and Commissions panels
 - Admin can set base_salary per user in the Users Management page
 - All Python syntax validated, no new lint errors introduced
+
+---
+Task ID: finance-settings-separation
+Agent: Main Agent
+Task: Separar configuração financeira da visualização — Criar FinanceSettingsPage + Limpar FinanceDashboard + Atualizar rotas e sidebar
+
+Work Log:
+- Criou frontend/src/pages/FinanceSettingsPage.js — nova página de comando financeiro (admin/CEO only)
+  - Secção A: Configuração de Honorários (tipo, valor, IVA, pré-visualização)
+  - Secção B: Modelo de Distribuição (Individual Split vs Pool Global com descrição visual)
+  - Secção C: Percentagens de Comissão por Área (Imobiliária + Crédito — legacy dashboard config)
+  - Guard with Shield icon para utilizadores não-admin/CEO
+  - Badge "Apenas Admin / CEO" no header
+- Limpou FinanceDashboard.js:
+  - Removeu HonorariosDialog (302 linhas) — movido para FinanceSettingsPage
+  - Removeu ConfigDialog (160 linhas) — movido para FinanceSettingsPage
+  - Removeu handleSaveConfig e respetivas importações (updateFinanceConfig, createFinanceConfig, updateFinanceConfigById)
+  - Expandiu layout: p-4 md:p-6 → w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6
+  - Tabs: grid w-full → flex flex-wrap gap-1 (tabs agora respiram e não ficam espremidas)
+  - Tab "Honorários & Processos" → "Processos Financeiros" (config removido, só dados)
+  - Adicionou botão "Gestão Financeira" no header (visível só para admin/CEO, navega para /finance/settings)
+  - Removeu ConfigDialog das tabs Imobiliária e Crédito
+  - KPIs: gap-4 → gap-4 md:gap-6
+  - Removeu imports não usados: React, TrendingDown, Eye, Input, Label, Dialog*
+- Atualizou App.js:
+  - Adicionou lazy import FinanceSettingsPage
+  - Registou rota /finance/settings com ProtectedRoute allowedRoles=["admin", "ceo"]
+- Atualizou DashboardLayout.js:
+  - Adicionou import Cog (lucide-react)
+  - Criou gestaoFinanceiraItem (array com link para /finance/settings, só admin/CEO)
+  - Admin/CEO menu: meuNegocioGroup.items + gestaoFinanceiraItem no grupo "O Meu Negócio"
+  - Adicionou /finance/settings ao array meuNegocioRoutes (para auto-expandir sidebar)
+- Frontend build passa com sucesso (vite build ✓)
+- Lint: sem novos erros, apenas warnings pré-existentes
+
+Stage Summary:
+- Nova página: FinanceSettingsPage.js (/finance/settings) — central de comando financeiro, só admin/CEO
+- FinanceDashboard.js limpo: sem modais de config, layout expandido w-full max-w-7xl, tabs flex-wrap
+- Sidebar: "Gestão Financeira" visível só para admin/CEO no grupo "O Meu Negócio"
+- Separação clara: Dashboard = visualização/relatórios, Settings = configuração

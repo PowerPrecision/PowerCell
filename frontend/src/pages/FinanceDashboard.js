@@ -1,23 +1,23 @@
 /**
- * FinanceDashboard — Módulo Financeiro Fase 2 (Premium UI)
+ * FinanceDashboard — Módulo Financeiro (Premium UI — Layout Expandido)
  *
- * Ecrã principal do módulo financeiro com 3 secções:
- * 1. Painel de Configuração da Empresa (Honorários) — Modal GET/POST/PUT FinanceConfig
- * 2. Resumo Financeiro — 4 KPI Cards agregados de ProcessFinance
- * 3. Tabela de Histórico — Snapshots de ProcessFinance com edição de Estado
+ * Ecrã principal do módulo financeiro com visualização de dados:
+ * 1. Resumo Financeiro — KPI Cards agregados
+ * 2. Tabs de análise: Processos Financeiros, Imobiliária, Crédito, Mensal, Comissões, Distribuição
  *
- * Preserva as tabs originais (Imobiliária, Crédito, Mensal, Comissões)
- * e adiciona a nova secção "Honorários & Processos".
+ * NOTA: Os painéis de configuração foram movidos para /finance/settings
+ * (FinanceSettingsPage). Esta página é agora apenas de visualização.
+ *
+ * Layout: ecrã inteiro (w-full max-w-7xl mx-auto)
  *
  * @context {AuthContext} — user.company como company_id (multi-tenant)
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   BarChart3,
   TrendingUp,
-  TrendingDown,
   DollarSign,
   Building2,
   Users,
@@ -28,12 +28,8 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
-  Settings,
   CreditCard,
-  Percent,
   Landmark,
-  Save,
-  Check,
   AlertTriangle,
   FileText,
   Receipt,
@@ -41,8 +37,8 @@ import {
   CircleDollarSign,
   RefreshCw,
   Filter,
-  Eye,
   Pencil,
+  Cog,
 } from "lucide-react";
 import {
   Card,
@@ -53,8 +49,6 @@ import {
 } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
 import {
   Select,
   SelectContent,
@@ -63,16 +57,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-  DialogClose,
-} from "../components/ui/dialog";
+// Dialog imports removed — config modals movidos para FinanceSettingsPage
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { hasRole } from "../utils/roleUtils";
@@ -83,11 +68,8 @@ import {
   getFinanceCommissions,
   getFinancePerformance,
   getFinanceConfig,
-  updateFinanceConfig,
   // Fase 2 APIs
   getFinanceConfigs,
-  createFinanceConfig,
-  updateFinanceConfigById,
   getProcessFinances,
   updateProcessFinance,
   getProcessFinanceSummary,
@@ -261,311 +243,10 @@ const KpiCard = ({ title, value, subtitle, icon: Icon, accent = "purple" }) => {
 };
 
 // ====================================================================
-// CONFIGURAR HONORÁRIOS — Modal (Fase 2)
+// NOTA: HonorariosDialog e ConfigDialog foram movidos para
+// FinanceSettingsPage (/finance/settings). Esta página é agora
+// apenas de visualização de dados financeiros.
 // ====================================================================
-
-const HonorariosDialog = ({ companyId, onSaved }) => {
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const [feeType, setFeeType] = useState("percentage");
-  const [defaultValue, setDefaultValue] = useState("");
-  const [taxRate, setTaxRate] = useState("23");
-  const [existingConfigId, setExistingConfigId] = useState(null);
-  const [distributionModel, setDistributionModel] = useState("individual_split");
-
-  // Carregar configuração ao abrir o modal
-  const fetchConfig = useCallback(async () => {
-    if (!companyId) return;
-    setLoading(true);
-    try {
-      const res = await getFinanceConfigs({ company_id: companyId });
-      const configs = res.data?.configs || [];
-      if (configs.length > 0) {
-        const cfg = configs[0];
-        setFeeType(cfg.fee_type || "percentage");
-        setDefaultValue(String(cfg.default_value ?? ""));
-        setTaxRate(String(cfg.tax_rate ?? "23"));
-        setExistingConfigId(cfg.id);
-        setDistributionModel(cfg.distribution_model || "individual_split");
-      } else {
-        setFeeType("percentage");
-        setDefaultValue("");
-        setTaxRate("23");
-        setExistingConfigId(null);
-        setDistributionModel("individual_split");
-      }
-    } catch (err) {
-      console.error("Erro ao carregar config:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    if (open) fetchConfig();
-  }, [open, fetchConfig]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    setSuccess(false);
-
-    try {
-      const payload = {
-        company_id: companyId,
-        fee_type: feeType,
-        default_value: parseFloat(defaultValue),
-        tax_rate: parseFloat(taxRate),
-        distribution_model: distributionModel,
-      };
-
-      if (existingConfigId) {
-        // PUT — actualizar existente
-        await updateFinanceConfigById(existingConfigId, {
-          fee_type: feeType,
-          default_value: parseFloat(defaultValue),
-          tax_rate: parseFloat(taxRate),
-          distribution_model: distributionModel,
-        });
-      } else {
-        // POST — criar nova
-        const res = await createFinanceConfig(payload);
-        const newId = res.data?.id;
-        if (newId) setExistingConfigId(newId);
-      }
-
-      setSuccess(true);
-      if (onSaved) onSaved();
-      setTimeout(() => {
-        setOpen(false);
-        setSuccess(false);
-      }, 1500);
-    } catch (err) {
-      const detail = err.response?.data?.detail;
-      setError(
-        typeof detail === "string"
-          ? detail
-          : "Erro ao guardar configuração de honorários."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Pré-visualização do cálculo
-  const previewValue = parseFloat(defaultValue) || 0;
-  const previewBase = 100000; // valor base exemplo
-  const commission =
-    feeType === "percentage"
-      ? previewBase * (previewValue / 100)
-      : previewValue;
-  const taxAmt = commission * ((parseFloat(taxRate) || 23) / 100);
-  const total = commission + taxAmt;
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Settings className="h-4 w-4" />
-          Configurar Honorários
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Percent className="h-5 w-5 text-purple-600" />
-            Configuração de Honorários
-          </DialogTitle>
-          <DialogDescription>
-            Defina o tipo de comissão e o valor por omissão para os processos da empresa.
-            As alterações aplicam-se aos novos processos (os já fechados mantêm o snapshot).
-          </DialogDescription>
-        </DialogHeader>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
-            <span className="ml-2 text-muted-foreground">A carregar configuração...</span>
-          </div>
-        ) : (
-          <div className="space-y-5 py-2">
-            {/* Tipo de Honorário */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Tipo de Honorário</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setFeeType("percentage")}
-                  className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                    feeType === "percentage"
-                      ? "border-purple-500 bg-purple-50 text-purple-700"
-                      : "border-gray-200 hover:border-gray-300 text-muted-foreground"
-                  }`}
-                >
-                  <Percent className="h-5 w-5" />
-                  <div className="text-left">
-                    <p className="text-sm font-semibold">Percentagem</p>
-                    <p className="text-xs opacity-70">% sobre o valor base</p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeeType("fixed")}
-                  className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                    feeType === "fixed"
-                      ? "border-purple-500 bg-purple-50 text-purple-700"
-                      : "border-gray-200 hover:border-gray-300 text-muted-foreground"
-                  }`}
-                >
-                  <DollarSign className="h-5 w-5" />
-                  <div className="text-left">
-                    <p className="text-sm font-semibold">Valor Fixo</p>
-                    <p className="text-xs opacity-70">Montante em euros</p>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Modelo de Distribuição */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Modelo de Distribuição de Comissões</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDistributionModel("individual_split")}
-                  className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                    distributionModel === "individual_split"
-                      ? "border-purple-500 bg-purple-50 text-purple-700"
-                      : "border-gray-200 hover:border-gray-300 text-muted-foreground"
-                  }`}
-                >
-                  <Users className="h-5 w-5" />
-                  <div className="text-left">
-                    <p className="text-sm font-semibold">Individual</p>
-                    <p className="text-xs opacity-70">Cada consultor recebe o seu</p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDistributionModel("global_pool")}
-                  className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                    distributionModel === "global_pool"
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                      : "border-gray-200 hover:border-gray-300 text-muted-foreground"
-                  }`}
-                >
-                  <CircleDollarSign className="h-5 w-5" />
-                  <div className="text-left">
-                    <p className="text-sm font-semibold">Pool Global</p>
-                    <p className="text-xs opacity-70">Divisão igualitária</p>
-                  </div>
-                </button>
-              </div>
-              {distributionModel === "global_pool" && (
-                <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  No modelo Pool, todas as comissões do mês são somadas e divididas igualmente pelos consultores ativos.
-                </p>
-              )}
-            </div>
-
-            {/* Valor */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">
-                  {feeType === "percentage" ? "Percentagem (%)" : "Valor Fixo (€)"}
-                </Label>
-                <div className="relative">
-                  <Input
-                    type="number"
-                    min={0}
-                    max={feeType === "percentage" ? 100 : undefined}
-                    step={feeType === "percentage" ? 0.5 : 100}
-                    value={defaultValue}
-                    onChange={(e) => setDefaultValue(e.target.value)}
-                    placeholder={feeType === "percentage" ? "ex: 5" : "ex: 5000"}
-                    className="pr-10"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                    {feeType === "percentage" ? "%" : "€"}
-                  </span>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Taxa de IVA (%)</Label>
-                <div className="relative">
-                  <Input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.5}
-                    value={taxRate}
-                    onChange={(e) => setTaxRate(e.target.value)}
-                    className="pr-8"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Pré-visualização */}
-            <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Pré-visualização (base: {formatCurrency(previewBase)})
-              </p>
-              <div className="grid grid-cols-3 gap-3 text-sm">
-                <div>
-                  <p className="text-muted-foreground text-xs">Comissão</p>
-                  <p className="font-semibold">{formatCurrency(commission)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">IVA ({taxRate}%)</p>
-                  <p className="font-semibold">{formatCurrency(taxAmt)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Total a Faturar</p>
-                  <p className="font-semibold text-emerald-700">{formatCurrency(total)}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg border border-red-200 bg-red-50 text-sm text-red-700">
-            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-            {error}
-          </div>
-        )}
-
-        {success && (
-          <div className="flex items-center gap-2 p-3 rounded-lg border border-green-200 bg-green-50 text-sm text-green-700">
-            <Check className="h-4 w-4 flex-shrink-0" />
-            Configuração guardada com sucesso!
-          </div>
-        )}
-
-        <DialogFooter className="gap-2">
-          <DialogClose asChild>
-            <Button variant="outline" disabled={saving}>Cancelar</Button>
-          </DialogClose>
-          <Button onClick={handleSave} disabled={saving || !defaultValue} className="gap-2">
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            Guardar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 // ====================================================================
 // STATUS BADGE — Componente de Estado
@@ -1253,169 +934,8 @@ const ProcessFinancesTab = ({ companyId }) => {
 };
 
 // ====================================================================
-// LEGACY CONFIG DIALOG (Preservado para as tabs originais)
+// ConfigDialog REMOVIDO — movido para FinanceSettingsPage
 // ====================================================================
-
-const ConfigDialog = ({ config, onSave }) => {
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [error, setError] = useState(null);
-
-  const [localConfig, setLocalConfig] = useState({
-    imobiliaria: { ...config?.imobiliaria },
-    credito: { ...config?.credito },
-  });
-
-  useEffect(() => {
-    if (config) {
-      setLocalConfig({
-        imobiliaria: { ...config.imobiliaria },
-        credito: { ...config.credito },
-      });
-    }
-  }, [config]);
-
-  const handleChange = (area, field, value) => {
-    const numVal = parseFloat(value);
-    if (!isNaN(numVal) && numVal >= 0 && numVal <= 100) {
-      setLocalConfig((prev) => ({
-        ...prev,
-        [area]: { ...prev[area], [field]: numVal },
-      }));
-    }
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    setSuccess(false);
-    try {
-      await onSave(localConfig);
-      setSuccess(true);
-      setTimeout(() => {
-        setOpen(false);
-        setSuccess(false);
-      }, 1500);
-    } catch (err) {
-      setError(err.response?.data?.detail || "Erro ao guardar configurações.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const fields = [
-    { key: "comissao_consultor_pct", label: "% Comissão Consultor", description: "Percentagem da comissão paga ao consultor" },
-    { key: "retida_agencia_pct", label: "% Retida pela Agência", description: "Percentagem da comissão retida como lucro bruto" },
-    { key: "taxa_impostos_sobre_lucro", label: "% Impostos sobre Lucro", description: "Taxa de imposto sobre o lucro bruto" },
-  ];
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Settings className="h-4 w-4" />
-          Config. Dashboard
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Percent className="h-5 w-5 text-purple-600" />
-            Configurações do Dashboard
-          </DialogTitle>
-          <DialogDescription>
-            Defina as percentagens de comissão e impostos para cada área de negócio.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-6 py-4">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Building2 className="h-4 w-4 text-purple-600" />
-              <h3 className="font-semibold text-sm">Imobiliária</h3>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {fields.map((f) => (
-                <div key={`imob-${f.key}`} className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">{f.label}</Label>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.5}
-                      value={localConfig.imobiliaria?.[f.key] ?? ""}
-                      onChange={(e) => handleChange("imobiliaria", f.key, e.target.value)}
-                      className="pr-8"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">{f.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <CreditCard className="h-4 w-4 text-blue-600" />
-              <h3 className="font-semibold text-sm">Crédito</h3>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {fields.map((f) => (
-                <div key={`cred-${f.key}`} className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">{f.label}</Label>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.5}
-                      value={localConfig.credito?.[f.key] ?? ""}
-                      onChange={(e) => handleChange("credito", f.key, e.target.value)}
-                      className="pr-8"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">{f.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg border border-red-200 bg-red-50 text-sm text-red-700">
-            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-            {error}
-          </div>
-        )}
-
-        {success && (
-          <div className="flex items-center gap-2 p-3 rounded-lg border border-green-200 bg-green-50 text-sm text-green-700">
-            <Check className="h-4 w-4 flex-shrink-0" />
-            Configurações guardadas com sucesso!
-          </div>
-        )}
-
-        <DialogFooter className="gap-2">
-          <DialogClose asChild>
-            <Button variant="outline" disabled={saving}>Cancelar</Button>
-          </DialogClose>
-          <Button onClick={handleSave} disabled={saving} className="gap-2">
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            Guardar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 // ====================================================================
 // MAIN COMPONENT
@@ -1490,11 +1010,6 @@ const FinanceDashboard = () => {
     }
   };
 
-  const handleSaveConfig = async (newConfig) => {
-    await updateFinanceConfig(newConfig);
-    setConfig(newConfig);
-    await fetchAllData();
-  };
 
   // Chart data para comparação imob vs cred
   const comparisonChartData = (monthly?.monthly || []).map((m) => ({
@@ -1506,7 +1021,7 @@ const FinanceDashboard = () => {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="p-4 md:p-6 space-y-4">
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-3">
             <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
             <span className="text-muted-foreground">A carregar dados financeiros...</span>
@@ -1516,9 +1031,12 @@ const FinanceDashboard = () => {
     );
   }
 
+  // Verificar se o utilizador é admin/CEO para mostrar o link de gestão
+  const isAdminOrCeo = hasRole(user, "admin") || hasRole(user, "ceo");
+
   return (
     <DashboardLayout>
-      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -1527,12 +1045,23 @@ const FinanceDashboard = () => {
               Dashboard Financeiro
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Visão financeira por área de negócio — exclusivo para Administração
+              Visão financeira por área de negócio — relatórios e KPIs
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <HonorariosDialog companyId={companyId} onSaved={fetchAllData} />
+            {/* Link para Gestão Financeira (admin/CEO only) */}
+            {isAdminOrCeo && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => navigate("/finance/settings")}
+              >
+                <Cog className="h-4 w-4" />
+                Gestão Financeira
+              </Button>
+            )}
 
             <div className="flex items-center gap-2">
               <Button variant="outline" size="icon" onClick={() => handleYearChange(-1)} disabled={selectedYear <= 2020}>
@@ -1557,9 +1086,9 @@ const FinanceDashboard = () => {
           </Card>
         )}
 
-        {/* KPIs Globais (Legacy) */}
+        {/* KPIs Globais — layout expandido */}
         {summary && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
             <FinanceStatCard
               title="Receita Total"
               value={formatCurrency(summary.global?.total_receita)}
@@ -1597,12 +1126,12 @@ const FinanceDashboard = () => {
           </div>
         )}
 
-        {/* Tabs */}
-        <Tabs defaultValue="honorarios" className="space-y-4">
-          <TabsList className={`grid w-full grid-cols-2 sm:grid-cols-${distributionModel === "global_pool" ? 6 : 5} lg:w-auto lg:inline-grid`}>
-            <TabsTrigger value="honorarios" className="gap-1.5">
-              <CircleDollarSign className="h-3.5 w-3.5" />
-              Honorários & Processos
+        {/* Tabs — layout expandido sem tabs de configuração */}
+        <Tabs defaultValue="processos" className="space-y-4">
+          <TabsList className="flex flex-wrap gap-1 h-auto p-1">
+            <TabsTrigger value="processos" className="gap-1.5">
+              <FileText className="h-3.5 w-3.5" />
+              Processos Financeiros
             </TabsTrigger>
             <TabsTrigger value="imobiliaria" className="gap-1.5">
               <Building2 className="h-3.5 w-3.5" />
@@ -1628,16 +1157,13 @@ const FinanceDashboard = () => {
             )}
           </TabsList>
 
-          {/* TAB: Honorários & Processos (Fase 2 — NOVO) */}
-          <TabsContent value="honorarios">
+          {/* TAB: Processos Financeiros (anteriormente Honorários & Processos) */}
+          <TabsContent value="processos">
             <ProcessFinancesTab companyId={companyId} />
           </TabsContent>
 
-          {/* TAB: Imobiliária */}
+          {/* TAB: Imobiliária — ConfigDialog removido (ver /finance/settings) */}
           <TabsContent value="imobiliaria">
-            <div className="flex justify-end mb-3">
-              <ConfigDialog config={config} onSave={handleSaveConfig} />
-            </div>
             <AreaDetail
               area="imobiliaria"
               data={summary?.imobiliaria}
@@ -1647,11 +1173,8 @@ const FinanceDashboard = () => {
             />
           </TabsContent>
 
-          {/* TAB: Crédito */}
+          {/* TAB: Crédito — ConfigDialog removido (ver /finance/settings) */}
           <TabsContent value="credito">
-            <div className="flex justify-end mb-3">
-              <ConfigDialog config={config} onSave={handleSaveConfig} />
-            </div>
             <AreaDetail
               area="credito"
               data={summary?.credito}

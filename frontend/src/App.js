@@ -81,6 +81,7 @@ const ProfilePage = React.lazy(() => import("./pages/ProfilePage"));
 const FormManagementPage = React.lazy(() => import("./pages/FormManagementPage"));
 const AuditTrailPage = React.lazy(() => import("./pages/AuditTrailPage"));
 const FinanceDashboard = React.lazy(() => import("./pages/FinanceDashboard"));
+const FinanceSettingsPage = React.lazy(() => import("./pages/FinanceSettingsPage"));
 const RGPDMigrationPage = React.lazy(() => import("./pages/RGPDMigrationPage"));
 const WebmailPage = React.lazy(() => import("./pages/WebmailPage"));
 const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
@@ -367,6 +368,18 @@ function App() {
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
                 <RouteBoundary name="Financeiro">
                   <FinanceDashboard />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Finance Settings - Admin and CEO only */}
+          <Route
+            path="/finance/settings"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <RouteBoundary name="Gestão Financeira">
+                  <FinanceSettingsPage />
                 </RouteBoundary>
               </ProtectedRoute>
             }

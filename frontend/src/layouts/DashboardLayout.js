@@ -63,7 +63,6 @@ import {
   Lock,
   Mail,
   Eye,
-  Calendar,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -162,7 +161,7 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo O Meu Negócio (inclui rotas de detalhe: /processo/:id, /imovel/:id, etc.)
-    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro"];
+    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro", "/finance/settings"];
     // Rotas do grupo Visão Global (inclui rotas de detalhe: /cliente/:id, /processo-detalhe/:id, etc.)
     const visaoGlobalRoutes = ["/clientes", "/cliente", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
@@ -443,6 +442,15 @@ const DashboardLayout = ({ children, title }) => {
     }
 
     // ====================================================================
+    // ITEM COMUM: Gestão Financeira (admin/CEO only)
+    // ====================================================================
+    const gestaoFinanceiraItem = (isAdmin || isCeo) ? [{
+      label: "Gestão Financeira",
+      icon: Cog,
+      href: "/finance/settings",
+    }] : [];
+
+    // ====================================================================
     // MENU PARA ADMINISTRATIVO
     // — Sem Painel de Administração
     // — Rascunhos filtrado por capability DRAFT_VIEW
@@ -475,11 +483,16 @@ const DashboardLayout = ({ children, title }) => {
     // MENU PARA CEO e ADMIN
     // — Vêem Gestão e Operações
     // — Vêem o botão "Painel de Administração" no fundo
+    // — Vêem "Gestão Financeira" no grupo O Meu Negócio
     // — SEM Configurações de Sistema espalhadas (tudo no Painel)
     // ====================================================================
     if (isAdmin || isCeo) {
+      const adminNegocioItems = [
+        ...meuNegocioGroup.items,
+        ...gestaoFinanceiraItem,
+      ];
       const adminGroups = [
-        meuNegocioGroup,
+        { ...meuNegocioGroup, items: adminNegocioItems },
         visaoGlobalGroup,
         comunicacoesGroup,
       ];
