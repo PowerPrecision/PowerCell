@@ -267,6 +267,7 @@ class DashboardFinanceConfigUpdate(BaseModel):
     """Schema para actualizar as configurações financeiras (dashboard legacy)."""
     imobiliaria: Optional[dict] = Field(None, description="Configurações da área de Imobiliária")
     credito: Optional[dict] = Field(None, description="Configurações da área de Crédito")
+    distribution_model: Optional[str] = Field(None, description="Modelo de distribuição: 'individual_split' ou 'global_pool'")
 
 
 @router.get("/finance/config")
@@ -328,6 +329,15 @@ async def update_finance_config(
                     detail=f"O campo '{field}' deve estar entre 0 e 100."
                 )
             current[area][field] = float(value)
+
+    # Guardar distribution_model se fornecido
+    if body.distribution_model is not None:
+        if body.distribution_model not in ("individual_split", "global_pool"):
+            raise HTTPException(
+                status_code=400,
+                detail="distribution_model deve ser 'individual_split' ou 'global_pool'."
+            )
+        current["distribution_model"] = body.distribution_model
 
     # Guardar na DB
     from datetime import timezone as tz
@@ -555,12 +565,10 @@ async def _calc_commissions_data(year: Optional[int], company_id: Optional[str] 
     config = await _get_finance_config()
     processes = await _get_processes(year)
 
-    # Determinar distribution_model
-    distribution_model = "individual_split"
-    if company_id:
-        config_doc = await db.finance_configs.find_one({"company_id": company_id})
-        if config_doc and config_doc.get("distribution_model"):
-            distribution_model = config_doc["distribution_model"]
+    # Determinar distribution_model a partir do _get_finance_config()
+    distribution_model = config.get("distribution_model", "individual_split")
+    if distribution_model not in ("individual_split", "global_pool"):
+        distribution_model = "individual_split"
 
     pct_consultor_imob = _safe_float(config.get("imobiliaria", {}).get("comissao_consultor_pct", 50))
     pct_consultor_cred = _safe_float(config.get("credito", {}).get("comissao_consultor_pct", 40))
@@ -804,14 +812,8 @@ async def export_commissions_csv(
     writer.writerow([f"Modelo de Distribuição: {model_label}"])
     writer.writerow([])
 
-    # Cabeçalho da tabela
-    writer.writerow([
-        "Nome do Consultor",
-        "Cargo",
-        "Salário Fixo (€)",
-        "Comissões/Pool (€)",
-        "Total a Receber (€)"
-    ])
+    # Cabeçalho da tabela — colunas exactas pedidas pela Contabilidade
+    writer.writerow(["Nome", "Cargo", "Fixo", "Variavel", "Total"])
 
     # Linhas dos consultores
     collaborators = data.get("collaborators", [])
