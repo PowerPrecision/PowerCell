@@ -102,6 +102,169 @@ logger = logging.getLogger(__name__)
 
 
 # ====================================================================
+# FINANCE SNAPSHOT HELPER — Criar ProcessFinance ao fechar processo
+# ====================================================================
+
+async def _create_finance_snapshot(process: dict, user: dict):
+    """
+    Cria um snapshot financeiro (ProcessFinance) quando um processo é concluído.
+
+    Lê dados de real_estate_data (valor_imovel) e credit_data (loan_amount)
+    para calcular comissões duais (Imobiliária + Crédito) de forma independente.
+
+    Usa a FinanceConfig da empresa para determinar fee_type/fee_value.
+    Se a empresa tiver configs separadas para imobiliária e crédito, usa-as;
+    caso contrário, usa a mesma config para ambas.
+
+    Compatibilidade retroactiva:
+    - Se não houver FinanceConfig para a empresa, usa os campos legacy
+      (base_business_value + applied_fee_type/value) se disponíveis.
+    - Se já existir um registo financeiro para este processo, ignora silenciosamente.
+    """
+    from models.finance import FeeType, FinanceStatus
+
+    process_id = process.get("id", "")
+    company_id = process.get("company_id", "")
+    client_id = process.get("client_id", "")
+
+    # Evitar duplicados: se já existe registo, não criar outro
+    existing = await db.process_finances.find_one({
+        "process_id": process_id,
+        "company_id": company_id,
+    })
+    if existing:
+        logger.info(f"Snapshot financeiro já existe para processo {process_id}, a ignorar")
+        return
+
+    # Obter dados do processo
+    real_estate_data = process.get("real_estate_data") or {}
+    credit_data = process.get("credit_data") or {}
+    financial_data = process.get("financial_data") or {}
+
+    # Ler valores base
+    valor_imovel = real_estate_data.get("valor_imovel")
+    loan_amount = credit_data.get("loan_amount") or credit_data.get("requested_amount")
+
+    # Tentar obter FinanceConfig da empresa
+    # A config pode ter campos separados para imobiliária e crédito
+    config_doc = await db.finance_configs.find_one({"company_id": company_id})
+
+    # Defaults para campos legacy (compatibilidade)
+    base_business_value = 0.0
+    applied_fee_type = None
+    applied_fee_value = None
+
+    # Comissão imobiliária
+    re_base_value = float(valor_imovel) if valor_imovel else 0.0
+    re_fee_type = None
+    re_fee_value = None
+
+    # Comissão de crédito
+    cr_base_value = float(loan_amount) if loan_amount else 0.0
+    cr_fee_type = None
+    cr_fee_value = None
+
+    tax_rate = 23.0  # IVA português por defeito
+
+    if config_doc:
+        # FinanceConfig encontrada — usar para ambas as áreas
+        fee_type = config_doc.get("fee_type", "percentage")
+        default_value = config_doc.get("default_value", 0.0)
+        tax_rate = config_doc.get("tax_rate", 23.0)
+
+        # Verificar se existem configs separadas para imobiliária e crédito
+        re_fee_type = config_doc.get("real_estate_fee_type") or fee_type
+        re_fee_value = config_doc.get("real_estate_fee_value") or config_doc.get("real_estate_default_value") or default_value
+        cr_fee_type = config_doc.get("credit_fee_type") or fee_type
+        cr_fee_value = config_doc.get("credit_fee_value") or config_doc.get("credit_default_value") or default_value
+
+        # Campos legacy para compatibilidade
+        applied_fee_type = fee_type
+        applied_fee_value = default_value
+        base_business_value = cr_base_value or re_base_value
+    else:
+        # Sem FinanceConfig: tentar usar campos do processo (financial_data)
+        comissao_mediacao = financial_data.get("comissao_mediacao")
+        if comissao_mediacao:
+            # Se já temos comissão, usar como comissão total (credit_commission por defeito)
+            cr_base_value = float(comissao_mediacao)
+            cr_fee_type = "fixed"
+            cr_fee_value = float(comissao_mediacao)
+            applied_fee_type = "fixed"
+            applied_fee_value = float(comissao_mediacao)
+            base_business_value = float(comissao_mediacao)
+        else:
+            # Sem config e sem comissão: criar registo com zeros
+            logger.info(
+                f"Sem FinanceConfig nem comissão para processo {process_id}. "
+                f"Snapshot criado com valores zero."
+            )
+
+    # Calcular comissões
+    # Comissão imobiliária
+    if re_fee_type == FeeType.PERCENTAGE.value:
+        re_commission = round(re_base_value * (re_fee_value / 100), 2) if re_base_value and re_fee_value else 0.0
+    elif re_fee_type == FeeType.FIXED.value:
+        re_commission = re_fee_value or 0.0
+    else:
+        re_commission = 0.0
+
+    # Comissão de crédito
+    if cr_fee_type == FeeType.PERCENTAGE.value:
+        cr_commission = round(cr_base_value * (cr_fee_value / 100), 2) if cr_base_value and cr_fee_value else 0.0
+    elif cr_fee_type == FeeType.FIXED.value:
+        cr_commission = cr_fee_value or 0.0
+    else:
+        cr_commission = 0.0
+
+    # Comissão total
+    expected_commission = round(re_commission + cr_commission, 2)
+    tax_amount = round(expected_commission * (tax_rate / 100), 2)
+    total_with_tax = round(expected_commission + tax_amount, 2)
+
+    # Criar documento
+    finance_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    doc = {
+        "id": finance_id,
+        "process_id": process_id,
+        "client_id": client_id,
+        "company_id": company_id,
+        # Campos legacy (compatibilidade retroactiva)
+        "base_business_value": base_business_value,
+        "applied_fee_type": applied_fee_type,
+        "applied_fee_value": applied_fee_value,
+        # Comissão Imobiliária (Real Estate)
+        "real_estate_base_value": re_base_value,
+        "real_estate_fee_type": re_fee_type,
+        "real_estate_fee_value": re_fee_value,
+        "real_estate_commission": re_commission,
+        # Comissão de Crédito (Credit)
+        "credit_base_value": cr_base_value,
+        "credit_fee_type": cr_fee_type,
+        "credit_fee_value": cr_fee_value,
+        "credit_commission": cr_commission,
+        # Totais
+        "expected_commission": expected_commission,
+        "tax_amount": tax_amount,
+        "total_with_tax": total_with_tax,
+        "status": FinanceStatus.PENDING.value,
+        "invoice_link": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await db.process_finances.insert_one(doc)
+
+    logger.info(
+        f"Snapshot financeiro criado: id={finance_id}, process_id={process_id}, "
+        f"re_commission={re_commission}, cr_commission={cr_commission}, "
+        f"total={expected_commission}"
+    )
+
+
+# ====================================================================
 # WEBSOCKET BROADCAST HELPERS
 # ====================================================================
 
@@ -1855,6 +2018,17 @@ async def move_process_kanban(
     # Exclude the user who made the move to avoid duplicate updates
     await manager.broadcast(moved_message, exclude_user=str(user.get("id", "")))
     
+    # === SNAPSHOT FINANCEIRO: Criar ProcessFinance ao mover para Concluídos ===
+    if new_status == "concluidos":
+        try:
+            await _create_finance_snapshot(process, user)
+        except Exception as snap_err:
+            # Falha no snapshot não deve impedir a mudança de estado
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                f"Falha ao criar snapshot financeiro para processo {process_id}: {snap_err}"
+            )
+    
     # === ALERTAS AUTOMÁTICOS BASEADOS NA MUDANÇA DE ESTADO ===
     
     # 1. Ao mover para CH Aprovado - Verificar documentos do imóvel
@@ -2259,6 +2433,85 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         )
         logger.info(f"Dados pessoais do cliente {client_id} atualizados via PUT processo: {list(client_updates.keys())}")
     
+    # ── REATRIBUIÇÃO DE CLIENTE: Se o body inclui client_id diferente do actual ──
+    new_client_id = raw_body.get("client_id")
+    if new_client_id and new_client_id != process.get("client_id"):
+        # Apenas admin, ceo e diretor podem reatribuir clientes
+        if role not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
+            raise HTTPException(
+                status_code=403,
+                detail="Apenas administradores, CEO ou directores podem reatribuir o cliente de um processo."
+            )
+        
+        # Validar que o novo cliente existe
+        new_client_doc = await db.clients.find_one({"id": new_client_id})
+        if not new_client_doc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Cliente com ID '{new_client_id}' não encontrado."
+            )
+        
+        # Desencriptar dados do novo cliente
+        decrypted_new_client = decrypt_client_data(new_client_doc)
+        new_client_name = decrypted_new_client.get("nome", "")
+        new_client_email = decrypted_new_client.get("contacto", {}).get("email", "")
+        new_client_phone = decrypted_new_client.get("contacto", {}).get("telefone", "")
+        
+        old_client_id = process.get("client_id")
+        old_client_name = process.get("client_name", "")
+        
+        now_reassign = datetime.now(timezone.utc).isoformat()
+        
+        # Remover processo do cliente antigo (process_ids)
+        if old_client_id:
+            await db.clients.update_one(
+                {"id": old_client_id},
+                {
+                    "$pull": {"process_ids": process_id},
+                    "$set": {"updated_at": now_reassign}
+                }
+            )
+        
+        # Adicionar processo ao novo cliente (process_ids)
+        await db.clients.update_one(
+            {"id": new_client_id},
+            {
+                "$addToSet": {"process_ids": process_id},
+                "$set": {"updated_at": now_reassign}
+            }
+        )
+        
+        # Actualizar dados do processo com novo cliente
+        # Actualizar client_ids também (suporte N:M)
+        current_client_ids = process.get("client_ids", [])
+        if old_client_id and old_client_id in current_client_ids:
+            current_client_ids = [cid for cid in current_client_ids if cid != old_client_id]
+        if new_client_id not in current_client_ids:
+            current_client_ids.insert(0, new_client_id)  # Novo cliente principal no início
+        
+        # Os campos client_name, client_email, client_phone serão adicionados ao update_data
+        # Mas como serão encriptados mais abaixo, adicionamos ao raw update
+        process["client_id"] = new_client_id
+        process["client_name"] = new_client_name
+        process["client_email"] = new_client_email
+        process["client_phone"] = new_client_phone
+        process["client_ids"] = current_client_ids
+        
+        # Registar no histórico
+        await log_history(
+            process_id, user,
+            f"Reatribuiu cliente de '{old_client_name}' para '{new_client_name}'"
+        )
+        await log_audit_event(
+            process_id, user,
+            f"Reatribuiu cliente de '{old_client_name}' para '{new_client_name}'",
+            request=request, source="web"
+        )
+        logger.info(
+            f"Processo {process_id} reatribuído de cliente {old_client_id} ({old_client_name}) "
+            f"para cliente {new_client_id} ({new_client_name}) por {user.get('email')}"
+        )
+    
     # Indexação só pode actualizar dados financeiros (restante é bloqueado mais abaixo)
     is_indexacao = role == UserRole.INDEXACAO
     
@@ -2271,6 +2524,15 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         )
     
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    
+    # ── Incluir dados de reatribuição no update_data (se houve reatribuição) ──
+    if new_client_id and new_client_id != client_id:
+        # client_id já foi actualizado no process dict acima
+        update_data["client_id"] = process["client_id"]
+        update_data["client_name"] = process["client_name"]
+        update_data["client_email"] = process["client_email"]
+        update_data["client_phone"] = process["client_phone"]
+        update_data["client_ids"] = process["client_ids"]
     
     valid_statuses = [s["name"] for s in await db.workflow_statuses.find({}, {"name": 1, "_id": 0}).to_list(100)]
     

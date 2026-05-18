@@ -396,6 +396,7 @@ async def list_registered_clients(
             "contacto": c.get("contacto", {}),
             "dados_pessoais": c.get("dados_pessoais", {}),
             "nif": c.get("dados_pessoais", {}).get("nif"),
+            "is_active": c.get("is_active", True),
             "has_process": has_process_flag,
             "process_count": len(process_ids),
             "processes": processes_info,
@@ -630,7 +631,7 @@ async def search_clients(
 
     clients = await db.clients.find(
         query,
-        {"_id": 0, "id": 1, "nome": 1, "contacto.email": 1, "contacto.telefone": 1, "dados_pessoais.nif": 1}
+        {"_id": 0, "id": 1, "nome": 1, "contacto.email": 1, "contacto.telefone": 1, "dados_pessoais.nif": 1, "is_active": 1}
     ).sort("nome", 1).limit(limit).to_list(length=limit)
 
     results = [
@@ -640,6 +641,7 @@ async def search_clients(
             "nif": c.get("dados_pessoais", {}).get("nif") if isinstance(c.get("dados_pessoais"), dict) else None,
             "email": c.get("contacto", {}).get("email") if isinstance(c.get("contacto"), dict) else None,
             "telefone": c.get("contacto", {}).get("telefone") if isinstance(c.get("contacto"), dict) else None,
+            "is_active": c.get("is_active", True),
         }
         for c in clients
     ]
@@ -847,6 +849,7 @@ async def list_clients(
                     "processes": [],  # Lista de processos com fase
                     "created_at": proc.get("created_at"),  # For sorting by date
                     "prioridade": proc_priority,  # Prioridade mais alta dos processos
+                    "is_active": True,  # Valor por defeito; será ajustado abaixo com base nos processos
                 }
             
             # Update created_at to earliest process date
@@ -883,6 +886,16 @@ async def list_clients(
             
             if proc.get("is_active", True) and proc.get("status") not in ["desistencias", "concluidos", "arquivado", "perdido", "concluido"]:
                 clients_map[key]["active_processes_count"] += 1
+        
+        # Determinar is_active de cada cliente com base nos seus processos
+        # Um cliente é "Inativo" se TODOS os seus processos tiverem is_active: False
+        for key in clients_map:
+            all_processes = clients_map[key].get("processes", [])
+            if all_processes:
+                # Verificar se pelo menos um processo está ativo
+                has_any_active = any(p.get("is_active", True) for p in all_processes)
+                clients_map[key]["is_active"] = has_any_active
+            # Se não tem processos, mantém o valor por defeito (True)
         
         clients = list(clients_map.values())
         
@@ -1658,17 +1671,18 @@ async def find_or_create_client(
 @router.delete("/{client_id}")
 async def delete_client(
     client_id: str,
-    hard_delete: bool = False,
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
-    Eliminar um cliente/processo (soft delete por defeito).
+    Eliminar um cliente/processo (sempre soft delete, nunca hard delete).
     
     Nota: Neste sistema, clientes e processos são a mesma entidade.
     Esta função procura primeiro na colecção 'processes' e depois em 'clients'.
     
-    Por defeito, usa soft delete (status='eliminado' + is_deleted=True) para permitir undo.
-    Com hard_delete=True, elimina permanentemente.
+    POLÍTICA DE SOFT DELETE OBRIGATÓRIO:
+    - Todos os eliminações são soft delete (status='eliminado' + is_deleted=True).
+    - Hard delete foi removido para garantir integridade dos dados e permitir undo.
+    - Nenhum documento é permanentemente removido do MongoDB.
     
     REGRA DE CASCADE:
     - Eliminar processo: O registo do cliente permanece intacto.
@@ -1693,85 +1707,23 @@ async def delete_client(
             # Permitir eliminar mas avisar
             logger.warning(f"Processo {client_id} eliminado com status activo: {process.get('status')}")
         
-        if hard_delete:
-            # Eliminação permanente
-            await db.documents.delete_many({"process_id": client_id})
-            await db.tasks.delete_many({"process_id": client_id})
-            await db.history.delete_many({"process_id": client_id})
-            await db.processes.delete_one({"id": client_id})
-            
-            logger.info(f"Processo/Cliente {client_id} ({process.get('client_name')}) eliminado permanentemente por {user.get('email')}")
-            
-            return {"success": True, "message": f"Cliente '{process.get('client_name')}' eliminado permanentemente"}
-        else:
-            # Soft delete - permite undo
-            # Define AMBOS status e is_deleted para consistência em todas as queries
-            await db.processes.update_one(
-                {"id": client_id},
-                {"$set": {
-                    "status": "eliminado",
-                    "is_deleted": True,
-                    "is_active": False,
-                    "deleted_at": now,
-                    "deleted_by": user["id"],
-                    "updated_at": now
-                }}
-            )
-            
-            # Marcar documentos como eliminados (soft delete)
-            await db.documents.update_many(
-                {"process_id": client_id},
-                {"$set": {
-                    "deleted": True,
-                    "is_deleted": True,
-                    "deleted_at": now,
-                    "deleted_by": user["id"]
-                }}
-            )
-            
-            # Marcar tarefas como eliminadas (soft delete)
-            await db.tasks.update_many(
-                {"process_id": client_id},
-                {"$set": {
-                    "deleted": True,
-                    "is_deleted": True,
-                    "deleted_at": now,
-                    "deleted_by": user["id"]
-                }}
-            )
-            
-            logger.info(f"Processo/Cliente {client_id} ({process.get('client_name')}) movido para lixo por {user.get('email')}")
-            
-            return {
-                "success": True, 
-                "message": f"Cliente '{process.get('client_name')}' movido para o lixo",
-                "can_undo": True,
-                "restore_endpoint": f"/api/processes/{client_id}/restore"
-            }
-    
-    # Se não encontrou em processes, procurar em clients (compatibilidade)
-    client = await db.clients.find_one({"id": client_id})
-    
-    if not client:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    
-    if hard_delete:
-        # Hard delete: também eliminar processos associados permanentemente
-        if client.get("process_ids"):
-            # Eliminar documentos/tarefas/histórico de cada processo
-            for pid in client["process_ids"]:
-                await db.documents.delete_many({"process_id": pid})
-                await db.tasks.delete_many({"process_id": pid})
-                await db.history.delete_many({"process_id": pid})
-            await db.processes.delete_many({"id": {"$in": client["process_ids"]}})
-        
-        await db.clients.delete_one({"id": client_id})
-        logger.info(f"Cliente {client_id} eliminado permanentemente por {user.get('email')}")
-        return {"success": True, "message": "Cliente eliminado permanentemente"}
-    else:
-        # Soft delete para cliente na coleção clients
-        await db.clients.update_one(
+        # Soft delete obrigatório - permite undo
+        # Define AMBOS status e is_deleted para consistência em todas as queries
+        await db.processes.update_one(
             {"id": client_id},
+            {"$set": {
+                "status": "eliminado",
+                "is_deleted": True,
+                "is_active": False,
+                "deleted_at": now,
+                "deleted_by": user["id"],
+                "updated_at": now
+            }}
+        )
+        
+        # Marcar documentos como eliminados (soft delete)
+        await db.documents.update_many(
+            {"process_id": client_id},
             {"$set": {
                 "deleted": True,
                 "is_deleted": True,
@@ -1780,40 +1732,79 @@ async def delete_client(
             }}
         )
         
-        # CASCADE: Marcar todos os processos associados como eliminados
-        # para evitar processos órfãos
-        cascade_count = 0
-        if client.get("process_ids"):
-            cascade_result = await db.processes.update_many(
-                {"id": {"$in": client["process_ids"]}, "is_deleted": {"$ne": True}},
-                {"$set": {
-                    "status": "eliminado",
-                    "is_deleted": True,
-                    "is_active": False,
-                    "deleted_at": now,
-                    "deleted_by": user["id"],
-                    "updated_at": now
-                }}
-            )
-            cascade_count = cascade_result.modified_count
-            
-            # Soft delete de documentos e tarefas dos processos em cascade
-            for pid in client["process_ids"]:
-                await db.documents.update_many(
-                    {"process_id": pid},
-                    {"$set": {"deleted": True, "is_deleted": True, "deleted_at": now, "deleted_by": user["id"]}}
-                )
-                await db.tasks.update_many(
-                    {"process_id": pid},
-                    {"$set": {"deleted": True, "is_deleted": True, "deleted_at": now, "deleted_by": user["id"]}}
-                )
+        # Marcar tarefas como eliminadas (soft delete)
+        await db.tasks.update_many(
+            {"process_id": client_id},
+            {"$set": {
+                "deleted": True,
+                "is_deleted": True,
+                "deleted_at": now,
+                "deleted_by": user["id"]
+            }}
+        )
         
-        logger.info(f"Cliente {client_id} movido para lixo por {user.get('email')} ({cascade_count} processos em cascade)")
+        logger.info(f"Processo/Cliente {client_id} ({process.get('client_name')}) movido para lixo por {user.get('email')}")
         
         return {
             "success": True, 
-            "message": f"Cliente movido para o lixo" + (f" ({cascade_count} processo(s) eliminado(s) em cascade)" if cascade_count > 0 else ""),
+            "message": f"Cliente '{process.get('client_name')}' movido para o lixo",
             "can_undo": True,
-            "restore_endpoint": f"/api/clients/{client_id}/restore",
-            "cascade_count": cascade_count
+            "restore_endpoint": f"/api/processes/{client_id}/restore"
         }
+    
+    # Se não encontrou em processes, procurar em clients (compatibilidade)
+    client = await db.clients.find_one({"id": client_id})
+    
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    
+    # Soft delete obrigatório para cliente na coleção clients
+    await db.clients.update_one(
+        {"id": client_id},
+        {"$set": {
+            "deleted": True,
+            "is_deleted": True,
+            "is_active": False,
+            "status": "eliminado",
+            "deleted_at": now,
+            "deleted_by": user["id"]
+        }}
+    )
+    
+    # CASCADE: Marcar todos os processos associados como eliminados
+    # para evitar processos órfãos
+    cascade_count = 0
+    if client.get("process_ids"):
+        cascade_result = await db.processes.update_many(
+            {"id": {"$in": client["process_ids"]}, "is_deleted": {"$ne": True}},
+            {"$set": {
+                "status": "eliminado",
+                "is_deleted": True,
+                "is_active": False,
+                "deleted_at": now,
+                "deleted_by": user["id"],
+                "updated_at": now
+            }}
+        )
+        cascade_count = cascade_result.modified_count
+        
+        # Soft delete de documentos e tarefas dos processos em cascade
+        for pid in client["process_ids"]:
+            await db.documents.update_many(
+                {"process_id": pid},
+                {"$set": {"deleted": True, "is_deleted": True, "deleted_at": now, "deleted_by": user["id"]}}
+            )
+            await db.tasks.update_many(
+                {"process_id": pid},
+                {"$set": {"deleted": True, "is_deleted": True, "deleted_at": now, "deleted_by": user["id"]}}
+            )
+    
+    logger.info(f"Cliente {client_id} movido para lixo por {user.get('email')} ({cascade_count} processos em cascade)")
+    
+    return {
+        "success": True, 
+        "message": f"Cliente movido para o lixo" + (f" ({cascade_count} processo(s) eliminado(s) em cascade)" if cascade_count > 0 else ""),
+        "can_undo": True,
+        "restore_endpoint": f"/api/clients/{client_id}/restore",
+        "cascade_count": cascade_count
+    }

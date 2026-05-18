@@ -884,10 +884,23 @@ async def delete_finance_config(
 # ====================================================================
 
 def _doc_to_process_finance_response(doc: dict) -> dict:
-    """Converte documento MongoDB para resposta ProcessFinance (remove _id)."""
+    """Converte documento MongoDB para resposta ProcessFinance (remove _id).
+
+    Garante que os campos de comissão dual estão presentes, mesmo em
+    documentos antigos que não os tinham (compatibilidade retroactiva).
+    """
     if doc is None:
         return {}
     doc.pop("_id", None)
+    # Garantir campos de comissão dual com defaults para documentos antigos
+    doc.setdefault("real_estate_base_value", 0.0)
+    doc.setdefault("real_estate_fee_type", None)
+    doc.setdefault("real_estate_fee_value", None)
+    doc.setdefault("real_estate_commission", 0.0)
+    doc.setdefault("credit_base_value", 0.0)
+    doc.setdefault("credit_fee_type", None)
+    doc.setdefault("credit_fee_value", None)
+    doc.setdefault("credit_commission", 0.0)
     return doc
 
 
@@ -908,13 +921,15 @@ async def get_process_finance_summary(
 
     Permissões: todos os roles de leitura financeira.
     """
-    # Pipeline de agregação por status
+    # Pipeline de agregação por status (inclui comissões duais)
     pipeline = [
         {"$match": {"company_id": company_id}},
         {"$group": {
             "_id": "$status",
             "total_commission": {"$sum": "$expected_commission"},
             "total_with_tax": {"$sum": "$total_with_tax"},
+            "total_real_estate_commission": {"$sum": {"$ifNull": ["$real_estate_commission", 0]}},
+            "total_credit_commission": {"$sum": {"$ifNull": ["$credit_commission", 0]}},
             "count": {"$sum": 1},
         }},
     ]
@@ -935,6 +950,8 @@ async def get_process_finance_summary(
         status_key = row["_id"]
         total_commission = _safe_float(row.get("total_commission"))
         total_tax = _safe_float(row.get("total_with_tax"))
+        total_re_commission = _safe_float(row.get("total_real_estate_commission"))
+        total_cr_commission = _safe_float(row.get("total_credit_commission"))
         count = row.get("count", 0)
 
         if status_key == FinanceStatus.PENDING.value:
@@ -950,7 +967,7 @@ async def get_process_finance_summary(
             summary.total_cancelled = round(total_commission, 2)
             summary.count_cancelled = count
 
-    # Totais de registos activos (não cancelados)
+    # Totais de registos activos (não cancelados) — inclui comissões duais
     active_statuses = FinanceStatus.active_statuses()
     active_pipeline = [
         {"$match": {"company_id": company_id, "status": {"$in": active_statuses}}},
@@ -958,6 +975,8 @@ async def get_process_finance_summary(
             "_id": None,
             "total_expected": {"$sum": "$expected_commission"},
             "total_with_tax": {"$sum": "$total_with_tax"},
+            "total_real_estate_commission": {"$sum": {"$ifNull": ["$real_estate_commission", 0]}},
+            "total_credit_commission": {"$sum": {"$ifNull": ["$credit_commission", 0]}},
         }},
     ]
     active_results = await db.process_finances.aggregate(active_pipeline).to_list(1)
@@ -965,6 +984,8 @@ async def get_process_finance_summary(
     if active_results:
         summary.total_expected = round(_safe_float(active_results[0].get("total_expected")), 2)
         summary.total_with_tax = round(_safe_float(active_results[0].get("total_with_tax")), 2)
+        summary.total_real_estate_commission = round(_safe_float(active_results[0].get("total_real_estate_commission")), 2)
+        summary.total_credit_commission = round(_safe_float(active_results[0].get("total_credit_commission")), 2)
 
     return summary.model_dump()
 
@@ -995,7 +1016,7 @@ async def create_process_finance(
                    f"na empresa '{body.company_id}'.",
         )
 
-    # Calcular valores financeiros automáticos
+    # Calcular valores financeiros automáticos (inclui comissões duais)
     computed = body.compute_finance()
 
     finance_id = str(uuid.uuid4())
@@ -1006,9 +1027,21 @@ async def create_process_finance(
         "process_id": body.process_id,
         "client_id": body.client_id,
         "company_id": body.company_id,
+        # Campos legacy (comissão única — compatibilidade retroactiva)
         "base_business_value": body.base_business_value,
         "applied_fee_type": body.applied_fee_type,
         "applied_fee_value": body.applied_fee_value,
+        # Comissão Imobiliária (Real Estate)
+        "real_estate_base_value": body.real_estate_base_value or 0.0,
+        "real_estate_fee_type": body.real_estate_fee_type,
+        "real_estate_fee_value": body.real_estate_fee_value,
+        "real_estate_commission": computed.get("real_estate_commission", 0.0),
+        # Comissão de Crédito (Credit)
+        "credit_base_value": body.credit_base_value or body.base_business_value or 0.0,
+        "credit_fee_type": body.credit_fee_type or body.applied_fee_type,
+        "credit_fee_value": body.credit_fee_value or body.applied_fee_value,
+        "credit_commission": computed.get("credit_commission", 0.0),
+        # Totais
         "expected_commission": computed["expected_commission"],
         "tax_amount": computed["tax_amount"],
         "total_with_tax": computed["total_with_tax"],
@@ -1023,6 +1056,8 @@ async def create_process_finance(
     logger.info(
         f"ProcessFinance criado: id={finance_id}, process_id={body.process_id}, "
         f"company_id={body.company_id}, commission={computed['expected_commission']}, "
+        f"re_commission={computed.get('real_estate_commission', 0.0)}, "
+        f"cr_commission={computed.get('credit_commission', 0.0)}, "
         f"por {user.get('email', 'unknown')}"
     )
 
@@ -1101,14 +1136,67 @@ async def update_process_finance(
     if not update_fields:
         raise HTTPException(status_code=400, detail="Nenhum campo fornecido para actualização")
 
-    # Se campos financeiros relevantes foram alterados, recalcular
+    # Se campos de comissão dual foram alterados, recalcular comissão total e impostos
+    dual_commission_fields_changed = any(
+        f in update_fields
+        for f in [
+            "real_estate_base_value", "real_estate_fee_type", "real_estate_fee_value", "real_estate_commission",
+            "credit_base_value", "credit_fee_type", "credit_fee_value", "credit_commission",
+        ]
+    )
+
+    # Se campos financeiros legacy foram alterados, recalcular (compatibilidade retroactiva)
     financial_fields_changed = any(
         f in update_fields
         for f in ["base_business_value", "applied_fee_type", "applied_fee_value"]
     )
 
-    if financial_fields_changed:
-        # Obter valores actuais + updates para recalcular
+    if dual_commission_fields_changed:
+        # Obter valores actuais + updates para recalcular comissão imobiliária
+        re_base = _safe_float(update_fields.get("real_estate_base_value", existing.get("real_estate_base_value", 0.0)))
+        re_fee_type = update_fields.get("real_estate_fee_type", existing.get("real_estate_fee_type"))
+        re_fee_value = _safe_float(update_fields.get("real_estate_fee_value", existing.get("real_estate_fee_value", 0.0)))
+
+        # Recalcular comissão imobiliária
+        if "real_estate_commission" not in update_fields:
+            if re_fee_type == FeeType.PERCENTAGE.value:
+                update_fields["real_estate_commission"] = round(re_base * (re_fee_value / 100), 2)
+            elif re_fee_type == FeeType.FIXED.value:
+                update_fields["real_estate_commission"] = re_fee_value
+            # Se não houver fee_type, manter o valor existente
+
+        # Obter valores actuais + updates para recalcular comissão de crédito
+        cr_base = _safe_float(update_fields.get("credit_base_value", existing.get("credit_base_value", 0.0)))
+        cr_fee_type = update_fields.get("credit_fee_type", existing.get("credit_fee_type"))
+        cr_fee_value = _safe_float(update_fields.get("credit_fee_value", existing.get("credit_fee_value", 0.0)))
+
+        # Recalcular comissão de crédito
+        if "credit_commission" not in update_fields:
+            if cr_fee_type == FeeType.PERCENTAGE.value:
+                update_fields["credit_commission"] = round(cr_base * (cr_fee_value / 100), 2)
+            elif cr_fee_type == FeeType.FIXED.value:
+                update_fields["credit_commission"] = cr_fee_value
+            # Se não houver fee_type, manter o valor existente
+
+        # Recalcular expected_commission = real_estate_commission + credit_commission
+        re_commission = _safe_float(update_fields.get("real_estate_commission", existing.get("real_estate_commission", 0.0)))
+        cr_commission = _safe_float(update_fields.get("credit_commission", existing.get("credit_commission", 0.0)))
+        expected_commission = round(re_commission + cr_commission, 2)
+
+        if "expected_commission" not in update_fields:
+            update_fields["expected_commission"] = expected_commission
+
+        # Recalcular tax_amount e total_with_tax
+        tax_rate = _safe_float(existing.get("tax_rate", 23.0))
+        ec = update_fields.get("expected_commission", expected_commission)
+        if "tax_amount" not in update_fields:
+            update_fields["tax_amount"] = round(_safe_float(ec) * (tax_rate / 100), 2)
+        if "total_with_tax" not in update_fields:
+            ta = update_fields.get("tax_amount", update_fields["tax_amount"])
+            update_fields["total_with_tax"] = round(_safe_float(ec) + _safe_float(ta), 2)
+
+    elif financial_fields_changed:
+        # Compatibilidade retroactiva: recalcular usando lógica legacy
         base = _safe_float(update_fields.get("base_business_value", existing.get("base_business_value")))
         fee_type = update_fields.get("applied_fee_type", existing.get("applied_fee_type"))
         fee_value = _safe_float(update_fields.get("applied_fee_value", existing.get("applied_fee_value")))

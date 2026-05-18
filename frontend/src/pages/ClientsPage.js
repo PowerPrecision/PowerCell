@@ -628,6 +628,11 @@ export default function ClientsPage() {
                             {isAlta && <span className="mr-1">🔥</span>}
                             {client.nome}
                           </button>
+                          {(!client.is_active || !client.active_processes_count || client.active_processes_count === 0) && (
+                            <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-[10px] mt-0.5">
+                              Inativo
+                            </Badge>
+                          )}
                           {client.contacto?.email && (
                             <p className="text-xs text-muted-foreground truncate">{client.contacto.email}</p>
                           )}
@@ -768,6 +773,11 @@ export default function ClientsPage() {
                               {isAlta && (
                                 <Badge className="bg-red-500 text-white border-red-600 text-[10px] px-2 py-0 h-5 gap-0.5 shadow-sm shadow-red-300/50">
                                   <Flame className="h-3 w-3" /> Prioridade Alta
+                                </Badge>
+                              )}
+                              {(!client.is_active || !client.active_processes_count || client.active_processes_count === 0) && (
+                                <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-[10px]">
+                                  Inativo
                                 </Badge>
                               )}
                             </div>
