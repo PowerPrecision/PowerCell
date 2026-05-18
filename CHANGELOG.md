@@ -3,6 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-08] — Correções Críticas: Sidebar, Edição Retroativa e Sincronização Financeira
+
+### Corrigido
+- **Sidebar recolhe indevidamente ao navegar para páginas de detalhe** (`fix` — **UX CRÍTICO**): Ao abrir `/processo/:id` ou `/cliente/:id`, os submenus laterais (O Meu Negócio, Visão Global, etc.) colapsavam porque `computedOpenSections` não incluía as rotas de detalhe na correspondência. Corrigido em `DashboardLayout.js`:
+  - Adicionadas rotas de detalhe (`/processo`, `/imovel`, `/cliente`) aos arrays de correspondência de secções
+  - Lógica de sincronização de `openSections` alterada de substituição total para apenas expansão — ao navegar para uma rota filha, a secção abre-se automaticamente; mas o utilizador pode fechar manualmente sem que a navegação a reabra
+  - Container principal recebeu `min-w-0` e `max-w-full` para evitar que conteúdo largo "empurre" a sidebar no desktop
+- **Processos concluídos bloqueiam edição para admin/CEO** (`fix` — **UX CRÍTICO**): Os inputs e o botão "Guardar Alterações" estavam desativados para processos em estado terminal (Concluído/Escritura), mesmo para admin e CEO. Corrigido em `ProcessDetails.js`:
+  - `isProcessLocked` agora exclui roles `admin` e `ceo` — estes podem editar processos concluídos
+  - `isViewMode` e todas as verificações `!isProcessLocked` passam a permitir interação para admin/CEO
+  - Adicionado banner informativo azul (com ícone Shield) que avisa que o processo está em estado terminal mas o utilizador pode editar retroativamente
+
+### Adicionado
+- **Sincronização Financeira Retroativa** (`feat` — **BACKEND CRÍTICO**): Quando um admin/CEO edita um processo concluído/escritura, o backend agora garante que o snapshot financeiro (`ProcessFinance`) existe e está atualizado com os novos valores:
+  - Nova função `_ensure_finance_snapshot()` em `processes.py`: se não existe snapshot → cria novo; se já existe → recalcula comissões com base nos novos valores e configurações atuais da empresa
+  - PUT `/processes/{id}` permite edição de processos terminais por admin/CEO (antes retornava 403)
+  - Após cada update por admin/CEO em processo com status `concluidos`/`escritura`/`escritura_agendada`, o sistema chama `_ensure_finance_snapshot()` automaticamente
+  - Proteção contra falhas: erro no snapshot não impede a atualização do processo
+
 ## [2026-03-07] — Módulo Financeiro: Modelo de Distribuição Pool Global
 
 ### Adicionado

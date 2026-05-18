@@ -149,11 +149,12 @@ import {
   RefreshCw,
   BrainCircuit,
   Home,
+  Shield,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isAfter } from "date-fns";
 import { pt } from "date-fns/locale";
-import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
+import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 
@@ -1545,6 +1546,7 @@ const ProcessDetails = () => {
       toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
       return;
     }
+    // Admin/CEO podem editar processos concluídos — isProcessLocked já exclui estes roles
     setSavingOrg(true);
     try {
       const orgData = {
@@ -1568,6 +1570,7 @@ const ProcessDetails = () => {
   // Função principal de save que verifica créditos ativos
   const handleSave = async () => {
     // Bloquear guarda se o processo está em status terminal
+    // Admin/CEO estão isentos (isProcessLocked já exclui estes roles)
     if (isProcessLocked) {
       toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
       return;
@@ -1666,6 +1669,7 @@ const ProcessDetails = () => {
 
   // Normalizar role para comparação case-insensitive
   const userRole = user?.role?.toLowerCase() || "";
+  const roleLabels = ROLE_LABELS; // Rótulos legíveis para exibição no banner retroativo
   const userPermissions = user?.permissions || {};
   const userPages = userPermissions?.pages || [];
   const userActions = userPermissions?.actions || [];
@@ -1703,8 +1707,10 @@ const ProcessDetails = () => {
   
   // Modo de visualização (read-only) quando não tem edit_process
   // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
+  // EXCEPÇÃO: admin e CEO podem editar processos concluídos (para correção retroativa de valores financeiros)
   const BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"];
-  const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status);
+  const isAdminOrCeo = ["admin", "ceo"].includes(userRole);
+  const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !isAdminOrCeo;
   const isViewMode = (!hasEditProcess && !(userActions.includes("view_financials") && userRole === "indexacao")) || isProcessLocked;
 
   // Função para eliminar o cliente/processo
@@ -2099,13 +2105,23 @@ const ProcessDetails = () => {
       />
 
       <div className="space-y-6">
-        {/* Aviso de processo bloqueado */}
+        {/* Aviso de processo bloqueado ou em modo retroativo */}
         {isProcessLocked && (
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-200 text-sm">
             <Lock className="h-4 w-4 shrink-0" />
             <span>
               Este processo encontra-se em estado terminal (<strong>{safeLabel(currentStatusInfo.label)}</strong>). 
               A edição de dados está bloqueada para todos os utilizadores.
+            </span>
+          </div>
+        )}
+        {!isProcessLocked && isAdminOrCeo && process && BLOCKED_STATUSES.includes(process.status) && (
+          <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-800 dark:text-blue-200 text-sm">
+            <Shield className="h-4 w-4 shrink-0" />
+            <span>
+              Este processo está em estado terminal (<strong>{safeLabel(currentStatusInfo.label)}</strong>), 
+              mas como <strong>{roleLabels[userRole] || userRole}</strong> pode editar valores retroativamente. 
+              As alterações serão sincronizadas com o snapshot financeiro.
             </span>
           </div>
         )}

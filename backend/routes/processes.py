@@ -264,6 +264,133 @@ async def _create_finance_snapshot(process: dict, user: dict):
     )
 
 
+async def _ensure_finance_snapshot(process: dict, user: dict):
+    """
+    Garante que existe um snapshot financeiro (ProcessFinance) para o processo,
+    criando um novo se não existir ou atualizando os valores base se já existir.
+
+    Usado na Sincronização Financeira Retroativa: quando um admin/CEO edita
+    um processo concluído/escritura, os valores financeiros (valor_imovel,
+    loan_amount) podem ter mudado, e o snapshot precisa de ser recalculado.
+
+    Lógica:
+    1. Procura registo existente em process_finances pelo process_id + company_id
+    2. Se NÃO existe → chama _create_finance_snapshot() para criar do zero
+    3. Se JÁ existe → recalcula as comissões com base nos novos valores do
+       processo e nas configurações atuais da empresa, e atualiza o registo
+    """
+    from models.finance import FeeType, FinanceStatus
+
+    process_id = process.get("id", "")
+    company_id = process.get("company_id", "")
+
+    existing = await db.process_finances.find_one({
+        "process_id": process_id,
+        "company_id": company_id,
+    })
+
+    # Se não existe, criar novo snapshot
+    if not existing:
+        logger.info(f"Nenhum snapshot financeiro encontrado para processo {process_id}. A criar novo.")
+        await _create_finance_snapshot(process, user)
+        return
+
+    # Já existe — recalcular comissões com base nos valores atualizados do processo
+    real_estate_data = process.get("real_estate_data") or {}
+    credit_data = process.get("credit_data") or {}
+    financial_data = process.get("financial_data") or {}
+
+    valor_imovel = real_estate_data.get("valor_imovel")
+    loan_amount = credit_data.get("loan_amount") or credit_data.get("requested_amount")
+
+    # Obter FinanceConfig da empresa
+    config_doc = await db.finance_configs.find_one({"company_id": company_id})
+
+    # Defaults
+    re_base_value = float(valor_imovel) if valor_imovel else 0.0
+    cr_base_value = float(loan_amount) if loan_amount else 0.0
+    re_fee_type = None
+    re_fee_value = None
+    cr_fee_type = None
+    cr_fee_value = None
+    base_business_value = 0.0
+    applied_fee_type = None
+    applied_fee_value = None
+    tax_rate = 23.0
+
+    if config_doc:
+        fee_type = config_doc.get("fee_type", "percentage")
+        default_value = config_doc.get("default_value", 0.0)
+        tax_rate = config_doc.get("tax_rate", 23.0)
+
+        re_fee_type = config_doc.get("real_estate_fee_type") or fee_type
+        re_fee_value = config_doc.get("real_estate_fee_value") or config_doc.get("real_estate_default_value") or default_value
+        cr_fee_type = config_doc.get("credit_fee_type") or fee_type
+        cr_fee_value = config_doc.get("credit_fee_value") or config_doc.get("credit_default_value") or default_value
+
+        applied_fee_type = fee_type
+        applied_fee_value = default_value
+        base_business_value = cr_base_value or re_base_value
+    else:
+        comissao_mediacao = financial_data.get("comissao_mediacao")
+        if comissao_mediacao:
+            cr_base_value = float(comissao_mediacao)
+            cr_fee_type = "fixed"
+            cr_fee_value = float(comissao_mediacao)
+            applied_fee_type = "fixed"
+            applied_fee_value = float(comissao_mediacao)
+            base_business_value = float(comissao_mediacao)
+
+    # Calcular comissões
+    if re_fee_type == FeeType.PERCENTAGE.value:
+        re_commission = round(re_base_value * (re_fee_value / 100), 2) if re_base_value and re_fee_value else 0.0
+    elif re_fee_type == FeeType.FIXED.value:
+        re_commission = re_fee_value or 0.0
+    else:
+        re_commission = 0.0
+
+    if cr_fee_type == FeeType.PERCENTAGE.value:
+        cr_commission = round(cr_base_value * (cr_fee_value / 100), 2) if cr_base_value and cr_fee_value else 0.0
+    elif cr_fee_type == FeeType.FIXED.value:
+        cr_commission = cr_fee_value or 0.0
+    else:
+        cr_commission = 0.0
+
+    expected_commission = round(re_commission + cr_commission, 2)
+    tax_amount = round(expected_commission * (tax_rate / 100), 2)
+    total_with_tax = round(expected_commission + tax_amount, 2)
+
+    # Atualizar registo existente
+    update_fields = {
+        "real_estate_base_value": re_base_value,
+        "real_estate_fee_type": re_fee_type,
+        "real_estate_fee_value": re_fee_value,
+        "real_estate_commission": re_commission,
+        "credit_base_value": cr_base_value,
+        "credit_fee_type": cr_fee_type,
+        "credit_fee_value": cr_fee_value,
+        "credit_commission": cr_commission,
+        "expected_commission": expected_commission,
+        "tax_amount": tax_amount,
+        "total_with_tax": total_with_tax,
+        "base_business_value": base_business_value,
+        "applied_fee_type": applied_fee_type,
+        "applied_fee_value": applied_fee_value,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db.process_finances.update_one(
+        {"id": existing["id"]},
+        {"$set": update_fields}
+    )
+
+    logger.info(
+        f"Snapshot financeiro atualizado retroativamente: process_id={process_id}, "
+        f"re_commission={re_commission}, cr_commission={cr_commission}, "
+        f"total={expected_commission}, updated_by={user.get('email', 'unknown')}"
+    )
+
+
 # ====================================================================
 # WEBSOCKET BROADCAST HELPERS
 # ====================================================================
@@ -2516,8 +2643,11 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     is_indexacao = role == UserRole.INDEXACAO
     
     # Bloquear edição de processos em status terminal (eliminados, desistências, concluídos)
+    # EXCEPÇÃO: admin e CEO podem editar processos concluídos para correção retroativa
+    # de valores financeiros (sincronização financeira retroativa).
     BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"]
-    if process.get("status") in BLOCKED_STATUSES:
+    is_admin_or_ceo = role in [UserRole.ADMIN, UserRole.CEO]
+    if process.get("status") in BLOCKED_STATUSES and not is_admin_or_ceo:
         raise HTTPException(
             status_code=403,
             detail=f"Não é possível editar um processo em estado terminal ({process.get('status')})."
@@ -2637,6 +2767,25 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    
+    # === SINCRONIZAÇÃO FINANCEIRA RETROATIVA ===
+    # Se um admin/CEO editou um processo em estado terminal (concluído/escritura),
+    # os valores financeiros podem ter mudado. Garantir que o snapshot financeiro
+    # existe e está atualizado com os novos valores.
+    current_status = updated.get("status", "")
+    finance_relevant_statuses = ["concluidos", "escritura", "escritura_agendada"]
+    if is_admin_or_ceo and current_status in finance_relevant_statuses:
+        # Desencriptar updated para obter valores reais antes do snapshot
+        try:
+            decrypted_for_finance = decrypt_sensitive_data(updated)
+        except Exception:
+            decrypted_for_finance = updated
+        try:
+            await _ensure_finance_snapshot(decrypted_for_finance, user)
+        except Exception as snap_err:
+            logger.warning(
+                f"Falha na sincronização financeira retroativa para processo {process_id}: {snap_err}"
+            )
     
     # === CACHE INVALIDATION: Actualização de processo pode alterar KPIs ===
     # Invalidar apenas se houve mudança de status (afeta contadores)

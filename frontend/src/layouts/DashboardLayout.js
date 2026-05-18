@@ -160,10 +160,10 @@ const DashboardLayout = ({ children, title }) => {
   const computedOpenSections = useMemo(() => {
     const path = location.pathname;
     
-    // Rotas do grupo O Meu Negócio
-    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/kanban", "/imoveis", "/financeiro"];
-    // Rotas do grupo Visão Global
-    const visaoGlobalRoutes = ["/clientes", "/lista-processos"];
+    // Rotas do grupo O Meu Negócio (inclui rotas de detalhe: /processo/:id, /imovel/:id, etc.)
+    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/financeiro"];
+    // Rotas do grupo Visão Global (inclui rotas de detalhe: /cliente/:id, /processo-detalhe/:id, etc.)
+    const visaoGlobalRoutes = ["/clientes", "/cliente", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
     const comunicacoesRoutes = ["/webmail", "/minutas", "/ficheiros"];
     // Rotas do grupo Gestão e Operações
@@ -182,8 +182,20 @@ const DashboardLayout = ({ children, title }) => {
   const [openSections, setOpenSections] = useState({});
   
   // Sync openSections with computed values when path or role changes
+  // Only EXPAND sections (never collapse) — o utilizador pode fechar manualmente,
+  // mas ao navegar para uma rota filha, a secção respectiva abre-se automaticamente.
   useEffect(() => {
-    setOpenSections(computedOpenSections);
+    setOpenSections(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const [section, shouldOpen] of Object.entries(computedOpenSections)) {
+        if (shouldOpen && !prev[section]) {
+          next[section] = true;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   }, [computedOpenSections]);
 
   // Detectar scroll para minimizar header
@@ -657,8 +669,8 @@ const DashboardLayout = ({ children, title }) => {
         </div>
       </aside>
 
-      {/* Main content */}
-      <div className={`lg:pl-64 ${isImpersonating ? 'pt-12' : ''}`}>
+      {/* Main content — min-w-0 prevents flex children from expanding beyond container */}
+      <div className={`lg:pl-64 min-w-0 ${isImpersonating ? 'pt-12' : ''}`}>
         {/* Top bar - Fixed height to prevent layout shift */}
         <header 
           className="border-b border-border bg-card sticky z-50 h-14"
@@ -793,7 +805,7 @@ const DashboardLayout = ({ children, title }) => {
         </header>
 
         {/* Page content — ErrorBoundary isolates crashes here so sidebar stays alive */}
-        <main className="p-4 lg:p-6 pb-24 md:pb-6 overflow-x-auto">
+        <main className="p-4 lg:p-6 pb-24 md:pb-6 overflow-x-auto max-w-full">
           <ErrorBoundary variant="page" moduleName={title || 'Conteúdo'} showRetry={true}>
             {children}
           </ErrorBoundary>
