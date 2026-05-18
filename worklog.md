@@ -180,3 +180,42 @@ Stage Summary:
 - Branch dev ativa e pronta para desenvolvimento
 - Credenciais guardadas no git config
 - Commit push testado com sucesso
+
+---
+Task ID: finance-phase2-frontend
+Agent: Main Agent
+Task: Reconstruir FinanceDashboard.js com UI Premium — Fase 2 do Módulo Financeiro
+
+Work Log:
+- Analisou código existente: FinanceDashboard.js (929 linhas), backend/routes/finance.py (1100+ linhas), backend/models/finance.py (591 linhas), api.js
+- Identificou endpoints Fase 2 já implementados: FinanceConfig CRUD (/finance/configs), ProcessFinance CRUD (/finance/processes), Summary (/finance/processes/summary)
+- Identificou user.company como company_id para multi-tenant
+- Adicionou 11 novas funções API em api.js:
+  - getFinanceConfigs, getFinanceConfigById, createFinanceConfig, updateFinanceConfigById, deleteFinanceConfigById
+  - getProcessFinances, getProcessFinanceById, createProcessFinance, updateProcessFinance, getProcessFinanceSummary
+- Reconstruiu FinanceDashboard.js com 3 novas secções Premium:
+  1. HonorariosDialog: Modal "Configurar Honorários" com GET/POST/PUT FinanceConfig
+     - Seleção visual tipo toggle (Percentagem / Valor Fixo)
+     - Campos default_value + tax_rate com pré-visualização do cálculo
+     - Criação automática (POST) ou atualização (PUT) conforme existência
+  2. KPI Cards Premium: 4 cartões com barra de acento lateral
+     - Total Faturado (emerald), A Receber/Pendente (amber), Impostos IVA (sky), Total Processos Ganhos (purple)
+     - Dados via GET /finance/processes/summary (company_id obrigatório)
+  3. Tabela de Histórico ProcessFinance:
+     - Colunas: Processo, Cliente, Valor Base, Honorário (badge %/€), Comissão, IVA, Total a Faturar, Estado
+     - Clique no estado para avançar ciclo (Pendente→Faturado→Pago) via PUT /finance/processes/{id}
+     - Filtro por estado (Select), sticky header/footer, linhas clicáveis
+     - Empty state com ícone e mensagem
+- Nova tab "Honorários & Processos" como tab padrão
+- Tabs originais preservadas (Imobiliária, Crédito, Mensal, Comissões)
+- Loading states com spinner e error handling com botão "Tentar novamente"
+- Frontend build passa com sucesso (npx vite build ✓)
+- Commit f1e8c69 pushed para origin/dev
+
+Stage Summary:
+- Frontend FinanceDashboard reconstruído com UI Premium
+- 11 novas funções API em api.js
+- Modal de Configuração de Honorários funcional (GET/POST/PUT)
+- 4 KPI Cards agregados via ProcessFinance Summary
+- Tabela de histórico com edição de estado inline
+- Pushed to origin/dev: commit f1e8c69
