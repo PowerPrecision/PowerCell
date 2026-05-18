@@ -297,7 +297,7 @@ const ProcessDetailsModal = memo(({
           <DialogTitle className="flex items-center justify-between">
             <span className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-blue-600" />
-              Processo #{process.process_number || '—'} — {process.client_data?.personal_data?.nome || process.client_name || 'Cliente'}
+              Processo #{process.process_number || '—'} — {process.client_name || process.client_data?.name || process.client_data?.personal_data?.nome || 'Cliente'}
             </span>
             <div className="flex items-center gap-2">
               {isEditing ? (

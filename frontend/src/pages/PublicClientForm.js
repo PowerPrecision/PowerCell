@@ -459,12 +459,12 @@ export default function PublicClientForm({ previewMode = false }) {
       documento_id: "",
       data_validade_cc: "",
       naturalidade: "",
-      nacionalidade: "Portuguesa",
+      nacionalidade: "",
       phone: "",
       morada_fiscal: "",
       birth_date: "",
       estado_civil: "",
-      compra_tipo: "individual",
+      compra_tipo: "",
       menor_35_anos: false,
       sexo: "",
       profissao: "",
@@ -740,6 +740,23 @@ export default function PublicClientForm({ previewMode = false }) {
     }
   }, [isStepVisible, step, getNextRealStep, maxStepNum]);
 
+  // ─── Campos obrigatórios hardcoded (por passo) ────────────────────────────
+  // Estes campos são sempre obrigatórios, independentemente do config do backend.
+  // Os campos condicionais (ex: titular2) só contam se o passo estiver visível.
+  const HARDCODED_REQUIRED_BY_STEP = useMemo(() => ({
+    1: ["name", "email", "phone", "nif", "documento_id", "data_validade_cc",
+        "naturalidade", "nacionalidade", "morada_fiscal", "birth_date",
+        "estado_civil", "compra_tipo"],
+    2: ["titular2_name", "titular2_email", "titular2_nif",
+        "titular2_documento_id", "titular2_naturalidade",
+        "titular2_nacionalidade", "titular2_phone", "titular2_morada_fiscal",
+        "titular2_birth_date", "titular2_estado_civil"],
+    3: ["finalidade", "tipo_imovel", "localizacao"],
+    4: ["employment_type", "employer_name", "salario_liquido"],
+    5: [], // Bancos — nenhum obrigatório por defeito
+    6: ["consent_data", "consent_contact"],
+  }), []);
+
   // Dynamic required fields derived from allFieldsConfig
   const dynamicRequiredFields = useMemo(() => {
     if (allFieldsConfig.length === 0) {
@@ -751,17 +768,65 @@ export default function PublicClientForm({ previewMode = false }) {
       .map(f => f.field_key);
   }, [allFieldsConfig]);
 
+  // Lista completa de campos obrigatórios visíveis (hardcoded + dinâmicos)
+  // Apenas inclui campos de passos que estão visíveis (respeita depends_on)
+  const allRequiredVisibleFields = useMemo(() => {
+    const fields = new Set();
+
+    // 1. Adicionar campos hardcoded de passos visíveis
+    for (const [stepNum, stepFields] of Object.entries(HARDCODED_REQUIRED_BY_STEP)) {
+      if (isStepVisible(Number(stepNum))) {
+        stepFields.forEach(f => fields.add(f));
+      }
+    }
+
+    // 2. Adicionar campos dinâmicos obrigatórios (que não estão já nos hardcoded)
+    dynamicRequiredFields.forEach(f => {
+      // Verificar se o campo está num passo visível
+      const fieldConfig = allFieldsConfig.find(fc => fc.field_key === f);
+      if (fieldConfig) {
+        const fieldStep = fieldConfig.step || 1;
+        if (isStepVisible(fieldStep)) {
+          // Respeitar depends_on do campo individual (se existir)
+          if (fieldConfig.depends_on) {
+            if (checkDependsOn(fieldConfig.depends_on)) {
+              fields.add(f);
+            }
+          } else {
+            fields.add(f);
+          }
+        }
+      } else {
+        // Campo dinâmico sem step definido — incluir se não está nos hardcoded
+        if (!fields.has(f)) {
+          fields.add(f);
+        }
+      }
+    });
+
+    return Array.from(fields);
+  }, [HARDCODED_REQUIRED_BY_STEP, dynamicRequiredFields, isStepVisible, allFieldsConfig, checkDependsOn]);
+
   // Calcular campos preenchidos para progresso
+  // Lógica: (campos_preenchidos / total_campos_obrigatórios_visíveis) * 100
+  // Inicia estritamente a 0% e termina a 100%
   const calculateProgress = useCallback(() => {
+    if (allRequiredVisibleFields.length === 0) {
+      return { completed: 0, total: 0 };
+    }
     let filled = 0;
-    dynamicRequiredFields.forEach(field => {
+    allRequiredVisibleFields.forEach(field => {
       const val = formData[field];
-      if (val && val !== "" && !(Array.isArray(val) && val.length === 0)) {
+      // Contar como preenchido se tem valor não-vazio
+      // Campos booleanos (consent_data, consent_contact): true conta como preenchido
+      if (typeof val === 'boolean') {
+        if (val === true) filled++;
+      } else if (val && val !== "" && !(Array.isArray(val) && val.length === 0)) {
         filled++;
       }
     });
-    return { completed: filled, total: dynamicRequiredFields.length };
-  }, [formData, dynamicRequiredFields]);
+    return { completed: filled, total: allRequiredVisibleFields.length };
+  }, [formData, allRequiredVisibleFields]);
 
   const progress = calculateProgress();
 
@@ -899,8 +964,10 @@ export default function PublicClientForm({ previewMode = false }) {
           <Input
             id={field.field_key}
             type="date"
+            lang="pt"
             value={value}
             onChange={(e) => updateCustom(e.target.value)}
+            placeholder="DD/MM/AAAA"
           />
         )}
 
@@ -1167,6 +1234,7 @@ export default function PublicClientForm({ previewMode = false }) {
           <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
           <Input
             id={key} name={key} type="date"
+            lang="pt"
             value={value || ""}
             onChange={(e) => updateField(key, e.target.value)}
             max={maxDate}
@@ -1268,7 +1336,7 @@ export default function PublicClientForm({ previewMode = false }) {
       return (
         <div className={cn("space-y-2", cls)} key={key} style={style}>
           <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
-          <Select value={value || "individual"} onValueChange={(v) => updateField(key, v)}>
+          <Select value={value} onValueChange={(v) => updateField(key, v)}>
             <SelectTrigger>
               <SelectValue placeholder="Selecione" />
             </SelectTrigger>

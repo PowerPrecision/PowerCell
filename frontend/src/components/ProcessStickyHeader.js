@@ -96,7 +96,7 @@ const ProcessStickyHeader = ({
       <div
         ref={headerRef}
         className={`
-          z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700
+          z-30 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700
           transition-all duration-200
           ${isSticky ? "fixed top-12 lg:top-16 left-0 right-0 lg:left-64 shadow-md" : ""}
         `}
