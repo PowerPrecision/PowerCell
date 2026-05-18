@@ -134,6 +134,28 @@ const ClientRegistrationsPage = () => {
   const [detailsDialog, setDetailsDialog] = useState({ open: false, client: null });
   const [detailsLoading, setDetailsLoading] = useState(false);
 
+  // Auto-abrir modal de detalhes quando vem da notificação (?clientId=xxx)
+  useEffect(() => {
+    const clientIdFromUrl = searchParams.get("clientId");
+    if (clientIdFromUrl && !detailsDialog.open) {
+      // Limpar o param da URL para não re-abrir ao navegar de volta
+      setSearchParams(prev => {
+        prev.delete("clientId");
+        return prev;
+      }, { replace: true });
+      // Buscar detalhes do cliente e abrir modal
+      setDetailsLoading(true);
+      fetch(`${API_URL}/api/clients/${clientIdFromUrl}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(res => res.ok ? res.json() : Promise.reject("Erro"))
+        .then(data => setDetailsDialog({ open: true, client: data }))
+        .catch(() => toast.error("Erro ao carregar detalhes do cliente"))
+        .finally(() => setDetailsLoading(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   // Create process modal (pre-filled from client details)
   const [showCreateProcess, setShowCreateProcess] = useState(false);
   const [preSelectedClient, setPreSelectedClient] = useState(null);

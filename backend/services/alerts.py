@@ -441,7 +441,8 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
     notification = {
         "id": str(uuid.uuid4()),
         "type": ALERT_TYPES["NEW_CLIENT_REGISTRATION"],
-        "process_id": process.get("id"),
+        "process_id": process.get("id"),  # Compatibilidade retroactiva
+        "client_id": process.get("client_id") or process.get("id"),  # ID real do cliente
         "client_name": client_name,
         "has_property": has_property,
         "message": f"Novo registo: {client_name}" + (" (Já tem imóvel)" if has_property else ""),

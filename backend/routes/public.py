@@ -298,7 +298,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
                 title="Novo Cliente Registado",
                 body=f"{clean_name} registou-se via formulário",
                 tag="new_client",
-                url="/clientes",  # Link para página de registos
+                url="/registos-clientes",  # Link para página de registos de clientes
                 data={
                     "type": "new_client",
                     "client_id": client_id,

@@ -138,6 +138,28 @@ const NotificationsDropdown = () => {
     }
   }, [soundEnabled]);
 
+  // Determinar ação de navegação para uma notificação
+  // Notificações de novo registo vão para /registos-clientes?clientId=xxx
+  // Notificações de processo vão para /process/{process_id}
+  const getNotificationAction = useCallback((notification) => {
+    const type = notification.type || "";
+    // Novo registo de cliente → navegar para Registos de Clientes com modal
+    if (type === "new_registration" && notification.client_id) {
+      return {
+        label: "Ver",
+        onClick: () => navigate(`/registos-clientes?clientId=${notification.client_id}`),
+      };
+    }
+    // Notificações com process_id → navegar para o processo
+    if (notification.process_id) {
+      return {
+        label: "Ver",
+        onClick: () => navigate(`/process/${notification.process_id}`),
+      };
+    }
+    return undefined;
+  }, [navigate]);
+
   // ====================================================================
   // WEBSOCKET — Real-time notifications from server push events
   // Complementa o polling: o polling cobre o caso de o WebSocket falhar,
@@ -167,10 +189,7 @@ const NotificationsDropdown = () => {
         playNotificationSound();
         toast.info(notification.message || "Nova notificação", {
           description: notification.client_name || notification.process_name || "Nova notificação",
-          action: notification.process_id ? {
-            label: "Ver",
-            onClick: () => navigate(`/process/${notification.process_id}`),
-          } : undefined,
+          action: getNotificationAction(notification),
           duration: 8000,
           icon: <Bell className="h-4 w-4 text-blue-500" />,
         });
@@ -186,7 +205,7 @@ const NotificationsDropdown = () => {
       // O badge permanece visível até o utilizador clicar na notificação
       // ou abrir o dropdown. Marcar como lido imediatamente fazia
       // o poll seguinte sobrescrever a contagem para um valor menor.
-    }, [navigate, playNotificationSound]),
+    }, [navigate, playNotificationSound, getNotificationAction]),
   });
 
   // ====================================================================
@@ -264,10 +283,7 @@ const NotificationsDropdown = () => {
             latestNotification.message,
             {
               description: latestNotification.client_name || "Nova notificação",
-              action: latestNotification.process_id ? {
-                label: "Ver",
-                onClick: () => navigate(`/process/${latestNotification.process_id}`)
-              } : undefined,
+              action: getNotificationAction(latestNotification),
               duration: 8000,
               icon: <UserPlus className="h-4 w-4 text-blue-500" />
             }
@@ -325,8 +341,11 @@ const NotificationsDropdown = () => {
         setUnreadCount(prev => Math.max(0, prev - 1));
       }
       
-      // Navigate to process if exists
-      if (notification.process_id) {
+      // Navigate based on notification type
+      const type = notification.type || "";
+      if (type === "new_registration" && notification.client_id) {
+        navigate(`/registos-clientes?clientId=${notification.client_id}`);
+      } else if (notification.process_id) {
         navigate(`/process/${notification.process_id}`);
       }
       
