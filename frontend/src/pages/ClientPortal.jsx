@@ -33,7 +33,9 @@ import {
   HelpCircle,
   Eye,
   EyeOff,
-
+  Home,
+  MapPin,
+  CalendarClock,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -1089,6 +1091,9 @@ export default function ClientPortal() {
   const [recommendations, setRecommendations] = useState([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(true);
 
+  // ── Tab navigation ──
+  const [activeTab, setActiveTab] = useState('documentos'); // 'documentos' | 'visitas'
+
   // ── Visits state ──
   const [visits, setVisits] = useState([]);
   const [visitsLoading, setVisitsLoading] = useState(true);
@@ -1324,9 +1329,43 @@ export default function ClientPortal() {
             </div>
           </div>
 
-          {/* ═══ LEFT COLUMN: Documentos + RGPD + Equipa ═══ */}
+          {/* ═══ LEFT COLUMN: Tabs — Documentos / As Minhas Visitas ═══ */}
           <div className="lg:col-span-7 space-y-5">
-            <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
+            {/* ── Tab Navigation ── */}
+            <div className="flex gap-1 bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5">
+              <button
+                onClick={() => setActiveTab('documentos')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === 'documentos'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                Documentos
+              </button>
+              <button
+                onClick={() => setActiveTab('visitas')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === 'visitas'
+                    ? 'bg-violet-600 text-white shadow-md'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                }`}
+              >
+                <Home className="w-4 h-4" />
+                As Minhas Visitas
+                {visits.filter(v => v.status === 'solicitada').length > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-violet-200 text-violet-800 text-[10px] font-bold">
+                    {visits.filter(v => v.status === 'solicitada').length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* ── Tab Content ── */}
+            {activeTab === 'documentos' ? (
+              <>
+                <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
 
             {/* RGPD Status */}
             {rgpd && (
@@ -1413,27 +1452,29 @@ export default function ClientPortal() {
             )}
 
             <TeamCard team={team} consultor={consultor} />
+              </>
+            ) : (
+              <>
+            {/* ═══ Tab: As Minhas Visitas ═══ */}
 
-            {/* ═══ Visitas e Imóveis (Bidirecional) ═══ */}
+            {/* ── Pedir Visita ── */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <h3 className="text-base font-bold text-gray-800 mb-1 flex items-center gap-2">
-                <svg className="w-5 h-5 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                </svg>
-                Visitas e Imóveis
+                <Home className="w-5 h-5 text-violet-500" />
+                Pedir Visita a um Imóvel
               </h3>
               <p className="text-sm text-gray-500 mb-4">
-                Encontre o imóvel dos seus sonhos e peça uma visita.
+                Encontrou um imóvel que gostou? Cole o link e nós tratamos do resto.
               </p>
 
               {/* URL Input */}
-              <div className="flex gap-2 mb-4">
+              <div className="flex flex-col sm:flex-row gap-2 mb-3">
                 <input
                   type="url"
                   value={visitUrl}
                   onChange={(e) => setVisitUrl(e.target.value)}
-                  placeholder="Cole aqui o link do imóvel (Idealista, Imovirtual...)"
-                  className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent"
+                  placeholder="Cole aqui o link do imóvel (Idealista, Imovirtual, Supercasa...)"
+                  className="flex-1 px-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent bg-gray-50"
                   disabled={requestingVisit}
                 />
                 <button
@@ -1452,7 +1493,7 @@ export default function ClientPortal() {
                       let data;
                       try { data = await res.json(); } catch { throw new Error('Erro inesperado do servidor.'); }
                       if (res.ok) {
-                        setVisitRequestResult({ success: true, message: 'Pedido enviado! A IA está a extrair os dados do imóvel.' });
+                        setVisitRequestResult({ success: true, message: 'Pedido enviado com sucesso! O nosso sistema extraiu os dados do imóvel e o seu consultor será notificado.' });
                         setVisitUrl('');
                         // Refresh visits list
                         const vRes = await fetch(`${BACKEND_URL}/portal/visits`, { headers: { Authorization: `Bearer ${token}` } });
@@ -1467,111 +1508,138 @@ export default function ClientPortal() {
                     }
                   }}
                   disabled={requestingVisit || !visitUrl.trim()}
-                  className="px-4 py-2 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 shrink-0"
+                  className="px-5 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 shrink-0 shadow-sm"
                 >
                   {requestingVisit ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> A extrair...</>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> A extrair dados...</>
                   ) : (
                     <><ExternalLink className="w-4 h-4" /> Pedir Visita</>
                   )}
                 </button>
               </div>
 
+              {/* Supported sites hint */}
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {['Idealista', 'Imovirtual', 'Supercasa', 'CasaSapo', 'Remax', 'ERA'].map((site) => (
+                  <span key={site} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">{site}</span>
+                ))}
+              </div>
+
               {/* Request result feedback */}
               {visitRequestResult?.success && (
-                <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4">
+                <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
                   <p className="text-xs text-emerald-700">{visitRequestResult.message}</p>
                 </div>
               )}
               {visitRequestResult?.error && (
-                <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-4">
+                <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2.5 mb-4">
                   <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                   <span>{visitRequestResult.error}</span>
                 </div>
               )}
+            </div>
 
-              {/* Visits List */}
+            {/* ── Lista de Visitas ── */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-base font-bold text-gray-800 mb-1 flex items-center gap-2">
+                <CalendarClock className="w-5 h-5 text-amber-500" />
+                As Minhas Visitas
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Acompanhe o estado dos seus pedidos de visita.
+              </p>
+
               {visitsLoading ? (
-                <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  A carregar visitas...
+                <div className="flex items-center justify-center gap-2 text-sm text-gray-400 py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-violet-500" />
+                  A carregar as suas visitas...
                 </div>
               ) : visits.length > 0 ? (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {visits.map((visit) => (
-                    <div key={visit.id} className="border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
-                      {/* Property photo */}
-                      {visit.property_photo ? (
-                        <div className="h-32 bg-gray-100 overflow-hidden">
-                          <img src={visit.property_photo} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
-                        </div>
-                      ) : (
-                        <div className="h-20 bg-gradient-to-br from-violet-50 to-teal-50 flex items-center justify-center">
-                          <svg className="w-8 h-8 text-violet-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                          </svg>
-                        </div>
-                      )}
-                      <div className="p-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-sm text-gray-800 truncate flex-1 mr-2">{visit.property_title || 'Imóvel'}</h4>
-                          {/* Status badge */}
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${
-                            visit.status === 'solicitada' ? 'bg-violet-100 text-violet-700' :
-                            visit.status === 'agendada' ? 'bg-amber-100 text-amber-700' :
-                            visit.status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
-                            visit.status === 'cancelada' ? 'bg-red-100 text-red-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>
-                            {visit.status_label || visit.status}
-                          </span>
-                        </div>
-                        {/* Price */}
-                        {visit.scraped_data?.price && (
-                          <p className="text-base font-bold text-emerald-600 mt-1">
-                            {typeof visit.scraped_data.price === 'number'
-                              ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(visit.scraped_data.price)
-                              : visit.scraped_data.price}
-                          </p>
-                        )}
-                        {/* Location */}
-                        {visit.property_address?.municipality && (
-                          <div className="flex items-center gap-1 text-xs text-gray-500 mt-1">
-                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-                            </svg>
-                            <span className="truncate">{visit.property_address.municipality}</span>
+                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+                  {visits.map((visit) => {
+                    // ── Enhanced status labels ──
+                    const getStatusInfo = (status, scheduledDate) => {
+                      switch (status) {
+                        case 'solicitada':
+                          return { label: 'A aguardar contacto do consultor', color: 'bg-violet-100 text-violet-700 border-violet-200', icon: <Clock className="w-3.5 h-3.5" /> };
+                        case 'agendada':
+                          if (scheduledDate) {
+                            const dateStr = new Date(scheduledDate).toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' });
+                            const timeStr = new Date(scheduledDate).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+                            return { label: `Agendada para ${dateStr} às ${timeStr}`, color: 'bg-amber-100 text-amber-700 border-amber-200', icon: <CalendarClock className="w-3.5 h-3.5" /> };
+                          }
+                          return { label: 'Agendada', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: <CalendarClock className="w-3.5 h-3.5" /> };
+                        case 'concluida':
+                          return { label: 'Visita Concluída', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
+                        case 'cancelada':
+                          return { label: 'Visita Cancelada', color: 'bg-red-100 text-red-700 border-red-200', icon: <X className="w-3.5 h-3.5" /> };
+                        default:
+                          return { label: status, color: 'bg-gray-100 text-gray-600 border-gray-200', icon: null };
+                      }
+                    };
+                    const statusInfo = getStatusInfo(visit.status, visit.scheduled_date);
+
+                    return (
+                      <div key={visit.id} className="border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-shadow group">
+                        {/* Property photo */}
+                        <div className="flex">
+                          {visit.property_photo ? (
+                            <div className="w-28 sm:w-36 bg-gray-100 overflow-hidden shrink-0">
+                              <img src={visit.property_photo} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onError={(e) => { e.target.style.display = 'none'; }} />
+                            </div>
+                          ) : (
+                            <div className="w-28 sm:w-36 bg-gradient-to-br from-violet-50 to-teal-50 flex items-center justify-center shrink-0">
+                              <Home className="w-8 h-8 text-violet-300" />
+                            </div>
+                          )}
+                          <div className="p-3 flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <h4 className="font-semibold text-sm text-gray-800 truncate">{visit.property_title || 'Imóvel'}</h4>
+                            </div>
+                            {/* Price */}
+                            {visit.scraped_data?.price && (
+                              <p className="text-sm font-bold text-emerald-600 mt-0.5">
+                                {typeof visit.scraped_data.price === 'number'
+                                  ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(visit.scraped_data.price)
+                                  : visit.scraped_data.price}
+                              </p>
+                            )}
+                            {/* Location */}
+                            {(visit.property_address?.municipality || visit.scraped_data?.location) && (
+                              <div className="flex items-center gap-1 text-xs text-gray-500 mt-1">
+                                <MapPin className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{visit.property_address?.municipality || visit.scraped_data?.location}</span>
+                              </div>
+                            )}
+                            {/* Typology */}
+                            {visit.scraped_data?.typology && (
+                              <p className="text-xs text-gray-400 mt-0.5">{visit.scraped_data.typology}</p>
+                            )}
+                            {/* Status badge with enhanced label */}
+                            <div className={`inline-flex items-center gap-1 mt-2 text-[11px] px-2.5 py-1 rounded-full font-medium border ${statusInfo.color}`}>
+                              {statusInfo.icon}
+                              {statusInfo.label}
+                            </div>
+                            {/* Source link */}
+                            {visit.scraped_url && (
+                              <a href={visit.scraped_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-violet-500 hover:text-violet-700 mt-1.5 block">
+                                Ver anúncio original ↗
+                              </a>
+                            )}
                           </div>
-                        )}
-                        {/* Typology */}
-                        {visit.scraped_data?.typology && (
-                          <p className="text-xs text-gray-400 mt-1">{visit.scraped_data.typology}</p>
-                        )}
-                        {/* Scheduled date */}
-                        {visit.scheduled_date && (
-                          <div className="flex items-center gap-1.5 text-xs text-amber-600 mt-2 bg-amber-50 rounded-lg px-2 py-1">
-                            <Clock className="w-3.5 h-3.5" />
-                            {visit.status === 'agendada' ? 'Agendada para ' : ''}{new Date(visit.scheduled_date).toLocaleDateString('pt-PT', { weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
-                          </div>
-                        )}
-                        {/* Source link */}
-                        {visit.scraped_url && (
-                          <a href={visit.scraped_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-violet-500 hover:text-violet-700 mt-1.5 inline-flex items-center gap-0.5">
-                            Ver anúncio original <ExternalLink className="w-3 h-3" />
-                          </a>
-                        )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
-                <div className="text-center py-4">
-                  <svg className="w-10 h-10 text-violet-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                  </svg>
-                  <p className="text-sm text-gray-500">Cole o link de um imóvel acima para pedir uma visita</p>
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                    <Home className="w-8 h-8 text-violet-300" />
+                  </div>
+                  <p className="text-sm text-gray-500 font-medium">Ainda não pediu nenhuma visita</p>
+                  <p className="text-xs text-gray-400 mt-1">Cole o link de um imóvel acima para pedir uma visita</p>
                 </div>
               )}
             </div>
@@ -1654,6 +1722,8 @@ export default function ClientPortal() {
                   A carregar imóveis recomendados...
                 </div>
               </div>
+            )}
+              </>
             )}
           </div>
 

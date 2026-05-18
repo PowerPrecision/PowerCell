@@ -452,3 +452,49 @@ Stage Summary:
 - 4 ficheiros modificados: backend/routes/finance.py, frontend/src/services/api.js, frontend/src/pages/FinanceDashboard.js, frontend/src/index.css
 - CSV com BOM UTF-8, colunas formatadas, totais e resumo do pool
 - Recibo com Logo, Nome, Cargo, Período, 3 parcelas de valor, data de geração
+
+---
+Task ID: visits-portal-bridge
+Agent: Main Agent
+Task: Reconstruir sistema de Visitas + ponte colaborativa com Portal do Cliente
+
+Work Log:
+- Explored entire codebase: confirmed VisitsPage.jsx already has 4-column Kanban (solicitada/agendada/concluida/cancelada), route /visitas, sidebar link
+- Confirmed backend portal endpoints already exist: POST /portal/visits/request (with scraper), GET /portal/visits
+- Confirmed ClientPortal.jsx already had visits section embedded in left column (not as a tab)
+- Added Home, MapPin, CalendarClock imports from lucide-react to ClientPortal.jsx
+- Added activeTab state ('documentos' | 'visitas') to ClientPortal component
+- Created tab navigation system in left column:
+  - Tab 1: "Documentos" (emerald active) — shows DocumentsPanel + RGPD + TeamCard
+  - Tab 2: "As Minhas Visitas" (violet active) — shows visit request form + visits list
+  - Tab badge shows count of pending 'solicitada' visits
+- Enhanced "Pedir Visita" section:
+  - Renamed header from "Visitas e Imóveis" to "Pedir Visita a um Imóvel"
+  - Improved placeholder text mentioning supported sites
+  - Added supported sites hint chips (Idealista, Imovirtual, Supercasa, etc.)
+  - Rounded-xl input with bg-gray-50 for better visual hierarchy
+  - Loading text changed from "A extrair..." to "A extrair dados..."
+  - Success message improved: "Pedido enviado com sucesso! O nosso sistema extraiu os dados do imóvel e o seu consultor será notificado."
+- Enhanced visits list ("As Minhas Visitas"):
+  - Horizontal card layout with side photo (instead of stacked)
+  - Photo with hover scale animation
+  - MapPin icon from lucide-react instead of inline SVG
+  - Enhanced status labels using getStatusInfo function:
+    - 'solicitada' → "A aguardar contacto do consultor" (violet, Clock icon)
+    - 'agendada' → "Agendada para [data] às [hora]" (amber, CalendarClock icon)
+    - 'concluida' → "Visita Concluída" (emerald, CheckCircle2 icon)
+    - 'cancelada' → "Visita Cancelada" (red, X icon)
+  - Status badges with border and icon
+  - Increased max-h to 500px for better scroll experience
+  - Empty state with Home icon and descriptive text
+- Frontend build passes (npx vite build ✓)
+- No new lint errors introduced
+
+Stage Summary:
+- VisitsPage.jsx: Already complete with 4-column Kanban, route, sidebar — no changes needed
+- Backend portal.py: POST /portal/visits/request and GET /portal/visits already exist — no changes needed
+- ClientPortal.jsx: Transformed from embedded visits section to professional tab navigation
+- Tab system: "Documentos" (emerald) + "As Minhas Visitas" (violet) with badge counter
+- Enhanced status labels: "A aguardar contacto do consultor", "Agendada para dia X", "Visita Concluída", "Visita Cancelada"
+- Horizontal card layout with photo, price, location, typology, and status badge
+- Full bidirectional flow: Client pastes URL → Scraper extracts data → Visit in 'solicitada' → Consultant schedules in CRM
