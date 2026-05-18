@@ -3,7 +3,7 @@
  * Lista, cria e edita imóveis listados pela agência
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, MapPin, Home, Ruler, User, Building2, MoreHorizontal, Trash2, Edit, Upload, FileSpreadsheet, Loader2, ExternalLink, AlertTriangle, Link as LinkIcon } from 'lucide-react';
+import { Plus, Search, MapPin, Home, Ruler, User, Building2, MoreHorizontal, Trash2, Edit, Upload, FileSpreadsheet, Loader2, ExternalLink, AlertTriangle, Link as LinkIcon, Calendar } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import DashboardLayout from '../layouts/DashboardLayout';
 import { Card, CardContent } from '../components/ui/card';
@@ -62,7 +62,7 @@ const CONDITIONS = {
 };
 
 // Componente de card de imóvel
-const PropertyCard = ({ property, onEdit, onDelete, onStatusChange }) => {
+const PropertyCard = ({ property, onEdit, onDelete, onStatusChange, onScheduleVisit }) => {
   const status = STATUS_CONFIG[property.status] || STATUS_CONFIG.em_analise;
   
   return (
@@ -99,6 +99,9 @@ const PropertyCard = ({ property, onEdit, onDelete, onStatusChange }) => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onScheduleVisit && onScheduleVisit(property)}>
+                <Calendar size={14} className="mr-2" /> Agendar Visita
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onEdit(property)}>
                 <Edit size={14} className="mr-2" /> Editar
               </DropdownMenuItem>
@@ -882,6 +885,12 @@ const PropertiesPage = () => {
     setDialogOpen(true);
   };
 
+  // ── Schedule Visit (navega para a página de Visitas com imóvel pré-seleccionado) ──
+  const handleScheduleVisit = (property) => {
+    // Navegar para a página de Visitas com query param
+    window.location.href = `/visitas?property=${property.id}`;
+  };
+
   // Função para importar ficheiro Excel (com processamento em background)
   const handleImportExcel = async (event) => {
     const file = event.target.files?.[0];
@@ -1138,6 +1147,7 @@ const PropertiesPage = () => {
                 onEdit={handleEditProperty}
                 onDelete={handleDeleteProperty}
                 onStatusChange={handleStatusChange}
+                onScheduleVisit={handleScheduleVisit}
               />
             ))}
           </div>

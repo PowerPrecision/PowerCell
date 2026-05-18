@@ -64,6 +64,7 @@ const UnifiedLogsPage = React.lazy(() => import("./pages/UnifiedLogsPage"));
 const PropertiesPage = React.lazy(() => import("./pages/PropertiesPage"));
 const ClientsPage = React.lazy(() => import("./pages/ClientsPage"));
 const LeadsPage = React.lazy(() => import("./pages/LeadsPage"));
+const VisitsPage = React.lazy(() => import("./pages/VisitsPage"));
 const MyClientsPage = React.lazy(() => import("./pages/MyClientsPage"));
 const ClientDetailPage = React.lazy(() => import("./pages/ClientDetailPage"));
 const BackupsPage = React.lazy(() => import("./pages/BackupsPage"));
@@ -414,6 +415,18 @@ function App() {
               <ProtectedRoute allowedRoles={STAFF_ROLES}>
                 <RouteBoundary name="Imóveis">
                   <PropertiesPage />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Visits Page - Staff and Admin */}
+          <Route
+            path="/visitas"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <RouteBoundary name="Visitas">
+                  <VisitsPage />
                 </RouteBoundary>
               </ProtectedRoute>
             }

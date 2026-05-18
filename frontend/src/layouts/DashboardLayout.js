@@ -63,6 +63,7 @@ import {
   Lock,
   Mail,
   Eye,
+  Calendar,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -161,7 +162,7 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo O Meu Negócio (inclui rotas de detalhe: /processo/:id, /imovel/:id, etc.)
-    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/financeiro"];
+    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro"];
     // Rotas do grupo Visão Global (inclui rotas de detalhe: /cliente/:id, /processo-detalhe/:id, etc.)
     const visaoGlobalRoutes = ["/clientes", "/cliente", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
@@ -277,9 +278,14 @@ const DashboardLayout = ({ children, title }) => {
           href: "/kanban",
         },
         {
-          label: "Imóveis e Visitas",
+          label: "Imóveis",
           icon: Search,
           href: "/imoveis",
+        },
+        {
+          label: "Visitas",
+          icon: Calendar,
+          href: "/visitas",
         },
         {
           label: "Financeiro",
@@ -398,7 +404,8 @@ const DashboardLayout = ({ children, title }) => {
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
         { label: "Os Meus Processos", icon: FileText, href: "/processos" },
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
-        { label: "Gestor de Visitas", icon: Search, href: "/leads" },
+        { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Imóveis", icon: Search, href: "/imoveis" },
         { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ];
 
