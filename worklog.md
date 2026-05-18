@@ -219,3 +219,23 @@ Stage Summary:
 - 4 KPI Cards agregados via ProcessFinance Summary
 - Tabela de histórico com edição de estado inline
 - Pushed to origin/dev: commit f1e8c69
+
+---
+Task ID: ux-fixes-1
+Agent: Main Agent
+Task: Correcções rigorosas de UX no Frontend (4 bugs)
+
+Work Log:
+- Bug 1: Z-Index dos Submenus — Dialog overlay/content z-50→z-[100], DropdownMenuContent z-50→z-[60], SelectContent z-50→z-[60], ProcessStickyHeader z-40→z-30
+- Bug 2: Título do Processo — Prioridade de nome: client_name → client_data.name → personal_data.nome_completo. ID MongoDB ocultado; apenas process_number visível (Nº XXX)
+- Bug 3: Barra de Progresso — Refactoração completa: HARDCODED_REQUIRED_BY_STEP + dynamicRequiredFields → allRequiredVisibleFields. Respeita depends_on e visibilidade condicional. Valores por defeito removidos (nacionalidade, compra_tipo) para garantir início a 0%. Booleanos (consent_data) contados correctamente. Termina a 100%.
+- Bug 4: Locale Datepicker — Adicionado lang="pt" a todos os inputs type="date" no PublicClientForm. Index.html já tem lang="pt-PT".
+- Commit 31fe28c pushed para origin/dev
+
+Stage Summary:
+- 7 ficheiros alterados, 87 inserções, 18 eliminações
+- Dialog/Modal z-index: z-[100] (acima de tudo)
+- Dropdown/Select: z-[60] (acima de header/sidebar z-50, abaixo de modais)
+- ProcessStickyHeader: z-30 (abaixo de sidebar/header)
+- Progress bar: 0% → 100% com base em campos obrigatórios visíveis
+- Pushed to origin/dev: commit 31fe28c
