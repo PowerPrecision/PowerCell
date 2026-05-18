@@ -159,3 +159,24 @@ Stage Summary:
 
 **Pattern applied:** Each component now has `const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;`. DashboardLayout title props are dropped when embedded=true. All DashboardLayout import statements preserved.
 
+
+---
+Task ID: config-setup
+Agent: Main Agent
+Task: Configuração do repositório GitHub PowerCell e credenciais
+
+Work Log:
+- Configurado git user: geral@powerealestate.pt / PowerCell Dev
+- Remote origin: https://github.com/PowerPrecision/PowerCell.git
+- Branch ativa: dev (sincronizada com origin/dev, commit 3edfc26)
+- Testado push dry-run: Everything up-to-date ✓
+- Revertido commit incorreto 9c913ed (módulo financeiro commitado na main)
+- Working tree limpo e sincronizado com origin/dev
+- Idioma de documentação: pt-PT
+- Regra: atualizar documentação sempre que houver alterações
+
+Stage Summary:
+- Repositório GitHub configurado e sincronizado
+- Branch dev ativa e pronta para desenvolvimento
+- Credenciais guardadas no git config
+- Commit push testado com sucesso
