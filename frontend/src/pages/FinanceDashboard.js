@@ -728,28 +728,63 @@ const PoolDistributionPanel = ({ companyId }) => {
               </div>
             </div>
 
-            {/* Lista de Consultores */}
+            {/* Lista de Consultores — com breakdown Fixo + Variável + Total */}
             {poolData.consultants && poolData.consultants.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
                   <Users className="h-4 w-4" />
                   Consultores no Pool — {monthNames[poolData.month]} {poolData.year}
                 </h4>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {poolData.consultants.map((c) => (
-                    <div
-                      key={c.id}
-                      className="flex items-center gap-3 p-3 rounded-lg border bg-white hover:shadow-md transition-shadow"
-                    >
-                      <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-semibold text-sm">
-                        {c.name?.charAt(0)?.toUpperCase() || "?"}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">{c.name}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{c.role}</p>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/50">
+                        <th className="text-left py-2.5 px-3 font-medium text-muted-foreground">Consultor</th>
+                        <th className="text-right py-2.5 px-3 font-medium text-muted-foreground">Fixo</th>
+                        <th className="text-right py-2.5 px-3 font-medium text-muted-foreground">Comissões/Pool</th>
+                        <th className="text-right py-2.5 px-3 font-medium text-emerald-700 font-semibold">Total Mensal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {poolData.consultants.map((c) => (
+                        <tr key={c.id} className="border-t hover:bg-muted/30 transition-colors">
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-semibold text-xs">
+                                {c.name?.charAt(0)?.toUpperCase() || "?"}
+                              </div>
+                              <div>
+                                <p className="font-medium text-sm">{c.name}</p>
+                                <p className="text-xs text-muted-foreground capitalize">{c.role}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="text-right py-2.5 px-3 font-mono text-sm text-slate-600">
+                            {formatCurrency(c.fixed_salary)}
+                          </td>
+                          <td className="text-right py-2.5 px-3 font-mono text-sm text-slate-600">
+                            {formatCurrency(c.variable_pay)}
+                          </td>
+                          <td className="text-right py-2.5 px-3 font-mono text-sm font-semibold text-emerald-700">
+                            {formatCurrency(c.total_monthly)}
+                          </td>
+                        </tr>
+                      ))}
+                      {/* Totals row */}
+                      <tr className="border-t-2 border-emerald-200 bg-emerald-50/50">
+                        <td className="py-2.5 px-3 font-semibold text-emerald-800">Total</td>
+                        <td className="text-right py-2.5 px-3 font-mono text-sm font-semibold text-slate-700">
+                          {formatCurrency(poolData.total_base_salaries)}
+                        </td>
+                        <td className="text-right py-2.5 px-3 font-mono text-sm font-semibold text-slate-700">
+                          {formatCurrency(poolData.total_variable_pay)}
+                        </td>
+                        <td className="text-right py-2.5 px-3 font-mono text-sm font-bold text-emerald-700">
+                          {formatCurrency(poolData.total_grand_monthly)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
@@ -1714,7 +1749,7 @@ const FinanceDashboard = () => {
                   <FinanceStatCard
                     title="Total Comissões Pagas"
                     value={formatCurrency(commissions.total_comissoes_pagas)}
-                    subtitle="Pagamentos a colaboradores"
+                    subtitle="Pagamentos variáveis a colaboradores"
                     icon={Users}
                     color="text-orange-600"
                     iconBg="bg-orange-50"
@@ -1729,10 +1764,40 @@ const FinanceDashboard = () => {
                   />
                 </div>
 
+                {/* KPIs do modelo híbrido */}
+                {(commissions.total_base_salaries > 0 || commissions.total_grand_monthly > 0) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <FinanceStatCard
+                      title="Total Vencimentos Fixos"
+                      value={formatCurrency(commissions.total_base_salaries || 0)}
+                      subtitle="Soma dos salários fixos mensais"
+                      icon={Wallet}
+                      color="text-slate-600"
+                      iconBg="bg-slate-50"
+                    />
+                    <FinanceStatCard
+                      title="Total Variável"
+                      value={formatCurrency(commissions.total_variable_pay || 0)}
+                      subtitle="Comissões + Pool"
+                      icon={Receipt}
+                      color="text-orange-600"
+                      iconBg="bg-orange-50"
+                    />
+                    <FinanceStatCard
+                      title="Total Geral Mensal"
+                      value={formatCurrency(commissions.total_grand_monthly || 0)}
+                      subtitle="Fixo + Variável"
+                      icon={CircleDollarSign}
+                      color="text-emerald-600"
+                      iconBg="bg-emerald-50"
+                    />
+                  </div>
+                )}
+
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">Ranking de Colaboradores — {selectedYear}</CardTitle>
-                    <CardDescription>Comissões por área de negócio</CardDescription>
+                    <CardDescription>Comissões por área de negócio (modelo híbrido: Fixo + Variável)</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {commissions.collaborators.length === 0 ? (
@@ -1748,7 +1813,9 @@ const FinanceDashboard = () => {
                               <th className="text-right py-2 px-3 font-medium text-muted-foreground">Processos</th>
                               <th className="text-right py-2 px-3 font-medium text-purple-600">Imobiliária</th>
                               <th className="text-right py-2 px-3 font-medium text-blue-600">Crédito</th>
-                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Total</th>
+                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Fixo</th>
+                              <th className="text-right py-2 px-3 font-medium text-muted-foreground">Comissões</th>
+                              <th className="text-right py-2 px-3 font-medium text-emerald-700 font-semibold">Total Mensal</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1757,8 +1824,8 @@ const FinanceDashboard = () => {
                                 <td className="py-2 px-3 text-muted-foreground font-mono">{idx + 1}</td>
                                 <td className="py-2 px-3 font-medium">{c.name}</td>
                                 <td className="py-2 px-3">
-                                  <Badge variant={hasRole(c, "consultor") ? "default" : "secondary"} className="text-xs">
-                                    {hasRole(c, "consultor") ? "Consultor" : "Intermediário"}
+                                  <Badge variant={c.role === "consultor" ? "default" : "secondary"} className="text-xs">
+                                    {c.role === "consultor" ? "Consultor" : "Intermediário"}
                                   </Badge>
                                 </td>
                                 <td className="py-2 px-3 text-right">{c.num_processos}</td>
@@ -1768,8 +1835,14 @@ const FinanceDashboard = () => {
                                 <td className="py-2 px-3 text-right text-blue-600">
                                   {formatCurrency(c.areas?.credito || 0)}
                                 </td>
-                                <td className="py-2 px-3 text-right font-semibold text-green-600">
+                                <td className="py-2 px-3 text-right font-mono text-slate-600">
+                                  {formatCurrency(c.base_salary || 0)}
+                                </td>
+                                <td className="py-2 px-3 text-right font-mono text-orange-600">
                                   {formatCurrency(c.total_comissao)}
+                                </td>
+                                <td className="py-2 px-3 text-right font-semibold font-mono text-emerald-700">
+                                  {formatCurrency(c.total_monthly || c.total_comissao)}
                                 </td>
                               </tr>
                             ))}

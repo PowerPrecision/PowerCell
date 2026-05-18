@@ -587,6 +587,7 @@ async def get_finance_commissions(
                     "num_processos": 0,
                     "areas": {"imobiliaria": 0, "credito": 0},
                     "tipos_processo": set(),
+                    "user_id": None,
                 }
             collaborator_data[key]["total_comissao"] += consultor_share
             collaborator_data[key]["num_processos"] += 1
@@ -605,19 +606,47 @@ async def get_finance_commissions(
                     "num_processos": 0,
                     "areas": {"imobiliaria": 0, "credito": 0},
                     "tipos_processo": set(),
+                    "user_id": None,
                 }
             collaborator_data[key]["total_comissao"] += mediador_share
             collaborator_data[key]["num_processos"] += 1
             collaborator_data[key]["areas"]["credito" if is_cred else "imobiliaria"] += mediador_share
             collaborator_data[key]["tipos_processo"].add(pt)
 
+    # --- Buscar base_salary dos utilizadores para breakdown híbrido ---
+    all_names = [d["name"] for d in collaborator_data.values()]
+    name_to_salary = {}
+    if all_names:
+        # Procurar por nome para obter base_salary
+        salary_users = await db.users.find(
+            {"name": {"$in": all_names}, "is_active": {"$ne": False}},
+            {"_id": 0, "name": 1, "base_salary": 1, "id": 1}
+        ).to_list(1000)
+        for su in salary_users:
+            name_to_salary[su["name"]] = {
+                "base_salary": _safe_float(su.get("base_salary")),
+                "user_id": su.get("id"),
+            }
+
     result = []
+    total_base_salaries = 0.0
+    total_variable = 0.0
+    total_grand = 0.0
     for key in collaborator_data:
         data = collaborator_data[key]
+        salary_info = name_to_salary.get(data["name"], {})
+        fixed = salary_info.get("base_salary", 0.0)
+        variable = round(data["total_comissao"], 2)
+        total = round(fixed + variable, 2)
+        total_base_salaries += fixed
+        total_variable += variable
+        total_grand += total
         result.append({
             "name": data["name"],
             "role": data["role"],
-            "total_comissao": round(data["total_comissao"], 2),
+            "base_salary": round(fixed, 2),         # a) Vencimento Fixo
+            "total_comissao": variable,               # b) Variável (Comissão/Pool)
+            "total_monthly": total,                    # c) Total a Pagar (Fixo + Variável)
             "num_processos": data["num_processos"],
             "areas": {
                 "imobiliaria": round(data["areas"]["imobiliaria"], 2),
@@ -626,12 +655,15 @@ async def get_finance_commissions(
             "tipos_processo": list(data["tipos_processo"]),
         })
 
-    result.sort(key=lambda x: x["total_comissao"], reverse=True)
+    result.sort(key=lambda x: x["total_monthly"], reverse=True)
 
     return {
         "year": year,
         "collaborators": result,
         "total_comissoes_pagas": round(sum(c["total_comissao"] for c in result), 2),
+        "total_base_salaries": round(total_base_salaries, 2),
+        "total_variable_pay": round(total_variable, 2),
+        "total_grand_monthly": round(total_grand, 2),
     }
 
 
@@ -961,8 +993,8 @@ async def get_pool_distribution(
         "is_active": {"$ne": False},
     }
 
-    primary_consultants = await db.users.find(primary_query, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
-    additional_consultants = await db.users.find(additional_query, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
+    primary_consultants = await db.users.find(primary_query, {"_id": 0, "id": 1, "name": 1, "role": 1, "base_salary": 1}).to_list(1000)
+    additional_consultants = await db.users.find(additional_query, {"_id": 0, "id": 1, "name": 1, "role": 1, "base_salary": 1}).to_list(1000)
 
     # Combinar e desduplicar por id
     seen_ids = set()
@@ -975,12 +1007,25 @@ async def get_pool_distribution(
                 "id": uid,
                 "name": u.get("name", ""),
                 "role": u.get("role", ""),
+                "base_salary": _safe_float(u.get("base_salary")),
             })
 
     total_consultants = len(all_consultants)
 
     # --- 3. Calcular pool_per_consultant ---
     pool_per_consultant = round(total_pool / total_consultants, 2) if total_consultants > 0 else 0.0
+
+    # --- 4. Calcular breakdown por consultor: Fixo + Variável + Total ---
+    total_base_salaries = 0.0
+    total_variable = 0.0
+    total_grand = 0.0
+    for c in all_consultants:
+        c["fixed_salary"] = round(c["base_salary"], 2)       # a) Vencimento Fixo
+        c["variable_pay"] = round(pool_per_consultant, 2)     # b) Variável (Pool/Comissão)
+        c["total_monthly"] = round(c["base_salary"] + pool_per_consultant, 2)  # c) Total a Pagar
+        total_base_salaries += c["fixed_salary"]
+        total_variable += c["variable_pay"]
+        total_grand += c["total_monthly"]
 
     month_names = [
         "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -999,6 +1044,9 @@ async def get_pool_distribution(
         "total_consultants": total_consultants,
         "pool_per_consultant": pool_per_consultant,
         "count_processes": count_processes,
+        "total_base_salaries": round(total_base_salaries, 2),
+        "total_variable_pay": round(total_variable, 2),
+        "total_grand_monthly": round(total_grand, 2),
         "consultants": all_consultants,
     }
 

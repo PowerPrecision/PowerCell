@@ -174,6 +174,7 @@ class UserResponse(BaseModel):
     onedrive_folder: Optional[str] = None
     permissions: Optional[dict] = None  # Permissões específicas do utilizador
     additional_roles: Optional[List[str]] = []
+    base_salary: Optional[float] = 0.0  # Vencimento fixo mensal (€) — modelo híbrido
 
 
 class TokenResponse(BaseModel):
@@ -191,6 +192,7 @@ class UserCreate(BaseModel):
     company: Optional[str] = None  # Empresa do utilizador
     onedrive_folder: Optional[str] = None
     additional_roles: Optional[List[str]] = []
+    base_salary: Optional[float] = 0.0  # Vencimento fixo mensal (€) — modelo híbrido
 
 
 class UserUpdate(BaseModel):
@@ -204,3 +206,4 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None  # Nova password (apenas admin pode alterar)
     permissions: Optional[dict] = None  # Permissões específicas do utilizador
     additional_roles: Optional[List[str]] = None
+    base_salary: Optional[float] = None  # Vencimento fixo mensal (€) — modelo híbrido

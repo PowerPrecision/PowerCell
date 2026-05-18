@@ -55,6 +55,7 @@ const UsersManagementPage = ({ embedded = false }) => {
     role: "consultor",
     additional_roles: [],
     onedrive_folder: "",
+    base_salary: 0,
   });
   const [showPassword, setShowPassword] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState("");
@@ -143,6 +144,7 @@ const UsersManagementPage = ({ embedded = false }) => {
         role: "consultor",
         additional_roles: [],
         onedrive_folder: "",
+        base_salary: 0,
       });
       setGeneratedPassword("");
       setShowPassword(false);
@@ -235,6 +237,7 @@ const UsersManagementPage = ({ embedded = false }) => {
       role: user.role,
       additional_roles: user.additional_roles || [],
       onedrive_folder: user.onedrive_folder || "",
+      base_salary: user.base_salary || 0,
     });
     setIsEditDialogOpen(true);
   };
@@ -406,6 +409,20 @@ const UsersManagementPage = ({ embedded = false }) => {
                             placeholder="Nome/caminho da pasta" 
                           />
                         </div>
+                        <div className="space-y-2">
+                          <Label>Salário Fixo Mensal (€)</Label>
+                          <Input 
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={formData.base_salary || ""} 
+                            onChange={(e) => setFormData({ ...formData, base_salary: parseFloat(e.target.value) || 0 })} 
+                            placeholder="0.00"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Vencimento fixo mensal para modelo de compensação híbrido (Fixo + Comissões).
+                          </p>
+                        </div>
                       </>
                     )}
                     <div className="space-y-2">
@@ -530,6 +547,11 @@ const UsersManagementPage = ({ embedded = false }) => {
                           </Badge>
                         </div>
                       </div>
+                      {u.base_salary > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Fixo: {Number(u.base_salary).toLocaleString("pt-PT", { minimumFractionDigits: 2 })} €/mês
+                        </p>
+                      )}
                       <div className="flex gap-1 justify-end">
                         {hasAnyRole(currentUser, ["admin", "ceo"]) && u.id !== currentUser?.id && u.role !== "admin" && u.role !== "ceo" && (
                           <Button variant="ghost" size="icon" onClick={async () => { try { await impersonate(u.id); toast.success(`A ver como ${u.name}`); } catch { toast.error("Erro"); } }}>
@@ -568,6 +590,7 @@ const UsersManagementPage = ({ embedded = false }) => {
                     <TableHead>Email</TableHead>
                     <TableHead>Perfil</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Salário Fixo</TableHead>
                     <TableHead>Pasta Drive</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
@@ -594,6 +617,9 @@ const UsersManagementPage = ({ embedded = false }) => {
                           >
                             {user.is_active ? "Ativo" : "Inativo"}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {user.base_salary ? `${Number(user.base_salary).toLocaleString("pt-PT", { minimumFractionDigits: 2 })} €` : "—"}
                         </TableCell>
                         <TableCell className="font-mono text-sm">{user.onedrive_folder || "-"}</TableCell>
                         <TableCell className="text-right">
@@ -710,6 +736,20 @@ const UsersManagementPage = ({ embedded = false }) => {
                     onChange={(e) => setFormData({ ...formData, onedrive_folder: e.target.value })} 
                     placeholder="Nome/caminho da pasta" 
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>Salário Fixo Mensal (€)</Label>
+                  <Input 
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.base_salary || ""} 
+                    onChange={(e) => setFormData({ ...formData, base_salary: parseFloat(e.target.value) || 0 })} 
+                    placeholder="0.00"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Vencimento fixo mensal para modelo de compensação híbrido (Fixo + Comissões).
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Nova Password (deixar em branco para manter)</Label>

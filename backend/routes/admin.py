@@ -101,6 +101,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
+def _safe_float(val) -> float:
+    """Converte valor para float de forma segura (helper local)."""
+    if val is None:
+        return 0.0
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 # ============== PERMISSIONS ROUTES ==============
 
 @router.get("/permissions/available")
@@ -1002,6 +1012,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
             "additional_roles": data.additional_roles or [],
             "is_active": True,
             "onedrive_folder": None,  # Parceiros não precisam de pasta
+            "base_salary": _safe_float(data.base_salary),  # Vencimento fixo mensal
             "created_at": now
         }
         
@@ -1033,6 +1044,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
         "additional_roles": data.additional_roles or [],
         "is_active": True,
         "onedrive_folder": data.onedrive_folder or clean_name,
+        "base_salary": _safe_float(data.base_salary),  # Vencimento fixo mensal
         "created_at": now
     }
     
@@ -1291,6 +1303,12 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
         update_data["is_active"] = data.is_active
     if data.onedrive_folder is not None:
         update_data["onedrive_folder"] = data.onedrive_folder
+    # Processar base_salary (vencimento fixo mensal — modelo híbrido)
+    if data.base_salary is not None:
+        salary = _safe_float(data.base_salary)
+        if salary < 0:
+            raise HTTPException(status_code=400, detail="Salário fixo não pode ser negativo")
+        update_data["base_salary"] = salary
     # Processar additional_roles (múltiplos perfis)
     if data.additional_roles is not None:
         update_data["additional_roles"] = data.additional_roles

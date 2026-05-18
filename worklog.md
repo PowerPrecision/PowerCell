@@ -350,3 +350,24 @@ Stage Summary:
 - Client can paste property URL → Scraper extracts data → Visit created with status 'solicitada'
 - Client sees all visits (portal-requested and consultant-scheduled) with clear status badges
 - Full bidirectional flow: Client Portal ↔ CRM VisitsPage now operational
+
+---
+Task ID: hybrid-compensation-1
+Agent: Main
+Task: Implement hybrid compensation models (Fixed Salary + Commissions) for consultants
+
+Work Log:
+- Added `base_salary: Optional[float]` field to UserCreate, UserUpdate, and UserResponse models in `backend/models/auth.py`
+- Added `_safe_float()` helper to `backend/routes/admin.py` for safe salary conversion
+- Updated `create_user` in admin.py to persist `base_salary` in both parceiro and normal user docs
+- Updated `update_user` in admin.py to handle `base_salary` with negative-value validation
+- Updated `GET /finance/pool-distribution` to fetch `base_salary` from users collection, compute 3-column breakdown per consultant (fixed_salary, variable_pay, total_monthly), and return aggregate totals (total_base_salaries, total_variable_pay, total_grand_monthly)
+- Updated `GET /finance/commissions` to look up `base_salary` by name from users collection, add base_salary/total_comissao/total_monthly to each collaborator, and return aggregate hybrid totals
+- Updated `frontend/src/pages/UsersManagementPage.js`: added base_salary to formData, Create dialog, Edit dialog, desktop table column, mobile card view
+- Updated `frontend/src/pages/FinanceDashboard.js`: PoolDistributionPanel now shows table with Fixo/Comissões/Total Mensal columns + totals row; Comissões tab shows 3 new KPI cards (Vencimentos Fixos, Total Variável, Total Geral Mensal) and expanded table with Fixo/Comissões/Total Mensal columns
+
+Stage Summary:
+- Full hybrid compensation model implemented across backend + frontend
+- 3-column financial breakdown (Fixo + Variável = Total) appears in both Pool Distribution and Commissions panels
+- Admin can set base_salary per user in the Users Management page
+- All Python syntax validated, no new lint errors introduced
