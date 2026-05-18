@@ -3,6 +3,19 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-07] — Módulo Financeiro: Modelo de Distribuição Pool Global
+
+### Adicionado
+- **Enum `DistributionModel` no modelo FinanceConfig** (`feat` — `backend/models/finance.py`): Novo enum com valores `individual_split` (cada consultor recebe a comissão dos seus processos — modelo tradicional) e `global_pool` (todas as comissões do mês são somadas e divididas igualmente pelos consultores ativos). Campo `distribution_model` adicionado a `FinanceConfig`, `FinanceConfigCreate`, `FinanceConfigUpdate` e `FinanceConfigResponse` com default `individual_split` para retro-compatibilidade.
+- **Endpoint GET /finance/pool-distribution** (`feat` — `backend/routes/finance.py`): Novo endpoint que calcula a distribuição do Pool Global para um mês/ano. Lógica: (1) soma `expected_commission` de todos os ProcessFinances com status `paid` ou `invoiced` no período, filtrando por `company_id` → `total_pool`; (2) conta utilizadores ativos com role `consultor` ou `intermediario` na empresa (incluindo `additional_roles`) → `total_consultants`; (3) retorna `pool_per_consultant = total_pool / total_consultants` com proteção de divisão por zero. Inclui lista de consultores e breakdown imobiliária/crédito.
+- **Seletor de Modelo de Distribuição no HonorariosDialog** (`feat` — `frontend/src/pages/FinanceDashboard.js`): Dois botões toggle no modal de Configuração de Honorários — "Individual" (roxo) e "Pool Global" (verde-esmeralda) — com aviso contextual explicando o modelo Pool. Estado persistido no campo `distribution_model` da FinanceConfig via API.
+- **Aba "Distribuição" no Dashboard Financeiro** (`feat` — `frontend/src/pages/FinanceDashboard.js`): Nova tab condicional que aparece apenas quando o modelo de distribuição é `global_pool`. Contém o componente `PoolDistributionPanel` com: seletor de mês/ano, 3 KPI cards (Total Faturado no Mês, Consultores Ativos, Valor por Consultor), breakdown imobiliária/crédito, e grid de avatares dos consultores no Pool.
+- **Função `getPoolDistribution` no api.js** (`feat` — `frontend/src/services/api.js`): Nova função API que consome o endpoint `/finance/pool-distribution` com parâmetros `month`, `year` e `company_id`.
+
+### Alterado
+- **FinanceConfig Create/Update incluem distribution_model** (`refactor`): Os endpoints `POST /finance/configs` e `PUT /finance/configs/{config_id}` agora aceitam e persistem o campo `distribution_model`. O `create_finance_config` inclui o campo no documento MongoDB. O `update_finance_config_by_id` suporta atualização do modelo via `FinanceConfigUpdate`.
+- **fetchAllData no FinanceDashboard** (`refactor`): A função de carregamento de dados agora faz 6 requests em paralelo (adicionado `getFinanceConfigs`) para determinar o `distributionModel` ativo e renderizar condicionalmente a aba "Distribuição".
+
 ## [2026-03-06] — Fase 1: Refatoração Arquitetural — Separação Cliente ↔ Processo (Atualização)
 
 ### Adicionado

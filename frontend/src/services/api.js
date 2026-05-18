@@ -685,6 +685,9 @@ export const createProcessFinance = (data) => api.post("/finance/processes", dat
 export const updateProcessFinance = (financeId, data) => api.put(`/finance/processes/${financeId}`, data);
 export const getProcessFinanceSummary = (params = {}) => api.get("/finance/processes/summary", { params });
 
+// Pool Distribution (modelo global_pool — fecho de mês)
+export const getPoolDistribution = (params = {}) => api.get("/finance/pool-distribution", { params });
+
 // ===== RGPD TEMPLATE =====
 export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
 export const updateRGPDTemplate = (content) => api.put("/rgpd/admin/template", { content });

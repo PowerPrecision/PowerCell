@@ -46,6 +46,20 @@ class FeeType(str, Enum):
         return [t.value for t in cls]
 
 
+class DistributionModel(str, Enum):
+    """
+    Modelo de distribuição de comissões aos consultores.
+    - 'individual_split': cada consultor recebe a comissão dos seus processos (tradicional)
+    - 'global_pool': o dinheiro de todos os processos é somado e dividido igualmente por todos os consultores
+    """
+    INDIVIDUAL_SPLIT = "individual_split"
+    GLOBAL_POOL = "global_pool"
+
+    @classmethod
+    def all_values(cls) -> List[str]:
+        return [t.value for t in cls]
+
+
 class FinanceStatus(str, Enum):
     """
     Status do registo financeiro do processo.
@@ -111,8 +125,8 @@ class FinanceConfig(BaseModel):
     """
     Configuração financeira de uma empresa (multi-tenant).
 
-    Define as regras de comissão/honorário e IVA que a empresa aplica.
-    Uma configuração por company_id.
+    Define as regras de comissão/honorário, IVA e modelo de distribuição
+    que a empresa aplica. Uma configuração por company_id.
     """
     id: str
     company_id: str = Field(..., description="Referência obrigatória à empresa (multi-tenant)")
@@ -128,6 +142,10 @@ class FinanceConfig(BaseModel):
         default=23.0,
         description="Taxa de imposto (ex: 23.0 = IVA a 23%)"
     )
+    distribution_model: str = Field(
+        default=DistributionModel.INDIVIDUAL_SPLIT.value,
+        description="Modelo de distribuição: 'individual_split' (tradicional) ou 'global_pool' (divisão igualitária)"
+    )
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -141,6 +159,18 @@ class FinanceConfig(BaseModel):
         valid = FeeType.all_values()
         if v_lower not in valid:
             raise ValueError(f"fee_type inválido: '{v}'. Valores permitidos: {valid}")
+        return v_lower
+
+    @field_validator('distribution_model', mode='before')
+    @classmethod
+    def validate_distribution_model(cls, v):
+        """Garantir que o distribution_model é um valor válido do enum."""
+        if v is None or v == '':
+            return DistributionModel.INDIVIDUAL_SPLIT.value
+        v_lower = str(v).lower().strip()
+        valid = DistributionModel.all_values()
+        if v_lower not in valid:
+            raise ValueError(f"distribution_model inválido: '{v}'. Valores permitidos: {valid}")
         return v_lower
 
     @field_validator('default_value', mode='before')
@@ -179,6 +209,10 @@ class FinanceConfigCreate(BaseModel):
     fee_type: str = Field(..., description="Tipo de comissão: 'fixed' ou 'percentage'")
     default_value: float = Field(..., description="Valor por omissão (€ ou %)")
     tax_rate: Optional[float] = Field(default=23.0, description="Taxa de IVA (ex: 23.0)")
+    distribution_model: Optional[str] = Field(
+        default=DistributionModel.INDIVIDUAL_SPLIT.value,
+        description="Modelo de distribuição: 'individual_split' ou 'global_pool'"
+    )
 
     @field_validator('fee_type', mode='before')
     @classmethod
@@ -188,6 +222,16 @@ class FinanceConfigCreate(BaseModel):
         v_lower = str(v).lower().strip()
         if v_lower not in FeeType.all_values():
             raise ValueError(f"fee_type inválido: '{v}'. Valores permitidos: {FeeType.all_values()}")
+        return v_lower
+
+    @field_validator('distribution_model', mode='before')
+    @classmethod
+    def validate_distribution_model(cls, v):
+        if v is None or v == '':
+            return DistributionModel.INDIVIDUAL_SPLIT.value
+        v_lower = str(v).lower().strip()
+        if v_lower not in DistributionModel.all_values():
+            raise ValueError(f"distribution_model inválido: '{v}'. Valores permitidos: {DistributionModel.all_values()}")
         return v_lower
 
     @field_validator('default_value', mode='before')
@@ -223,6 +267,7 @@ class FinanceConfigUpdate(BaseModel):
     fee_type: Optional[str] = None
     default_value: Optional[float] = None
     tax_rate: Optional[float] = None
+    distribution_model: Optional[str] = None
 
     @field_validator('fee_type', mode='before')
     @classmethod
@@ -232,6 +277,16 @@ class FinanceConfigUpdate(BaseModel):
         v_lower = str(v).lower().strip()
         if v_lower not in FeeType.all_values():
             raise ValueError(f"fee_type inválido: '{v}'. Valores permitidos: {FeeType.all_values()}")
+        return v_lower
+
+    @field_validator('distribution_model', mode='before')
+    @classmethod
+    def validate_distribution_model(cls, v):
+        if v is None or v == '':
+            return None
+        v_lower = str(v).lower().strip()
+        if v_lower not in DistributionModel.all_values():
+            raise ValueError(f"distribution_model inválido: '{v}'. Valores permitidos: {DistributionModel.all_values()}")
         return v_lower
 
     @field_validator('default_value', mode='before')
@@ -271,6 +326,7 @@ class FinanceConfigResponse(BaseModel):
     fee_type: str
     default_value: float
     tax_rate: float
+    distribution_model: str = DistributionModel.INDIVIDUAL_SPLIT.value
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

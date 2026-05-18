@@ -91,6 +91,7 @@ import {
   getProcessFinances,
   updateProcessFinance,
   getProcessFinanceSummary,
+  getPoolDistribution,
 } from "../services/api";
 import {
   BarChart,
@@ -274,6 +275,7 @@ const HonorariosDialog = ({ companyId, onSaved }) => {
   const [defaultValue, setDefaultValue] = useState("");
   const [taxRate, setTaxRate] = useState("23");
   const [existingConfigId, setExistingConfigId] = useState(null);
+  const [distributionModel, setDistributionModel] = useState("individual_split");
 
   // Carregar configuração ao abrir o modal
   const fetchConfig = useCallback(async () => {
@@ -288,11 +290,13 @@ const HonorariosDialog = ({ companyId, onSaved }) => {
         setDefaultValue(String(cfg.default_value ?? ""));
         setTaxRate(String(cfg.tax_rate ?? "23"));
         setExistingConfigId(cfg.id);
+        setDistributionModel(cfg.distribution_model || "individual_split");
       } else {
         setFeeType("percentage");
         setDefaultValue("");
         setTaxRate("23");
         setExistingConfigId(null);
+        setDistributionModel("individual_split");
       }
     } catch (err) {
       console.error("Erro ao carregar config:", err);
@@ -316,6 +320,7 @@ const HonorariosDialog = ({ companyId, onSaved }) => {
         fee_type: feeType,
         default_value: parseFloat(defaultValue),
         tax_rate: parseFloat(taxRate),
+        distribution_model: distributionModel,
       };
 
       if (existingConfigId) {
@@ -324,6 +329,7 @@ const HonorariosDialog = ({ companyId, onSaved }) => {
           fee_type: feeType,
           default_value: parseFloat(defaultValue),
           tax_rate: parseFloat(taxRate),
+          distribution_model: distributionModel,
         });
       } else {
         // POST — criar nova
@@ -422,6 +428,49 @@ const HonorariosDialog = ({ companyId, onSaved }) => {
                   </div>
                 </button>
               </div>
+            </div>
+
+            {/* Modelo de Distribuição */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Modelo de Distribuição de Comissões</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDistributionModel("individual_split")}
+                  className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
+                    distributionModel === "individual_split"
+                      ? "border-purple-500 bg-purple-50 text-purple-700"
+                      : "border-gray-200 hover:border-gray-300 text-muted-foreground"
+                  }`}
+                >
+                  <Users className="h-5 w-5" />
+                  <div className="text-left">
+                    <p className="text-sm font-semibold">Individual</p>
+                    <p className="text-xs opacity-70">Cada consultor recebe o seu</p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDistributionModel("global_pool")}
+                  className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
+                    distributionModel === "global_pool"
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      : "border-gray-200 hover:border-gray-300 text-muted-foreground"
+                  }`}
+                >
+                  <CircleDollarSign className="h-5 w-5" />
+                  <div className="text-left">
+                    <p className="text-sm font-semibold">Pool Global</p>
+                    <p className="text-xs opacity-70">Divisão igualitária</p>
+                  </div>
+                </button>
+              </div>
+              {distributionModel === "global_pool" && (
+                <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  No modelo Pool, todas as comissões do mês são somadas e divididas igualmente pelos consultores ativos.
+                </p>
+              )}
             </div>
 
             {/* Valor */}
@@ -529,6 +578,192 @@ const StatusBadge = ({ status }) => {
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {s.label}
     </span>
+  );
+};
+
+// ====================================================================
+// POOL DISTRIBUTION PANEL — Distribuição do Mês (Modelo Global Pool)
+// ====================================================================
+
+const PoolDistributionPanel = ({ companyId }) => {
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [poolData, setPoolData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchPoolData = useCallback(async () => {
+    if (!companyId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getPoolDistribution({
+        month: selectedMonth,
+        year: selectedYear,
+        company_id: companyId,
+      });
+      setPoolData(res.data);
+    } catch (err) {
+      console.error("Erro ao carregar distribuição do pool:", err);
+      setError(err.response?.data?.detail || "Erro ao carregar distribuição do pool.");
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId, selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    fetchPoolData();
+  }, [fetchPoolData]);
+
+  const monthNames = [
+    "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+  ];
+
+  return (
+    <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50/50 to-white">
+      <CardHeader>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <CircleDollarSign className="h-5 w-5 text-emerald-600" />
+              Distribuição do Mês — Pool Global
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Comissões faturadas divididas igualmente pelos consultores ativos
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Select value={String(selectedMonth)} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {monthNames.slice(1).map((name, idx) => (
+                  <SelectItem key={idx + 1} value={String(idx + 1)}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: 6 }, (_, i) => now.getFullYear() - i).map((yr) => (
+                  <SelectItem key={yr} value={String(yr)}>{yr}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="icon" onClick={fetchPoolData} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading && !poolData ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+            <span className="ml-2 text-muted-foreground">A calcular distribuição...</span>
+          </div>
+        ) : error ? (
+          <div className="flex items-center gap-2 p-3 rounded-lg border border-red-200 bg-red-50 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            {error}
+          </div>
+        ) : poolData ? (
+          <div className="space-y-6">
+            {/* KPIs do Pool */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="rounded-xl border bg-white p-5 shadow-sm">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 rounded-lg bg-emerald-100">
+                    <Receipt className="h-5 w-5 text-emerald-600" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Total Faturado no Mês</span>
+                </div>
+                <p className="text-2xl font-bold text-emerald-700">
+                  {formatCurrency(poolData.total_pool)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {poolData.count_processes} processo{poolData.count_processes !== 1 ? "s" : ""} faturado{poolData.count_processes !== 1 ? "s" : ""}
+                </p>
+                {(poolData.total_real_estate_commission > 0 || poolData.total_credit_commission > 0) && (
+                  <div className="flex gap-3 mt-2 text-xs">
+                    <span className="text-purple-600">Imob: {formatCurrency(poolData.total_real_estate_commission)}</span>
+                    <span className="text-blue-600">Créd: {formatCurrency(poolData.total_credit_commission)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border bg-white p-5 shadow-sm">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 rounded-lg bg-blue-100">
+                    <Users className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Consultores Ativos</span>
+                </div>
+                <p className="text-2xl font-bold text-blue-700">
+                  {poolData.total_consultants}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Consultores e intermediários da empresa
+                </p>
+              </div>
+
+              <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/50 p-5 shadow-sm">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 rounded-lg bg-emerald-200">
+                    <Wallet className="h-5 w-5 text-emerald-700" />
+                  </div>
+                  <span className="text-sm font-medium text-emerald-800">Valor por Consultor</span>
+                </div>
+                <p className="text-3xl font-bold text-emerald-700">
+                  {formatCurrency(poolData.pool_per_consultant)}
+                </p>
+                <p className="text-xs text-emerald-600 mt-1">
+                  = {formatCurrency(poolData.total_pool)} ÷ {poolData.total_consultants} consultores
+                </p>
+              </div>
+            </div>
+
+            {/* Lista de Consultores */}
+            {poolData.consultants && poolData.consultants.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Consultores no Pool — {monthNames[poolData.month]} {poolData.year}
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {poolData.consultants.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center gap-3 p-3 rounded-lg border bg-white hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-semibold text-sm">
+                        {c.name?.charAt(0)?.toUpperCase() || "?"}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{c.name}</p>
+                        <p className="text-xs text-muted-foreground capitalize">{c.role}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {poolData.total_pool === 0 && (
+              <div className="text-center py-6 text-muted-foreground">
+                <Receipt className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">Sem comissões faturadas em {monthNames[poolData.month]} {poolData.year}.</p>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 };
 
@@ -1165,6 +1400,7 @@ const FinanceDashboard = () => {
   const [commissions, setCommissions] = useState(null);
   const [performance, setPerformance] = useState(null);
   const [config, setConfig] = useState(null);
+  const [distributionModel, setDistributionModel] = useState("individual_split");
 
   // Filtros
   const currentYear = new Date().getFullYear();
@@ -1179,13 +1415,14 @@ const FinanceDashboard = () => {
     setError(null);
     try {
       const params = { year: selectedYear };
-      const [summaryRes, monthlyRes, commissionsRes, performanceRes, configRes] =
+      const [summaryRes, monthlyRes, commissionsRes, performanceRes, configRes, financeConfigsRes] =
         await Promise.all([
           getFinanceSummary(params),
           getFinanceMonthly(params),
           getFinanceCommissions(params),
           getFinancePerformance(params),
           getFinanceConfig(),
+          getFinanceConfigs({ company_id: companyId }),
         ]);
       setSummary(summaryRes.data);
       setMonthly(monthlyRes.data);
@@ -1193,6 +1430,10 @@ const FinanceDashboard = () => {
       setPerformance(performanceRes.data);
       if (configRes.data?.config) {
         setConfig(configRes.data.config);
+      }
+      const cfgs = financeConfigsRes.data?.configs || [];
+      if (cfgs.length > 0 && cfgs[0].distribution_model) {
+        setDistributionModel(cfgs[0].distribution_model);
       }
     } catch (err) {
       console.error("Erro ao carregar dados financeiros:", err);
@@ -1323,7 +1564,7 @@ const FinanceDashboard = () => {
 
         {/* Tabs */}
         <Tabs defaultValue="honorarios" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 lg:w-auto lg:inline-grid">
+          <TabsList className={`grid w-full grid-cols-2 sm:grid-cols-${distributionModel === "global_pool" ? 6 : 5} lg:w-auto lg:inline-grid`}>
             <TabsTrigger value="honorarios" className="gap-1.5">
               <CircleDollarSign className="h-3.5 w-3.5" />
               Honorários & Processos
@@ -1344,6 +1585,12 @@ const FinanceDashboard = () => {
               <Users className="h-3.5 w-3.5" />
               Comissões
             </TabsTrigger>
+            {distributionModel === "global_pool" && (
+              <TabsTrigger value="distribution" className="gap-1.5">
+                <CircleDollarSign className="h-3.5 w-3.5" />
+                Distribuição
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* TAB: Honorários & Processos (Fase 2 — NOVO) */}
@@ -1535,6 +1782,13 @@ const FinanceDashboard = () => {
               </>
             )}
           </TabsContent>
+
+          {/* TAB: Distribuição (Pool Global — conditional) */}
+          {distributionModel === "global_pool" && (
+            <TabsContent value="distribution">
+              <PoolDistributionPanel companyId={companyId} />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </DashboardLayout>
