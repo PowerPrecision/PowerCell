@@ -1707,10 +1707,9 @@ const ProcessDetails = () => {
   
   // Modo de visualização (read-only) quando não tem edit_process
   // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
-  // EXCEPÇÃO: admin e CEO podem editar processos concluídos (para correção retroativa de valores financeiros)
+  // EXCEPÇÃO: admin e CEO NUNCA sofrem lock — podem editar processos concluídos retroativamente
   const BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"];
-  const isAdminOrCeo = ["admin", "ceo"].includes(userRole);
-  const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !isAdminOrCeo;
+  const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !['admin', 'ceo'].includes(userRole);
   const isViewMode = (!hasEditProcess && !(userActions.includes("view_financials") && userRole === "indexacao")) || isProcessLocked;
 
   // Função para eliminar o cliente/processo
@@ -2115,7 +2114,7 @@ const ProcessDetails = () => {
             </span>
           </div>
         )}
-        {!isProcessLocked && isAdminOrCeo && process && BLOCKED_STATUSES.includes(process.status) && (
+        {!isProcessLocked && ['admin', 'ceo'].includes(userRole) && process && BLOCKED_STATUSES.includes(process.status) && (
           <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-800 dark:text-blue-200 text-sm">
             <Shield className="h-4 w-4 shrink-0" />
             <span>

@@ -2769,12 +2769,14 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
     # === SINCRONIZAÇÃO FINANCEIRA RETROATIVA ===
-    # Se um admin/CEO editou um processo em estado terminal (concluído/escritura),
-    # os valores financeiros podem ter mudado. Garantir que o snapshot financeiro
-    # existe e está atualizado com os novos valores.
+    # Se o processo está num status de ganho (concluído/escritura), garantir que
+    # o snapshot financeiro (process_finances) existe e está atualizado com os
+    # valores mais recentes de real_estate_data e credit_data.
+    # Isto assegura que expected_commission, real_estate_base_value e
+    # credit_base_value refletem sempre os dados submetidos pelo utilizador.
     current_status = updated.get("status", "")
     finance_relevant_statuses = ["concluidos", "escritura", "escritura_agendada"]
-    if is_admin_or_ceo and current_status in finance_relevant_statuses:
+    if current_status in finance_relevant_statuses:
         # Desencriptar updated para obter valores reais antes do snapshot
         try:
             decrypted_for_finance = decrypt_sensitive_data(updated)
