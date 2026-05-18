@@ -54,14 +54,12 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     """
     Endpoint público para registo de clientes - sem autenticação.
     
-    FLUXO:
-    1. Verifica se email ou NIF já existem (bloqueia duplicados)
-    2. Cria ficha de cliente na tabela 'clients' (NÃO cria processo)
-    3. Envia email de confirmação ao cliente
-    4. Notifica administradores/staff
-    5. Gera alertas no sistema
+    FLUXO RELACIONAL (Client ↔ Process):
+    1. Anti-Duplicação: Procura cliente por email/NIF → upsert se existe, cria se não
+    2. Criação Isolada do Processo: Novo documento em `processes` com client_id OBRIGATÓRIO
+    3. Associação: process_id adicionado ao array process_ids do cliente
     
-    O processo é criado quando o cliente é atribuído a um utilizador.
+    SEGURANÇA: Rate limiting, sanitização de inputs, encriptação RGPD.
     """
     
     # Sanitizar inputs
@@ -73,198 +71,255 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     clean_name = sanitize_name(data.name) if data.name else ""
     clean_phone = sanitize_phone(data.phone) if data.phone else None
     
-    # =========================================
-    # VERIFICAR DUPLICADOS (EMAIL E NIF)
-    # Usar blind indexes para pesquisa de dados encriptados
-    # =========================================
+    # Processar dados do formulário
+    has_property = data.has_property or False
+    process_type = data.process_type or "credito_habitacao"
+    now = datetime.now(timezone.utc).isoformat()
 
-    # Verificar se já existe cliente com o mesmo email
-    # Usar blind index (email_hash) para dados encriptados, fallback para plain text
+    # =========================================
+    # PASSO 1: ANTI-DUPLICAÇÃO (Upsert de Cliente)
+    # Procurar por email (blind index) ou NIF.
+    # Se existe → atualizar dados novos e reutilizar client_id
+    # Se NÃO existe → criar novo documento de cliente
+    # =========================================
+    
     email_hash = generate_email_hash(clean_email)
-    existing_by_email = None
+    existing_client = None
+    
+    # Procurar por email (blind index para dados encriptados, fallback plain text)
     if email_hash:
-        existing_by_email = await db.clients.find_one({"contacto.email_hash": email_hash})
-    if not existing_by_email:
-        # Fallback para dados antigos não migrados
-        existing_by_email = await db.clients.find_one({"contacto.email": clean_email.lower()})
-
-    if existing_by_email:
-        # Registar duplicado no system_error_logger para monitoring
-        try:
-            from services.system_error_logger import system_error_logger
-            await system_error_logger.log_error(
-                error_type="duplicate_registration",
-                message=f"Registo duplicado (email): {clean_email}",
-                component="public_form",
-                details={"reason": "email", "email": clean_email, "existing_client_id": existing_by_email.get("id")},
-                severity="info",
-                request_path="/api/public/client-registration"
-            )
-        except Exception:
-            pass
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": False,
-                "blocked": True,
-                "reason": "email",
-                "message": "Já existe um registo com este email. A nossa equipa entrará em contacto consigo em breve."
-            }
-        )
-
-    # Verificar se já existe cliente com o mesmo NIF
-    # NOTA: NIF já não vem no PublicClientRegistration (removido na Fase 1)
-    # O NIF será recolhido depois pelo consultor durante o processo
+        existing_client = await db.clients.find_one({"contacto.email_hash": email_hash})
+    if not existing_client:
+        existing_client = await db.clients.find_one({"contacto.email": clean_email.lower()})
+    
+    # Procurar por NIF (se disponível no payload — atualmente não vem no formulário público)
     clean_nif = None
-    if clean_nif:
-        # Usar blind index (nif_hash) para dados encriptados, fallback para plain text
+    if not existing_client and clean_nif:
         nif_hash = generate_nif_hash(clean_nif)
-        existing_by_nif = None
         if nif_hash:
-            existing_by_nif = await db.clients.find_one({"dados_pessoais.nif_hash": nif_hash})
-        if not existing_by_nif:
-            # Fallback para dados antigos não migrados
-            existing_by_nif = await db.clients.find_one({"dados_pessoais.nif": clean_nif})
-
-        if existing_by_nif:
-            # Registar duplicado no system_error_logger para monitoring
+            existing_client = await db.clients.find_one({"dados_pessoais.nif_hash": nif_hash})
+        if not existing_client:
+            existing_client = await db.clients.find_one({"dados_pessoais.nif": clean_nif})
+    
+    if existing_client:
+        # ── CLIENTE JÁ EXISTE: Atualizar dados novos (upsert parcial) ──
+        client_id = existing_client["id"]
+        
+        # Desencriptar para comparar dados
+        try:
+            decrypted_existing = decrypt_client_data(existing_client)
+        except Exception:
+            decrypted_existing = existing_client
+        
+        # Atualizar campos que possam ter mudado ou sido adicionados
+        client_updates = {"updated_at": now}
+        
+        # Atualizar telefone se novo ou vazio
+        existing_phone = (decrypted_existing.get("contacto") or {}).get("telefone", "")
+        if clean_phone and not existing_phone:
+            client_updates["contacto.telefone"] = clean_phone
+        
+        # Atualizar nome se existente está vazio
+        existing_name = decrypted_existing.get("nome", "")
+        if not existing_name and clean_name:
+            client_updates["nome"] = clean_name
+        
+        # Atualizar has_property se o cliente indicou ter imóvel agora
+        if has_property and not existing_client.get("has_property"):
+            client_updates["has_property"] = True
+        
+        # Mesclar custom_fields
+        existing_custom = existing_client.get("custom_fields") or {}
+        new_custom = data.custom_fields or {}
+        if new_custom:
+            merged_custom = {**existing_custom, **new_custom}
+            client_updates["custom_fields"] = merged_custom
+        
+        # Re-encriptar dados atualizados
+        try:
+            # Construir doc temporário para encriptação seletiva
+            temp_update = {}
+            for k, v in client_updates.items():
+                if k.startswith("contacto."):
+                    if "contacto" not in temp_update:
+                        temp_update["contacto"] = {}
+                    temp_update["contacto"][k.replace("contacto.", "")] = v
+                elif k.startswith("dados_pessoais."):
+                    if "dados_pessoais" not in temp_update:
+                        temp_update["dados_pessoais"] = {}
+                    temp_update["dados_pessoais"][k.replace("dados_pessoais.", "")] = v
+                else:
+                    temp_update[k] = v
+            
+            encrypted_updates = encrypt_client_data(temp_update)
+            
+            # Reconverter para dot-notation
+            final_updates = {}
+            for k, v in client_updates.items():
+                if k.startswith("contacto.") and "contacto" in encrypted_updates:
+                    field = k.replace("contacto.", "")
+                    final_updates[k] = encrypted_updates["contacto"].get(field, v)
+                elif k.startswith("dados_pessoais.") and "dados_pessoais" in encrypted_updates:
+                    field = k.replace("dados_pessoais.", "")
+                    final_updates[k] = encrypted_updates["dados_pessoais"].get(field, v)
+                elif k in encrypted_updates:
+                    final_updates[k] = encrypted_updates[k]
+                else:
+                    final_updates[k] = v
+            
+            # Preservar blind indexes que não precisam de encriptação
+            if "contacto.email_hash" in client_updates:
+                final_updates["contacto.email_hash"] = client_updates["contacto.email_hash"]
+            
+            client_updates = final_updates
+        except Exception as e:
+            logger.warning(f"Falha ao encriptar updates do cliente existente {client_id}: {e}")
+        
+        await db.clients.update_one({"id": client_id}, {"$set": client_updates})
+        logger.info(f"Cliente existente atualizado via formulário público: {client_id}")
+    else:
+        # ── NOVO CLIENTE: Criar documento isolado na coleção clients ──
+        client_id = str(uuid.uuid4())
+        
+        personal_data = {
+            "nome": clean_name,
+            "email": clean_email,
+            "telefone": clean_phone,
+        }
+        
+        client_doc = {
+            "id": client_id,
+            "nome": clean_name,
+            "contacto": {
+                "email": clean_email.lower(),
+                "telefone": clean_phone
+            },
+            "dados_pessoais": personal_data,
+            "dados_financeiros": {},  # Dados financeiros pertencem ao Processo
+            "dados_imobiliarios": {},  # Dados do imóvel recolhidos depois
+            "process_ids": [],  # Será preenchido no Passo 3
+            "fonte": "public_form",
+            "has_property": has_property,
+            "idade_menos_35": False,
+            "created_at": now,
+            "updated_at": now,
+            "registration_completed": True,
+            "assigned_to": None,
+            "assigned_at": None,
+            "custom_fields": data.custom_fields if data.custom_fields else {},
+        }
+        
+        # RGPD: Encriptar dados sensíveis ANTES de inserir na BD
+        try:
+            client_doc = encrypt_client_data(client_doc)
+            logger.info(f"Dados do cliente {client_id} encriptados com sucesso (blind indexes incluídos)")
+        except Exception as e:
+            logger.warning(f"Falha ao encriptar dados do cliente {client_id}: {e}")
             try:
                 from services.system_error_logger import system_error_logger
                 await system_error_logger.log_error(
-                    error_type="duplicate_registration",
-                    message=f"Registo duplicado (NIF): {clean_nif}",
+                    error_type="encryption_failure",
+                    message=f"Falha ao encriptar dados do cliente {client_id}: {e}",
                     component="public_form",
-                    details={"reason": "nif", "nif": clean_nif, "existing_client_id": existing_by_nif.get("id")},
-                    severity="info",
+                    details={"client_id": client_id, "error": str(e)},
+                    severity="warning",
                     request_path="/api/public/client-registration"
                 )
             except Exception:
                 pass
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "success": False,
-                    "blocked": True,
-                    "reason": "nif",
-                    "message": "Já existe um registo com este NIF. A nossa equipa entrará em contacto consigo em breve."
-                }
+        
+        await db.clients.insert_one(client_doc)
+        
+        # M3 - Criar pasta S3 para o cliente
+        try:
+            import asyncio
+            result = await asyncio.to_thread(
+                s3_service.initialize_client_folders,
+                client_id,
+                clean_name,
+                None  # Sem segundo titular no formulário público
             )
-    
-    client_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Processar dados do formulário
-    has_property = data.has_property or False
-    
-    personal_data = {
-        "nome": clean_name,
-        "email": clean_email,
-        "telefone": clean_phone,
-    }
-    
-    birth_date = None  # Não recolhido no formulário público
-    idade_menos_35 = False
-    
-    # Segundo titular já não vem no formulário (removido Titular2Data)
-    second_client_name = None
+            if result and len(result) == 2:
+                success, s3_folder_name = result
+                if success and s3_folder_name:
+                    await db.clients.update_one(
+                        {"id": client_id},
+                        {"$set": {"s3_folder": s3_folder_name}}
+                    )
+                    logger.info(f"Pasta S3 criada para cliente {client_id}: {s3_folder_name}")
+        except Exception as e:
+            logger.warning(f"Não foi possível criar pasta S3 para cliente {client_id}: {e}")
     
     # =========================================
-    # CRIAR FICHA DE CLIENTE (tabela clients)
-    # RGPD: Encriptar dados sensíveis ANTES de inserir
+    # PASSO 2: CRIAÇÃO ISOLADA DO PROCESSO
+    # Novo documento em `processes` com client_id OBRIGATÓRIO
     # =========================================
-    client_doc = {
-        "id": client_id,
-        "nome": clean_name,
-        "contacto": {
-            "email": clean_email.lower(),
-            "telefone": clean_phone
-        },
-        "dados_pessoais": personal_data,
-        "dados_financeiros": {},  # Dados financeiros pertencem ao Processo
-        "dados_imobiliarios": {},  # Dados do imóvel recolhidos depois
-        "process_ids": [],  # Vazio até ser criado o processo
-        "fonte": "public_form",
+    process_id = str(uuid.uuid4())
+    process_number = await get_next_process_number()
+    
+    process_doc = {
+        "id": process_id,
+        "process_number": process_number,
+        "client_id": client_id,  # OBRIGATÓRIO — ligação relacional
+        "client_name": clean_name,
+        "client_email": clean_email,
+        "client_phone": clean_phone,
+        "status": "novo",
+        "is_active": True,
+        "process_type": process_type,
         "has_property": has_property,
-        "idade_menos_35": idade_menos_35,
+        "fonte": "public_form",
+        # Dados de negócio (preenchidos depois pelo consultor)
+        "real_estate_data": {},
+        "credit_data": {},
+        "financial_data": {},
+        # Atribuições (pendentes)
+        "assigned_consultor_id": None,
+        "assigned_consultor_ids": [],
+        "assigned_mediador_id": None,
+        "assigned_mediador_ids": [],
+        "consultor_names": [],
+        "mediador_names": [],
+        "notes": "",
+        "prioridade": "media",
+        "labels": [],
         "created_at": now,
         "updated_at": now,
-        "registration_completed": True,  # Marcar que completou o registo
-        "assigned_to": None,  # Atribuído a nenhum utilizador inicialmente
-        "assigned_at": None,
-        "custom_fields": data.custom_fields if data.custom_fields else {},
     }
-
-    # RGPD: Encriptar dados sensíveis ANTES de inserir na BD
-    # Isto garante que NIFs, telefones e outros dados sensíveis
-    # nunca são guardados em plain text
+    
+    # Encriptar campos sensíveis do processo
     try:
-        client_doc = encrypt_client_data(client_doc)
-        logger.info(f"Dados do cliente {client_id} encriptados com sucesso (blind indexes incluídos)")
+        from services.encryption import encrypt_sensitive_data
+        process_doc = encrypt_sensitive_data(process_doc)
     except Exception as e:
-        logger.warning(f"Falha ao encriptar dados do cliente {client_id}: {e}")
-        try:
-            from services.system_error_logger import system_error_logger
-            await system_error_logger.log_error(
-                error_type="encryption_failure",
-                message=f"Falha ao encriptar dados do cliente {client_id}: {e}",
-                component="public_form",
-                details={"client_id": client_id, "error": str(e)},
-                severity="warning",
-                request_path="/api/public/client-registration"
-            )
-        except Exception:
-            pass
-
-    await db.clients.insert_one(client_doc)
+        logger.warning(f"Falha ao encriptar dados do processo {process_id}: {e}")
+    
+    await db.processes.insert_one(process_doc)
+    logger.info(f"Processo {process_number} criado para cliente {client_id} via formulário público")
     
     # =========================================
-    # M3 - CRIAR PASTA S3 PARA O CLIENTE
+    # PASSO 3: ASSOCIAÇÃO (Array de Processos do Cliente)
+    # Adicionar process_id ao array process_ids do cliente
     # =========================================
-    try:
-        import asyncio
-        result = await asyncio.to_thread(
-            s3_service.initialize_client_folders,
-            client_id,
-            clean_name,
-            second_client_name
-        )
-        # initialize_client_folders retorna (success, folder_path)
-        if result and len(result) == 2:
-            success, s3_folder_name = result
-            if success and s3_folder_name:
-                await db.clients.update_one(
-                    {"id": client_id},
-                    {"$set": {"s3_folder": s3_folder_name}}
-                )
-                logger.info(f"Pasta S3 criada para cliente {client_id}: {s3_folder_name}")
-    except Exception as e:
-        logger.warning(f"Não foi possível criar pasta S3 para cliente {client_id}: {e}")
-        try:
-            from services.system_error_logger import system_error_logger
-            await system_error_logger.log_error(
-                error_type="s3_folder_failure",
-                message=f"Falha ao criar pasta S3 para cliente {client_id}: {e}",
-                component="public_form",
-                details={"client_id": client_id, "error": str(e)},
-                severity="warning",
-                request_path="/api/public/client-registration"
-            )
-        except Exception:
-            pass
+    await db.clients.update_one(
+        {"id": client_id},
+        {
+            "$addToSet": {"process_ids": process_id},
+            "$set": {"updated_at": now}
+        }
+    )
+    logger.info(f"Processo {process_id} associado ao cliente {client_id} (process_ids atualizado)")
     
     # =========================================
-    # ENVIAR EMAIL DE CONFIRMAÇÃO AO CLIENTE
-    # Usa Task Queue para não bloquear a resposta
+    # PÓS-REGISTO: Email, Notificações, Alertas
     # =========================================
+    
+    # Enviar email de confirmação ao cliente
     from services.task_queue import task_queue
-    
-    # Tentar enfileirar (se Redis disponível)
     job_id = await task_queue.send_registration_email(
         client_email=clean_email,
         client_name=clean_name
     )
-    
-    # Se Task Queue não disponível, enviar directamente
     if not job_id:
         logger.info("Task Queue não disponível, enviando email directamente")
         await send_registration_confirmation(
@@ -272,20 +327,12 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             client_name=clean_name
         )
     
-    # =========================================
-    # NOTIFICAR STAFF SOBRE NOVO REGISTO
-    # =========================================
+    # Criar alertas no sistema de notificações (passar dados do processo, não do cliente)
+    await notify_new_client_registration(process_doc, has_property)
     
-    # Criar alertas no sistema de notificações
-    await notify_new_client_registration(client_doc, has_property)
-    
-    # =========================================
-    # ENVIAR PUSH NOTIFICATIONS PARA STAFF
-    # =========================================
+    # Enviar push notifications para staff
     try:
-        from services.push_notifications import send_push_notification, broadcast_push_notification
-        
-        # Notificar todos os admins, CEOs e directores via push
+        from services.push_notifications import send_push_notification
         from services.role_query import deep_role_in_filter
         staff_for_push = await db.users.find(
             {"$and": [deep_role_in_filter([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]), {"is_active": True}]},
@@ -309,45 +356,44 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         logger.info(f"Push notifications enviadas para {len(staff_for_push)} membros do staff")
     except Exception as e:
         logger.warning(f"Erro ao enviar push notifications: {e}")
-        # Não falhar o registo se push notifications falharem
     
-    # Enviar email apenas para o PRIMEIRO admin/CEO (evitar spam)
-    # Os outros são notificados via sistema de alertas interno
+    # Email para o primeiro admin/CEO/diretor
     from services.role_query import deep_role_in_filter
     staff = await db.users.find(
         deep_role_in_filter([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]),
         {"_id": 0}
     ).to_list(100)
     
-    # Enviar email apenas para o primeiro membro (reduz spam)
     if staff:
         first_admin = staff[0]
         staff_job = await task_queue.send_email(
             to=first_admin["email"],
             subject=f"Novo Cliente Registado: {clean_name}",
-            body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\n\nO cliente aguarda atribuição."
+            body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\nTipo de Processo: {process_type}\n\nO processo #{process_number} foi criado e aguarda atribuição."
         )
         
-        # Fallback se Task Queue não disponível
         if not staff_job:
             await send_new_client_notification(
                 client_name=clean_name,
                 client_email=clean_email,
                 client_phone=clean_phone or "N/A",
-                process_type=data.process_type,
+                process_type=process_type,
                 staff_email=first_admin["email"],
                 staff_name=first_admin["name"]
             )
     
-    # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
+    is_new_client = existing_client is None
+    
     return JSONResponse(
         status_code=200,
         content={
             "success": True,
             "message": "Registo criado com sucesso. Verifique o seu email.",
             "client_id": client_id,
+            "process_id": process_id,
+            "process_number": process_number,
+            "is_new_client": is_new_client,
             "has_property": has_property,
-            "idade_menos_35": idade_menos_35,
             "email_queued": bool(job_id)
         }
     )
