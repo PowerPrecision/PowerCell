@@ -244,6 +244,64 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
     elif possibilidade_fiador == False or possibilidade_fiador == "false" or possibilidade_fiador == "nao":
         possibilidade_fiador = "Não"
     
+    # ==== VARIÁVEIS FINANCEIRAS PARA TEMPLATES DE BANCOS ====
+    # [VALOR_IMOVEL] — Valor de aquisição do imóvel
+    valor_imovel_raw = (
+        financial_data.get("valor_imovel")
+        or financial_data.get("real_estate_base_value")
+        or real_estate_data.get("valor_imovel")
+        or real_estate_data.get("real_estate_base_value")
+        or financial_data.get("valor_aquisicao")
+    )
+    valor_imovel = format_currency(valor_imovel_raw)
+    
+    # [VALOR_FINANCIAMENTO] — Montante pedido de financiamento
+    valor_financiamento_raw = (
+        financial_data.get("credit_base_value")
+        or financial_data.get("requested_amount")
+        or financial_data.get("montante_pretendido")
+        or financial_data.get("valor_financiamento")
+    )
+    valor_financiamento = format_currency(valor_financiamento_raw)
+    
+    # [CAPITAIS_PROPRIOS] — Capitais próprios (valor_imovel - valor_financiamento)
+    capitais_proprios_raw = financial_data.get("capitais_proprios")
+    if capitais_proprios_raw is not None and capitais_proprios_raw != "":
+        capitais_proprios = format_currency(capitais_proprios_raw)
+    elif valor_imovel_raw and valor_financiamento_raw:
+        try:
+            cp = float(valor_imovel_raw) - float(valor_financiamento_raw)
+            capitais_proprios = format_currency(cp)
+        except (ValueError, TypeError):
+            capitais_proprios = "N/A"
+    else:
+        capitais_proprios = "N/A"
+    
+    # [PRAZO_FINANCIAMENTO] — Prazo em anos/meses
+    prazo_raw = (
+        financial_data.get("prazo_financiamento")
+        or financial_data.get("loan_term")
+        or financial_data.get("prazo")
+        or financial_data.get("prazo_anos")
+    )
+    if prazo_raw:
+        try:
+            prazo_val = int(float(prazo_raw))
+            prazo_financiamento = f"{prazo_val} anos"
+        except (ValueError, TypeError):
+            prazo_financiamento = safe_val(prazo_raw)
+    else:
+        prazo_financiamento = "N/A"
+    
+    # [COMPRA_SOZINHO] — Se há co-titulares
+    co_buyers = process.get("co_buyers") or process.get("compradores") or []
+    has_cotitular = (
+        has_second_proponent
+        or (isinstance(co_buyers, list) and len(co_buyers) > 0)
+        or num_titulares > 1
+    )
+    compra_sozinho = "Não (Com Co-titular)" if has_cotitular else "Sim"
+    
     # Retornar todas as variáveis
     return {
         # Dados básicos
@@ -284,6 +342,13 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
         "valor_extra": valor_extra,
         "localidade_imovel": localidade_imovel,
         "possibilidade_fiador": possibilidade_fiador,
+        
+        # Variáveis Financeiras (Templates de Bancos)
+        "CAPITAIS_PROPRIOS": capitais_proprios,
+        "VALOR_IMOVEL": valor_imovel,
+        "VALOR_FINANCIAMENTO": valor_financiamento,
+        "PRAZO_FINANCIAMENTO": prazo_financiamento,
+        "COMPRA_SOZINHO": compra_sozinho,
         
         # Remetente
         "sender_name": user.get("name", ""),
@@ -705,13 +770,16 @@ async def preview_documentation_email(
     
     # Gerar HTML do email
     if email_template:
+        # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
+        # Os templates de email bancário usam [CAPITAIS_PROPRIOS] etc.
+        normalized_template = re.sub(r'\[([A-Z_]+)\]', r'{\1}', email_template)
         # Usar template personalizado da configuração com todas as variáveis
         try:
-            email_body = email_template.format(**template_vars)
+            email_body = normalized_template.format(**template_vars)
         except KeyError as e:
             logger.warning(f"Variável não encontrada no template: {e}")
             # Fallback com variáveis básicas
-            email_body = email_template.format(
+            email_body = normalized_template.format(
                 client_name=client_name,
                 client_nif=client_nif,
                 process_number=process_number,
@@ -944,11 +1012,13 @@ async def send_documentation_email(
     
     elif custom_message and current_user["role"] in ["admin", "ceo"]:
         custom_message = sanitize_string(custom_message, max_length=10000)
+        # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
+        normalized_custom = re.sub(r'\[([A-Z_]+)\]', r'{\1}', custom_message)
         try:
-            email_body = custom_message.format(**template_vars)
+            email_body = normalized_custom.format(**template_vars)
         except KeyError as e:
             logger.warning(f"Variável não encontrada no custom_message: {e}")
-            email_body = custom_message.format(
+            email_body = normalized_custom.format(
                 client_name=client_name,
                 client_nif=client_nif,
                 process_number=process_number,
@@ -957,13 +1027,15 @@ async def send_documentation_email(
                 sender_email=current_user.get("email", "")
             )
     elif email_template:
+        # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
+        normalized_template = re.sub(r'\[([A-Z_]+)\]', r'{\1}', email_template)
         # Usar template personalizado da configuração com todas as variáveis
         try:
-            email_body = email_template.format(**template_vars)
+            email_body = normalized_template.format(**template_vars)
         except KeyError as e:
             logger.warning(f"Variável não encontrada no template: {e}")
             # Fallback com variáveis básicas
-            email_body = email_template.format(
+            email_body = normalized_template.format(
                 client_name=client_name,
                 client_nif=client_nif,
                 process_number=process_number,
