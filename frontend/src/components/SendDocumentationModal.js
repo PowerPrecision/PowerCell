@@ -63,6 +63,11 @@ import {
   Building2,
   Eye,
   Edit3,
+  Tag,
+  Copy,
+  ChevronDown,
+  ChevronUp,
+  Euro,
 } from "lucide-react";
 import { toast } from "sonner";
 import { RichTextViewer } from "./ui/RichTextEditor";
@@ -70,6 +75,87 @@ import SmartRichEditor from "./ui/SmartRichEditor";
 import { safeString } from "../utils/safeString";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
+
+/**
+ * Tags Disponíveis para templates de email bancário.
+ * Organizadas por categoria para facilitar a consulta.
+ * As tags financeiras (5 novas) estão destacadas com flag `financial: true`.
+ * Formato de uso nos templates: [NOME_DA_TAG]
+ */
+const TEMPLATE_TAG_CATEGORIES = [
+  {
+    label: "Dados Básicos",
+    tags: [
+      { key: "client_name", label: "Nome do Cliente" },
+      { key: "client_nif", label: "NIF do Cliente" },
+      { key: "process_number", label: "Nº do Processo" },
+      { key: "documents_list", label: "Lista de Documentos" },
+    ],
+  },
+  {
+    label: "1º Proponente",
+    tags: [
+      { key: "p1_nome", label: "Nome" },
+      { key: "p1_email", label: "Email" },
+      { key: "p1_telefone", label: "Telefone" },
+      { key: "p1_nif", label: "NIF" },
+      { key: "p1_data_nascimento", label: "Data de Nascimento" },
+      { key: "p1_tipo_doc", label: "Doc. Identificação" },
+      { key: "p1_estado_civil", label: "Estado Civil" },
+      { key: "p1_regime_casamento", label: "Regime de Casamento" },
+      { key: "p1_profissao", label: "Profissão" },
+      { key: "p1_vinculo", label: "Vínculo Laboral" },
+      { key: "p1_salario", label: "Salário Líquido" },
+      { key: "p1_dependentes", label: "Dependentes" },
+      { key: "p1_despesas", label: "Despesas Mensais" },
+      { key: "p1_situacao_bancaria", label: "Situação Bancária" },
+    ],
+  },
+  {
+    label: "2º Proponente",
+    tags: [
+      { key: "p2_nome", label: "Nome" },
+      { key: "p2_email", label: "Email" },
+      { key: "p2_telefone", label: "Telefone" },
+    ],
+  },
+  {
+    label: "Crédito Atual",
+    tags: [
+      { key: "banco_atual", label: "Banco Atual" },
+      { key: "num_titulares", label: "Nº Titulares" },
+      { key: "contrato_mais_2_anos", label: "Contrato > 2 Anos" },
+      { key: "valor_aquisicao", label: "Valor Aquisição" },
+      { key: "montante_divida", label: "Montante em Dívida" },
+    ],
+  },
+  {
+    label: "Transferência",
+    tags: [
+      { key: "valor_extra", label: "Valor Multiopções" },
+      { key: "localidade_imovel", label: "Localidade do Imóvel" },
+      { key: "possibilidade_fiador", label: "Possibilidade Fiador" },
+    ],
+  },
+  {
+    label: "💰 Financeiras",
+    tags: [
+      { key: "CAPITAIS_PROPRIOS", label: "Capitais Próprios", financial: true },
+      { key: "VALOR_IMOVEL", label: "Valor do Imóvel", financial: true },
+      { key: "VALOR_FINANCIAMENTO", label: "Valor Financiamento", financial: true },
+      { key: "PRAZO_FINANCIAMENTO", label: "Prazo Financiamento", financial: true },
+      { key: "COMPRA_SOZINHO", label: "Compra Sozinho", financial: true },
+    ],
+  },
+  {
+    label: "Remetente",
+    tags: [
+      { key: "sender_name", label: "Nome do Consultor" },
+      { key: "sender_email", label: "Email do Consultor" },
+      { key: "sender_phone", label: "Telefone do Consultor" },
+    ],
+  },
+];
 
 const SendDocumentationModal = ({
   open,
@@ -98,6 +184,8 @@ const SendDocumentationModal = ({
   const [emailSubject, setEmailSubject] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("preview"); // "preview" | "edit"
+  const [tagsExpanded, setTagsExpanded] = useState(false);
+  const [copiedTag, setCopiedTag] = useState(null);
 
   // Carregar configuração e documentos
   useEffect(() => {
@@ -624,6 +712,73 @@ const SendDocumentationModal = ({
                   </TabsContent>
                 )}
               </Tabs>
+
+              {/* Tags Disponíveis para Templates */}
+              <div className="border rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between p-2.5 hover:bg-muted/50 transition-colors"
+                  onClick={() => setTagsExpanded(!tagsExpanded)}
+                >
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <Tag className="h-4 w-4 text-muted-foreground" />
+                    Tags Disponíveis
+                    <Badge variant="secondary" className="text-xs">
+                      {TEMPLATE_TAG_CATEGORIES.reduce((sum, cat) => sum + cat.tags.length, 0)} variáveis
+                    </Badge>
+                  </span>
+                  {tagsExpanded
+                    ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    : <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  }
+                </button>
+
+                {tagsExpanded && (
+                  <div className="border-t px-2.5 pb-2.5 pt-2 space-y-3 max-h-72 overflow-y-auto">
+                    <p className="text-xs text-muted-foreground">
+                      Clique numa tag para copiar <code className="bg-muted px-1 rounded">[TAG]</code> para a área de transferência.
+                      Use no template de email do sistema (Configurações → Documentação).
+                    </p>
+                    {TEMPLATE_TAG_CATEGORIES.map((category) => (
+                      <div key={category.label}>
+                        <p className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">
+                          {category.label}
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {category.tags.map((tag) => (
+                            <button
+                              key={tag.key}
+                              type="button"
+                              title={`${tag.label} — clica para copiar [${tag.key}]`}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono transition-all cursor-pointer border ${
+                                tag.financial
+                                  ? "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                                  : copiedTag === tag.key
+                                    ? "bg-emerald-100 dark:bg-emerald-900/30 border-emerald-300 text-emerald-800 dark:text-emerald-200"
+                                    : "bg-muted/50 border-border hover:bg-muted text-foreground"
+                              }`}
+                              onClick={() => {
+                                const tagText = `[${tag.key}]`;
+                                navigator.clipboard.writeText(tagText).then(() => {
+                                  setCopiedTag(tag.key);
+                                  toast.success(`Tag ${tagText} copiada!`, { duration: 1500 });
+                                  setTimeout(() => setCopiedTag(null), 1500);
+                                });
+                              }}
+                            >
+                              {tag.financial && <Euro className="h-3 w-3" />}
+                              {copiedTag === tag.key
+                                ? <><Copy className="h-3 w-3" /> Copiado</>
+                                : <>{tag.key}</>
+                              }
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Info sobre o email */}
               <div className="text-xs text-muted-foreground space-y-1">
