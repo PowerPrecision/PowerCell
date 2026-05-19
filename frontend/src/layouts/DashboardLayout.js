@@ -161,7 +161,7 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo O Meu Negócio (inclui rotas de detalhe: /processo/:id, /imovel/:id, etc.)
-    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro", "/finance/settings"];
+    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro"];
     // Rotas do grupo Visão Global (inclui rotas de detalhe: /cliente/:id, /processo-detalhe/:id, etc.)
     const visaoGlobalRoutes = ["/clientes", "/cliente", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
@@ -441,14 +441,8 @@ const DashboardLayout = ({ children, title }) => {
       };
     }
 
-    // ====================================================================
-    // ITEM COMUM: Gestão Financeira (admin/CEO only)
-    // ====================================================================
-    const gestaoFinanceiraItem = (isAdmin || isCeo) ? [{
-      label: "Gestão Financeira",
-      icon: Cog,
-      href: "/finance/settings",
-    }] : [];
+    // NOTA: Gestão Financeira foi movida para Tab "Finanças" no SystemAdminPanel
+    // Não há mais link na sidebar — tudo consolidado no Painel de Administração
 
     // ====================================================================
     // MENU PARA ADMINISTRATIVO
@@ -483,13 +477,12 @@ const DashboardLayout = ({ children, title }) => {
     // MENU PARA CEO e ADMIN
     // — Vêem Gestão e Operações
     // — Vêem o botão "Painel de Administração" no fundo
-    // — Vêem "Gestão Financeira" no grupo O Meu Negócio
+    // — Gestão Financeira está na Tab "Finanças" do Painel de Administração
     // — SEM Configurações de Sistema espalhadas (tudo no Painel)
     // ====================================================================
     if (isAdmin || isCeo) {
       const adminNegocioItems = [
         ...meuNegocioGroup.items,
-        ...gestaoFinanceiraItem,
       ];
       const adminGroups = [
         { ...meuNegocioGroup, items: adminNegocioItems },

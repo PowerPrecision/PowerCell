@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent } from "../components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
@@ -37,11 +37,13 @@ import {
   Info,
   StickyNote,
   FolderOpen,
+  FileStack,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getClient } from "../services/api";
+import { getClient, getClientFiles } from "../services/api";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -157,6 +159,8 @@ export default function ClientDetailPage() {
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [clientDocs, setClientDocs] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(false);
 
   const fetchClientData = useCallback(async () => {
     if (!id) return;
@@ -190,6 +194,24 @@ export default function ClientDetailPage() {
   useEffect(() => {
     fetchClientData();
   }, [fetchClientData]);
+
+  const fetchClientDocuments = useCallback(async () => {
+    if (!id) return;
+    setDocsLoading(true);
+    try {
+      const res = await getClientFiles(id);
+      setClientDocs(res.data?.files || res.data || []);
+    } catch {
+      // Silently ignore — docs section is supplementary
+      setClientDocs([]);
+    } finally {
+      setDocsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchClientDocuments();
+  }, [fetchClientDocuments, processes]);
 
   // Loading state
   if (loading) {
@@ -502,6 +524,67 @@ export default function ClientDetailPage() {
                 })}
               </div>
             )}
+
+            {/* ─── DOCUMENTAÇÃO DO CLIENTE ─── */}
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <FileStack className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                  <h2 className="text-lg font-semibold">Documentação do Cliente</h2>
+                  <Badge className="bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300 border-0 text-xs font-medium px-2.5 py-0.5">
+                    {clientDocs.length}
+                  </Badge>
+                </div>
+              </div>
+
+              {docsLoading ? (
+                <Card className="rounded-xl shadow-sm">
+                  <CardContent className="flex items-center justify-center py-12">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </CardContent>
+                </Card>
+              ) : clientDocs.length === 0 ? (
+                <Card className="rounded-xl shadow-sm">
+                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="p-4 bg-muted/50 rounded-full mb-4">
+                      <FileStack className="h-10 w-10 text-muted-foreground/40" />
+                    </div>
+                    <p className="text-muted-foreground font-medium">Sem documentação</p>
+                    <p className="text-muted-foreground/70 text-sm mt-1">
+                      Este cliente ainda não tem documentos associados.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="rounded-xl shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardDescription>
+                      Documentos associados a este cliente
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nome</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <TableHead>Data</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {clientDocs.map((doc, idx) => (
+                          <TableRow key={doc.id || idx}>
+                            <TableCell className="font-medium">{doc.name || doc.filename || "-"}</TableCell>
+                            <TableCell>{doc.type || doc.category || "-"}</TableCell>
+                            <TableCell>{formatDate(doc.created_at || doc.uploaded_at)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </div>
         </div>
       </div>

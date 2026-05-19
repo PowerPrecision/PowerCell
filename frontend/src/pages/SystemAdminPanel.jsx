@@ -49,7 +49,9 @@ import {
   // Compliance
   ShieldCheck, Scale, ClipboardList,
   // Técnico
-  Shield, AlertTriangle, Database, Brain, Activity, ArrowRightLeft
+  Shield, AlertTriangle, Database, Brain, Activity, ArrowRightLeft,
+  // Finanças
+  Landmark
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { hasRole } from "../utils/roleUtils";
@@ -81,6 +83,7 @@ import DiagnosticsPage from "./DiagnosticsPage";
 import AIConfigPage from "./AIConfigPage";
 import BackgroundJobsPage from "./BackgroundJobsPage";
 import ProcessMigrationTab from "../components/admin/ProcessMigrationTab";
+import FinanceTab from "../components/admin/FinanceTab";
 
 const SystemAdminPanel = () => {
   const navigate = useNavigate();
@@ -161,6 +164,20 @@ const SystemAdminPanel = () => {
               {/* Separador visual */}
               <div className="w-px h-6 bg-border mx-1 self-center" />
 
+              {/* === TAB FINANÇAS (amber/gold) === */}
+              <TabsTrigger
+                value="financas"
+                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
+                data-testid="tab-financas"
+              >
+                <Landmark className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Finanças</span>
+                <span className="sm:hidden">Fin</span>
+              </TabsTrigger>
+
+              {/* Separador visual */}
+              <div className="w-px h-6 bg-border mx-1 self-center" />
+
               {/* === TAB CUSTOMIZAÇÃO (emerald/green) === */}
               <TabsTrigger
                 value="customizacao"
@@ -234,6 +251,13 @@ const SystemAdminPanel = () => {
           {/* Automações — AutomationPage em modo embedded */}
           <TabsContent value="automation" className="mt-6">
             <AutomationPage embedded={true} />
+          </TabsContent>
+
+          {/* ================================================================ */}
+          {/* === TAB FINANÇAS — FinanceTab (amber/gold) === */}
+          {/* ================================================================ */}
+          <TabsContent value="financas" className="mt-6">
+            <FinanceTab />
           </TabsContent>
 
           {/* ================================================================ */}

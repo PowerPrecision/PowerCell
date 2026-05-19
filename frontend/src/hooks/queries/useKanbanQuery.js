@@ -23,8 +23,9 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const fetchKanbanData = async (token, filters) => {
   const params = new URLSearchParams();
   
-  // FILTRO DE ESTADO ATIVO: Por defeito, mostra apenas processos ativos
-  params.append('view_mode', 'active_only');
+  // Incluir processos concluídos e desistências no Kanban
+  // (a coluna "Concluídos" e "Desistências" devem estar visíveis)
+  params.append('view_mode', 'all');
   // Visão global: mostrar todos os processos independentemente do utilizador
   params.append('show_all', 'true');
   
