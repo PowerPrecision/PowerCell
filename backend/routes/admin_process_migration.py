@@ -46,7 +46,7 @@ _migration_state = {
 
 # If a migration has been in "running" state for longer than this, it is
 # considered stale (e.g. server crashed mid-migration and state was lost).
-STALE_THRESHOLD_SECONDS = 600  # 10 minutes
+STALE_THRESHOLD_SECONDS = 120  # 2 minutes (Render restarts lose in-memory state)
 
 
 def _is_stale() -> bool:
@@ -594,8 +594,20 @@ async def dry_run_migration(
     if _migration_state["status"] == "running":
         raise HTTPException(
             status_code=409,
-            detail="Já existe uma migração em execução. Aguarde a conclusão."
+            detail="Já existe uma migração em execução. Aguarde a conclusão ou use o botão Reset se estiver preso."
         )
+
+    # Auto-reset non-running terminal states so we can re-run
+    if _migration_state["status"] in ("completed", "failed", "rolled_back"):
+        _migration_state.update({
+            "status": "idle",
+            "started_at": None,
+            "completed_at": None,
+            "started_by": None,
+            "last_report": None,
+            "mode": None,
+            "last_updated": now_iso(),
+        })
 
     background_tasks.add_task(run_migration_task, dry_run=True, started_by=user.get("email", "unknown"))
 
@@ -634,11 +646,25 @@ async def run_migration(
     # Auto-reset stale state (e.g. server crashed mid-migration)
     was_stale = _reset_stale_state()
 
+    # Allow re-running if previous migration completed, failed, or was rolled back.
+    # Only block if genuinely still running (and not stale).
     if _migration_state["status"] == "running":
         raise HTTPException(
             status_code=409,
-            detail="Já existe uma migração em execução. Aguarde a conclusão."
+            detail="Já existe uma migração em execução. Aguarde a conclusão ou use o botão Reset se estiver preso."
         )
+
+    # Auto-reset non-running terminal states so we can re-run
+    if _migration_state["status"] in ("completed", "failed", "rolled_back"):
+        _migration_state.update({
+            "status": "idle",
+            "started_at": None,
+            "completed_at": None,
+            "started_by": None,
+            "last_report": None,
+            "mode": None,
+            "last_updated": now_iso(),
+        })
 
     # Avisar se não há backup
     has_backup = await db.clients_legacy.count_documents({}) > 0
@@ -743,19 +769,20 @@ async def reset_migration_state(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
     """
-    Reset forçado do estado da migração de 'running' para 'idle'.
+    Reset forçado do estado da migração para 'idle'.
 
     Útil quando uma migração fica presa no estado 'running' (por exemplo,
-    o servidor reiniciou a meio e o estado em memória ficou inconsistente).
+    o servidor reiniciou a meio e o estado em memória ficou inconsistente),
+    ou quando se pretende re-executar a migração após uma execução anterior.
 
     Acesso: Apenas Admin, CEO ou Diretor
     """
-    if _migration_state["status"] != "running":
-        raise HTTPException(
-            status_code=400,
-            detail=f"O estado actual não é 'running' (actual: {_migration_state['status']}). "
-                   f"O reset só é permitido quando a migração está presa no estado 'running'."
-        )
+    if _migration_state["status"] == "idle":
+        return {
+            "success": True,
+            "message": "O estado já está em 'idle'. Nenhuma acção necessária.",
+            "current_state": _migration_state,
+        }
 
     previous_state = dict(_migration_state)
 
