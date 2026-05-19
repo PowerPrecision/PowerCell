@@ -115,11 +115,10 @@ async def auto_categorize_document_background(
     """
     Categoriza automaticamente um documento com IA em background,
     extraindo texto do PDF e aplicando classificação com GPT.
-
-    Porquê em background: a categorização com IA demora 3-10 segundos.
-    Executá-la de forma síncrona no upload atrasaria a resposta ao
-    utilizador significativamente. O utilizador vê o ficheiro
-    imediatamente, e a categoria aparece segundos depois via polling.
+    
+    ADICIONADO: Também executa o ai_document_analyzer para extrair
+    entidades (Nome, NIF, Morada, Validade) de documentos de 
+    identificação ou fiscal, guardando extracted_data nos metadados.
 
     Garante resiliência ao capturar TODOS os erros internamente
     (nunca crasha a tarefa de background) e registar no log para
@@ -167,6 +166,51 @@ async def auto_categorize_document_background(
         # Criar ou actualizar metadados - CORRIGIDO: verificar se existing é None
         doc_id = existing.get("id") if existing else str(uuid.uuid4())
         
+        # ====================================================================
+        # AI OCR: Extrair entidades de documentos de identificação/fiscal
+        # Se o documento for CC, IRS, ou similar, executar o analyzer
+        # para extrair Nome, NIF, Morada, Validade, etc.
+        # ====================================================================
+        extracted_data = None
+        ai_category = result.get("category", "")
+        ocr_categories = {"Identificação", "Identificacao", "Identidade", "Fiscal", "Financiamento", "Financeiros"}
+        should_run_ocr = (
+            ai_category in ocr_categories
+            or any(cat in (ai_category or "").lower() for cat in ["ident", "fiscal", "financeiro", "cc", "irs"])
+        )
+        
+        if should_run_ocr and len(file_content) > 0:
+            try:
+                from services.ai_document import analyze_document_from_base64
+                import base64 as b64
+                
+                # Determinar document_type para o analyzer
+                doc_type_map = {
+                    "Identificação": "cc", "Identidade": "cc", "Identificacao": "cc",
+                    "Fiscal": "irs", "Financeiros": "irs", "Financiamento": "irs",
+                }
+                document_type = doc_type_map.get(ai_category, "cc")
+                
+                b64_content = b64.b64encode(file_content).decode('utf-8')
+                mime_type = MIME_TYPE_PDF if filename.lower().endswith('.pdf') else "image/jpeg"
+                
+                ocr_result = await analyze_document_from_base64(b64_content, mime_type, document_type)
+                
+                if ocr_result and ocr_result.get("extracted_data"):
+                    extracted_data = ocr_result["extracted_data"]
+                    logger.info(f"[AUTO-CAT] OCR extraído: {list(extracted_data.keys())}")
+                    
+                    # Criar sugestões de conflito se o processo tem dados diferentes
+                    if extracted_data:
+                        process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+                        if process and not process.get("is_data_confirmed"):
+                            from services.data_conflict import create_conflict_suggestions
+                            await create_conflict_suggestions(process_id, extracted_data, filename, doc_id)
+                else:
+                    logger.info(f"[AUTO-CAT] OCR não retornou dados extraídos")
+            except Exception as ocr_err:
+                logger.warning(f"[AUTO-CAT] Erro no OCR (não bloqueia categorização): {ocr_err}")
+        
         metadata = {
             "id": doc_id,
             "process_id": process_id,
@@ -181,6 +225,7 @@ async def auto_categorize_document_background(
             "expiry_date": result.get("expiry_date"),  # Nova: data de validade
             "expiry_alert_sent": False,  # Nova: flag de alerta
             "extracted_text": extracted_text[:5000] if extracted_text else None,
+            "extracted_data": extracted_data,  # Dados OCR extraídos (Nome, NIF, Morada, etc.)
             "file_size": len(file_content),
             "mime_type": MIME_TYPE_PDF if filename.lower().endswith('.pdf') else None,
             "is_categorized": True,
@@ -1198,7 +1243,26 @@ async def delete_file_s3(
     request: Request,
     user: dict = Depends(get_current_user)
 ):
-    """Elimina um ficheiro do S3."""
+    """
+    Elimina um ficheiro do S3 com protecção contra eliminação cruzada.
+    
+    PROTECÇÃO DE ELIMINAÇÃO SEGURA (Regra de Scope Cruzado):
+    - Se o documento tem scope 'global' (pertence ao client_id), verifica
+      se está referenciado nos arrays de document_ids / checklist de OUTROS
+      processos ativos do mesmo cliente.
+    - Se estiver, retorna 409 Conflict com mensagem explícita indicando
+      qual o processo que referencia o documento.
+    - Documentos com scope 'process' ou sem scope são eliminados normalmente.
+    
+    Args:
+        client_id: ID do processo/cliente.
+        file_path: Caminho do ficheiro no S3.
+        request: Request object (para rate limiting).
+        user: Utilizador autenticado (injetado pelo Depends).
+    
+    Returns:
+        JSONResponse: Sucesso ou erro 409 com detalhes do conflito.
+    """
     process = await db.processes.find_one({"id": client_id})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
@@ -1230,12 +1294,101 @@ async def delete_file_s3(
         if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
             raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
     
+    # ====================================================================
+    # PROTECÇÃO DE ELIMINAÇÃO SEGURA — Scope Global
+    # Se o documento é 'global' do cliente (ex: Cartão de Cidadão),
+    # verificar se está referenciado por OUTROS processos ativos antes
+    # de eliminar. Isto previne a perda de documentos partilhados.
+    # ====================================================================
+    doc_metadata = await db.document_metadata.find_one({"s3_path": file_path}, {"_id": 0})
+    doc_scope = doc_metadata.get("doc_scope") if doc_metadata else None
+    doc_client_id = doc_metadata.get("client_id") if doc_metadata else None
+    
+    # Documentos de scope 'global' requerem verificação de referências cruzadas
+    if doc_scope == "global" or (doc_client_id and doc_client_id != client_id):
+        # Determinar o client_id do documento (pode ser o mesmo do processo ou diferente)
+        effective_client_id = doc_client_id or process.get("client_id") or client_id
+        
+        # Buscar TODOS os processos ativos deste cliente (excluindo o processo actual)
+        other_processes = await db.processes.find(
+            {
+                "client_id": effective_client_id,
+                "id": {"$ne": client_id},
+                "is_deleted": {"$ne": True},
+                "status": {"$nin": ["eliminados", "desistencias"]},
+            },
+            {"_id": 0, "id": 1, "process_number": 1, "client_name": 1, "status": 1, "document_ids": 1, "required_documents": 1, "checklist": 1}
+        ).to_list(100)
+        
+        # Verificar se o documento está referenciado em qualquer outro processo
+        for other_proc in other_processes:
+            # Verificar arrays que podem referenciar documentos
+            doc_ids = other_proc.get("document_ids") or []
+            required_docs = other_proc.get("required_documents") or []
+            checklist = other_proc.get("checklist") or []
+            
+            # Verificar se o s3_path ou o ID do documento está referenciado
+            doc_id = doc_metadata.get("id") if doc_metadata else None
+            
+            is_referenced = False
+            reference_source = ""
+            
+            # Verificar document_ids
+            if file_path in doc_ids or (doc_id and doc_id in doc_ids):
+                is_referenced = True
+                reference_source = "document_ids"
+            # Verificar required_documents
+            elif isinstance(required_docs, list):
+                for req_doc in required_docs:
+                    if isinstance(req_doc, dict):
+                        if req_doc.get("s3_path") == file_path or req_doc.get("id") == doc_id:
+                            is_referenced = True
+                            reference_source = "required_documents"
+                            break
+                    elif isinstance(req_doc, str) and (req_doc == file_path or req_doc == doc_id):
+                        is_referenced = True
+                        reference_source = "required_documents"
+                        break
+            # Verificar checklist
+            if not is_referenced and isinstance(checklist, list):
+                for check_item in checklist:
+                    if isinstance(check_item, dict):
+                        if check_item.get("s3_path") == file_path or check_item.get("document_id") == doc_id:
+                            is_referenced = True
+                            reference_source = "checklist"
+                            break
+            
+            # Verificar também se o S3 path começa com o prefixo da pasta do outro processo
+            if not is_referenced:
+                other_s3_folder = other_proc.get("s3_folder")
+                if other_s3_folder and file_path.startswith(other_s3_folder.rstrip('/') + '/'):
+                    is_referenced = True
+                    reference_source = "s3_folder"
+            
+            if is_referenced:
+                proc_number = other_proc.get("process_number", "N/A")
+                proc_name = other_proc.get("client_name", "Cliente")
+                proc_status = other_proc.get("status", "ativo")
+                filename = file_path.split('/')[-1] if '/' in file_path else file_path
+                
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Não é possível eliminar: Este documento está a ser utilizado "
+                        f"no Processo #{proc_number} ({proc_name})."
+                    )
+                )
+    
     # Guardar nome do ficheiro antes de eliminar
     filename = file_path.split('/')[-1] if '/' in file_path else file_path
     
     success = s3_service.delete_file(file_path)
     if not success:
         raise HTTPException(status_code=500, detail=ERROR_DELETE_FILE)
+    
+    # Eliminar metadados do documento
+    if doc_metadata:
+        await db.document_metadata.delete_one({"s3_path": file_path})
     
     # Registar no histórico
     await log_history(
@@ -3902,3 +4055,164 @@ async def delete_portal_document_request(
     })
 
     return {"success": True, "message": "Pedido de documento removido"}
+
+
+# ====================================================================
+# ENDPOINTS DE DADOS OCR / CONFLITOS DE DADOS
+# ====================================================================
+
+@router.get("/process/{process_id}/ocr-status", responses={404: HTTP_404_RESPONSE})
+async def get_document_ocr_status(
+    process_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Retorna o estado do OCR para todos os documentos de um processo.
+    
+    Permite ao frontend fazer polling após o upload para verificar
+    se o OCR já extraiu dados dos documentos.
+    
+    Args:
+        process_id: ID do processo.
+    
+    Returns:
+        Lista de documentos com extracted_data (se disponível).
+    """
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    docs = await db.document_metadata.find(
+        {"process_id": process_id},
+        {"_id": 0, "id": 1, "filename": 1, "ai_category": 1, "extracted_data": 1, "is_categorized": 1, "categorized_at": 1}
+    ).to_list(100)
+    
+    # Filtrar apenas documentos com extracted_data
+    docs_with_ocr = [d for d in docs if d.get("extracted_data")]
+    
+    return {
+        "success": True,
+        "total_documents": len(docs),
+        "documents_with_ocr": len(docs_with_ocr),
+        "documents": docs_with_ocr,
+    }
+
+
+@router.get("/process/{process_id}/data-suggestions", responses={404: HTTP_404_RESPONSE})
+async def get_data_suggestions(
+    process_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Retorna sugestões de conflito de dados pendentes para um processo.
+    
+    O DataConflictResolver no frontend consome este endpoint para
+    mostrar ao utilizador as diferenças entre dados atuais e dados OCR.
+    
+    Args:
+        process_id: ID do processo.
+    
+    Returns:
+        Lista de sugestões pendentes com campo, valor atual e valor sugerido.
+    """
+    from services.data_conflict import get_pending_suggestions
+    
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    suggestions = await get_pending_suggestions(process_id)
+    
+    return {
+        "success": True,
+        "process_id": process_id,
+        "is_data_confirmed": process.get("is_data_confirmed", False),
+        "suggestions": suggestions,
+        "count": len(suggestions),
+    }
+
+
+@router.post("/process/{process_id}/resolve-conflict", responses={404: HTTP_404_RESPONSE})
+async def resolve_data_conflict(
+    process_id: str,
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Resolve um conflito de dados individual.
+    
+    Body:
+        - suggestion_id: ID da sugestão (opcional, alternativa ao field)
+        - field: Nome do campo em conflito (alternativa ao suggestion_id)
+        - choice: 'current' (manter actual) ou 'ai' (aceitar valor da IA)
+    
+    Returns:
+        Resultado da resolução.
+    """
+    from services.data_conflict import resolve_suggestion
+    
+    suggestion_id = data.get("suggestion_id")
+    field = data.get("field")
+    choice = data.get("choice", "current")
+    
+    if not suggestion_id and not field:
+        raise HTTPException(status_code=400, detail="suggestion_id ou field é obrigatório")
+    
+    if choice not in ("current", "ai"):
+        raise HTTPException(status_code=400, detail="choice deve ser 'current' ou 'ai'")
+    
+    # Se não tem suggestion_id, procurar por field
+    if not suggestion_id:
+        suggestion = await db.data_suggestions.find_one(
+            {"process_id": process_id, "field": field, "resolved": False}
+        )
+        if not suggestion:
+            raise HTTPException(status_code=404, detail="Sugestão não encontrada para este campo")
+        suggestion_id = suggestion["id"]
+    
+    result = await resolve_suggestion(suggestion_id, choice, user.get("id"))
+    
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["message"])
+    
+    return result
+
+
+@router.post("/process/{process_id}/confirm-data", responses={404: HTTP_404_RESPONSE})
+async def confirm_process_data(
+    process_id: str,
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Confirma ou desconfirma os dados do processo.
+    
+    Quando confirmados, o sistema deixa de criar sugestões de conflito
+    automaticamente (o utilizador pode desbloquear depois).
+    
+    Body:
+        - confirmed: true para confirmar, false para desbloquear
+    """
+    confirmed = data.get("confirmed", True)
+    
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": {
+            "is_data_confirmed": confirmed,
+            "data_confirmed_at": now if confirmed else None,
+            "data_confirmed_by": user.get("id") if confirmed else None,
+            "updated_at": now,
+        }}
+    )
+    
+    return {
+        "success": True,
+        "message": "Dados confirmados com sucesso" if confirmed else "Dados desbloqueados",
+        "is_data_confirmed": confirmed,
+    }

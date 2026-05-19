@@ -67,6 +67,11 @@ class DocumentMetadata(BaseModel):
     process_id: str
     client_name: str
     
+    # Scope do documento: 'global' (pertence ao cliente, ex: CC) ou 'process' (pertence ao processo, ex: Caderneta Predial)
+    doc_scope: Optional[str] = None  # 'global' | 'process'
+    # client_id do cliente (diferente de process_id quando o doc é partilhado entre processos)
+    client_id: Optional[str] = None
+    
     # Localização do ficheiro
     s3_path: str
     filename: str

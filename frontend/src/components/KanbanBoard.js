@@ -396,6 +396,8 @@ const KanbanBoard = ({
                   onCardClick={handleCardClick}
                   draggingCard={draggingCard}
                   lockedProcesses={lockedProcesses}
+                  completedDays={completedDays}
+                  onCompletedDaysChange={setCompletedDays}
                 />
               ))}
             </div>
