@@ -11,6 +11,7 @@ ENDPOINTS:
   GET  /admin/process-migration/status    — Estado actual da migração
   POST /admin/process-migration/dry-run   — Simulação (não modifica a BD)
   POST /admin/process-migration/run       — Executar migração
+  POST /admin/process-migration/reset     — Reset forçado do estado (quando preso)
   POST /admin/process-migration/rollback  — Reverter migração
 ====================================================================
 """
@@ -34,13 +35,53 @@ logger = logging.getLogger(__name__)
 # ─── Estado da migração (in-memory) ──────────────────────────────────────────
 
 _migration_state = {
-    "status": "idle",          # idle | running | completed | failed
+    "status": "idle",          # idle | running | completed | failed | rolled_back
     "started_at": None,
     "completed_at": None,
     "started_by": None,
     "last_report": None,
     "mode": None,              # dry-run | apply
+    "last_updated": None,      # ISO timestamp of last state change
 }
+
+# If a migration has been in "running" state for longer than this, it is
+# considered stale (e.g. server crashed mid-migration and state was lost).
+STALE_THRESHOLD_SECONDS = 600  # 10 minutes
+
+
+def _is_stale() -> bool:
+    """Check whether the current 'running' state is stale (>10 min without update)."""
+    if _migration_state.get("status") != "running":
+        return False
+    started = _migration_state.get("started_at") or _migration_state.get("last_updated")
+    if not started:
+        return True  # No timestamp — treat as stale
+    try:
+        started_dt = datetime.fromisoformat(started)
+        elapsed = (datetime.now(timezone.utc) - started_dt).total_seconds()
+        return elapsed > STALE_THRESHOLD_SECONDS
+    except (ValueError, TypeError):
+        return True  # Unparseable timestamp — treat as stale
+
+
+def _reset_stale_state() -> bool:
+    """If the migration state is stale, reset it to idle. Returns True if reset."""
+    if _is_stale():
+        logger.warning(
+            f"⚠️  Stale migration state detected (running since {_migration_state.get('started_at')}), "
+            f"auto-resetting to idle"
+        )
+        _migration_state.update({
+            "status": "idle",
+            "started_at": None,
+            "completed_at": None,
+            "started_by": None,
+            "last_report": None,
+            "mode": None,
+            "last_updated": now_iso(),
+        })
+        return True
+    return False
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -110,14 +151,15 @@ async def run_migration_task(dry_run: bool, started_by: str):
     """
     global _migration_state
 
-    _migration_state = {
+    _migration_state.update({
         "status": "running",
         "started_at": now_iso(),
         "completed_at": None,
         "started_by": started_by,
         "last_report": None,
         "mode": "dry-run" if dry_run else "apply",
-    }
+        "last_updated": now_iso(),
+    })
 
     logger.info("=" * 60)
     logger.info(f"INICIANDO MIGRAÇÃO FASE 1 (modo={'DRY-RUN' if dry_run else 'APLICAR'})")
@@ -393,6 +435,7 @@ async def run_migration_task(dry_run: bool, started_by: str):
             "status": "completed",
             "completed_at": now_iso(),
             "last_report": stats,
+            "last_updated": now_iso(),
         })
 
         # Registar no sistema de logs
@@ -411,6 +454,7 @@ async def run_migration_task(dry_run: bool, started_by: str):
             "status": "failed",
             "completed_at": now_iso(),
             "last_report": {"errors": [str(e)]},
+            "last_updated": now_iso(),
         })
         await system_error_logger.log_error(
             error_type="migration_phase1_error",
@@ -484,9 +528,25 @@ async def get_migration_status(
     def pct(count, total):
         return round(count / total * 100, 1) if total > 0 else 0
 
+    # Detect stale "running" state
+    stale_info = None
+    if _migration_state.get("status") == "running":
+        if _is_stale():
+            started = _migration_state.get("started_at") or _migration_state.get("last_updated")
+            stale_info = {
+                "is_stale": True,
+                "started_at": started,
+                "stale_threshold_seconds": STALE_THRESHOLD_SECONDS,
+                "message": f"Migration has been in 'running' state for over {STALE_THRESHOLD_SECONDS // 60} minutes. "
+                           f"Use POST /admin/process-migration/reset to clear the stuck state.",
+            }
+        else:
+            stale_info = {"is_stale": False}
+
     return {
         "migration_needed": migration_needed,
         "current_state": _migration_state,
+        "stale_state": stale_info,
         "overview": {
             "total_clients": total_clients,
             "total_processes": total_processes,
@@ -530,6 +590,9 @@ async def dry_run_migration(
     - Quantos processos seriam migrados
     - Quais os erros encontrados
     """
+    # Auto-reset stale state (e.g. server crashed mid-migration)
+    was_stale = _reset_stale_state()
+
     if _migration_state["status"] == "running":
         raise HTTPException(
             status_code=409,
@@ -540,12 +603,16 @@ async def dry_run_migration(
 
     logger.info(f"🔄 Dry-run de migração iniciado por {user.get('email')}")
 
-    return {
+    result = {
         "success": True,
         "message": "Simulação (dry-run) iniciada em background. Verifique o estado para acompanhar o progresso.",
         "started_by": user.get("email"),
         "note": "A simulação não modifica a base de dados. Verifique o relatório antes de executar a migração real."
     }
+    if was_stale:
+        result["auto_reset"] = True
+        result["message"] += " (stale state was auto-reset)"
+    return result
 
 
 @router.post("/run")
@@ -566,6 +633,9 @@ async def run_migration(
 
     Acesso: Apenas Admin, CEO ou Diretor
     """
+    # Auto-reset stale state (e.g. server crashed mid-migration)
+    was_stale = _reset_stale_state()
+
     if _migration_state["status"] == "running":
         raise HTTPException(
             status_code=409,
@@ -581,13 +651,17 @@ async def run_migration(
 
     logger.info(f"🚀 Migração Fase 1 iniciada por {user.get('email')}")
 
-    return {
+    result = {
         "success": True,
         "message": "Migração Fase 1 iniciada em background. Um backup será criado automaticamente antes das alterações.",
         "started_by": user.get("email"),
         "warning": "A migração modifica a base de dados. Certifique-se de que fez um backup antes de prosseguir.",
         "note": "A migração pode demorar alguns minutos dependendo do volume de dados. Verifique o estado para acompanhar."
     }
+    if was_stale:
+        result["auto_reset"] = True
+        result["message"] += " (stale state was auto-reset)"
+    return result
 
 
 @router.post("/rollback")
@@ -646,6 +720,7 @@ async def rollback_migration(
         "status": "rolled_back",
         "completed_at": now_iso(),
         "last_report": {"rollback": restored},
+        "last_updated": now_iso(),
     })
 
     await system_error_logger.log_error(
@@ -662,4 +737,57 @@ async def rollback_migration(
         "message": "Rollback executado com sucesso. As colecções foram restauradas para o estado anterior à migração.",
         "restored": restored,
         "rolled_back_by": user.get("email"),
+    }
+
+
+@router.post("/reset")
+async def reset_migration_state(
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+):
+    """
+    Reset forçado do estado da migração de 'running' para 'idle'.
+
+    Útil quando uma migração fica presa no estado 'running' (por exemplo,
+    o servidor reiniciou a meio e o estado em memória ficou inconsistente).
+
+    Acesso: Apenas Admin, CEO ou Diretor
+    """
+    if _migration_state["status"] != "running":
+        raise HTTPException(
+            status_code=400,
+            detail=f"O estado actual não é 'running' (actual: {_migration_state['status']}). "
+                   f"O reset só é permitido quando a migração está presa no estado 'running'."
+        )
+
+    previous_state = dict(_migration_state)
+
+    _migration_state.update({
+        "status": "idle",
+        "started_at": None,
+        "completed_at": None,
+        "started_by": None,
+        "last_report": None,
+        "mode": None,
+        "last_updated": now_iso(),
+    })
+
+    logger.warning(
+        f"⚠️  Migration state manually reset from 'running' to 'idle' by {user.get('email')}. "
+        f"Previous state: {previous_state}"
+    )
+
+    await system_error_logger.log_error(
+        error_type="migration_state_reset",
+        message=f"Estado da migração resetado manualmente por {user.get('email')}",
+        component="admin_process_migration",
+        details={"previous_state": previous_state},
+        severity="warning",
+        request_path="/api/admin/process-migration/reset"
+    )
+
+    return {
+        "success": True,
+        "message": "Estado da migração resetado de 'running' para 'idle'. Pode agora iniciar uma nova migração.",
+        "previous_state": previous_state,
+        "reset_by": user.get("email"),
     }

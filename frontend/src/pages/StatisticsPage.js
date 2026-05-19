@@ -260,8 +260,8 @@ const StatisticsPage = () => {
                   Número de processos em cada fase do workflow
                 </CardDescription>
               </CardHeader>
-              <CardContent className="h-80">
-                <SafeChartContainer className="h-full min-w-0">
+              <CardContent>
+                <SafeChartContainer className="h-[300px] min-w-0">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={statusData}>
                       <CartesianGrid strokeDasharray="3 3" />
@@ -285,8 +285,8 @@ const StatisticsPage = () => {
                   Processos organizados por nível de prioridade
                 </CardDescription>
               </CardHeader>
-              <CardContent className="h-80">
-                <SafeChartContainer className="h-full min-w-0">
+              <CardContent>
+                <SafeChartContainer className="h-[300px] min-w-0">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -319,8 +319,8 @@ const StatisticsPage = () => {
                   Valor total de imóveis em cada fase
                 </CardDescription>
               </CardHeader>
-              <CardContent className="h-80">
-                <SafeChartContainer className="h-full min-w-0">
+              <CardContent>
+                <SafeChartContainer className="h-[300px] min-w-0">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={valorPorFaseData}>
                       <CartesianGrid strokeDasharray="3 3" />
@@ -346,9 +346,9 @@ const StatisticsPage = () => {
                     Leads em cada fase do processo de venda
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="h-80">
+                <CardContent>
                   {leadsStats?.funnel_data && Array.isArray(leadsStats.funnel_data) && (
-                    <SafeChartContainer className="h-full min-w-0">
+                    <SafeChartContainer className="h-[300px] min-w-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={leadsStats.funnel_data} layout="vertical">
                           <CartesianGrid strokeDasharray="3 3" />
@@ -375,9 +375,9 @@ const StatisticsPage = () => {
                     Distribuição por fonte de origem
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="h-80">
+                <CardContent>
                   {Array.isArray(leadsStats?.leads_by_source) && leadsStats.leads_by_source.length > 0 ? (
-                    <SafeChartContainer className="h-full min-w-0">
+                    <SafeChartContainer className="h-[300px] min-w-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
