@@ -75,8 +75,16 @@ async function fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = await fetch(url, options);
-      // Only retry on 503 (Service Unavailable — cold start or transient issue)
+      // Only retry on 503 from Render's proxy (cold start).
+      // Render's 503 returns HTML (non-JSON), while our app-level 503s return JSON.
+      // We clone the response to peek at the content-type without consuming the body.
       if (res.status === 503 && attempt < retries) {
+        const contentType = res.headers.get('content-type') || '';
+        // If it's JSON, it's an app-level 503 (not a cold start) — don't retry
+        if (contentType.includes('application/json')) {
+          return res;
+        }
+        // Non-JSON 503 (Render's HTML page) — likely a cold start, retry
         await new Promise((r) => setTimeout(r, FETCH_RETRY_DELAYS[attempt]));
         continue;
       }
@@ -417,8 +425,12 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
       if (res.ok && data.success) {
         setSuccess(data.message || 'Documentos obtidos com sucesso!');
         setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 2500);
+      } else if (res.ok && data.success === false) {
+        // App-level error returned as 200 + success:false (scraper unavailable, etc.)
+        setError(data.message || 'O serviço de obtenção automática não está disponível de momento. Por favor, faça download manualmente e envie os documentos através do botão de upload.');
       } else if (res.status === 503) {
-        setError(data.detail || 'O serviço de obtenção automática não está disponível de momento. Por favor, faça download manualmente e envie os documentos através do botão de upload.');
+        // Render cold start 503 (shouldn't reach here after fetchWithRetry, but handle gracefully)
+        setError(data.detail || 'O servidor está a iniciar. Por favor, aguarde uns segundos e tente novamente.');
       } else if (res.status === 401 && data.detail) {
         setError(data.detail);
       } else {

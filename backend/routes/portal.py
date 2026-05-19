@@ -1124,12 +1124,25 @@ async def fetch_financas_documents(
                     detail="As credenciais que introduziu estão incorretas. Verifique o seu NIF e password do Portal das Finanças e tente novamente."
                 )
 
-            # Erros do sistema (Playwright não instalado, timeout, etc.) → 503
+            # Erros do sistema (Playwright não instalado, timeout, etc.)
+            # RETORNAR 200 + success:false em vez de HTTPException 503
+            # Motivo: o frontend fetchWithRetry faz retry automático em 503
+            # (para cold starts do Render), o que causa múltiplos pedidos
+            # inúteis quando o scraper está permanentemente indisponível.
             logger.error(f"[PORTAL] Erro do scraper Finanças: {error_detail}")
-            raise HTTPException(
-                status_code=503,
-                detail="O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente do Portal das Finanças e envie os documentos através do botão de upload."
-            )
+
+            try:
+                await _send_portal_fetch_email(
+                    client_email, client_name, "financas", "error"
+                )
+            except Exception:
+                pass
+
+            return {
+                "success": False,
+                "error_type": "scraper_unavailable",
+                "message": "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente do Portal das Finanças e envie os documentos através do botão de upload."
+            }
 
     except HTTPException:
         raise
@@ -1143,10 +1156,12 @@ async def fetch_financas_documents(
         except:
             pass
 
-        raise HTTPException(
-            status_code=500,
-            detail="Ocorreu um erro ao obter os documentos. Tente novamente mais tarde ou contacte o seu consultor."
-        )
+        # Erro inesperado também retorna 200 + success:false para evitar retries
+        return {
+            "success": False,
+            "error_type": "unexpected_error",
+            "message": "Ocorreu um erro ao obter os documentos. Tente novamente mais tarde ou contacte o seu consultor."
+        }
 
 
 @router.post("/fetch-seguranca-social")
@@ -1243,12 +1258,25 @@ async def fetch_seguranca_social_documents(
                     detail="As credenciais que introduziu estão incorretas. Verifique o seu NISS e password da Segurança Social e tente novamente."
                 )
 
-            # Erros do sistema (Playwright não instalado, timeout, etc.) → 503
+            # Erros do sistema (Playwright não instalado, timeout, etc.)
+            # RETORNAR 200 + success:false em vez de HTTPException 503
+            # Motivo: o frontend fetchWithRetry faz retry automático em 503
+            # (para cold starts do Render), o que causa múltiplos pedidos
+            # inúteis quando o scraper está permanentemente indisponível.
             logger.error(f"[PORTAL] Erro do scraper Seg. Social: {error_detail}")
-            raise HTTPException(
-                status_code=503,
-                detail="O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
-            )
+
+            try:
+                await _send_portal_fetch_email(
+                    client_email, client_name, "seguranca_social", "error"
+                )
+            except Exception:
+                pass
+
+            return {
+                "success": False,
+                "error_type": "scraper_unavailable",
+                "message": "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
+            }
 
     except HTTPException:
         raise
@@ -1262,10 +1290,12 @@ async def fetch_seguranca_social_documents(
         except:
             pass
 
-        raise HTTPException(
-            status_code=500,
-            detail="Ocorreu um erro ao obter os documentos. Tente novamente mais tarde ou contacte o seu consultor."
-        )
+        # Erro inesperado também retorna 200 + success:false para evitar retries
+        return {
+            "success": False,
+            "error_type": "unexpected_error",
+            "message": "Ocorreu um erro ao obter os documentos. Tente novamente mais tarde ou contacte o seu consultor."
+        }
 
 
 # ====================================================================
