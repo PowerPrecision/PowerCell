@@ -1575,8 +1575,9 @@ async def get_kanban_board(
     mediador_id: Optional[str] = None,
     indexacao_id: Optional[str] = None,
     parceiro_id: Optional[str] = None,
-    view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all"),
+    view_mode: Optional[str] = Query("all", description="Modo de visualização: active_only, all"),
     show_all: Optional[bool] = Query(False, description="Visão global: ignorar filtro de utilizador"),
+    completed_days: Optional[int] = Query(30, description="Limitar concluídos/desistências aos últimos N dias (0 = sem limite)"),
     user: dict = Depends(require_staff())
 ):
     """
@@ -1586,8 +1587,12 @@ async def get_kanban_board(
     Supports multiple consultants and intermediaries per process.
     
     FILTRO DE ESTADO ATIVO (view_mode):
-    - 'active_only' (DEFAULT): Apenas processos em curso (exclui concluídos, desistências)
-    - 'all': Todos os processos (incluindo arquivo)
+    - 'active_only': Apenas processos em curso (exclui concluídos, desistências)
+    - 'all' (DEFAULT): Todos os processos (incluindo arquivo)
+    
+    FILTRO DE DATAS (completed_days):
+    - Limita processos concluídos/desistências aos últimos N dias
+    - Default: 30 dias. Use 0 para sem limite.
     """
     role = user["role"]
     user_id = user["id"]
@@ -1699,10 +1704,11 @@ async def get_kanban_board(
     
     # ====================================================================
     # FILTRO DE ESTADO ATIVO (view_mode) para Kanban
-    # Por defeito, o Kanban mostra apenas processos ativos (não arquivados)
+    # - active_only: Apenas processos em curso
+    # - all (DEFAULT): Processos ativos + concluídos/desistências (com filtro de datas)
     # ====================================================================
     if view_mode == "active_only":
-        # Excluir concluídos e desistências do Kanban normal
+        # Excluir concluídos e desistências do Kanban
         active_filter = {"status": {"$nin": INACTIVE_STATUSES}}
         if "$and" in query:
             query["$and"].append(active_filter)
@@ -1710,7 +1716,32 @@ async def get_kanban_board(
             query = {"$and": [query, active_filter]}
         else:
             query = active_filter
-    # view_mode == 'all': Mostra todos os processos (incluindo arquivo)
+    else:
+        # view_mode == 'all': Mostrar ativos + concluídos/desistências
+        # Se completed_days > 0, limitar processos inactivos aos últimos N dias
+        if completed_days and completed_days > 0:
+            from datetime import timedelta
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=completed_days)).isoformat()
+            # Processos ativos (sem restrição) OU inactivos dentro do período
+            inactive_within_period = {
+                "$and": [
+                    {"status": {"$in": ARCHIVED_STATUSES}},
+                    {"updated_at": {"$gte": cutoff_date}}
+                ]
+            }
+            active_or_recent = {
+                "$or": [
+                    {"status": {"$nin": INACTIVE_STATUSES}},
+                    inactive_within_period
+                ]
+            }
+            if "$and" in query:
+                query["$and"].append(active_or_recent)
+            elif query:
+                query = {"$and": [query, active_or_recent]}
+            else:
+                query = active_or_recent
+        # Se completed_days == 0, sem limite de datas (mostra tudo)
     
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
@@ -1865,7 +1896,9 @@ async def get_kanban_board(
         "total_processes": active_count,
         "total_inactive": inactive_count,
         "user_role": role,
-        "current_user_id": user_id
+        "current_user_id": user_id,
+        "view_mode": view_mode,
+        "completed_days": completed_days
     }
 
 

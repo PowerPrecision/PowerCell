@@ -9,6 +9,7 @@
  * - Refetch on window focus
  * - Integração com WebSocket para updates em tempo real
  * - Estados derivados (isLoading, isError, etc.)
+ * - Filtro de datas para processos concluídos (completed_days)
  * ====================================================================
  */
 
@@ -23,11 +24,15 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const fetchKanbanData = async (token, filters) => {
   const params = new URLSearchParams();
   
-  // Incluir processos concluídos e desistências no Kanban
-  // (a coluna "Concluídos" e "Desistências" devem estar visíveis)
-  params.append('view_mode', 'all');
+  // view_mode=all: mostrar processos ativos + concluídos/desistências
+  params.append('view_mode', filters.viewMode || 'all');
   // Visão global: mostrar todos os processos independentemente do utilizador
   params.append('show_all', 'true');
+  
+  // Filtro de datas para processos concluídos (últimos N dias, 0 = sem limite)
+  if (filters.completedDays !== undefined && filters.completedDays !== null) {
+    params.append('completed_days', String(filters.completedDays));
+  }
   
   const { consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter } = filters;
   
@@ -65,6 +70,7 @@ const fetchKanbanData = async (token, filters) => {
  * @param {string} options.indexacaoFilter - Filtro de indexação
  * @param {string} options.parceiroFilter - Filtro de parceiro
  * @param {boolean} options.enabled - Se a query deve executar
+ * @param {number} options.completedDays - Limitar concluídos aos últimos N dias (default 30, 0 = sem limite)
  * @returns {Object} Query result com data, isLoading, isError, etc.
  */
 export function useKanbanQuery(options = {}) {
@@ -74,6 +80,7 @@ export function useKanbanQuery(options = {}) {
     mediadorFilter = 'all',
     indexacaoFilter = 'all',
     parceiroFilter = 'all',
+    completedDays = 30,
     enabled = true,
   } = options;
 
@@ -83,6 +90,8 @@ export function useKanbanQuery(options = {}) {
     mediador: mediadorFilter,
     indexacao: indexacaoFilter,
     parceiro: parceiroFilter,
+    completedDays,
+    viewMode: 'all',
   };
 
   const query = useQuery({
@@ -92,6 +101,8 @@ export function useKanbanQuery(options = {}) {
       mediadorFilter,
       indexacaoFilter,
       parceiroFilter,
+      completedDays,
+      viewMode: 'all',
     }),
     enabled: !!token && enabled,
     // staleTime de 1 minuto é ideal para Kanban
@@ -108,6 +119,8 @@ export function useKanbanQuery(options = {}) {
     kanbanData: query.data || { columns: [], total_processes: 0 },
     columns: query.data?.columns || [],
     totalProcesses: query.data?.total_processes || 0,
+    totalInactive: query.data?.total_inactive || 0,
+    completedDays: query.data?.completed_days ?? completedDays,
     
     // Estados de loading
     isLoading: query.isLoading,

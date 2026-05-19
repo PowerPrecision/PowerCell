@@ -27,11 +27,13 @@ import {
   List, 
   LayoutGrid,
   Wifi,
-  WifiOff 
+  WifiOff,
+  Archive
 } from 'lucide-react';
 
 const KanbanHeader = memo(({
   totalProcesses,
+  totalInactive,
   visibleCount,
   isConnected,
   searchTerm,
@@ -43,6 +45,8 @@ const KanbanHeader = memo(({
   onDateFilterChange,
   urgencyFilter,
   onUrgencyFilterChange,
+  completedDays,
+  onCompletedDaysChange,
   onScrollLeft,
   onScrollRight,
 }) => {
@@ -53,7 +57,8 @@ const KanbanHeader = memo(({
   const handleClearFilters = useCallback(() => {
     onDateFilterChange?.('all');
     onUrgencyFilterChange?.('all');
-  }, [onDateFilterChange, onUrgencyFilterChange]);
+    onCompletedDaysChange?.(30);
+  }, [onDateFilterChange, onUrgencyFilterChange, onCompletedDaysChange]);
 
   return (
     <>
@@ -63,7 +68,7 @@ const KanbanHeader = memo(({
           <div>
             <h2 className="text-xl font-bold">Quadro Geral de Processos</h2>
             <p className="text-sm text-muted-foreground">
-              {totalProcesses} processos • Arraste para mover entre fases ou clique para ver detalhes
+              {totalProcesses} processos{totalInactive > 0 ? ` • ${totalInactive} concluídos/desistências` : ''} • Arraste para mover entre fases ou clique para ver detalhes
             </p>
           </div>
           {/* WebSocket Connection Status Indicator */}
@@ -170,7 +175,22 @@ const KanbanHeader = memo(({
           </SelectContent>
         </Select>
         
-        {(dateFilter !== 'all' || urgencyFilter !== 'all') && (
+        {/* Filtro de Concluídos — período de datas */}
+        <Select value={String(completedDays)} onValueChange={(v) => onCompletedDaysChange?.(Number(v))}>
+          <SelectTrigger className="h-8 w-full sm:w-[160px] text-xs" data-testid="kanban-completed-filter">
+            <Archive className="h-3 w-3 mr-1" />
+            <SelectValue placeholder="Concluídos" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7">Últimos 7 dias</SelectItem>
+            <SelectItem value="15">Últimos 15 dias</SelectItem>
+            <SelectItem value="30">Últimos 30 dias</SelectItem>
+            <SelectItem value="90">Últimos 90 dias</SelectItem>
+            <SelectItem value="0">Todos (sem limite)</SelectItem>
+          </SelectContent>
+        </Select>
+        
+        {(dateFilter !== 'all' || urgencyFilter !== 'all' || completedDays !== 30) && (
           <Button 
             variant="ghost" 
             size="sm" 

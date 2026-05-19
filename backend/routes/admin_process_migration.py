@@ -149,8 +149,6 @@ async def run_migration_task(dry_run: bool, started_by: str):
     """
     Executar a migração completa em background.
     """
-    global _migration_state
-
     _migration_state.update({
         "status": "running",
         "started_at": now_iso(),

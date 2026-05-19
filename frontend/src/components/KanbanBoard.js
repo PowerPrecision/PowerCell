@@ -110,6 +110,7 @@ const KanbanBoard = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
   const [urgencyFilter, setUrgencyFilter] = useState('all');
+  const [completedDays, setCompletedDays] = useState(30);
   const [viewMode, setViewMode] = useState('kanban');
   const [scrollPosition, setScrollPosition] = useState(0);
   
@@ -141,6 +142,7 @@ const KanbanBoard = ({
     kanbanData,
     columns,
     totalProcesses,
+    totalInactive,
     isLoading,
     isFetching,
     isError,
@@ -148,6 +150,7 @@ const KanbanBoard = ({
   } = useKanbanQuery({
     token,
     ...filters,
+    completedDays,
   });
 
   // === REACT QUERY - WEBSOCKET REAL-TIME ===
@@ -175,9 +178,9 @@ const KanbanBoard = ({
   // Never auto-collapse completed/desistencia columns — users need to see them
   useEffect(() => {
     if (columns.length > 0 && collapsedColumns.size === 0) {
-      const PRESERVED_COLUMNS = new Set(['concluidos', 'desistencias']);
+      const PRESERVED_COLUMN_NAMES = new Set(['concluidos', 'desistencias']);
       const emptyColumnIds = columns
-        .filter(col => col.count === 0 && !PRESERVED_COLUMNS.has(col.id))
+        .filter(col => col.count === 0 && !PRESERVED_COLUMN_NAMES.has(col.name))
         .map(col => col.id);
       if (emptyColumnIds.length > 0) {
         setCollapsedColumns(new Set(emptyColumnIds));
@@ -302,7 +305,7 @@ const KanbanBoard = ({
 
         return matchesSearch && matchesDate && matchesUrgency;
       }),
-      column.id
+      column.name
     ),
   }));
 
@@ -343,6 +346,7 @@ const KanbanBoard = ({
       {/* Header */}
       <KanbanHeader
         totalProcesses={totalProcesses}
+        totalInactive={totalInactive}
         visibleCount={filteredColumns.reduce((acc, col) => acc + col.processes.length, 0)}
         isConnected={isConnected}
         searchTerm={searchTerm}
@@ -354,6 +358,8 @@ const KanbanBoard = ({
         onDateFilterChange={setDateFilter}
         urgencyFilter={urgencyFilter}
         onUrgencyFilterChange={setUrgencyFilter}
+        completedDays={completedDays}
+        onCompletedDaysChange={setCompletedDays}
         onScrollLeft={() => scrollContainer('left')}
         onScrollRight={() => scrollContainer('right')}
         isFetching={isFetching}
