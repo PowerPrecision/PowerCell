@@ -2426,7 +2426,16 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     # personal_data, titular2_data, financial_data na resposta
     process = await populate_client_data(process)
     
-    return ProcessResponse(**process)
+    # Garantir campos obrigatórios para ProcessResponse (processos antigos
+    # podem não ter client_id após a refatoração Fase 1→2)
+    process.setdefault("client_id", process.get("client_id") or "")
+    
+    try:
+        return ProcessResponse(**process)
+    except Exception as e:
+        logger.warning(f"Erro de validação ProcessResponse para processo {process_id}: {e}")
+        # Fallback: retornar o dict diretamente (ignora response_model)
+        return process
 
 
 @router.get("/{process_id}/alerts")

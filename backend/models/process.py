@@ -187,7 +187,7 @@ class ProcessResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     process_number: Optional[int] = None  
-    client_id: str = Field(..., description="Apenas guardamos a referência para a pessoa fiscal")
+    client_id: Optional[str] = Field(None, description="Referência para a pessoa fiscal (pode estar em falta em processos antigos)")
     client_ids: Optional[List[str]] = None  
     process_type: Optional[str] = None
     type: Optional[str] = None  
