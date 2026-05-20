@@ -1775,6 +1775,26 @@ const SystemConfigPage = ({ embedded = false }) => {
         }
       }
     }
+    // Pré-processar audit_trail: critical_fields (textarea → lista) e retention_days (string → int)
+    if (section === "audit_trail") {
+      if (typeof processedData.critical_fields === "string") {
+        const trimmed = processedData.critical_fields.trim();
+        if (!trimmed) {
+          processedData.critical_fields = ["financial_data", "credit_data", "status"];
+        } else {
+          try {
+            const parsed = JSON.parse(trimmed);
+            processedData.critical_fields = Array.isArray(parsed) ? parsed : ["financial_data", "credit_data", "status"];
+          } catch {
+            processedData.critical_fields = ["financial_data", "credit_data", "status"];
+          }
+        }
+      }
+      if (typeof processedData.retention_days === "string") {
+        const val = parseInt(processedData.retention_days, 10);
+        processedData.retention_days = isNaN(val) ? 365 : val;
+      }
+    }
 
     const response = await fetch(`${API_URL}/api/system-config/${section}`, {
       method: "PATCH",

@@ -235,10 +235,26 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
         # Se critical_fields é uma string, tentar parsear para lista
         if isinstance(current.get("critical_fields"), str):
             import json
+            raw = current["critical_fields"].strip()
+            if not raw:
+                current["critical_fields"] = ["financial_data", "credit_data", "status"]
+            else:
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        current["critical_fields"] = parsed
+                    else:
+                        logger.warning(f"critical_fields não é uma lista: {type(parsed)}, a usar default")
+                        current["critical_fields"] = ["financial_data", "credit_data", "status"]
+                except json.JSONDecodeError:
+                    logger.warning(f"critical_fields não é JSON válido: '{raw[:100]}', a usar default")
+                    current["critical_fields"] = ["financial_data", "credit_data", "status"]
+        # retention_days pode vir como string do frontend
+        if isinstance(current.get("retention_days"), str):
             try:
-                current["critical_fields"] = json.loads(current["critical_fields"])
-            except json.JSONDecodeError:
-                logger.warning("critical_fields não é um JSON válido, a manter valor original")
+                current["retention_days"] = int(current["retention_days"])
+            except (ValueError, TypeError):
+                current["retention_days"] = 365
         config.audit_trail = AuditTrailConfig(**current)
     elif section == "system_smtp":
         current = config.system_smtp.model_dump()
