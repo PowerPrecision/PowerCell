@@ -1221,7 +1221,7 @@ function PortalLoginScreen({ onLoginSuccess, client_id }) {
 // MAIN CLIENT PORTAL
 // ====================================================================
 export default function ClientPortal() {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('A carregar o seu processo...');
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
@@ -1255,24 +1255,106 @@ export default function ClientPortal() {
     }
   }, []);
 
+  // ── Resolve magic link (apenas extrai client_id, NÃO carrega dados) ──
+  // Os dados do portal só são carregados APÓS o login ser verificado.
   useEffect(() => {
     let cancelled = false;
     const token = rawToken.current;
 
-    if (!token) { setError('Link inválido. Contacte o seu consultor.'); setLoading(false); return; }
+    if (!token) {
+      setError('Link inválido. Contacte o seu consultor.');
+      setLoading(false);
+      return;
+    }
 
     const isShortToken = !token.includes('.');
 
-    const fetchStatus = async (jwt) => {
-      if (cancelled) return;
+    const init = async () => {
       try {
-        sessionStorage.setItem('portal_token', jwt);
+        if (isShortToken) {
+          // Resolver magic link para obter client_id (não carregar dados ainda)
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 15000);
+          const r = await fetch(`${BACKEND_URL}/portal/resolve/${token}`, { signal: ctrl.signal });
+          clearTimeout(t);
+          if (cancelled) return;
+          if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            throw new Error(e.detail || 'Link não encontrado ou expirado');
+          }
+          const resolved = await r.json();
+          if (cancelled) return;
+          // Guardar client_id para o ecrã de login usar
+          if (resolved.client_id) {
+            setClientId(resolved.client_id);
+            sessionStorage.setItem('portal_client_id', resolved.client_id);
+          }
+        } else {
+          // Token JWT direto — guardar token e extrair client_id
+          // (não carregar dados — o login ainda é obrigatório)
+          sessionStorage.setItem('portal_token', token);
+          // Extrair client_id do processo via /portal/status (sem mostrar dados)
+          // Isto é necessário para o ecrã de login saber qual client_id verificar
+          try {
+            const ctrl2 = new AbortController();
+            const t2 = setTimeout(() => ctrl2.abort(), 10000);
+            const statusRes = await fetch(`${BACKEND_URL}/portal/status`, {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: ctrl2.signal,
+            });
+            clearTimeout(t2);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              const cid = statusData?.process?.client_id;
+              if (cid) {
+                setClientId(cid);
+                sessionStorage.setItem('portal_client_id', cid);
+              }
+            }
+          } catch {
+            // Se falhar, o utilizador pode ainda assim introduzir o client_id manualmente
+          }
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.name === 'AbortError' ? 'Ligação demorou demais. Tente novamente.' : err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    init();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Carregar dados do portal APENAS quando isVerified for true ──
+  useEffect(() => {
+    if (!isVerified) return;
+    let cancelled = false;
+
+    const fetchStatus = async () => {
+      const jwt = sessionStorage.getItem('portal_token');
+      if (!jwt) {
+        setError('Sessão inválida. Recarregue a página.');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setLoadingMessage('A carregar o seu processo...');
+      try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 20000);
-        const res = await fetch(`${BACKEND_URL}/portal/status`, { headers: { Authorization: `Bearer ${jwt}` }, signal: ctrl.signal });
+        const res = await fetch(`${BACKEND_URL}/portal/status`, {
+          headers: { Authorization: `Bearer ${jwt}` },
+          signal: ctrl.signal,
+        });
         clearTimeout(t);
         if (cancelled) return;
-        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || 'Erro ao carregar dados'); }
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.detail || 'Erro ao carregar dados');
+        }
         const result = await res.json();
         if (cancelled) return;
         setData(result);
@@ -1280,36 +1362,14 @@ export default function ClientPortal() {
       } catch (err) {
         if (cancelled) return;
         setError(err.name === 'AbortError' ? 'Ligação demorou demais. Tente novamente.' : err.message);
-      } finally { if (!cancelled) setLoading(false); }
-    };
-
-    const init = async () => {
-      try {
-        if (isShortToken) {
-          setLoadingMessage('A verificar link...');
-          const ctrl = new AbortController();
-          const t = setTimeout(() => ctrl.abort(), 15000);
-          const r = await fetch(`${BACKEND_URL}/portal/resolve/${token}`, { signal: ctrl.signal });
-          clearTimeout(t);
-          if (cancelled) return;
-          if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Link não encontrado ou expirado'); }
-          const jwt = (await r.json())?.token;
-          if (!jwt) throw new Error('Erro ao resolver link');
-          setLoadingMessage('A carregar o seu processo...');
-          await fetchStatus(jwt);
-        } else {
-          await fetchStatus(token);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(err.name === 'AbortError' ? 'Ligação demorou demais. Tente novamente.' : err.message);
-        setLoading(false);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
 
-    init();
+    fetchStatus();
     return () => { cancelled = true; };
-  }, [refreshKey]);
+  }, [isVerified, refreshKey]);
 
   const handleUploadSuccess = useCallback(() => setRefreshKey((k) => k + 1), []);
 
@@ -1458,33 +1518,8 @@ export default function ClientPortal() {
 
   // ── Login Gate — Se não está verificado, mostrar ecrã de login ──
   const handleLoginSuccess = useCallback((token) => {
+    // Login verificado — o useEffect [isVerified, refreshKey] vai carregar os dados
     setIsVerified(true);
-    // Após login bem-sucedido, carregar os dados do portal
-    setLoading(true);
-    setLoadingMessage('A carregar o seu processo...');
-    (async () => {
-      try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 20000);
-        const res = await fetch(`${BACKEND_URL}/portal/status`, {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: ctrl.signal,
-        });
-        clearTimeout(t);
-        if (res.ok) {
-          const result = await res.json();
-          setData(result);
-          setError(null);
-        } else {
-          const e = await res.json().catch(() => ({}));
-          setError(e.detail || 'Erro ao carregar dados');
-        }
-      } catch (err) {
-        setError(err.name === 'AbortError' ? 'Ligação demorou demais.' : err.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
   }, []);
 
   if (!isVerified) {

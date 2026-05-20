@@ -194,9 +194,27 @@ async def resolve_portal_token(short_id: str):
     except Exception:
         raise HTTPException(status_code=401, detail="Link inválido.")
 
+    # Obter client_id (pode não existir em tokens antigos)
+    client_id = token_doc.get("client_id")
+
+    # Fallback: buscar client_id do processo se não estiver no token
+    if not client_id and token_doc.get("process_id"):
+        process = await db.processes.find_one(
+            {"id": token_doc["process_id"]},
+            {"client_id": 1, "_id": 0}
+        )
+        if process:
+            client_id = process.get("client_id")
+            # Atualizar o token doc para futuras resoluções
+            await db.portal_tokens.update_one(
+                {"short_id": short_id},
+                {"$set": {"client_id": client_id or ""}}
+            )
+
     return {
         "token": token_doc["jwt_token"],
         "process_id": token_doc.get("process_id"),
+        "client_id": client_id,
     }
 
 
