@@ -277,13 +277,10 @@ services:
   #   - Security headers: X-Frame-Options, X-XSS-Protection
   # O render.yaml Blueprint NÃO suporta estes campos.
   # ────────────────────────────────────────────────────────────────
-  - type: web
+  - type: static_site
     name: powercell-frontend
-    runtime: static
     buildCommand: cd frontend && yarn install && yarn build
-    staticPublishPath: frontend/dist
-    plan: free
-    region: frankfurt
+    publish: frontend/dist
     branch: dev
 
     envVars:
