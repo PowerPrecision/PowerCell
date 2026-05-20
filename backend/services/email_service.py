@@ -419,12 +419,12 @@ def _send_via_resend(
         logger.info(f"[Resend] Email enviado com sucesso: id={result.get('id', 'N/A')}")
         return result
 
-    except resend.exceptions.AuthenticationError as e:
-        error_msg = f"Resend AuthenticationError: API key inválida ou expirada. Detalhe: {str(e)}"
+    except resend.exceptions.InvalidApiKeyError as e:
+        error_msg = f"Resend InvalidApiKeyError: API key inválida ou expirada. Detalhe: {str(e)}"
         logger.error(f"[Resend] {error_msg}")
         raise Exception(error_msg)
-    except resend.exceptions.RateLimitError as e:
-        error_msg = f"Resend RateLimitError: Limite de envio atingido. Detalhe: {str(e)}"
+    except resend.exceptions.ApplicationError as e:
+        error_msg = f"Resend ApplicationError: Erro da API (possível limite de envio ou domínio não verificado). Detalhe: {str(e)}"
         logger.error(f"[Resend] {error_msg}")
         raise Exception(error_msg)
     except Exception as e:
