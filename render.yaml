@@ -265,23 +265,24 @@ services:
         sync: false
 
   # ────────────────────────────────────────────────────────────────
-  # 3. FRONTEND — React SPA (Static Site)
+  # 3. FRONTEND — React SPA (Web Service com serve)
   # ────────────────────────────────────────────────────────────────
-  # Build com Vite, servido como ficheiros estáticos.
+  # Build com Vite, servido via `serve` como web service.
   # O REACT_APP_BACKEND_URL é injetado no build time.
   #
-  # NOTA: routes e headers para SPA rewrite e cache devem ser
-  # configurados manualmente no Render Dashboard → Settings:
-  #   - Rewrite rule: /* → /index.html
-  #   - Headers: Cache-Control em /assets/*
-  #   - Security headers: X-Frame-Options, X-XSS-Protection
-  # O render.yaml Blueprint NÃO suporta estes campos.
+  # NOTA: O tipo static_site foi descontinuado no Render Blueprint.
+  # Usamos type: web + npx serve para servir os ficheiros estáticos.
+  # A flag -s garante SPA rewrite (/* → /index.html).
   # ────────────────────────────────────────────────────────────────
-  - type: static_site
+  - type: web
     name: powercell-frontend
-    buildCommand: cd frontend && yarn install && yarn build
-    publish: frontend/dist
+    runtime: node
+    plan: starter
+    region: frankfurt
     branch: dev
+    buildCommand: cd frontend && yarn install && yarn build
+    startCommand: npx serve frontend/dist -s -l $PORT
+    numInstances: 1
 
     envVars:
       # ── Backend URL (injetado no build time) ──
