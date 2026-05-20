@@ -50,6 +50,10 @@ async def _create_calendar_event_for_visit(visit: dict):
 
         property_name = visit.get("property_title") or "Imóvel"
         scheduled_date = visit.get("scheduled_date")
+        client_name_suffix = ""
+        client_name_val = visit.get("client_name", "")
+        if client_name_val:
+            client_name_suffix = f" — {client_name_val}"
 
         consultor_id = visit.get("consultor_id")
         process_id = visit.get("client_id")  # client_id = process_id
@@ -62,8 +66,7 @@ async def _create_calendar_event_for_visit(visit: dict):
             "visit_id": visit.get("id"),  # Referência cruzada
             "title": f"Visita Imóvel: {property_name}",
             "description": (
-                f"Visita agendada a '{property_name}'"
-                f"{f' — {visit.get(\"client_name\", \"\")}' if visit.get('client_name') else ''}"
+                f"Visita agendada a '{property_name}'{client_name_suffix}"
                 f"\nNotas: {visit.get('notes', '—')}"
             ),
             "due_date": scheduled_date or now,
