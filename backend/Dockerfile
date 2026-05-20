@@ -6,19 +6,19 @@
 # e resolve os erros de exit code 1 no Render.
 #
 # A imagem base já inclui:
-#   - Python 3.10
+#   - Python 3.12
 #   - Chromium + todas as dependências de sistema
 #   - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 #
 # IMPORTANTE: a versão do pacote playwright em requirements.txt DEVE
-# corresponder à versão desta imagem (v1.42.0) para garantir que o
+# corresponder à versão desta imagem (v1.52.0) para garantir que o
 # binário do browser pré-instalado é compatível com o package Python.
 #
 # Build: docker build -t powercell-backend .
 # Run:   docker run -p 8001:8001 powercell-backend
 # ====================================================================
 
-FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.52.0-noble
 
 # Prevent interactive prompts (tzdata, etc.)
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -47,7 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # ── Instalar dependências Python ──
-# O pacote playwright em requirements.txt deve ser ==1.42.0 para
+# O pacote playwright em requirements.txt deve ser ==1.52.0 para
 # compatibilidade com o Chromium pré-instalado na imagem base.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

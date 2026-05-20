@@ -211,4 +211,5 @@ zipp==3.23.0
 zope.event==6.1
 zope.interface==8.2
 reportlab==4.2.5
-playwright==1.42.0
+playwright==1.52.0
+playwright-stealth==1.0.6

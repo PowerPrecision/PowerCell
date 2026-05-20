@@ -12,7 +12,7 @@
 # interno em worker.py). Em DEV, sai imediatamente sem gastar RAM.
 # ====================================================================
 
-FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.52.0-noble
 
 # Prevent interactive prompts (tzdata, etc.)
 ENV DEBIAN_FRONTEND=noninteractive \

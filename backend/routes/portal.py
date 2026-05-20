@@ -1409,10 +1409,22 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
     if not result.success:
         error_map = {
             "credenciais_invalidas": "credenciais_invalidas",
+            "mfa_requerido": "mfa_requerido",
             "timeout": "timeout_scraper",
             "sem_documentos": "sem_documentos",
+            "selector_desatualizado": "selector_desatualizado",
         }
-        return {"success": False, "error": error_map.get(result.error, result.error or "erro_desconhecido")}
+        response = {
+            "success": False,
+            "error": error_map.get(result.error, result.error or "erro_desconhecido"),
+            "step_failed": result.step_failed,
+        }
+        # Incluir screenshot para debug (se disponível)
+        if result.screenshot_b64:
+            response["screenshot_available"] = True
+            # Não enviar o base64 no response (pode ser grande) — guardar no log
+            logger.info(f"[PORTAL] Screenshot disponível para debug ({len(result.screenshot_b64)} chars)")
+        return response
 
     # ── Upload dos documentos para o S3 e registo na BD ──
     now = datetime.now(timezone.utc).isoformat()
@@ -1501,10 +1513,20 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
     if not result.success:
         error_map = {
             "credenciais_invalidas": "credenciais_invalidas",
+            "mfa_requerido": "mfa_requerido",
             "timeout": "timeout_scraper",
             "sem_documentos": "sem_documentos",
+            "selector_desatualizado": "selector_desatualizado",
         }
-        return {"success": False, "error": error_map.get(result.error, result.error or "erro_desconhecido")}
+        response = {
+            "success": False,
+            "error": error_map.get(result.error, result.error or "erro_desconhecido"),
+            "step_failed": result.step_failed,
+        }
+        if result.screenshot_b64:
+            response["screenshot_available"] = True
+            logger.info(f"[PORTAL] Screenshot disponível para debug ({len(result.screenshot_b64)} chars)")
+        return response
 
     # ── Upload dos documentos para o S3 e registo na BD ──
     now = datetime.now(timezone.utc).isoformat()
