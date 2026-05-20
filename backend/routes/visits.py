@@ -56,7 +56,7 @@ async def _create_calendar_event_for_visit(visit: dict):
             client_name_suffix = f" — {client_name_val}"
 
         consultor_id = visit.get("consultor_id")
-        process_id = visit.get("client_id")  # client_id = process_id
+        process_id = visit.get("process_id") or visit.get("client_id")  # process_id explícito ou fallback para client_id
 
         assigned_users = [uid for uid in [consultor_id] if uid]
 
@@ -110,7 +110,7 @@ async def _update_portal_visit_status(visit: dict, new_status: str, scheduled_da
     Quando é recusada/cancelada, atualiza o estado no portal.
     """
     try:
-        process_id = visit.get("client_id")  # client_id = process_id
+        process_id = visit.get("process_id") or visit.get("client_id")  # process_id explícito ou fallback
         visit_id = visit.get("id")
 
         update_fields = {
@@ -540,7 +540,7 @@ async def update_visit(
 
     # ── Sincronização com Calendário e Portal ──
     if new_status and new_status != old_status:
-        # Status → 'agendada': Criar evento no calendário + atualizar portal
+        # Status → 'agendada': Criar evento no calendário + atualizar portal + notificar cliente
         if new_status == "agendada":
             scheduled_date = data.get("scheduled_date") or visit.get("scheduled_date")
 
@@ -552,6 +552,29 @@ async def update_visit(
 
             # Atualizar portal do cliente
             await _update_portal_visit_status(visit, "agendada", scheduled_date)
+
+            # Notificar cliente por email sobre o agendamento confirmado
+            try:
+                from services.notification_service import send_notification_with_preference_check
+                client_email_addr = visit.get("client_email")
+                if client_email_addr and scheduled_date:
+                    try:
+                        dt = datetime.fromisoformat(scheduled_date.replace("Z", "+00:00"))
+                        formatted_date = dt.strftime("%d/%m/%Y às %H:%M")
+                    except Exception:
+                        formatted_date = scheduled_date
+                    
+                    property_name = visit.get("property_title", "Imóvel")
+                    await send_notification_with_preference_check(
+                        client_email_addr,
+                        "Visita Agendada",
+                        f"A sua visita a '{property_name}' foi agendada para {formatted_date}. "
+                        f"O seu consultor entrará em contacto se necessário.",
+                        notification_type="visit_update",
+                    )
+                    logger.info(f"[VISITS] Cliente notificado do agendamento: {client_email_addr}")
+            except Exception as e:
+                logger.warning(f"[VISITS] Erro ao notificar cliente do agendamento: {e}")
 
         # Status → 'cancelada' ou 'recusada': Remover evento do calendário + atualizar portal
         elif new_status in ("cancelada", "recusada"):

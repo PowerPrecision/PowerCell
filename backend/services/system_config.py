@@ -43,8 +43,6 @@ async def get_system_config(company_id: str = "default") -> SystemConfig:
       - Se não existir config para a empresa, cria uma cópia da global
         com o company_id preenchido.
     """
-    global _config_cache
-
     cache_key = company_id or "default"
 
     # Verificar cache
@@ -137,8 +135,6 @@ async def save_system_config(config: SystemConfig) -> bool:
     Guardar configurações do sistema na BD.
     Usa o company_id para determinar o _id do documento.
     """
-    global _config_cache
-
     try:
         config.updated_at = datetime.now(timezone.utc).isoformat()
         # mode='json' para garantir Enums são serializados como strings
@@ -358,7 +354,6 @@ def invalidate_config_cache(company_id: str = None):
     Se company_id for fornecido, invalida apenas essa empresa.
     Se for None, invalida todo o cache.
     """
-    global _config_cache
     if company_id:
         _config_cache.pop(company_id, None)
     else:
