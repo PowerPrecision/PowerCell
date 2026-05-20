@@ -8,14 +8,15 @@
  */
 
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "../components/ui/button";
 import { hasRole } from "../utils/roleUtils";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { Mail, Lock, Loader2, Eye, EyeOff } from "lucide-react";
+import { Alert, AlertDescription } from "../components/ui/alert";
+import { Mail, Lock, Loader2, Eye, EyeOff, Info } from "lucide-react";
 import { toast } from "sonner";
 
 export default function LoginPage() {
@@ -25,6 +26,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const showPortalInfo = searchParams.get("info") === "portal";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -38,7 +41,8 @@ export default function LoginPage() {
       if (hasRole(user, "admin")) {
         navigate("/admin");
       } else if (hasRole(user, "cliente")) {
-        navigate("/cliente");
+        // Clientes não usam o dashboard de staff — redirecionar para aviso
+        navigate("/login?info=portal");
       } else {
         // CEO e outros staff vão para /processos
         navigate("/processos");
@@ -107,6 +111,16 @@ export default function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Aviso para clientes que tentam login de staff */}
+            {showPortalInfo && (
+              <Alert className="mb-4 border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800">
+                <Info className="h-4 w-4 text-amber-600" />
+                <AlertDescription className="text-amber-800 dark:text-amber-200 text-sm">
+                  Como cliente, deve aceder ao portal através do link enviado pelo seu consultor.
+                  Este login é exclusivo para a equipa PowerCell.
+                </AlertDescription>
+              </Alert>
+            )}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>

@@ -147,7 +147,13 @@ export function AuthProvider({ children }) {
   }, [getTokenExpiry, refreshTokens]);
 
   useEffect(() => {
-    if (token) {
+    // No portal do cliente, o AuthContext de staff não deve tentar
+    // autenticar — o portal tem o seu próprio sistema (portal_token).
+    // Isto evita que um token de staff expirado dispare o interceptor
+    // 401 que redirecionaria para /login.
+    const isOnPortal = window.location.pathname.startsWith('/portal');
+
+    if (token && !isOnPortal) {
       setAuthToken(token);
       fetchUser();
       scheduleTokenRefresh(token);
