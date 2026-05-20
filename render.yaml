@@ -265,36 +265,12 @@ services:
         sync: false
 
   # ────────────────────────────────────────────────────────────────
-  # 3. FRONTEND — React SPA (Web Service com serve)
+  # 3. FRONTEND — NÃO definido no Blueprint
   # ────────────────────────────────────────────────────────────────
-  # Build com Vite, servido via `serve` como web service.
-  # O REACT_APP_BACKEND_URL é injetado no build time.
-  #
-  # NOTA: O tipo static_site foi descontinuado no Render Blueprint.
-  # Usamos type: web + npx serve para servir os ficheiros estáticos.
-  # A flag -s garante SPA rewrite (/* → /index.html).
+  # O frontend é deployado como Static Site GRATUITO manualmente
+  # no Render Dashboard. O tipo static_site foi removido do Blueprint
+  # (Render descontinuou-o). Configurar manualmente:
+  #   - Build Command: cd frontend && yarn install && yarn build
+  #   - Publish Directory: frontend/dist
+  #   - Routes: /* → /index.html (SPA rewrite)
   # ────────────────────────────────────────────────────────────────
-  - type: web
-    name: powercell-frontend
-    runtime: node
-    plan: starter
-    region: frankfurt
-    branch: dev
-    buildCommand: cd frontend && yarn install && yarn build
-    startCommand: npx serve frontend/dist -s -l $PORT
-    numInstances: 1
-
-    envVars:
-      # ── Backend URL (injetado no build time) ──
-      # IMPORTANTE: Deve corresponder ao nome do serviço backend acima.
-      # Se o backend se chama "powercell", o URL é https://powercell.onrender.com
-      - key: REACT_APP_BACKEND_URL
-        value: https://powercell.onrender.com
-      # ── VAPID Public Key (SECRETS) ──
-      - key: REACT_APP_VAPID_PUBLIC_KEY
-        sync: false
-      # ── Sentry Frontend (SECRETS) ──
-      - key: VITE_DSN_SENTRY_FRONTEND
-        sync: false
-      - key: VITE_SENTRY_ENVIRONMENT
-        value: production
