@@ -2429,7 +2429,7 @@ const ProcessDetails = () => {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-xl font-semibold truncate">
-                  Processo #{process?.process_number || ''} — {process?.client_name || process?.client_data?.name || process?.personal_data?.nome_completo || 'Cliente'}
+                  Processo #{process?.process_number || ''} — {clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome || 'Cliente'}
                 </h2>
                 <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
                   {safeLabel(currentStatusInfo.label)}
@@ -5754,7 +5754,7 @@ const ProcessDetails = () => {
           
           <div className="space-y-4 py-4">
             <div className="p-3 bg-gray-50 rounded-lg">
-              <p className="font-medium">{safeString(process?.client_name)}</p>
+              <p className="font-medium">{safeString(clientData?.nome || process?.client_name || personalData?.nome_completo) || 'Cliente'}</p>
               <p className="text-sm text-muted-foreground">
                 #{safeString(process?.process_number, '—')}
               </p>
@@ -5948,7 +5948,7 @@ const ProcessDetails = () => {
             {/* Cliente actual */}
             <div className="p-3 bg-gray-50 rounded-lg">
               <p className="text-xs text-muted-foreground mb-1">Cliente actual</p>
-              <p className="font-medium">{safeString(process?.client_name)}</p>
+              <p className="font-medium">{safeString(clientData?.nome || process?.client_name || personalData?.nome_completo) || 'Cliente'}</p>
               {process?.client_email && (
                 <p className="text-sm text-muted-foreground">{process.client_email}</p>
               )}
