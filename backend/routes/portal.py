@@ -2011,6 +2011,7 @@ async def request_portal_visit(
         "property_photo": property_photo,
         "property_address": {"municipality": property_location, "district": ""} if property_location else {},
         "client_id": process_id,
+        "process_id": process_id,  # Explícito para queries e sincronização
         "client_name": client_name,
         "client_email": process.get("client_email", ""),
         "client_phone": process.get("client_phone", ""),

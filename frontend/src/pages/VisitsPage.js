@@ -2,14 +2,12 @@
  * VisitsPage — Quadro de Visitas
  *
  * Página dedicada à gestão de Visitas a Imóveis.
- * Kanban Board com 3 colunas: Agendadas, Concluídas, Canceladas.
- * Cada cartão exibe: Data/Hora, Cliente, Imóvel, Consultor.
+ * Kanban Board com 4 colunas: Pedidos Portal, Agendadas, Concluídas, Canceladas.
  *
- * Funcionalidades:
- * - Kanban Board com drag-and-drop visual (click para mover de coluna)
- * - Agendar nova visita (modal com seleção de imóvel, cliente, data/hora)
- * - Filtrar por consultor e data
- * - Alterar estado da visita (Agendada → Concluída/Cancelada)
+ * v2 — Enriquecido com dados do Scraper:
+ * - Cartões mostram: Nome, Preço, Morada, Tipologia, Foto, Link fonte
+ * - Botão 'Criar Visita' (renomeado de 'Agendar') com campo URL opcional
+ * - Scraper invocado em background quando URL é preenchida
  *
  * @route /visitas
  */
@@ -54,6 +52,11 @@ import {
   Users,
   ArrowRight,
   Inbox,
+  ExternalLink,
+  Home,
+  Euro,
+  Link2,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isToday, isTomorrow, isPast } from "date-fns";
@@ -116,59 +119,114 @@ const isVisitPast = (isoDate) => {
   }
 };
 
+// ── Format price helper ──
+const formatPrice = (price) => {
+  if (!price) return null;
+  if (typeof price === 'number') {
+    return new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(price);
+  }
+  return String(price);
+};
+
 // ════════════════════════════════════════════════════════════════
-// VISIT CARD — Cartão individual de visita
+// VISIT CARD — Cartão individual de visita (v2 com dados do scraper)
 // ════════════════════════════════════════════════════════════════
 function VisitCard({ visit, onStatusChange, onEdit, onSchedule }) {
   const status = visit.status || "agendada";
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.agendada;
   const past = isVisitPast(visit.scheduled_date) && status === "agendada";
 
+  // Dados do scraper (para visitas do portal ou criadas com URL)
+  const scraped = visit.scraped_data || {};
+  const scrapedUrl = visit.scraped_url;
+  const propertyTitle = visit.property_title || scraped.title || "Imóvel";
+  const propertyPhoto = visit.property_photo || scraped.photo_url;
+  const propertyPrice = visit.scraped_price || scraped.price;
+  const propertyTypology = visit.scraped_typology || scraped.typology;
+  const propertyLocation = visit.property_address?.municipality || scraped.location || "";
+  const propertyAddress = [
+    visit.property_address?.street,
+    visit.property_address?.municipality || scraped.location,
+    visit.property_address?.district,
+  ].filter(Boolean).join(", ") || scraped.location || "";
+  const sourceName = scraped.source;
+  const sourceUrl = scrapedUrl || scraped.url;
+
   return (
     <Card className={`group hover:shadow-md transition-all ${past ? "border-amber-300 border-dashed" : ""}`}>
       <CardContent className="p-3 space-y-2">
-        {/* Date & Time */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-            <Clock className="h-3.5 w-3.5 text-amber-600" />
-            {formatVisitDate(visit.scheduled_date)}
+        {/* Date & Time + Source Badge */}
+        <div className="flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground min-w-0">
+            <Clock className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+            <span className="truncate">{formatVisitDate(visit.scheduled_date)}</span>
           </div>
-          <Badge className={`text-[9px] px-1.5 py-0 ${config.badge}`}>
-            {config.label.slice(0, -1)}
-          </Badge>
-          {visit.source === 'portal_client' && (
-            <span className="text-[9px] px-1.5 py-0 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-              Sugerido pelo Cliente
-            </span>
-          )}
+          <div className="flex items-center gap-1 shrink-0">
+            {visit.source === 'portal_client' && (
+              <span className="text-[9px] px-1.5 py-0 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                Cliente
+              </span>
+            )}
+            <Badge className={`text-[9px] px-1.5 py-0 ${config.badge}`}>
+              {config.label.slice(0, -1)}
+            </Badge>
+          </div>
         </div>
 
-        {/* Property */}
+        {/* Property Info — Enriquecido com dados do scraper */}
         <div className="flex items-start gap-2">
-          {visit.property_photo ? (
-            <img src={visit.property_photo} alt="" className="h-10 w-10 rounded-lg object-cover shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
+          {propertyPhoto ? (
+            <img
+              src={propertyPhoto}
+              alt={propertyTitle}
+              className="h-12 w-12 rounded-lg object-cover shrink-0 border border-gray-100"
+              onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'flex'); }}
+            />
           ) : (
-            <Building2 className="h-4 w-4 text-teal-600 mt-0.5 shrink-0" />
+            <div className="h-12 w-12 rounded-lg bg-teal-50 flex items-center justify-center shrink-0">
+              <Building2 className="h-5 w-5 text-teal-500" />
+            </div>
           )}
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{visit.property_title || "Imóvel"}</p>
-            {visit.property_address && (
-              <p className="text-[11px] text-muted-foreground truncate">
+          <div className="min-w-0 flex-1">
+            {/* Nome do Imóvel */}
+            <p className="text-sm font-medium truncate">{propertyTitle}</p>
+
+            {/* Preço */}
+            {propertyPrice && (
+              <p className="text-[11px] font-semibold text-amber-700">
+                <Euro className="h-3 w-3 inline mr-0.5" />
+                {formatPrice(propertyPrice)}
+              </p>
+            )}
+
+            {/* Tipologia */}
+            {propertyTypology && (
+              <p className="text-[10px] text-muted-foreground">
+                <Home className="h-3 w-3 inline mr-0.5" />
+                {propertyTypology}
+              </p>
+            )}
+
+            {/* Morada */}
+            {propertyAddress && (
+              <p className="text-[10px] text-muted-foreground truncate">
                 <MapPin className="h-3 w-3 inline mr-0.5" />
-                {[visit.property_address?.municipality, visit.property_address?.district]
-                  .filter(Boolean)
-                  .join(", ")}
+                {propertyAddress}
               </p>
             )}
-            {visit.scraped_data?.price && (
-              <p className="text-[11px] font-semibold text-amber-700 truncate">
-                {typeof visit.scraped_data.price === 'number' 
-                  ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(visit.scraped_data.price)
-                  : visit.scraped_data.price}
-              </p>
-            )}
-            {visit.scraped_data?.typology && (
-              <p className="text-[10px] text-muted-foreground">{visit.scraped_data.typology}</p>
+
+            {/* Link para fonte original */}
+            {sourceUrl && (
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-teal-600 hover:text-teal-800 hover:underline inline-flex items-center gap-0.5 mt-0.5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="h-2.5 w-2.5" />
+                {sourceName || 'Ver fonte'}
+              </a>
             )}
           </div>
         </div>
@@ -188,6 +246,14 @@ function VisitCard({ visit, onStatusChange, onEdit, onSchedule }) {
         {/* Notes */}
         {visit.notes && (
           <p className="text-[11px] text-muted-foreground italic truncate mt-1">{visit.notes}</p>
+        )}
+
+        {/* Scraper pending indicator */}
+        {visit.scraper_status === "pending" && (
+          <div className="flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            A extrair dados do imóvel...
+          </div>
         )}
 
         {/* Past warning */}
@@ -213,7 +279,7 @@ function VisitCard({ visit, onStatusChange, onEdit, onSchedule }) {
               size="sm"
               variant="outline"
               className="flex-1 h-7 text-[11px] gap-1 text-red-700 border-red-300 hover:bg-red-50"
-              onClick={() => onStatusChange(visit.id, "cancelada")}
+              onClick={() => onStatusChange(visit.id, "recusada")}
             >
               <XCircle className="h-3 w-3" />
               Recusar
@@ -291,45 +357,87 @@ function KanbanColumn({ status, visits, onStatusChange, onEdit, onSchedule }) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// SCHEDULE VISIT DIALOG — Modal para agendar visita
+// CREATE VISIT DIALOG — Modal para criar visita (v2 com URL do imóvel)
 // ════════════════════════════════════════════════════════════════
-function ScheduleVisitDialog({ open, onOpenChange, onSuccess, properties, processes, users }) {
+function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processes, users }) {
   const { user, token } = useAuth();
   const [saving, setSaving] = useState(false);
+  const [scrapingUrl, setScrapingUrl] = useState(false);
   const [form, setForm] = useState({
     property_id: "",
     client_id: "",
     scheduled_date: "",
     consultor_id: "",
     notes: "",
+    property_url: "",  // v2: URL do imóvel (Idealista/Imovirtual)
   });
 
+  // Verificar se a URL parece ser de um portal de imóveis
+  const isPropertyUrl = form.property_url && (
+    form.property_url.includes("idealista") ||
+    form.property_url.includes("imovirtual") ||
+    form.property_url.includes("remax") ||
+    form.property_url.includes("era") ||
+    form.property_url.includes("supercasa") ||
+    form.property_url.includes("olx") ||
+    form.property_url.includes("casa.sapo") ||
+    form.property_url.startsWith("http")
+  );
+
   const handleSubmit = async () => {
-    if (!form.property_id || !form.client_id || !form.scheduled_date) {
-      toast.error("Preencha imóvel, cliente e data/hora");
+    // Se tem URL, property_id não é obrigatório
+    if (!form.property_id && !form.property_url) {
+      toast.error("Selecione um imóvel ou insira um URL de imóvel");
       return;
     }
+    if (!form.client_id) {
+      toast.error("Selecione um cliente");
+      return;
+    }
+    if (!form.scheduled_date) {
+      toast.error("Escolha a data e hora da visita");
+      return;
+    }
+
     setSaving(true);
     try {
+      const body = {
+        client_id: form.client_id,
+        scheduled_date: form.scheduled_date,
+        consultor_id: form.consultor_id || user?.id,
+        notes: form.notes,
+      };
+
+      // Se tem property_id, enviar
+      if (form.property_id) {
+        body.property_id = form.property_id;
+      }
+
+      // Se tem URL do imóvel, enviar para o backend invocar o scraper
+      if (form.property_url) {
+        body.property_url = form.property_url.trim();
+      }
+
       const response = await fetch(`${API_URL}/api/visits`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          ...form,
-          consultor_id: form.consultor_id || user?.id,
-        }),
+        body: JSON.stringify(body),
       });
       if (response.ok) {
-        toast.success("Visita agendada com sucesso!");
-        setForm({ property_id: "", client_id: "", scheduled_date: "", consultor_id: "", notes: "" });
+        toast.success(
+          form.property_url
+            ? "Visita criada! Os dados do imóvel estão a ser extraídos..."
+            : "Visita criada com sucesso!"
+        );
+        setForm({ property_id: "", client_id: "", scheduled_date: "", consultor_id: "", notes: "", property_url: "" });
         onOpenChange(false);
         if (onSuccess) onSuccess();
       } else {
         const err = await response.json();
-        toast.error(err.detail || "Erro ao agendar visita");
+        toast.error(err.detail || "Erro ao criar visita");
       }
     } catch {
       toast.error("Erro de ligação ao servidor");
@@ -343,24 +451,59 @@ function ScheduleVisitDialog({ open, onOpenChange, onSuccess, properties, proces
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CalendarClock className="h-5 w-5 text-amber-600" />
-            Agendar Visita
+            <Plus className="h-5 w-5 text-amber-600" />
+            Criar Visita
           </DialogTitle>
           <DialogDescription>
-            Agende uma visita a um imóvel para um cliente.
+            Crie uma visita a um imóvel para um cliente. Pode selecionar um imóvel existente ou colar um URL.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Property select */}
+          {/* URL do Imóvel (opcional) — v2 */}
           <div>
-            <Label className="text-sm font-medium">Imóvel *</Label>
+            <Label className="text-sm font-medium flex items-center gap-1">
+              <Link2 className="h-3.5 w-3.5 text-teal-500" />
+              URL do Imóvel (Idealista/Imovirtual)
+              <span className="text-muted-foreground font-normal">— opcional</span>
+            </Label>
+            <div className="relative mt-1">
+              <Input
+                type="url"
+                placeholder="https://www.idealista.pt/imovel/..."
+                value={form.property_url}
+                onChange={(e) => setForm((f) => ({ ...f, property_url: e.target.value }))}
+                className={isPropertyUrl ? "border-teal-300 focus-visible:ring-teal-400" : ""}
+              />
+              {isPropertyUrl && (
+                <Sparkles className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-teal-500" />
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Se preencher, o sistema extrai automaticamente os dados do imóvel (nome, preço, morada, foto).
+            </p>
+          </div>
+
+          {/* Divider */}
+          {form.property_url && (
+            <div className="flex items-center gap-2">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-[10px] text-muted-foreground">ou selecione um imóvel existente</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+          )}
+
+          {/* Property select (opcional se tem URL) */}
+          <div>
+            <Label className="text-sm font-medium">
+              Imóvel {form.property_url ? "" : "*"}
+            </Label>
             <Select
               value={form.property_id}
               onValueChange={(v) => setForm((f) => ({ ...f, property_id: v }))}
             >
               <SelectTrigger className="mt-1">
-                <SelectValue placeholder="Selecionar imóvel..." />
+                <SelectValue placeholder={form.property_url ? "Opcional — dados virão do URL" : "Selecionar imóvel..."} />
               </SelectTrigger>
               <SelectContent className="max-h-64">
                 {properties.map((p) => (
@@ -447,11 +590,11 @@ function ScheduleVisitDialog({ open, onOpenChange, onSuccess, properties, proces
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={saving || !form.property_id || !form.client_id || !form.scheduled_date}
+            disabled={saving || (!form.property_id && !form.property_url) || !form.client_id || !form.scheduled_date}
             className="gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-            Agendar Visita
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Criar Visita
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -460,7 +603,7 @@ function ScheduleVisitDialog({ open, onOpenChange, onSuccess, properties, proces
 }
 
 // ════════════════════════════════════════════════════════════════
-// VISITS PAGE — Página Principal
+// SCHEDULE FROM PORTAL DIALOG — Modal para agendar visita pedida pelo cliente
 // ════════════════════════════════════════════════════════════════
 function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
   const { user, token } = useAuth();
@@ -507,6 +650,15 @@ function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
 
   if (!visit) return null;
 
+  // Dados do scraper
+  const scraped = visit.scraped_data || {};
+  const scrapedUrl = visit.scraped_url || scraped.url;
+  const propertyTitle = visit.property_title || scraped.title || "Imóvel";
+  const propertyPhoto = visit.property_photo || scraped.photo_url;
+  const propertyPrice = scraped.price;
+  const propertyTypology = scraped.typology;
+  const propertyLocation = scraped.location || visit.property_address?.municipality;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -520,22 +672,41 @@ function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
           </DialogDescription>
         </DialogHeader>
 
-        {/* Property preview */}
+        {/* Property preview — Enriquecido com dados do scraper */}
         <div className="flex gap-3 p-3 bg-violet-50 rounded-xl border border-violet-100">
-          {visit.property_photo && (
-            <img src={visit.property_photo} alt="" className="h-16 w-16 rounded-lg object-cover shrink-0" />
+          {propertyPhoto && (
+            <img src={propertyPhoto} alt="" className="h-16 w-16 rounded-lg object-cover shrink-0" />
           )}
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold truncate">{visit.property_title || "Imóvel"}</p>
-            {visit.scraped_data?.price && (
+            <p className="text-sm font-semibold truncate">{propertyTitle}</p>
+            {propertyPrice && (
               <p className="text-xs font-semibold text-amber-700">
-                {typeof visit.scraped_data.price === 'number'
-                  ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(visit.scraped_data.price)
-                  : visit.scraped_data.price}
+                <Euro className="h-3 w-3 inline mr-0.5" />
+                {formatPrice(propertyPrice)}
               </p>
             )}
-            {visit.scraped_data?.typology && (
-              <p className="text-xs text-muted-foreground">{visit.scraped_data.typology}</p>
+            {propertyTypology && (
+              <p className="text-xs text-muted-foreground">
+                <Home className="h-3 w-3 inline mr-0.5" />
+                {propertyTypology}
+              </p>
+            )}
+            {propertyLocation && (
+              <p className="text-xs text-muted-foreground">
+                <MapPin className="h-3 w-3 inline mr-0.5" />
+                {propertyLocation}
+              </p>
+            )}
+            {scrapedUrl && (
+              <a
+                href={scrapedUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-teal-600 hover:text-teal-800 hover:underline inline-flex items-center gap-0.5 mt-0.5"
+              >
+                <ExternalLink className="h-2.5 w-2.5" />
+                Ver anúncio original
+              </a>
             )}
             {visit.client_name && (
               <p className="text-xs text-muted-foreground mt-1">
@@ -586,11 +757,14 @@ function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════
+// VISITS PAGE — Página Principal
+// ════════════════════════════════════════════════════════════════
 const VisitsPage = () => {
   const { user, token } = useAuth();
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [properties, setProperties] = useState([]);
   const [processes, setProcesses] = useState([]);
   const [users, setUsers] = useState([]);
@@ -611,7 +785,6 @@ const VisitsPage = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        // Flatten for search, keep kanban structure
         setVisits(data);
       }
     } catch (error) {
@@ -674,7 +847,7 @@ const VisitsPage = () => {
         body: JSON.stringify({ status: newStatus }),
       });
       if (response.ok) {
-        const statusLabels = { concluida: "concluída", cancelada: "cancelada", agendada: "agendada" };
+        const statusLabels = { concluida: "concluída", cancelada: "cancelada", agendada: "agendada", recusada: "recusada" };
         toast.success(`Visita marcada como ${statusLabels[newStatus] || newStatus}`);
         fetchVisits();
       } else {
@@ -685,7 +858,7 @@ const VisitsPage = () => {
     }
   };
 
-  // Filter visits by search term
+  // Filter visits by search term (inclui campos do scraper)
   const filteredKanban = useMemo(() => {
     if (!searchTerm) return visits;
 
@@ -696,7 +869,11 @@ const VisitsPage = () => {
           (v.property_title || "").toLowerCase().includes(term) ||
           (v.client_name || "").toLowerCase().includes(term) ||
           (v.consultor_name || "").toLowerCase().includes(term) ||
-          (v.notes || "").toLowerCase().includes(term)
+          (v.notes || "").toLowerCase().includes(term) ||
+          (v.scraped_data?.title || "").toLowerCase().includes(term) ||
+          (v.scraped_data?.location || "").toLowerCase().includes(term) ||
+          (v.scraped_url || "").toLowerCase().includes(term) ||
+          (v.scraped_data?.typology || "").toLowerCase().includes(term)
       );
 
     return {
@@ -733,10 +910,10 @@ const VisitsPage = () => {
           </div>
           <Button
             className="gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
-            onClick={() => setShowScheduleDialog(true)}
+            onClick={() => setShowCreateDialog(true)}
           >
             <Plus className="h-4 w-4" />
-            Agendar Visita
+            Criar Visita
           </Button>
         </div>
 
@@ -779,7 +956,7 @@ const VisitsPage = () => {
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Pesquisar por imóvel, cliente ou consultor..."
+              placeholder="Pesquisar por imóvel, cliente, morada..."
               className="pl-9"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -834,10 +1011,10 @@ const VisitsPage = () => {
         )}
       </div>
 
-      {/* Schedule Visit Dialog */}
-      <ScheduleVisitDialog
-        open={showScheduleDialog}
-        onOpenChange={setShowScheduleDialog}
+      {/* Create Visit Dialog */}
+      <CreateVisitDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
         onSuccess={fetchVisits}
         properties={properties}
         processes={processes}
