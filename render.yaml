@@ -269,6 +269,13 @@ services:
   # ────────────────────────────────────────────────────────────────
   # Build com Vite, servido como ficheiros estáticos.
   # O REACT_APP_BACKEND_URL é injetado no build time.
+  #
+  # NOTA: routes e headers para SPA rewrite e cache devem ser
+  # configurados manualmente no Render Dashboard → Settings:
+  #   - Rewrite rule: /* → /index.html
+  #   - Headers: Cache-Control em /assets/*
+  #   - Security headers: X-Frame-Options, X-XSS-Protection
+  # O render.yaml Blueprint NÃO suporta estes campos.
   # ────────────────────────────────────────────────────────────────
   - type: web
     name: powercell-frontend
@@ -278,28 +285,6 @@ services:
     plan: free
     region: frankfurt
     branch: dev
-
-    # SPA rewrite: todas as rotas → index.html
-    routes:
-      - type: rewrite
-        source: /.*
-        destination: /index.html
-
-    headers:
-      # Cache agressivo para assets (JS, CSS, imagens)
-      - source: /assets/*
-        headers:
-          - key: Cache-Control
-            value: public, max-age=31536000, immutable
-      # Security headers
-      - source: /*
-        headers:
-          - key: X-Content-Type-Options
-            value: nosniff
-          - key: X-Frame-Options
-            value: DENY
-          - key: X-XSS-Protection
-            value: "1; mode=block"
 
     envVars:
       # ── Backend URL (injetado no build time) ──
