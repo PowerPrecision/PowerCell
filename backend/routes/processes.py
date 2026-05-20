@@ -2576,6 +2576,13 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     # Extraímos esses campos e atualizamos a coleção `clients` em vez de `processes`.
     client_id = process.get("client_id")
     client_updates = extract_client_updates_from_body(raw_body)
+    
+    # ── Sincronizar client_email/client_phone para o processo ──
+    # O Frontend envia estes campos directamente no body do PUT do processo.
+    # Precisamos guardá-los no documento do processo (além de sincronizar com o cliente).
+    raw_client_email = raw_body.get("client_email")
+    raw_client_phone = raw_body.get("client_phone")
+    
     if client_updates and client_id:
         # Gerar blind indexes para NIF/email se foram atualizados
         if "dados_pessoais.nif" in client_updates:
@@ -2739,6 +2746,16 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         )
     
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    
+    # ── Incluir client_email/client_phone do raw body (enviados pelo Frontend) ──
+    # Estes campos são guardados directamente no documento do processo.
+    # A sincronização para o cliente e para personal_data.email é feita
+    # pelo mecanismo de client_updates (extract_client_updates_from_body)
+    # e pelo sync do client update (clients.py:1295-1314).
+    if raw_client_email is not None:
+        update_data["client_email"] = raw_client_email
+    if raw_client_phone is not None:
+        update_data["client_phone"] = raw_client_phone
     
     # ── Incluir dados de reatribuição no update_data (se houve reatribuição) ──
     if new_client_id and new_client_id != client_id:

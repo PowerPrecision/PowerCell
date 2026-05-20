@@ -209,14 +209,22 @@ const ProcessesPage = () => {
 
   // Debounced search — only updates URL param, main useEffect handles fetch
   const [searchInput, setSearchInput] = useState(searchTerm);
+  const searchInputRef = useRef(null);
   useEffect(() => {
     const timer = setTimeout(() => {
       if (searchInput !== searchTerm) {
         setSearchTerm(searchInput);
       }
-    }, 300);
+    }, 500);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  // Refocus search input after search results load
+  useEffect(() => {
+    if (!loading && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [loading]);
 
   // Peso de prioridade para ordenação (alta=3, urgente tag=3, media=2, baixa=1, sem=0)
   const hasUrgentTag = useCallback((process) => {
@@ -251,15 +259,10 @@ const ProcessesPage = () => {
     setSortedProcesses(sorted);
   }, [processes, getPriorityWeight]);
 
-  // Re-fetch when search, sort, view mode, or role filter changes
+  // Re-fetch when filters, sort, view mode, role filter, or search term changes
   useEffect(() => {
     fetchProcesses();
-  }, [fetchProcesses, filterByRole]);
-
-  // Re-fetch when searchTerm changes (debounced via URL param)
-  useEffect(() => {
-    fetchProcesses();
-  }, [searchTerm]);
+  }, [fetchProcesses, filterByRole, searchTerm]);
 
   // Funções de paginação
   const goToPage = useCallback((page) => {
@@ -363,7 +366,10 @@ const ProcessesPage = () => {
     );
   };
 
-  if (loading) {
+  // Initial load (no data yet) — show full-page skeleton
+  const isInitialLoad = loading && processes.length === 0;
+
+  if (isInitialLoad) {
     return (
       <DashboardLayout title={pageTitle}>
         <div className="space-y-6">
@@ -419,19 +425,22 @@ const ProcessesPage = () => {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input 
+                  ref={searchInputRef}
                   placeholder="Pesquisar por nome, email ou NIF..." 
-                  className="pl-10 pr-8" 
+                  className="pl-10 pr-9" 
                   value={searchInput} 
                   onChange={(e) => setSearchInput(e.target.value)} 
                 />
-                {searchInput && (
+                {loading && !isInitialLoad ? (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />
+                ) : searchInput ? (
                   <button
                     onClick={() => setSearchInput("")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                )}
+                ) : null}
               </div>
               
               {/* Toggle para mostrar concluídos/desistências */}
@@ -477,7 +486,7 @@ const ProcessesPage = () => {
               </div>
             )}
 
-            <div className="rounded-md border overflow-x-auto">
+            <div className={`rounded-md border overflow-x-auto transition-opacity ${loading && !isInitialLoad ? 'opacity-60 pointer-events-none' : ''}`}>
               <Table>
                 <TableHeader>
                   <TableRow>

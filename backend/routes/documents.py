@@ -325,34 +325,47 @@ async def list_client_files(
 ):
     """Lista todos os ficheiros do cliente no S3 organizados por pastas.
     
-    Suporta lookup por ID de processo OU ID de cliente (coleção clients).
-    Quando recebe um client_id da coleção clients, procura os processos
-    associados para obter nome e dados do titular.
+    Suporta tanto IDs de processo como IDs de cliente:
+    - Se client_id corresponder a um processo, usa-o directamente.
+    - Se for um ID de cliente (coleção clients), procura o processo associado.
     """
-    # 1. Tentar lookup na coleção processes (comportamento original)
+    # 1. Tentar como ID de processo (comportamento original)
     process = await db.processes.find_one({"id": client_id})
+    effective_id = client_id
     
-    if process:
-        client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-        titular2 = process.get("titular2_data") or {}
-        second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
-        s3_folder = process.get("s3_folder")
-    else:
-        # 2. Tentar lookup na coleção clients (navegação a partir de ClientDetailPage)
-        client_doc = await db.clients.find_one({"id": client_id})
-        if not client_doc:
-            raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
-        
-        client_name = client_doc.get("nome", client_doc.get("name", DEFAULT_CLIENT_NAME))
-        titular2 = client_doc.get("titular2_data") or {}
-        second_client_name = client_doc.get("second_client_name") or titular2.get("nome") or titular2.get("name")
-        s3_folder = client_doc.get("s3_folder")
+    # 2. Se não encontrado, tentar como ID de cliente
+    if not process:
+        client = await db.clients.find_one({"id": client_id})
+        if client:
+            # Procurar processo associado a este cliente
+            process_ids = client.get("process_ids", [])
+            if process_ids:
+                process = await db.processes.find_one({"id": process_ids[0]})
+                if process:
+                    effective_id = process["id"]
+            if not process:
+                # Cliente existe mas sem processo — usar dados do cliente
+                client_name = client.get("nome", DEFAULT_CLIENT_NAME)
+                loop = asyncio.get_event_loop()
+                files = await loop.run_in_executor(
+                    None,
+                    lambda: s3_service.list_files(client_id, client_name, None, None)
+                )
+                return files
+    
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
+    
+    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    titular2 = process.get("titular2_data") or {}
+    second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
+    s3_folder = process.get("s3_folder")
     
     # Executar operação síncrona do S3 em thread separada para não bloquear o event loop
     loop = asyncio.get_event_loop()
     files = await loop.run_in_executor(
         None,  # Usar executor default (ThreadPool)
-        lambda: s3_service.list_files(client_id, client_name, second_client_name, s3_folder)
+        lambda: s3_service.list_files(effective_id, client_name, second_client_name, s3_folder)
     )
     return files
 
@@ -425,8 +438,23 @@ async def upload_file_s3(
         # ================================================================
         
         process = await db.processes.find_one({"id": client_id})
+        effective_id = client_id
+        
+        # Se não encontrado como processo, tentar como ID de cliente
+        if not process:
+            client = await db.clients.find_one({"id": client_id})
+            if client:
+                process_ids = client.get("process_ids", [])
+                if process_ids:
+                    process = await db.processes.find_one({"id": process_ids[0]})
+                    if process:
+                        effective_id = process["id"]
+        
         if not process:
             raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
+        
+        # Usar effective_id (processo) para operações S3, não o client_id original
+        client_id = effective_id
         
         # Se empresa_nif foi fornecido, guardar no processo
         if empresa_nif:
@@ -1100,6 +1128,15 @@ async def check_file_upload(
 async def initialize_folders(client_id: str, user: dict = Depends(get_current_user)):
     """Cria a estrutura de pastas inicial no S3 (se não existir)."""
     process = await db.processes.find_one({"id": client_id})
+    
+    # Se não encontrado como processo, tentar como ID de cliente
+    if not process:
+        client = await db.clients.find_one({"id": client_id})
+        if client:
+            process_ids = client.get("process_ids", [])
+            if process_ids:
+                process = await db.processes.find_one({"id": process_ids[0]})
+    
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
@@ -1141,6 +1178,15 @@ async def get_download_url(
 ):
     """Gera um URL temporário para download de um ficheiro."""
     process = await db.processes.find_one({"id": client_id})
+    
+    # Se não encontrado como processo, tentar como ID de cliente
+    if not process:
+        client = await db.clients.find_one({"id": client_id})
+        if client:
+            process_ids = client.get("process_ids", [])
+            if process_ids:
+                process = await db.processes.find_one({"id": process_ids[0]})
+    
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
@@ -1400,6 +1446,15 @@ async def delete_file_s3(
         JSONResponse: Sucesso ou erro 409 com detalhes do conflito.
     """
     process = await db.processes.find_one({"id": client_id})
+    
+    # Se não encontrado como processo, tentar como ID de cliente
+    if not process:
+        client = await db.clients.find_one({"id": client_id})
+        if client:
+            process_ids = client.get("process_ids", [])
+            if process_ids:
+                process = await db.processes.find_one({"id": process_ids[0]})
+    
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     

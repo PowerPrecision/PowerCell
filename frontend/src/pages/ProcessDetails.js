@@ -1518,25 +1518,15 @@ const ProcessDetails = () => {
       // 4. DISPARAR OS DOIS REQUESTS EM SIMULTÂNEO (PROMISE.ALL)
       const promises = [];
       
-      // Update do Processo
+      // Update do Processo — incluir client_email/client_phone no body
+      // (o backend lê do raw_body para sincronizar com o cliente)
+      if (process.client_email !== undefined) processUpdateData.client_email = process.client_email;
+      if (process.client_phone !== undefined) processUpdateData.client_phone = process.client_phone;
       promises.push(updateProcess(id, processUpdateData));
       
       // Update do Cliente (apenas se houver client_id e não for role de indexação)
       if (process.client_id && !hasRole(user, "indexacao")) {
-        const token = localStorage.getItem('token');
-        promises.push(
-          fetch(`${API_URL}/api/clients/${process.client_id}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify(clientUpdateData)
-          }).then(res => {
-            if (!res.ok) throw new Error("Falha ao atualizar dados do cliente");
-            return res.json();
-          })
-        );
+        promises.push(updateClient(process.client_id, clientUpdateData));
       }
       
       await Promise.all(promises);
@@ -2800,7 +2790,11 @@ const ProcessDetails = () => {
                               <Input
                                 type="email"
                                 value={process?.client_email || ""}
-                                onChange={(e) => setProcess({ ...process, client_email: e.target.value })}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setProcess({ ...process, client_email: val });
+                                  setPersonalData(prev => ({ ...prev, email: val }));
+                                }}
                                 disabled={!canEditPersonal}
                                 placeholder="email@exemplo.com"
                                 className="h-9"
@@ -2810,7 +2804,11 @@ const ProcessDetails = () => {
                               <Label className="text-xs text-muted-foreground">Telefone</Label>
                               <Input
                                 value={process?.client_phone || ""}
-                                onChange={(e) => setProcess({ ...process, client_phone: e.target.value })}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setProcess({ ...process, client_phone: val });
+                                  setPersonalData(prev => ({ ...prev, telefone: val }));
+                                }}
                                 disabled={!canEditPersonal}
                                 placeholder="+351 000 000 000"
                                 className="h-9"
