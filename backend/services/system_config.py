@@ -16,53 +16,84 @@ from models.system_config import (
 
 logger = logging.getLogger(__name__)
 
-# Cache das configurações
-_config_cache: Optional[SystemConfig] = None
-_config_cache_time: Optional[datetime] = None
+# Cache das configurações — agora suporta múltiplas empresas
+# Chave: company_id (str), Valor: (SystemConfig, datetime)
+_config_cache: Dict[str, tuple] = {}
 CACHE_TTL_SECONDS = 60  # Recarregar a cada 60 segundos
 
 
-async def get_system_config() -> SystemConfig:
+def _config_doc_id(company_id: str = "default") -> str:
+    """Converte company_id para _id do documento MongoDB.
+
+    - "default" → "main" (retrocompatibilidade com config global existente)
+    - qualquer outro → "company:<company_id>"
     """
-    Obter configurações do sistema.
-    Primeiro tenta carregar da BD, se não existir usa valores por defeito + env vars.
+    if company_id == "default" or not company_id:
+        return "main"
+    return f"company:{company_id}"
+
+
+async def get_system_config(company_id: str = "default") -> SystemConfig:
     """
-    global _config_cache, _config_cache_time
-    
+    Obter configurações do sistema para uma empresa específica.
+
+    MULTI-EMPRESA:
+      - company_id="default" → config global (retrocompatível, _id="main")
+      - company_id="power_real_estate" → config específica dessa empresa
+      - Se não existir config para a empresa, cria uma cópia da global
+        com o company_id preenchido.
+    """
+    global _config_cache
+
+    cache_key = company_id or "default"
+
     # Verificar cache
-    if _config_cache and _config_cache_time:
-        cache_age = (datetime.now(timezone.utc) - _config_cache_time).total_seconds()
+    if cache_key in _config_cache:
+        cached_config, cache_time = _config_cache[cache_key]
+        cache_age = (datetime.now(timezone.utc) - cache_time).total_seconds()
         if cache_age < CACHE_TTL_SECONDS:
-            return _config_cache
-    
+            return cached_config
+
+    doc_id = _config_doc_id(cache_key)
+
     # Carregar da BD
-    config_doc = await db.system_config.find_one({"_id": "main"})
-    
+    config_doc = await db.system_config.find_one({"_id": doc_id})
+
     if config_doc:
         # Remover _id para não causar problemas com Pydantic
         config_doc.pop("_id", None)
         try:
             config = SystemConfig(**config_doc)
         except Exception as e:
-            logger.warning(f"Erro ao carregar config da BD: {e}")
-            config = _build_default_config()
+            logger.warning(f"Erro ao carregar config da BD (company_id={cache_key}): {e}")
+            config = _build_default_config(cache_key)
     else:
-        # Criar configuração inicial com valores do .env
-        config = _build_default_config()
-        await save_system_config(config)
-    
+        if cache_key == "default":
+            # Criar configuração inicial com valores do .env
+            config = _build_default_config(cache_key)
+            await save_system_config(config)
+        else:
+            # Empresa sem config própria → herdar da global e criar cópia
+            global_config = await get_system_config("default")
+            config_data = global_config.model_dump(mode='json')
+            config_data["company_id"] = cache_key
+            config_data.pop("setup_completed", None)  # Não copiar flag de setup
+            config = SystemConfig(**config_data)
+            await save_system_config(config)
+            logger.info(f"Criada config para empresa '{cache_key}' (herdada da global)")
+
     # Actualizar cache
-    _config_cache = config
-    _config_cache_time = datetime.now(timezone.utc)
-    
+    _config_cache[cache_key] = (config, datetime.now(timezone.utc))
+
     return config
 
 
-def _build_default_config() -> SystemConfig:
+def _build_default_config(company_id: str = "default") -> SystemConfig:
     """
     Construir configuração por defeito usando variáveis de ambiente.
     """
     return SystemConfig(
+        company_id=company_id,
         storage=StorageConfig(
             provider=StorageProvider.ONEDRIVE if os.environ.get("ONEDRIVE_CLIENT_ID") else StorageProvider.NONE,
             onedrive_client_id=os.environ.get("ONEDRIVE_CLIENT_ID"),
@@ -104,38 +135,42 @@ def _build_default_config() -> SystemConfig:
 async def save_system_config(config: SystemConfig) -> bool:
     """
     Guardar configurações do sistema na BD.
+    Usa o company_id para determinar o _id do documento.
     """
-    global _config_cache, _config_cache_time
-    
+    global _config_cache
+
     try:
         config.updated_at = datetime.now(timezone.utc).isoformat()
         # mode='json' para garantir Enums são serializados como strings
         config_dict = config.model_dump(mode='json')
-        config_dict["_id"] = "main"
-        
+        doc_id = _config_doc_id(config.company_id or "default")
+        config_dict["_id"] = doc_id
+
         await db.system_config.replace_one(
-            {"_id": "main"},
+            {"_id": doc_id},
             config_dict,
             upsert=True
         )
-        
+
         # Invalidar cache para forçar reload na próxima leitura
-        _config_cache = None
-        _config_cache_time = None
-        
-        logger.info("Configurações do sistema guardadas")
+        cache_key = config.company_id or "default"
+        _config_cache.pop(cache_key, None)
+
+        logger.info(f"Configurações do sistema guardadas (company_id={cache_key})")
         return True
     except Exception as e:
         logger.error(f"Erro ao guardar configurações: {e}")
         return False
 
 
-async def update_config_section(section: str, data: Dict[str, Any]) -> SystemConfig:
+async def update_config_section(section: str, data: Dict[str, Any], company_id: str = "default") -> SystemConfig:
     """
     Actualizar uma secção específica da configuração.
     Ignora campos com valores mascarados (••••••••) para não sobrescrever credenciais.
+
+    MULTI-EMPRESA: o parâmetro company_id determina qual config carregar/guardar.
     """
-    config = await get_system_config()
+    config = await get_system_config(company_id)
     
     # Lista de campos sensíveis que são mascarados na API
     sensitive_fields = [
@@ -284,44 +319,73 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
     return config
 
 
-async def get_storage_provider():
+async def get_storage_provider(company_id: str = "default"):
     """
     Obter o provider de armazenamento actualmente configurado.
     """
-    config = await get_system_config()
+    config = await get_system_config(company_id)
     return config.storage.provider
 
 
-async def get_ai_config() -> AIConfig:
+async def get_ai_config(company_id: str = "default") -> AIConfig:
     """
     Obter configuração de IA.
     """
-    config = await get_system_config()
+    config = await get_system_config(company_id)
     return config.ai
 
 
-async def is_setup_completed() -> bool:
+async def is_setup_completed(company_id: str = "default") -> bool:
     """
     Verificar se a configuração inicial foi concluída.
     """
-    config = await get_system_config()
+    config = await get_system_config(company_id)
     return config.setup_completed
 
 
-async def mark_setup_completed():
+async def mark_setup_completed(company_id: str = "default"):
     """
     Marcar a configuração inicial como concluída.
     """
-    config = await get_system_config()
+    config = await get_system_config(company_id)
     config.setup_completed = True
     await save_system_config(config)
 
 
-def invalidate_config_cache():
+def invalidate_config_cache(company_id: str = None):
     """
     Invalidar o cache de configurações.
-    Útil após actualizações.
+    Se company_id for fornecido, invalida apenas essa empresa.
+    Se for None, invalida todo o cache.
     """
-    global _config_cache, _config_cache_time
-    _config_cache = None
-    _config_cache_time = None
+    global _config_cache
+    if company_id:
+        _config_cache.pop(company_id, None)
+    else:
+        _config_cache.clear()
+
+
+async def list_available_companies() -> list:
+    """
+    Lista os company_ids com configuração própria no sistema.
+    Inclui sempre "default" (global).
+    """
+    docs = await db.system_config.find(
+        {},
+        {"_id": 1, "company_id": 1, "settings.company_name": 1}
+    ).to_list(100)
+
+    result = []
+    for doc in docs:
+        cid = doc.get("company_id", "default")
+        company_name = doc.get("settings", {}).get("company_name", cid)
+        result.append({
+            "company_id": cid,
+            "company_name": company_name,
+        })
+
+    # Garantir que "default" está presente
+    if not any(r["company_id"] == "default" for r in result):
+        result.insert(0, {"company_id": "default", "company_name": "Global (Padrão)"})
+
+    return result

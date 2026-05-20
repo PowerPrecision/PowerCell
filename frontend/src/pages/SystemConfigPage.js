@@ -1738,9 +1738,31 @@ const SystemConfigPage = ({ embedded = false }) => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(() => searchParams.get("tab") || "storage");
 
+  // MULTI-EMPRESA: seletor de empresa no topo
+  const [selectedCompanyId, setSelectedCompanyId] = useState("default");
+  const [availableCompanies, setAvailableCompanies] = useState([]);
+
+  // Carregar lista de empresas disponíveis
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/system-config/companies`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableCompanies(data.companies || []);
+        }
+      } catch (err) {
+        console.error("Erro ao carregar empresas:", err);
+      }
+    };
+    fetchCompanies();
+  }, [token]);
+
   const fetchConfig = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/system-config`, {
+      const response = await fetch(`${API_URL}/api/system-config?company_id=${encodeURIComponent(selectedCompanyId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -1764,11 +1786,19 @@ const SystemConfigPage = ({ embedded = false }) => {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, selectedCompanyId]);
 
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
+
+  // Recarregar config quando a empresa selecionada mudar
+  useEffect(() => {
+    if (selectedCompanyId) {
+      setLoading(true);
+      fetchConfig();
+    }
+  }, [selectedCompanyId]);
 
   const handleSave = async (section, data) => {
     // Pré-processar campos especiais
@@ -1806,7 +1836,7 @@ const SystemConfigPage = ({ embedded = false }) => {
       }
     }
 
-    const response = await fetch(`${API_URL}/api/system-config/${section}`, {
+    const response = await fetch(`${API_URL}/api/system-config/${section}?company_id=${encodeURIComponent(selectedCompanyId)}`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -3066,7 +3096,7 @@ const SystemConfigPage = ({ embedded = false }) => {
   const pageContent = (
     <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Settings className="h-6 w-6" />
@@ -3076,10 +3106,36 @@ const SystemConfigPage = ({ embedded = false }) => {
               Configure as integrações e definições da aplicação
             </p>
           </div>
-          <Button variant="outline" onClick={fetchConfig}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Recarregar
-          </Button>
+          <div className="flex items-center gap-3">
+            {/* MULTI-EMPRESA: Seletor de Empresa */}
+            {availableCompanies.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <Select
+                  value={selectedCompanyId}
+                  onValueChange={(v) => {
+                    setSelectedCompanyId(v);
+                    setActiveTab("settings"); // Reset to settings when company changes
+                  }}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="Selecionar empresa..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableCompanies.map((c) => (
+                      <SelectItem key={c.company_id} value={c.company_id}>
+                        {c.company_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <Button variant="outline" onClick={fetchConfig}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Recarregar
+            </Button>
+          </div>
         </div>
 
         {/* Vertical Master-Detail Layout */}
@@ -3126,32 +3182,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                       <span className="truncate">RGPD</span>
                       {activeTab === "rgpd" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("integrations")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "integrations"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <Plug className={`h-4 w-4 shrink-0 ${activeTab === "integrations" ? "text-primary" : ""}`} />
-                      <span className="truncate">Integrações</span>
-                      {activeTab === "integrations" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("system_emails")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "system_emails"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <MailCheck className={`h-4 w-4 shrink-0 ${activeTab === "system_emails" ? "text-primary" : ""}`} />
-                      <span className="truncate">Emails Sistema</span>
-                      {activeTab === "system_emails" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
+                    {/* Nota: "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
                     <button
                       type="button"
                       onClick={() => setActiveTab("maintenance")}
@@ -3208,18 +3239,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                       RGPD
                     </span>
                   </SelectItem>
-                  <SelectItem value="integrations">
-                    <span className="flex items-center gap-2">
-                      <Plug className="h-4 w-4" />
-                      Integrações
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="system_emails">
-                    <span className="flex items-center gap-2">
-                      <MailCheck className="h-4 w-4" />
-                      Emails Sistema
-                    </span>
-                  </SelectItem>
+                  {/* Nota: Integrações e Emails Sistema movidos para Comunicações */}
                   <SelectItem value="maintenance">
                     <span className="flex items-center gap-2">
                       <Wrench className="h-4 w-4" />
@@ -3255,8 +3275,8 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {["rgpd", "integrations", "system_emails", "maintenance", "portal"].map((key) => {
-                  const Icon = key === "rgpd" ? FileSignature : key === "integrations" ? Plug : key === "system_emails" ? MailCheck : key === "portal" ? MessageSquare : Wrench;
+                {["rgpd", "maintenance", "portal"].map((key) => {
+                  const Icon = key === "rgpd" ? FileSignature : key === "portal" ? MessageSquare : Wrench;
                   const isActive = activeTab === key;
                   return (
                     <button
@@ -3270,7 +3290,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      {key === "rgpd" ? "RGPD" : key === "integrations" ? "Integrações" : key === "portal" ? "Portal" : "Manutenção"}
+                      {key === "rgpd" ? "RGPD" : key === "portal" ? "Portal" : "Manutenção"}
                     </button>
                   );
                 })}
@@ -3601,3 +3621,6 @@ const SystemEmailsSection = ({ token }) => {
 };
 
 export default SystemConfigPage;
+
+// Named exports para uso no SystemAdminPanel (tab Comunicações)
+export { IntegrationsConfigSection, SystemEmailsSection };

@@ -106,6 +106,20 @@ async def get_my_email_config(
     resolved = await resolve_email_config(user_id, active_role=active_role)
     source = resolved.get("config_source", "none")
 
+    # MULTI-EMPRESA: listar company_ids disponíveis na config do user
+    existing_user_doc = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "email_config": 1}
+    )
+    raw_ec = (existing_user_doc or {}).get("email_config", {})
+    available_companies = []
+    if isinstance(raw_ec, dict):
+        for key in raw_ec.keys():
+            if key.startswith("company:"):
+                available_companies.append(key.replace("company:", ""))
+            elif key == "default":
+                available_companies.append("default")
+
     return {
         "config_source": source,
         "is_configured": resolved.get("has_password") or resolved.get("has_google_oauth"),
@@ -120,6 +134,8 @@ async def get_my_email_config(
         "google_email": resolved.get("google_email"),
         "oauth_connected_at": resolved.get("oauth_connected_at"),
         "company_name": resolved.get("company_name"),
+        "company_id": "default",
+        "available_companies": available_companies,
     }
 
 
@@ -168,6 +184,16 @@ async def save_my_email_config(
     else:
         storage_role = "default"
 
+    # MULTI-EMPRESA: Incorporar company_id na chave de armazenamento.
+    # Se company_id for fornecido e não for "default", a chave passa a ser
+    # "company:<company_id>" em vez de "default" ou do role.
+    # Isto permite que um utilizador tenha configs diferentes por empresa.
+    company_id = config.company_id or "default"
+    if company_id != "default":
+        storage_key = f"company:{company_id}"
+    else:
+        storage_key = storage_role
+
     # Buscar config existente para preservar password se não fornecida
     existing_user = await db.users.find_one(
         {"id": user_id},
@@ -183,10 +209,10 @@ async def save_my_email_config(
     else:
         nested_existing = {}
 
-    # Get existing config for THIS role (to preserve password / OAuth tokens)
+    # Get existing config for THIS key (to preserve password / OAuth tokens)
     existing_role_config = _extract_role_email_config(
-        nested_existing, storage_role
-    ) if storage_role != "default" else nested_existing.get("default", {})
+        nested_existing, storage_key
+    ) if storage_key != "default" else nested_existing.get("default", {})
 
     # Encriptar a password (ou manter a existente do role)
     if config.password:
@@ -203,6 +229,7 @@ async def save_my_email_config(
         "smtp_server": config.smtp_server.strip(),
         "smtp_port": config.smtp_port,
         "encrypted_password": encrypted_password,
+        "company_id": company_id,  # MULTI-EMPRESA: associação à empresa
         "is_configured": True,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -219,8 +246,8 @@ async def save_my_email_config(
     if existing_role_config.get("oauth_connected_at"):
         new_role_config["oauth_connected_at"] = existing_role_config["oauth_connected_at"]
 
-    # Store under the role key in the nested structure
-    nested_existing[storage_role] = new_role_config
+    # Store under the storage key in the nested structure
+    nested_existing[storage_key] = new_role_config
 
     result = await db.users.update_one(
         {"id": user_id},
