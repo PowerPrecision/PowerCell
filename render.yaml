@@ -105,8 +105,13 @@ services:
         value: /ms-playwright
 
       # ── Uvicorn ──
+      # IMPORTANTE: Com 2GB RAM, usar MÁXIMO 2 workers.
+      # Com 4 workers, cada um inicia 4 background tasks = 16 tasks = OOM.
+      # O server.py agora tem singleton lock para background tasks, mas
+      # múltiplos workers ainda duplicam índices DB e consumo base de RAM.
+      # Se alterou este valor no Render Dashboard, reverter para 1-2.
       - key: UVICORN_WORKERS
-        value: "1"
+        value: "2"
 
       # ── Google OAuth (SECRETS) ──
       - key: GOOGLE_CLIENT_ID
