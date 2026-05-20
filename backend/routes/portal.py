@@ -724,6 +724,51 @@ async def confirm_portal_upload(
     document_id = data.get("document_id")  # ID do doc REQUESTED a satisfazer
     custom_label = data.get("custom_label")  # Custom label for "Outros" category
 
+    # ====================================================================
+    # TRIAGEM AUTOMÁTICA COM IA: Se a categoria for 'Outros', 'Auto' ou vazia,
+    # invocar IA para determinar a categoria correta com base no nome do
+    # ficheiro e no conteúdo (se disponível).
+    # ====================================================================
+    ai_categorization_info = None
+    if category.lower().strip() in ("outros", "auto", "", "other"):
+        try:
+            from services.document_categorization import (
+                extract_text_from_pdf,
+                categorize_document_with_ai,
+            )
+
+            # Tentar obter conteúdo do ficheiro do S3 para análise
+            file_content_for_ai = s3_service.get_file_content(file_key)
+
+            text_for_analysis = f"Ficheiro: {original_filename}"
+            if file_content_for_ai and original_filename.lower().endswith('.pdf'):
+                extracted = extract_text_from_pdf(file_content_for_ai, max_chars=3000)
+                if extracted:
+                    text_for_analysis = extracted
+
+            existing_categories = await db.document_metadata.distinct("ai_category")
+
+            ai_result = await categorize_document_with_ai(
+                text_content=text_for_analysis,
+                filename=original_filename,
+                existing_categories=existing_categories,
+            )
+
+            if ai_result.get("success") and ai_result.get("category"):
+                ai_suggested = ai_result["category"]
+                ai_categorization_info = {
+                    "original_category": category or "Outros",
+                    "ai_category": ai_suggested,
+                    "ai_confidence": ai_result.get("confidence"),
+                }
+                category = ai_suggested
+                logger.info(
+                    f"[PORTAL-IA] Categoria IA: {ai_suggested} "
+                    f"para {original_filename}"
+                )
+        except Exception as ai_err:
+            logger.warning(f"[PORTAL-IA] Erro na triagem IA: {ai_err}")
+
     if not file_key:
         raise HTTPException(status_code=400, detail="file_key é obrigatório")
     if not original_filename:
@@ -812,6 +857,7 @@ async def confirm_portal_upload(
         "category": category,
         "s3_path": file_key,
         "temporary_url": temporary_url,
+        "ai_categorization": ai_categorization_info,
     }
 
 

@@ -510,6 +510,68 @@ async def upload_file_s3(
             # HEIC/HEIF são aceites mas não convertidos automaticamente
             # O utilizador deve converter para JPEG antes do upload idealmente
         
+        # ====================================================================
+        # TRIAGEM AUTOMÁTICA COM IA: Se a categoria for 'Outros', 'Auto' ou vazia,
+        # invocar o serviço de IA para determinar a categoria correta com base
+        # no nome do ficheiro e no texto extraído (se PDF).
+        # Isto garante que o documento é guardado na pasta S3 correta desde
+        # o início, em vez de ficar como 'Outros'.
+        # ====================================================================
+        ai_suggested_category = None
+        auto_categorization_detail = None
+        needs_ai_categorization = category.lower().strip() in ("outros", "auto", "", "other")
+
+        if needs_ai_categorization:
+            try:
+                from services.document_categorization import (
+                    extract_text_from_pdf,
+                    categorize_document_with_ai,
+                )
+
+                # Extrair texto do PDF para análise (se aplicável)
+                text_for_analysis = f"{DEFAULT_FILE_PREFIX}{original_filename}"
+                if original_filename.lower().endswith('.pdf') and len(file_content) > 0:
+                    extracted = extract_text_from_pdf(file_content, max_chars=3000)
+                    if extracted:
+                        text_for_analysis = extracted
+
+                # Obter categorias existentes para consistência
+                existing_categories = await db.document_metadata.distinct("ai_category")
+
+                # Invocar IA para categorização
+                ai_result = await categorize_document_with_ai(
+                    text_content=text_for_analysis,
+                    filename=original_filename,
+                    existing_categories=existing_categories,
+                )
+
+                if ai_result.get("success") and ai_result.get("category"):
+                    ai_suggested_category = ai_result["category"]
+                    auto_categorization_detail = {
+                        "original_category": category or "Outros",
+                        "ai_category": ai_suggested_category,
+                        "ai_subcategory": ai_result.get("subcategory"),
+                        "ai_confidence": ai_result.get("confidence"),
+                    }
+                    # Usar a categoria sugerida pela IA
+                    category = ai_suggested_category
+                    logger.info(
+                        f"[UPLOAD-IA] Categoria IA: {ai_suggested_category} "
+                        f"(confiança: {ai_result.get('confidence', 0):.0%}) "
+                        f"para {sanitize_for_log(original_filename)}"
+                    )
+                else:
+                    logger.warning(
+                        f"[UPLOAD-IA] IA não conseguiu categorizar, "
+                        f"a usar 'Outros' como fallback"
+                    )
+                    category = category or "Outros"
+            except Exception as ai_err:
+                logger.warning(
+                    f"[UPLOAD-IA] Erro na triagem IA (fallback para 'Outros'): {ai_err}"
+                )
+                category = category or "Outros"
+
         # Usar nome personalizado se fornecido (para evitar conflitos), senão normalizar
         if custom_filename:
             # Sanitizar o nome personalizado para segurança
@@ -576,22 +638,25 @@ async def upload_file_s3(
         logger.info(f"[UPLOAD] Upload concluído com sucesso: {normalized_filename}")
         
         # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True, 
-                "path": s3_path, 
-                "message": "Ficheiro guardado com sucesso",
-                "original_filename": file.filename,
-                "normalized_filename": normalized_filename,
-                "converted_to_pdf": converted_to_pdf,
-                "was_extracted": was_extracted,
-                "was_converted": was_converted,
-                "conversion_method": conversion_info.get("conversion_method"),
-                "auto_categorization": "iniciada",
-                "temporary_url": temporary_url
-            }
-        )
+        response_data = {
+            "success": True, 
+            "path": s3_path, 
+            "message": "Ficheiro guardado com sucesso",
+            "original_filename": file.filename,
+            "normalized_filename": normalized_filename,
+            "converted_to_pdf": converted_to_pdf,
+            "was_extracted": was_extracted,
+            "was_converted": was_converted,
+            "conversion_method": conversion_info.get("conversion_method"),
+            "auto_categorization": "iniciada",
+            "temporary_url": temporary_url,
+            "category": category,
+        }
+        # Incluir detalhes da triagem IA se foi executada
+        if auto_categorization_detail:
+            response_data["ai_categorization"] = auto_categorization_detail
+
+        return JSONResponse(status_code=200, content=response_data)
     
     except HTTPException:
         # Re-raise HTTPExceptions para manter o status code correto
@@ -860,10 +925,65 @@ async def confirm_upload(
     # Gerar URL temporário para acesso imediato
     temporary_url = s3_service.get_presigned_url(file_key) or ""
     
-    # Agendar categorização automática em background
+    # ====================================================================
+    # TRIAGEM AUTOMÁTICA COM IA: Se a categoria for 'Outros', 'Auto' ou vazia,
+    # invocar IA para determinar a categoria correta.
+    # Nota: Para uploads diretos, o S3 path já está definido, mas a IA
+    # determina a categoria para os metadados do documento.
+    # ====================================================================
+    ai_categorization_detail = None
+    file_content = None
+    
+    if category.lower().strip() in ("outros", "auto", "", "other"):
+        try:
+            from services.document_categorization import (
+                extract_text_from_pdf,
+                categorize_document_with_ai,
+            )
+            
+            # Obter conteúdo do ficheiro do S3 para análise
+            file_content = s3_service.get_file_content(file_key)
+            
+            text_for_analysis = f"{DEFAULT_FILE_PREFIX}{original_filename}"
+            if file_content and original_filename.lower().endswith('.pdf'):
+                extracted = extract_text_from_pdf(file_content, max_chars=3000)
+                if extracted:
+                    text_for_analysis = extracted
+            
+            existing_categories = await db.document_metadata.distinct("ai_category")
+            
+            ai_result = await categorize_document_with_ai(
+                text_content=text_for_analysis,
+                filename=original_filename,
+                existing_categories=existing_categories,
+            )
+            
+            if ai_result.get("success") and ai_result.get("category"):
+                ai_suggested = ai_result["category"]
+                ai_categorization_detail = {
+                    "original_category": category or "Outros",
+                    "ai_category": ai_suggested,
+                    "ai_subcategory": ai_result.get("subcategory"),
+                    "ai_confidence": ai_result.get("confidence"),
+                }
+                category = ai_suggested
+                logger.info(
+                    f"[CONFIRM-UPLOAD-IA] Categoria IA: {ai_suggested} "
+                    f"para {sanitize_for_log(original_filename)}"
+                )
+        except Exception as ai_err:
+            logger.warning(
+                f"[CONFIRM-UPLOAD-IA] Erro na triagem IA: {ai_err}"
+            )
+    
+    # Agendar categorização automática em background (OCR + metadados completos)
+    if not file_content:
+        try:
+            file_content = s3_service.get_file_content(file_key)
+        except Exception:
+            pass
+    
     try:
-        # Tentar obter conteúdo do ficheiro para categorização
-        file_content = s3_service.get_file_content(file_key)
         if file_content:
             background_tasks.add_task(
                 auto_categorize_document_background,
@@ -890,7 +1010,7 @@ async def confirm_upload(
     
     logger.info(f"[CONFIRM-UPLOAD] Upload confirmado: {normalized_filename}")
     
-    return {
+    response_data = {
         "success": True,
         "s3_path": file_key,
         "normalized_filename": normalized_filename,
@@ -900,6 +1020,10 @@ async def confirm_upload(
         "message": "Upload registado com sucesso",
         "auto_categorization": "iniciada" if file_content else " indisponível"
     }
+    if ai_categorization_detail:
+        response_data["ai_categorization"] = ai_categorization_detail
+    
+    return response_data
 
 
 @router.post("/check-file", responses={400: HTTP_400_RESPONSE, 500: HTTP_500_RESPONSE})
