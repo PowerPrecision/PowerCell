@@ -830,7 +830,7 @@ async def send_documentation_email(
     em curso (conflito de interesse regulado por legislação bancária).
 
     A construção do corpo do email segue uma prioridade decrescente:
-    1. custom_html_body (Rich Text Editor do admin/CEO).
+    1. custom_html_body (Rich Text Editor — disponível para todos os utilizadores).
     2. custom_message (texto com variáveis).
     3. email_template (template da configuração).
     4. Template HTML profissional por defeito.
@@ -1013,18 +1013,18 @@ async def send_documentation_email(
     # ============================================================
     # 1. custom_html_body: HTML já formatado pelo Rich Text Editor
     #    (PRIORIDADE MÁXIMA - usado diretamente, sem sanitização de variáveis)
-    # 2. custom_message: mensagem de texto do admin/CEO (com substituição de variáveis)
+    # 2. custom_message: mensagem de texto personalizada (com substituição de variáveis)
     # 3. email_template: template personalizado da configuração
     # 4. template HTML profissional por defeito
     # ============================================================
     
-    if custom_html_body and current_user["role"] in ["admin", "ceo"]:
-        # USAR HTML CUSTOMIZADO DO EDITOR WYSIWYG
+    if custom_html_body:
+        # USAR HTML CUSTOMIZADO DO EDITOR WYSIWYG (disponível para todos os utilizadores)
         # Sanitizar para segurança (remover scripts perigosos)
         email_body = sanitize_html(custom_html_body)
-        logger.info(f"Usando custom_html_body do Rich Text Editor para processo {process_id}")
+        logger.info(f"Usando custom_html_body do Rich Text Editor para processo {process_id} (utilizador: {current_user['role']})")
     
-    elif custom_message and current_user["role"] in ["admin", "ceo"]:
+    elif custom_message:
         custom_message = sanitize_string(custom_message, max_length=10000)
         # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
         normalized_custom = re.sub(r'\[([A-Z_]+)\]', r'{\1}', custom_message)
