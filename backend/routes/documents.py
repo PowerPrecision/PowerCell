@@ -323,18 +323,30 @@ async def list_client_files(
     client_id: str, 
     user: dict = Depends(get_current_user)
 ):
-    """Lista todos os ficheiros do cliente no S3 organizados por pastas."""
+    """Lista todos os ficheiros do cliente no S3 organizados por pastas.
+    
+    Suporta lookup por ID de processo OU ID de cliente (coleção clients).
+    Quando recebe um client_id da coleção clients, procura os processos
+    associados para obter nome e dados do titular.
+    """
+    # 1. Tentar lookup na coleção processes (comportamento original)
     process = await db.processes.find_one({"id": client_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    # Obter segundo titular se existir (com verificação de None)
-    titular2 = process.get("titular2_data") or {}
-    second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
-    
-    # Obter mapeamento S3 configurado (prioridade máxima)
-    s3_folder = process.get("s3_folder")
+    if process:
+        client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+        titular2 = process.get("titular2_data") or {}
+        second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
+        s3_folder = process.get("s3_folder")
+    else:
+        # 2. Tentar lookup na coleção clients (navegação a partir de ClientDetailPage)
+        client_doc = await db.clients.find_one({"id": client_id})
+        if not client_doc:
+            raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
+        
+        client_name = client_doc.get("nome", client_doc.get("name", DEFAULT_CLIENT_NAME))
+        titular2 = client_doc.get("titular2_data") or {}
+        second_client_name = client_doc.get("second_client_name") or titular2.get("nome") or titular2.get("name")
+        s3_folder = client_doc.get("s3_folder")
     
     # Executar operação síncrona do S3 em thread separada para não bloquear o event loop
     loop = asyncio.get_event_loop()

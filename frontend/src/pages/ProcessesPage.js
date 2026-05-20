@@ -21,7 +21,7 @@ import {
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
   User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
-  Flame
+  Flame, X
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
@@ -419,11 +419,19 @@ const ProcessesPage = () => {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input 
-                  placeholder="Pesquisar por nome ou email..." 
-                  className="pl-10" 
+                  placeholder="Pesquisar por nome, email ou NIF..." 
+                  className="pl-10 pr-8" 
                   value={searchInput} 
                   onChange={(e) => setSearchInput(e.target.value)} 
                 />
+                {searchInput && (
+                  <button
+                    onClick={() => setSearchInput("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
               
               {/* Toggle para mostrar concluídos/desistências */}

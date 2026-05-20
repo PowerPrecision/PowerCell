@@ -7,6 +7,44 @@ from datetime import datetime, timezone
 # NOTA: libmagic1 é instalado no Dockerfile (camada de build).
 # NÃO instalar apt-get packages no arranque — causa OOM no Render (512MB).
 
+# ====================================================================
+# SINGLETON LOCK para tarefas de background
+# ====================================================================
+# Com múltiplos Uvicorn workers, cada worker executa o startup event.
+# Sem lock, tarefas pesadas (email sync, CDC, backup) correm N vezes,
+# causando OOM no Render (2GB RAM com 4 workers = 16 tarefas de bg).
+# Este lock garante que SÓ UM worker inicia as tarefas de background.
+# ====================================================================
+import fcntl
+
+_BG_LOCK_FD = None
+
+def _try_acquire_bg_lock() -> bool:
+    """Tenta adquirir o lock singleton para tarefas de background.
+    
+    Usa fcntl.flock (exclusivo, não-bloqueante) em /tmp/powercell_bg.lock.
+    Só o primeiro worker que chamar esta função obtém o lock.
+    Os restantes workers não iniciam tarefas de background.
+    
+    Returns:
+        True se o lock foi adquirido (worker primário), False caso contrário.
+    """
+    global _BG_LOCK_FD
+    try:
+        _BG_LOCK_FD = open('/tmp/powercell_bg.lock', 'w')
+        fcntl.flock(_BG_LOCK_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _BG_LOCK_FD.write(str(os.getpid()))
+        _BG_LOCK_FD.flush()
+        return True
+    except (IOError, OSError):
+        if _BG_LOCK_FD:
+            try:
+                _BG_LOCK_FD.close()
+            except (IOError, OSError):
+                pass
+            _BG_LOCK_FD = None
+        return False
+
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
@@ -741,15 +779,21 @@ async def startup():
     
     # ==========================================
     # TAREFAS DE BACKGROUND
-    # ==========================================
+    # =========================================
     # 🛑 EM DEV (ENVIRONMENT != production): Só corre o job monitor (leve).
-    # Backup, CDC e Email Sync são BLOQUEADOS para poupar RAM no Render (512MB).
+    # Backup, CDC e Email Sync são BLOQUEADOS para poupar RAM no Render.
+    # 🔑 SINGLETON: Com múltiplos workers, SÓ O PRIMEIRO worker inicia
+    # as tarefas de background (via file lock). Isto evita que N workers
+    # lancem N×4 tarefas de background em simultâneo (causa OOM).
     import asyncio
     import os as _os
     _is_production = _os.environ.get('ENVIRONMENT') == 'production'
+    _is_primary_worker = _try_acquire_bg_lock()
 
-    if _is_production:
-        logger.info("🟢 PRODUÇÃO: Todas as tarefas de background ativadas.")
+    if _is_production and _is_primary_worker:
+        logger.info("🟢 PRODUÇÃO + Worker primário: Todas as tarefas de background ativadas.")
+    elif _is_production and not _is_primary_worker:
+        logger.info("🟢 PRODUÇÃO + Worker secundário: Apenas job monitor (leve).")
     else:
         logger.warning("🟡 MODO DEV: Tarefas pesadas de background DESATIVADAS para poupar RAM.")
 
@@ -758,8 +802,9 @@ async def startup():
     _background_tasks.add(monitor_task)
     monitor_task.add_done_callback(_background_tasks.discard)
 
-    # --- Backup Scheduler: backup diário às 03:00 UTC ---
-    if _is_production:
+    # --- Tarefas pesadas: SÓ no worker primário em PRODUÇÃO ---
+    if _is_production and _is_primary_worker:
+        # --- Backup Scheduler: backup diário às 03:00 UTC ---
         try:
             from services.backup import start_backup_scheduler
             backup_task = asyncio.create_task(start_backup_scheduler())
@@ -768,11 +813,8 @@ async def startup():
             logger.info("💾 Backup scheduler iniciado - backup diário às 03:00 UTC")
         except (IOError, OSError, ValueError, ImportError) as backup_err:
             logger.warning(f"⚠️ Erro ao iniciar backup scheduler: {backup_err}")
-    else:
-        logger.info("💾 Backup scheduler: DESATIVADO em DEV")
 
-    # --- CDC Audit Listener: Change Data Capture para compliance ---
-    if _is_production:
+        # --- CDC Audit Listener: Change Data Capture para compliance ---
         try:
             from services.audit_cdc import cdc_listener
             cdc_task = asyncio.create_task(cdc_listener.start())
@@ -781,11 +823,8 @@ async def startup():
             logger.info("🔍 CDC Audit Listener iniciado - monitorizando alterações para compliance")
         except (IOError, OSError, ValueError, ImportError) as cdc_err:
             logger.warning(f"⚠️ Erro ao iniciar CDC Audit Listener: {cdc_err}")
-    else:
-        logger.info("🔍 CDC Audit Listener: DESATIVADO em DEV")
 
-    # Iniciar Auto-Sync de Emails
-    if _is_production:
+        # Iniciar Auto-Sync de Emails
         try:
             from services.scheduled_tasks import run_email_auto_sync
             email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=180))
@@ -794,7 +833,13 @@ async def startup():
             logger.info("✅ Auto-sync de email iniciado (Apenas Produção).")
         except Exception as email_sync_err:
             logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
+    elif _is_production and not _is_primary_worker:
+        logger.info("💾 Backup scheduler: DESATIVADO (worker secundário)")
+        logger.info("🔍 CDC Audit Listener: DESATIVADO (worker secundário)")
+        logger.info("📧 Auto-sync de email: DESATIVADO (worker secundário)")
     else:
+        logger.info("💾 Backup scheduler: DESATIVADO em DEV")
+        logger.info("🔍 CDC Audit Listener: DESATIVADO em DEV")
         logger.warning("🛑 MODO DEV: Tarefas de background (Email/Scraper) DESATIVADAS para poupar RAM.")
 
 @app.on_event("shutdown")
