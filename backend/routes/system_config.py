@@ -691,12 +691,13 @@ async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN, 
 
 
 @router.get("/companies")
-async def get_available_companies(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_available_companies(user: dict = Depends(get_current_user)):
     """
     Listar empresas com configuração própria no sistema.
 
     MULTI-EMPRESA: Retorna a lista de company_ids disponíveis para o dropdown
-    no frontend de Definições Gerais. Inclui sempre "default" (global).
+    no frontend (Definições Gerais + ProfilePage). Leitura permitida para
+    todos os utilizadores autenticados — apenas a escrita requer ADMIN/CEO.
     """
     companies = await list_available_companies()
     return {"companies": companies, "total": len(companies)}
