@@ -10,7 +10,7 @@
  *   1. Utilizador acede ao portal (via link com client_id ou magic link)
  *   2. Se não tem verified_session token → Mostra ecrã de login
  *   3. Login: NIF + Nº Processo → POST /portal/{client_id}/verify → JWT
- *   4. Token gravado em sessionStorage → Acesso concedido ao portal
+ *   4. Token gravado em localStorage → Acesso concedido ao portal
  *   5. Fluxo legado (magic link) ainda funciona como fallback
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
@@ -198,7 +198,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
     setProgress(0);
 
     try {
-      const token = sessionStorage.getItem('portal_token');
+      const token = localStorage.getItem('portal_token');
       if (!token) throw new Error('Sessão expirada. Recarregue a página.');
 
       // Step 1: pre-signed URL
@@ -400,7 +400,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
 
     setLoading(true);
     try {
-      const token = sessionStorage.getItem('portal_token');
+      const token = localStorage.getItem('portal_token');
       if (!token) throw new Error('Sessão expirada.');
 
       const endpoint = isFinancas ? 'fetch-financas' : 'fetch-seguranca-social';
@@ -1052,8 +1052,8 @@ function PortalLoginScreen({ onLoginSuccess, client_id }) {
     setLoading(true);
     try {
       // Determinar o client_id para o endpoint de verificação
-      // Pode vir da URL ou do sessionStorage (após resolver magic link)
-      const cid = client_id || sessionStorage.getItem('portal_client_id');
+      // Pode vir da URL ou do localStorage (após resolver magic link)
+      const cid = client_id || localStorage.getItem('portal_client_id');
 
       if (!cid) {
         setError('Identificação do cliente não encontrada. Aceda através do link fornecido pelo consultor.');
@@ -1083,11 +1083,13 @@ function PortalLoginScreen({ onLoginSuccess, client_id }) {
       }
 
       if (res.ok && data.token) {
-        // Guardar o token de sessão verificada
-        sessionStorage.setItem('portal_token', data.token);
-        sessionStorage.setItem('portal_verified', 'true');
-        sessionStorage.setItem('portal_client_name', data.client_name || '');
-        sessionStorage.setItem('portal_process_id', data.process_id || '');
+        // Guardar o token de sessão verificada no localStorage
+        // (persiste entre tabs e reloads, ao contrário de localStorage)
+        localStorage.setItem('portal_token', data.token);
+        localStorage.setItem('portal_verified', 'true');
+        localStorage.setItem('portal_client_name', data.client_name || '');
+        localStorage.setItem('portal_process_id', data.process_id || '');
+        if (cid) localStorage.setItem('portal_client_id', cid);
 
         if (onLoginSuccess) {
           onLoginSuccess(data.token);
@@ -1237,12 +1239,12 @@ export default function ClientPortal() {
   // (nunca confiar apenas no flag portal_verified; o token pode ter expirado)
   useEffect(() => {
     let cancelled = false;
-    const token = sessionStorage.getItem('portal_token');
-    const verified = sessionStorage.getItem('portal_verified') === 'true';
+    const token = localStorage.getItem('portal_token');
+    const verified = localStorage.getItem('portal_verified') === 'true';
 
     if (!token || !verified) {
       // Sem token ou sem flag — mostrar login
-      sessionStorage.removeItem('portal_verified');
+      localStorage.removeItem('portal_verified');
       return;
     }
 
@@ -1259,15 +1261,15 @@ export default function ClientPortal() {
           setIsVerified(true);
         } else {
           // Token inválido/expirado — limpar sessão e mostrar login
-          sessionStorage.removeItem('portal_token');
-          sessionStorage.removeItem('portal_verified');
-          sessionStorage.removeItem('portal_client_id');
-          sessionStorage.removeItem('portal_client_name');
-          sessionStorage.removeItem('portal_process_id');
+          localStorage.removeItem('portal_token');
+          localStorage.removeItem('portal_verified');
+          localStorage.removeItem('portal_client_id');
+          localStorage.removeItem('portal_client_name');
+          localStorage.removeItem('portal_process_id');
         }
       } catch {
         // Erro de rede — não auto-verificar, mostrar login
-        sessionStorage.removeItem('portal_verified');
+        localStorage.removeItem('portal_verified');
       }
     })();
 
@@ -1282,7 +1284,7 @@ export default function ClientPortal() {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(urlPart);
       if (isUuid) {
         setClientId(urlPart);
-        sessionStorage.setItem('portal_client_id', urlPart);
+        localStorage.setItem('portal_client_id', urlPart);
       }
     }
   }, []);
@@ -1319,12 +1321,12 @@ export default function ClientPortal() {
           // Guardar client_id para o ecrã de login usar
           if (resolved.client_id) {
             setClientId(resolved.client_id);
-            sessionStorage.setItem('portal_client_id', resolved.client_id);
+            localStorage.setItem('portal_client_id', resolved.client_id);
           }
         } else {
           // Token JWT direto — guardar token e extrair client_id
           // (não carregar dados — o login ainda é obrigatório)
-          sessionStorage.setItem('portal_token', token);
+          localStorage.setItem('portal_token', token);
           // Extrair client_id do processo via /portal/status (sem mostrar dados)
           // Isto é necessário para o ecrã de login saber qual client_id verificar
           try {
@@ -1340,7 +1342,7 @@ export default function ClientPortal() {
               const cid = statusData?.process?.client_id;
               if (cid) {
                 setClientId(cid);
-                sessionStorage.setItem('portal_client_id', cid);
+                localStorage.setItem('portal_client_id', cid);
               }
             }
           } catch {
@@ -1365,7 +1367,7 @@ export default function ClientPortal() {
     let cancelled = false;
 
     const fetchStatus = async () => {
-      const jwt = sessionStorage.getItem('portal_token');
+      const jwt = localStorage.getItem('portal_token');
       if (!jwt) {
         setError('Sessão inválida. Recarregue a página.');
         setLoading(false);
@@ -1428,7 +1430,7 @@ export default function ClientPortal() {
   const [visitRequestResult, setVisitRequestResult] = useState(null);
 
   const fetchMessages = useCallback(async () => {
-    const token = sessionStorage.getItem('portal_token');
+    const token = localStorage.getItem('portal_token');
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/messages`, {
@@ -1446,7 +1448,7 @@ export default function ClientPortal() {
   }, []);
 
   const fetchUnreadCount = useCallback(async () => {
-    const token = sessionStorage.getItem('portal_token');
+    const token = localStorage.getItem('portal_token');
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/messages/unread`, {
@@ -1463,7 +1465,7 @@ export default function ClientPortal() {
 
   const sendMessage = useCallback(async () => {
     if (!newMessage.trim()) return;
-    const token = sessionStorage.getItem('portal_token');
+    const token = localStorage.getItem('portal_token');
     if (!token) return;
     setSendingMessage(true);
     try {
@@ -1496,7 +1498,7 @@ export default function ClientPortal() {
 
   // ── Fetch recommended properties ──
   const fetchRecommendations = useCallback(async () => {
-    const token = sessionStorage.getItem('portal_token');
+    const token = localStorage.getItem('portal_token');
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/recommendations`, {
@@ -1519,7 +1521,7 @@ export default function ClientPortal() {
 
   // ── Fetch visits ──
   const fetchVisits = useCallback(async () => {
-    const token = sessionStorage.getItem('portal_token');
+    const token = localStorage.getItem('portal_token');
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/visits`, {
@@ -1623,14 +1625,14 @@ export default function ClientPortal() {
             <span>Acesso Seguro</span>
           </div>
           {/* Botão Terminar Sessão */}
-          {sessionStorage.getItem('portal_verified') === 'true' && (
+          {localStorage.getItem('portal_verified') === 'true' && (
             <button
               onClick={() => {
-                sessionStorage.removeItem('portal_token');
-                sessionStorage.removeItem('portal_verified');
-                sessionStorage.removeItem('portal_client_id');
-                sessionStorage.removeItem('portal_client_name');
-                sessionStorage.removeItem('portal_process_id');
+                localStorage.removeItem('portal_token');
+                localStorage.removeItem('portal_verified');
+                localStorage.removeItem('portal_client_id');
+                localStorage.removeItem('portal_client_name');
+                localStorage.removeItem('portal_process_id');
                 setIsVerified(false);
                 setData(null);
               }}
@@ -1845,7 +1847,7 @@ export default function ClientPortal() {
                     setRequestingVisit(true);
                     setVisitRequestResult(null);
                     try {
-                      const token = sessionStorage.getItem('portal_token');
+                      const token = localStorage.getItem('portal_token');
                       if (!token) throw new Error('Sessão expirada.');
                       const res = await fetchWithRetry(`${BACKEND_URL}/portal/visits/request`, {
                         method: 'POST',

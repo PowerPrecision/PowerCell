@@ -44,6 +44,7 @@ from services.email_draft_service import (
     batch_create_missing_doc_drafts,
 )
 from utils.input_sanitization import sanitize_string, sanitize_name, sanitize_email, sanitize_html, sanitize_url, log_sanitization_rejection
+from services.process_service import decrypt_sensitive_data
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,9 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
     Extrai todas as variáveis disponíveis para uso em templates de email,
     agregando dados de múltiplas secções do processo num dicionário plano.
 
-    Porquê centralizar a extração: o mesmo conjunto de variáveis é usado
-    pelo preview, pelo envio, e por templates personalizados. Centralizar
-    evita duplicação de lógica e garante consistência entre preview e envio.
+    SEGURANÇA: Desencripta campos sensíveis (NIF, telefone, documento_id, etc.)
+    antes de os disponibilizar para substituição no template. Os dados que chegam
+    ao banco têm de ser texto limpo e legível, nunca hashes cifrados.
 
     Inclui formatação automática de moeda (pt-PT), datas (DD/MM/AAAA),
     mapeamento de vínculos laborais e estado civil/regime de casamento.
@@ -85,6 +86,11 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
             - Crédito (banco_atual, montante_divida, etc.).
             - Remetente (sender_name, sender_email, sender_phone).
     """
+    # ── Desencriptar campos sensíveis ANTES de extrair variáveis ──
+    # Garante que NIF, telefone, documento_id, morada_fiscal, etc.
+    # chegam ao banco como texto legível (nunca ENC:xxx)
+    process = decrypt_sensitive_data(process)
+
     personal_data = process.get("personal_data", {}) or {}
     titular2_data = process.get("titular2_data", {}) or {}
     financial_data = process.get("financial_data", {}) or {}
@@ -737,6 +743,9 @@ async def preview_documentation_email(
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
     
+    # ── Desencriptar dados sensíveis para o preview ──
+    process = decrypt_sensitive_data(process)
+    
     # Obter configuração
     config = await get_system_config()
     doc_config = config.document_recipients
@@ -845,6 +854,11 @@ async def send_documentation_email(
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    # ── Desencriptar dados sensíveis antes de usar no email ──
+    # Garante que NIF, telefone, documento_id, etc. chegam ao banco
+    # como texto legível (nunca ENC:xxx)
+    process = decrypt_sensitive_data(process)
     
     # Obter configuração
     config = await get_system_config()
@@ -1015,10 +1029,10 @@ async def send_documentation_email(
         # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
         normalized_custom = re.sub(r'\[([A-Z_]+)\]', r'{\1}', custom_message)
         try:
-            email_body = normalized_custom.format(**template_vars)
+            resolved_text = normalized_custom.format(**template_vars)
         except KeyError as e:
             logger.warning(f"Variável não encontrada no custom_message: {e}")
-            email_body = normalized_custom.format(
+            resolved_text = normalized_custom.format(
                 client_name=client_name,
                 client_nif=client_nif,
                 process_number=process_number,
@@ -1026,22 +1040,45 @@ async def send_documentation_email(
                 sender_name=current_user.get("name", ""),
                 sender_email=current_user.get("email", "")
             )
+        # ── Converter texto simples em HTML profissional ──
+        # Os bancos precisam de emails com parágrafos organizados,
+        # não texto corrido sem formatação
+        email_body = (
+            "<div style='font-family: Arial, sans-serif; font-size: 14px; "
+            "line-height: 1.6; color: #333; max-width: 600px;'>"
+            + resolved_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                .replace('\n', '<br />')
+            + "</div>"
+        )
     elif email_template:
         # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
         normalized_template = re.sub(r'\[([A-Z_]+)\]', r'{\1}', email_template)
         # Usar template personalizado da configuração com todas as variáveis
         try:
-            email_body = normalized_template.format(**template_vars)
+            resolved_text = normalized_template.format(**template_vars)
         except KeyError as e:
             logger.warning(f"Variável não encontrada no template: {e}")
             # Fallback com variáveis básicas
-            email_body = normalized_template.format(
+            resolved_text = normalized_template.format(
                 client_name=client_name,
                 client_nif=client_nif,
                 process_number=process_number,
                 documents_list=documents_list,
                 sender_name=current_user.get("name", ""),
                 sender_email=current_user.get("email", "")
+            )
+        # ── Verificar se o template já contém HTML ──
+        # Se não tem tags HTML, converter texto para HTML
+        has_html = bool(re.search(r'<(div|p|br|span|table|ul|ol|h[1-6])', resolved_text, re.IGNORECASE))
+        if has_html:
+            email_body = resolved_text
+        else:
+            email_body = (
+                "<div style='font-family: Arial, sans-serif; font-size: 14px; "
+                "line-height: 1.6; color: #333; max-width: 600px;'>"
+                + resolved_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    .replace('\n', '<br />')
+                + "</div>"
             )
     else:
         # Usar template HTML profissional por defeito

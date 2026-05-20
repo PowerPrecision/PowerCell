@@ -782,7 +782,7 @@ async def test_service_connection(
                     return {"success": False, "message": "Email do Remetente (From) não configurado. Preencha o campo 'Email do Remetente'."}
 
                 try:
-                    resend.ApiKey = sys_smtp.resend_api_key
+                    resend.api_key = sys_smtp.resend_api_key
 
                     from_header = sys_smtp.smtp_from_email
                     if sys_smtp.smtp_from_name:
