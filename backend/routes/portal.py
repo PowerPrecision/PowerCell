@@ -9,7 +9,12 @@ SEGURANÇA:
 - Upload restrito ao process_id do token
 - Sem acesso a endpoints de staff
 
+FLUXOS DE AUTENTICAÇÃO:
+1. Magic Link (legado): short_id → resolve → JWT type=magic_link
+2. Verificação NIF + Nº Processo: POST /portal/{client_id}/verify → JWT type=verified_session
+
 ENDPOINTS:
+- POST /portal/{client_id}/verify  → Verifica NIF + Nº Processo, devolve token de sessão
 - GET  /portal/resolve/{short_id}  → Resolve short_id para JWT
 - GET  /portal/status              → Status do processo + stepper + documentos
 - POST /portal/upload-url          → Gera pre-signed URL para upload
@@ -27,7 +32,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from database import db
-from services.portal_security import get_current_client, PORTAL_ROLE
+from services.portal_security import (
+    get_current_client,
+    PORTAL_ROLE,
+    create_verified_session_token,
+    verify_client_credentials,
+)
 from services.auth import get_current_user, require_roles
 from services.s3_storage import s3_service
 from services.redis_cache import invalidate_stats_cache
@@ -37,6 +47,71 @@ from services.websocket_manager import manager, WSEventType, create_ws_message
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal", tags=["Client Portal"])
+
+
+# ====================================================================
+# VERIFICAÇÃO DE LOGIN DO PORTAL (NIF + Nº Processo)
+# ====================================================================
+
+@router.post("/{client_id}/verify")
+async def verify_portal_login(client_id: str, data: dict):
+    """
+    Verifica as credenciais do cliente para acesso ao Portal.
+
+    Este endpoint é o novo ecrã de login do Portal do Cliente. O cliente
+    deve inserir o seu NIF e o Número do Processo para desbloquear o acesso.
+
+    Se as credenciais forem válidas, devolve um token de sessão (JWT)
+    que pode ser usado para aceder aos restantes endpoints do portal.
+
+    SEGURANÇA:
+    - NIF é cruzado via blind index (SHA-256) — nunca exposto em plain text na query
+    - Protecção contra brute-force: 5 tentativas, lockout de 15 min
+    - Token de sessão tem validade de 4 horas (mais curto que magic link de 90 dias)
+    - Mensagens de erro genéricas (não revelam qual campo está errado)
+
+    Path:
+    - client_id: ID do cliente (UUID) — obtido a partir do link do portal
+
+    Body:
+    - nif: NIF do cliente (9 dígitos, obrigatório)
+    - process_number: Número do processo (inteiro, obrigatório)
+
+    Returns:
+    - token: JWT de sessão verificada (type=verified_session)
+    - process_id: ID do processo associado
+    - client_name: Nome do cliente
+    - expires_in: Validade do token em segundos
+    """
+    nif = data.get("nif", "").strip()
+    process_number = data.get("process_number")
+
+    if not nif:
+        raise HTTPException(status_code=400, detail="NIF é obrigatório.")
+    if process_number is None:
+        raise HTTPException(status_code=400, detail="Número de processo é obrigatório.")
+
+    # Verificar credenciais (NIF + process_number)
+    result = await verify_client_credentials(
+        client_id=client_id,
+        nif=nif,
+        process_number=process_number,
+    )
+
+    # Gerar token de sessão verificada
+    session_token = create_verified_session_token(
+        process_id=result["process_id"],
+        client_id=result["client_id"],
+    )
+
+    return JSONResponse(content={
+        "token": session_token,
+        "process_id": result["process_id"],
+        "client_name": result["client_name"],
+        "process_number": result["process_number"],
+        "token_type": "verified_session",
+        "expires_in": 4 * 60 * 60,  # 4 horas em segundos
+    })
 
 
 # ====================================================================

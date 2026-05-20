@@ -88,6 +88,9 @@ export const queryKeys = {
     details: () => [...queryKeys.processes.all, 'detail'],
     detail: (id) => [...queryKeys.processes.details(), id],
     kanban: (filters) => [...queryKeys.processes.all, 'kanban', filters],
+    // Query key INDEPENDENTE para Concluídos — quando completedDays muda,
+    // só esta query é invalidada, não a query das colunas activas
+    kanbanCompleted: (filters) => [...queryKeys.processes.all, 'kanban-completed', filters],
     myClients: (filters) => [...queryKeys.processes.all, 'my-clients', filters],
   },
   

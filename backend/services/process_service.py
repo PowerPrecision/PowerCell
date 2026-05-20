@@ -421,10 +421,18 @@ async def populate_client_data(process: dict) -> dict:
     dados_pessoais = client_doc.get("dados_pessoais") or {}
 
     # ── Preencher campos de nível raiz (retrocompatibilidade) ──────────
-    result.setdefault("client_name", client_doc.get("nome", ""))
-    result.setdefault("client_email", contacto.get("email", ""))
-    result.setdefault("client_phone", contacto.get("telefone", ""))
-    result.setdefault("client_nif", dados_pessoais.get("nif", ""))
+    # Após refatoração Fase 3 (Clientes separados de Processos), o campo
+    # client_name pode existir como string vazia no processo — usamos
+    # `if not get()` em vez de `setdefault` para forçar override quando
+    # o valor armazenado está vazio mas o cliente tem nome.
+    if not result.get("client_name"):
+        result["client_name"] = client_doc.get("nome", "")
+    if not result.get("client_email"):
+        result["client_email"] = contacto.get("email", "")
+    if not result.get("client_phone"):
+        result["client_phone"] = contacto.get("telefone", "")
+    if not result.get("client_nif"):
+        result["client_nif"] = dados_pessoais.get("nif", "")
 
     # ── Montar personal_data (estrutura antiga do Frontend) ────────────
     # Só preencher se NÃO existir personal_data no processo

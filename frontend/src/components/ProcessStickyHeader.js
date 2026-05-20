@@ -109,7 +109,7 @@ const ProcessStickyHeader = ({
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4 text-gray-500" />
                 <span className="font-semibold text-sm truncate max-w-[200px]">
-                  {safeString(process?.client_name)}
+                  {safeString(process?.client_name) || safeString(personalData?.nome_completo) || safeString(personalData?.nome) || 'Cliente'}
                 </span>
                 {process?.process_number && (
                   <span className="text-xs text-gray-500 font-mono">

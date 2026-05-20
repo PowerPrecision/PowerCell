@@ -8,9 +8,16 @@ SEGURANÇA:
 - Validade longa (90 dias) configurável
 - Token contém process_id para escopo restrito
 - Sem acesso a endpoints de staff/admin
+
+FLUXOS DE AUTENTICAÇÃO:
+1. Magic Link (legado): short_id → resolve → JWT type=magic_link
+2. Verificação NIF + Nº Processo: POST /portal/{client_id}/verify → JWT type=verified_session
+
+Ambos os tipos de token são aceites pelo get_current_client.
 """
 import jwt
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 from fastapi import Depends, HTTPException
@@ -27,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 PORTAL_ROLE = "client_portal"
 PORTAL_TOKEN_VALIDITY_DAYS = 90  # 90 dias
+PORTAL_SESSION_VALIDITY_HOURS = 4  # Sessão verificada: 4 horas (mais curta que magic link)
+
+# Tentativas máximas de verificação por client_id (prevenção de brute-force)
+MAX_VERIFY_ATTEMPTS = 5
+VERIFY_LOCKOUT_MINUTES = 15
 
 # Security scheme (igual ao staff, mas validado separadamente)
 _portal_security = HTTPBearer(auto_error=False)
@@ -38,7 +50,7 @@ _portal_security = HTTPBearer(auto_error=False)
 
 def create_client_magic_token(process_id: str) -> str:
     """
-    Gera um JWT específico para o Portal do Cliente.
+    Gera um JWT específico para o Portal do Cliente (Magic Link).
 
     Claims:
     - sub: process_id (o ID do processo)
@@ -62,6 +74,270 @@ def create_client_magic_token(process_id: str) -> str:
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     logger.info(f"Magic link gerado para processo {process_id} (expira em {PORTAL_TOKEN_VALIDITY_DAYS}d)")
     return token
+
+
+def create_verified_session_token(process_id: str, client_id: str) -> str:
+    """
+    Gera um JWT de sessão verificada para o Portal do Cliente.
+
+    Este token é emitido após verificação bem-sucedida de NIF + Nº Processo.
+    Tem validade mais curta que o magic link (4h vs 90d) por ser uma
+    sessão interactiva.
+
+    Claims:
+    - sub: process_id (o ID do processo)
+    - role: "client_portal" (isolado de roles de staff)
+    - type: "verified_session" (obtido por verificação NIF + processo)
+    - client_id: ID do cliente verificado
+    - iat: timestamp de emissão
+    - exp: 4 horas a partir de agora
+
+    Args:
+        process_id: ID do processo (UUID)
+        client_id: ID do cliente verificado (UUID)
+
+    Returns:
+        JWT string codificado
+    """
+    payload = {
+        "sub": process_id,
+        "role": PORTAL_ROLE,
+        "type": "verified_session",
+        "client_id": client_id,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=PORTAL_SESSION_VALIDITY_HOURS),
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    logger.info(
+        f"Sessão verificada gerada para processo {process_id}, "
+        f"cliente {client_id} (expira em {PORTAL_SESSION_VALIDITY_HOURS}h)"
+    )
+    return token
+
+
+async def verify_client_credentials(client_id: str, nif: str, process_number: int) -> Dict[str, Any]:
+    """
+    Verifica as credenciais do cliente (NIF + Nº Processo) para acesso ao portal.
+
+    Fluxo de verificação:
+    1. Validar formato do NIF (9 dígitos)
+    2. Verificar lockout por tentativas falhadas
+    3. Buscar cliente por ID e cruzar NIF (via blind index ou texto limpo)
+    4. Buscar processo por process_number que pertença ao cliente
+    5. Se ambos baterem, registar sucesso e retornar dados
+    6. Se falhar, incrementar contador de tentativas
+
+    SEGURANÇA:
+    - NIF é verificado via blind index (SHA-256) quando encriptado
+    - Fallback para texto limpo quando encriptação não está activa
+    - Protecção contra brute-force: 5 tentativas, lockout de 15 min
+    - Log de tentativas falhadas para auditoria
+
+    Args:
+        client_id: ID do cliente (UUID)
+        nif: NIF do cliente (9 dígitos)
+        process_number: Número do processo
+
+    Returns:
+        Dict com {client_id, process_id, client_name} se verificação bem-sucedida
+
+    Raises:
+        HTTPException 400: Dados inválidos
+        HTTPException 401: Credenciais incorrectas
+        HTTPException 429: Muitas tentativas (lockout)
+    """
+    # ── 1. Validar formato do NIF ──
+    nif_clean = re.sub(r'[^\d]', '', str(nif))
+    if len(nif_clean) != 9 or not nif_clean.isdigit():
+        raise HTTPException(
+            status_code=400,
+            detail="NIF inválido. Deve conter 9 dígitos."
+        )
+
+    # ── 2. Verificar lockout por tentativas falhadas ──
+    lockout_key = f"portal_verify:{client_id}"
+    lockout_doc = await db.portal_verify_attempts.find_one({"_id": lockout_key})
+
+    if lockout_doc:
+        attempts = lockout_doc.get("attempts", 0)
+        locked_until = lockout_doc.get("locked_until")
+
+        if locked_until:
+            try:
+                locked_until_dt = datetime.fromisoformat(
+                    locked_until.replace('Z', '+00:00') if isinstance(locked_until, str) else locked_until
+                )
+                if datetime.now(timezone.utc) < locked_until_dt:
+                    remaining = int((locked_until_dt - datetime.now(timezone.utc)).total_seconds() / 60)
+                    logger.warning(
+                        f"[PORTAL VERIFY] Conta bloqueada para client_id={client_id}. "
+                        f"Tenta novamente em {remaining} min."
+                    )
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Muitas tentativas falhadas. Tente novamente em {remaining} minutos."
+                    )
+            except (ValueError, TypeError):
+                pass  # Data inválida, ignorar lockout
+
+        if attempts >= MAX_VERIFY_ATTEMPTS:
+            # Aplicar lockout
+            locked_until_str = (
+                datetime.now(timezone.utc) + timedelta(minutes=VERIFY_LOCKOUT_MINUTES)
+            ).isoformat()
+            await db.portal_verify_attempts.update_one(
+                {"_id": lockout_key},
+                {"$set": {"locked_until": locked_until_str}}
+            )
+            logger.warning(
+                f"[PORTAL VERIFY] Lockout aplicado para client_id={client_id} "
+                f"após {attempts} tentativas falhadas"
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Muitas tentativas falhadas. Conta bloqueada por {VERIFY_LOCKOUT_MINUTES} minutos."
+            )
+
+    # ── 3. Buscar cliente e cruzar NIF ──
+    client = await db.clients.find_one({"id": client_id})
+
+    if not client:
+        await _record_failed_attempt(lockout_key)
+        logger.warning(f"[PORTAL VERIFY] Cliente não encontrado: {client_id}")
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu NIF e Número de Processo."
+        )
+
+    # Cruzar NIF — tentar via blind index primeiro (dados encriptados)
+    from services.encryption import generate_nif_hash
+    nif_hash = generate_nif_hash(nif_clean)
+    nif_matches = False
+
+    # Verificar blind index (dados encriptados)
+    if nif_hash:
+        stored_nif_hash = (
+            client.get("dados_pessoais", {}).get("nif_hash")
+        )
+        if stored_nif_hash and stored_nif_hash == nif_hash:
+            nif_matches = True
+
+    # Fallback: verificar NIF em texto limpo (dados não encriptados)
+    if not nif_matches:
+        stored_nif = client.get("dados_pessoais", {}).get("nif") or client.get("nif")
+        if stored_nif:
+            # Se está encriptado, desencriptar para comparar
+            if isinstance(stored_nif, str) and stored_nif.startswith("ENC:"):
+                from services.encryption import decrypt_value
+                stored_nif = decrypt_value(stored_nif)
+            stored_nif_clean = re.sub(r'[^\d]', '', str(stored_nif))
+            if stored_nif_clean == nif_clean:
+                nif_matches = True
+
+    if not nif_matches:
+        await _record_failed_attempt(lockout_key)
+        logger.warning(
+            f"[PORTAL VERIFY] NIF não corresponde para client_id={client_id}"
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu NIF e Número de Processo."
+        )
+
+    # ── 4. Buscar processo por process_number que pertença ao cliente ──
+    process = None
+    client_process_ids = client.get("process_ids", [])
+
+    # Converter process_number para int (pode vir como string do frontend)
+    try:
+        process_number_int = int(process_number)
+    except (ValueError, TypeError):
+        await _record_failed_attempt(lockout_key)
+        raise HTTPException(
+            status_code=400,
+            detail="Número de processo inválido."
+        )
+
+    # Procurar processo pelo número que pertença ao cliente
+    # Critério: process_number == process_number_int E client_id no processo
+    query = {
+        "process_number": process_number_int,
+        "$or": [
+            {"client_id": client_id},
+            {"client_ids": client_id},
+        ],
+    }
+    process = await db.processes.find_one(query, {"_id": 0})
+
+    if not process:
+        # Fallback: verificar por ID directo se o process_number for na verdade o UUID
+        if client_process_ids:
+            process = await db.processes.find_one(
+                {"id": str(process_number), "client_id": client_id},
+                {"_id": 0}
+            )
+
+    if not process:
+        await _record_failed_attempt(lockout_key)
+        logger.warning(
+            f"[PORTAL VERIFY] Processo nº{process_number} não encontrado "
+            f"para client_id={client_id}"
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu NIF e Número de Processo."
+        )
+
+    # ── 5. Verificação bem-sucedida — limpar tentativas falhadas ──
+    await db.portal_verify_attempts.delete_one({"_id": lockout_key})
+
+    client_name = client.get("nome", "Cliente")
+    process_id = process.get("id")
+
+    logger.info(
+        f"[PORTAL VERIFY] Verificação bem-sucedida: client_id={client_id}, "
+        f"process_id={process_id}, process_number={process_number_int}"
+    )
+
+    return {
+        "client_id": client_id,
+        "process_id": process_id,
+        "client_name": client_name,
+        "process_number": process_number_int,
+    }
+
+
+async def _record_failed_attempt(lockout_key: str) -> None:
+    """
+    Regista uma tentativa falhada de verificação e aplica lockout se necessário.
+
+    Incrementa o contador de tentativas. Se atingir o limite, aplica lockout.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    result = await db.portal_verify_attempts.update_one(
+        {"_id": lockout_key},
+        {
+            "$inc": {"attempts": 1},
+            "$set": {"last_attempt_at": now},
+        },
+        upsert=True,
+    )
+
+    # Verificar se atingiu o limite
+    doc = await db.portal_verify_attempts.find_one({"_id": lockout_key})
+    if doc and doc.get("attempts", 0) >= MAX_VERIFY_ATTEMPTS:
+        locked_until_str = (
+            datetime.now(timezone.utc) + timedelta(minutes=VERIFY_LOCKOUT_MINUTES)
+        ).isoformat()
+        await db.portal_verify_attempts.update_one(
+            {"_id": lockout_key},
+            {"$set": {"locked_until": locked_until_str}}
+        )
+        logger.warning(
+            f"[PORTAL VERIFY] Lockout aplicado para {lockout_key} "
+            f"após {MAX_VERIFY_ATTEMPTS} tentativas"
+        )
 
 
 # ====================================================================
@@ -121,8 +397,10 @@ async def get_current_client(
             detail="Este token não tem permissão para aceder ao portal."
         )
 
-    # Verificar que é um magic_link (não um access_token de staff)
-    if payload.get("type") != "magic_link":
+    # Verificar que é um tipo de token válido para o portal
+    # Tipos aceites: "magic_link" (legado) e "verified_session" (verificação NIF + processo)
+    token_type = payload.get("type")
+    if token_type not in ("magic_link", "verified_session"):
         raise HTTPException(
             status_code=403,
             detail="Token de tipo incorreto para o portal."
