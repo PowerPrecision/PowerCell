@@ -707,7 +707,8 @@ async def update_config(
             "section": section,
         }
     except Exception as e:
-        logger.error(f"Erro ao actualizar configuração: {e}")
+        import traceback
+        logger.error(f"Erro ao actualizar configuração '{section}': {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

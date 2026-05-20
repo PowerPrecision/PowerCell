@@ -508,14 +508,27 @@ const SharedEmailCard = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        toast.success(`Sincronização iniciada: ${data.new_emails || 0} novos emails`);
+        toast.success(
+          `Sincronização concluída: ${data.total_synced || 0} novos, ` +
+          `${data.total_duplicates || 0} duplicados`
+        );
         fetchConfigs();
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao sincronizar");
+        // Mostrar mensagem de erro detalhada do backend
+        const errorMsg = data.detail || "Erro ao sincronizar";
+        if (res.status === 404) {
+          toast.error(`Configuração em falta — ${errorMsg}`, { duration: 6000 });
+        } else if (res.status === 422) {
+          toast.error(`OAuth necessário — ${errorMsg}`, { duration: 6000 });
+        } else if (res.status === 503) {
+          toast.error(`Serviço indisponível — ${errorMsg}`, { duration: 6000 });
+        } else {
+          toast.error(errorMsg, { duration: 6000 });
+        }
       }
     } catch (error) {
-      toast.error("Erro ao sincronizar");
+      toast.error("Erro de ligação ao sincronizar");
     } finally {
       setSyncing(null);
     }

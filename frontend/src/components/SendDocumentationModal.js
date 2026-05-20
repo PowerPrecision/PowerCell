@@ -14,7 +14,7 @@
  *   de bancos_creditos e bancos_simulacoes do cliente (case-insensitive).
  * - TO/BCC/CC separados para controlo de visibilidade (BCC protege a privacidade).
  * - Preview do HTML gerado pelo backend antes do envio.
- * - SmartRichEditor disponível apenas para Admin/CEO (edição visual ou HTML bruto).
+ * - SmartRichEditor disponível para todos os utilizadores (edição visual ou HTML bruto).
  *
  * @param {Object} props
  * @param {boolean} props.open — Controla se o modal está visível
@@ -363,7 +363,7 @@ const SendDocumentationModal = ({
       return recipient && isRecipientBlocked(recipient);
     });
 
-    if (blockedRecipients.length > 0 && !user?.role?.match(/admin|ceo/i)) {
+    if (blockedRecipients.length > 0 && !isAdminOrCEO) {
       toast.error(
         <div>
           <strong>Destinatários bloqueados:</strong>
@@ -386,8 +386,8 @@ const SendDocumentationModal = ({
         cc_emails: ccEmails ? ccEmails.split(",").map(e => e.trim()) : [],
       };
 
-      // NOVO: Enviar HTML customizado do editor se for admin/CEO
-      if (canEditTemplate && emailHtml) {
+      // Enviar HTML customizado do editor (disponível para todos os utilizadores)
+      if (emailHtml) {
         requestBody.custom_html_body = emailHtml;
       }
 
@@ -431,8 +431,9 @@ const SendDocumentationModal = ({
     }
   };
 
-  // Verificar permissões
-  const canEditTemplate = user?.role?.match(/admin|ceo/i);
+  // Verificar permissões — Admin/CEO podem contornar destinatários bloqueados
+  const canEditTemplate = true; // Todos os utilizadores podem editar o corpo do email
+  const isAdminOrCEO = user?.role?.match(/admin|ceo/i);
 
   if (!config?.enabled) {
     return (
@@ -580,7 +581,7 @@ const SendDocumentationModal = ({
                           <Checkbox
                             checked={selectedRecipients.includes(recipient.email)}
                             onCheckedChange={() => toggleRecipient(recipient.email)}
-                            disabled={isBlocked && !canEditTemplate}
+                            disabled={isBlocked && !isAdminOrCEO}
                           />
                           <div className="flex-1">
                             <span className="text-sm font-medium">{recipient.name}</span>
@@ -661,23 +662,19 @@ const SendDocumentationModal = ({
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-medium">
                     Corpo do Email
-                    {canEditTemplate && (
-                      <Badge variant="outline" className="ml-2 text-xs">
-                        Editável (Admin/CEO)
-                      </Badge>
-                    )}
+                    <Badge variant="outline" className="ml-2 text-xs">
+                      Editável
+                    </Badge>
                   </Label>
                   <TabsList>
                     <TabsTrigger value="preview" className="text-xs">
                       <Eye className="h-3.5 w-3.5 mr-1" />
                       Preview
                     </TabsTrigger>
-                    {canEditTemplate && (
-                      <TabsTrigger value="edit" className="text-xs">
-                        <Edit3 className="h-3.5 w-3.5 mr-1" />
-                        Editar
-                      </TabsTrigger>
-                    )}
+                    <TabsTrigger value="edit" className="text-xs">
+                      <Edit3 className="h-3.5 w-3.5 mr-1" />
+                      Editar
+                    </TabsTrigger>
                   </TabsList>
                 </div>
 
@@ -693,24 +690,22 @@ const SendDocumentationModal = ({
                   )}
                 </TabsContent>
 
-                {canEditTemplate && (
-                  <TabsContent value="edit" className="mt-2">
-                    {previewLoading ? (
-                      <div className="flex items-center justify-center py-12 border rounded-lg">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : (
-                      <SmartRichEditor
-                        key={emailHtml ? 'preview-loaded' : 'preview-empty'}
-                        value={emailHtml}
-                        onChange={setEmailHtml}
-                        placeholder="Edite o conteúdo do email..."
-                        minHeight={300}
-                        advanced
-                      />
-                    )}
-                  </TabsContent>
-                )}
+                <TabsContent value="edit" className="mt-2">
+                  {previewLoading ? (
+                    <div className="flex items-center justify-center py-12 border rounded-lg">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : (
+                    <SmartRichEditor
+                      key={emailHtml ? 'preview-loaded' : 'preview-empty'}
+                      value={emailHtml}
+                      onChange={setEmailHtml}
+                      placeholder="Edite o conteúdo do email..."
+                      minHeight={300}
+                      advanced
+                    />
+                  )}
+                </TabsContent>
               </Tabs>
 
               {/* Tags Disponíveis para Templates */}
@@ -786,10 +781,7 @@ const SendDocumentationModal = ({
                   <strong>Assunto:</strong> {emailSubject || `Documentação - ${safeString(process?.client_name) || "N/A"} (Processo #${safeString(process?.process_number) || "N/A"})`}
                 </p>
                 <p>
-                  <strong>Nota:</strong> {canEditTemplate
-                    ? "Pode editar o conteúdo visualmente ou alternar para o modo HTML no botão </> Editar HTML."
-                    : "O conteúdo do email é gerado automaticamente com base nos documentos selecionados."
-                  }
+                  <strong>Nota:</strong> Pode editar o conteúdo visualmente no separador "Editar" ou alternar para o modo HTML no botão {'</>'} Editar HTML.
                 </p>
               </div>
             </div>
