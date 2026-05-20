@@ -604,7 +604,7 @@ export const syncProcessWithTrello = (processId) => api.post(`/trello/sync/${pro
 // Clients
 export const getClients = (params = {}) => api.get("/clients", { params });
 export const getClient = (id) => api.get(`/clients/${id}`);
-export const getClientFiles = (clientId) => api.get(`/clients/${clientId}/files`);
+export const getClientFiles = (clientId) => api.get(`/documents/client/${clientId}/files`);
 export const createClient = (data) => api.post("/clients", data);
 export const updateClient = (id, data) => api.put(`/clients/${id}`, data);
 export const deleteClient = (id) => api.delete(`/clients/${id}`);
