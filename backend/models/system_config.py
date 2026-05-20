@@ -267,7 +267,18 @@ class SystemWebmailConfig(BaseModel):
 
 
 class SystemConfig(BaseModel):
-    """Configuração completa do sistema"""
+    """Configuração completa do sistema.
+
+    MULTI-EMPRESA:
+      O campo company_id identifica a empresa a que esta config pertence.
+      - Valor "default" (ou auscente): config global/partilhada (retrocompatível).
+      - Qualquer outro valor: config específica dessa empresa.
+
+      Quando o frontend seleciona uma empresa no dropdown, as rotas GET/PUT
+      filtram e guardam o documento com base neste campo.
+      O _id em MongoDB segue o padrão: "main" (global) ou "company:<company_id>".
+    """
+    company_id: Optional[str] = "default"  # "default" = global, outro = empresa específica
     storage: StorageConfig = StorageConfig()
     email: EmailConfig = EmailConfig()
     ai: AIConfig = AIConfig()

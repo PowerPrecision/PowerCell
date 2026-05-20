@@ -363,6 +363,7 @@ function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processe
   const { user, token } = useAuth();
   const [saving, setSaving] = useState(false);
   const [scrapingUrl, setScrapingUrl] = useState(false);
+  const [scrapePreview, setScrapePreview] = useState(null);
   const [form, setForm] = useState({
     property_id: "",
     client_id: "",
@@ -383,6 +384,45 @@ function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processe
     form.property_url.includes("casa.sapo") ||
     form.property_url.startsWith("http")
   );
+
+  // Debounced scrape preview quando URL é colada
+  useEffect(() => {
+    if (!isPropertyUrl || !token) {
+      setScrapePreview(null);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      setScrapingUrl(true);
+      try {
+        const res = await fetch(
+          `${API_URL}/api/scraper/single`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ url: form.property_url.trim() }),
+          }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.data) {
+            setScrapePreview(data.data);
+          } else {
+            setScrapePreview(null);
+          }
+        } else {
+          setScrapePreview(null);
+        }
+      } catch {
+        setScrapePreview(null);
+      } finally {
+        setScrapingUrl(false);
+      }
+    }, 1500);
+    return () => clearTimeout(timeout);
+  }, [form.property_url, token, isPropertyUrl]);
 
   const handleSubmit = async () => {
     // Se tem URL, property_id não é obrigatório
@@ -433,6 +473,7 @@ function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processe
             : "Visita criada com sucesso!"
         );
         setForm({ property_id: "", client_id: "", scheduled_date: "", consultor_id: "", notes: "", property_url: "" });
+        setScrapePreview(null);
         onOpenChange(false);
         if (onSuccess) onSuccess();
       } else {
@@ -482,6 +523,32 @@ function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processe
             <p className="text-[10px] text-muted-foreground mt-1">
               Se preencher, o sistema extrai automaticamente os dados do imóvel (nome, preço, morada, foto).
             </p>
+            {/* Scrape preview inline */}
+            {scrapingUrl && (
+              <div className="flex items-center gap-2 mt-2 p-2 bg-teal-50 rounded-lg border border-teal-100">
+                <Loader2 className="h-4 w-4 animate-spin text-teal-600" />
+                <span className="text-xs text-teal-700">A extrair dados do imóvel...</span>
+              </div>
+            )}
+            {scrapePreview && !scrapingUrl && (
+              <div className="mt-2 p-2 bg-teal-50 rounded-lg border border-teal-100 space-y-1">
+                <p className="text-xs font-semibold text-teal-800 flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  Dados extraídos
+                </p>
+                <div className="flex gap-2">
+                  {scrapePreview.photo_url && (
+                    <img src={scrapePreview.photo_url} alt="" className="h-10 w-10 rounded object-cover shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
+                  )}
+                  <div className="min-w-0 text-[11px]">
+                    {scrapePreview.title && <p className="font-medium truncate">{scrapePreview.title}</p>}
+                    {scrapePreview.price && <p className="text-amber-700 font-semibold">{formatPrice(scrapePreview.price)}</p>}
+                    {scrapePreview.location && <p className="text-muted-foreground"><MapPin className="h-3 w-3 inline mr-0.5" />{scrapePreview.location}</p>}
+                    {scrapePreview.typology && <p className="text-muted-foreground"><Home className="h-3 w-3 inline mr-0.5" />{scrapePreview.typology}</p>}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Divider */}

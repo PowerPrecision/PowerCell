@@ -16,7 +16,8 @@ from models.system_config import (
 )
 from services.system_config import (
     get_system_config, update_config_section, 
-    mark_setup_completed, invalidate_config_cache
+    mark_setup_completed, invalidate_config_cache,
+    list_available_companies
 )
 
 router = APIRouter(prefix="/system-config", tags=["System Configuration"])
@@ -562,9 +563,9 @@ CONFIG_FIELDS = {
             ConfigField(
                 key="eligible_doc_types",
                 label="Tipos de Documento Elegíveis",
-                type="textarea",
-                placeholder='["irs", "recibo_vencimento", "extrato_bancario"]',
-                help_text="Lista JSON com os tipos de documento que geram rascunhos automáticos quando em falta",
+                type="text",
+                placeholder="irs, recibo_vencimento, extrato_bancario, cc",
+                help_text="Tipos de documento separados por vírgula que geram rascunhos automáticos quando em falta",
                 depends_on={"enabled": True},
             ),
         ]
@@ -622,12 +623,18 @@ CONFIG_FIELDS = {
 
 
 @router.get("")
-async def get_config(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_config(
+    company_id: Optional[str] = Query("default", description="ID da empresa (default = global)"),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
     """
     Obter todas as configurações do sistema.
     Apenas admin e CEO podem aceder.
+
+    MULTI-EMPRESA: Use o parâmetro company_id para obter a config de uma empresa específica.
+    Se não for fornecido, retorna a config global (retrocompatível).
     """
-    config = await get_system_config()
+    config = await get_system_config(company_id)
     
     # Mascarar passwords para segurança
     config_dict = config.model_dump()
@@ -683,14 +690,29 @@ async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN, 
     return CONFIG_FIELDS
 
 
+@router.get("/companies")
+async def get_available_companies(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+    """
+    Listar empresas com configuração própria no sistema.
+
+    MULTI-EMPRESA: Retorna a lista de company_ids disponíveis para o dropdown
+    no frontend de Definições Gerais. Inclui sempre "default" (global).
+    """
+    companies = await list_available_companies()
+    return {"companies": companies, "total": len(companies)}
+
+
 @router.patch("/{section}")
 async def update_config(
     section: str,
     data: Dict[str, Any],
+    company_id: Optional[str] = Query("default", description="ID da empresa (default = global)"),
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Actualizar uma secção da configuração.
+
+    MULTI-EMPRESA: Use o parâmetro company_id para actualizar a config de uma empresa específica.
     """
     # Secções válidas: definidas em CONFIG_FIELDS + secções de integração
     EXTRA_SECTIONS = {"system_smtp", "system_webmail"}
@@ -698,8 +720,8 @@ async def update_config(
         raise HTTPException(status_code=400, detail=f"Secção inválida: {section}")
     
     try:
-        await update_config_section(section, data)
-        logger.info(f"Configuração '{section}' actualizada por {user.get('email')}")
+        await update_config_section(section, data, company_id)
+        logger.info(f"Configuração '{section}' actualizada por {user.get('email')} (company_id={company_id})")
         
         return {
             "success": True,

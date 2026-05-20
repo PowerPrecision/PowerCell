@@ -3028,23 +3028,73 @@ async def get_process_emails(
         except Exception as e:
             logger.error(f"Erro na re-sync após limpeza de cache: {e}")
     
-    query = {"process_id": process_id}
-    
+    # ── Query principal: emails com process_id directo ──
+    base_conditions = [{"process_id": process_id}]
+
+    # ── Fallback: emails sem process_id mas que envolvem o cliente do processo ──
+    # Isto apanha emails enviados/recebidos (Sent/Drafts) que o Smart Threading
+    # não associou automaticamente porque não tinham In-Reply-To ou tag [Proc-xxx].
+    process_doc = await db.processes.find_one(
+        {"id": process_id},
+        {"_id": 0, "client_email": 1, "monitored_emails": 1}
+    )
+    client_email = (process_doc or {}).get("client_email", "").lower().strip()
+    monitored = (process_doc or {}).get("monitored_emails", [])
+
+    if client_email or monitored:
+        # Construir lista de endereços do cliente para matching
+        client_emails = set()
+        if client_email:
+            client_emails.add(client_email)
+        for me in monitored:
+            if me and isinstance(me, str):
+                client_emails.add(me.lower().strip())
+        client_emails.discard("")
+
+        if client_emails:
+            email_match_or = []
+            for ce in client_emails:
+                escaped = re.escape(ce)
+                email_match_or.extend([
+                    {"from_email": {"$regex": escaped, "$options": "i"}},
+                    {"to_emails": {"$regex": escaped, "$options": "i"}},
+                ])
+
+            # Só incluir se NÃO tiver process_id já (evitar duplicados)
+            fallback_condition = {
+                "$and": [
+                    {"$or": [{"process_id": None}, {"process_id": {"$exists": False}}]},
+                    {"$or": email_match_or},
+                ]
+            }
+            base_conditions.append(fallback_condition)
+
+    query = {"$or": base_conditions} if len(base_conditions) > 1 else base_conditions[0]
+
     if direction:
-        query["direction"] = direction.value
-    
+        query = {"$and": [query, {"direction": direction.value}]}
+
     if not include_archived:
-        query["is_archived"] = {"$ne": True}
-    
+        if "$and" in query:
+            query["$and"].append({"is_archived": {"$ne": True}})
+        else:
+            query = {"$and": [query, {"is_archived": {"$ne": True}}]}
+
     if filter_by_user:
         user_email = current_user.get("email", "").lower()
         if user_email:
-            query["$or"] = [
-                {"from_email": {"$regex": user_email, "$options": "i"}},
-                {"to_emails": {"$elemMatch": {"$regex": user_email, "$options": "i"}}},
-                {"cc_emails": {"$elemMatch": {"$regex": user_email, "$options": "i"}}}
-            ]
-    
+            user_filter = {
+                "$or": [
+                    {"from_email": {"$regex": user_email, "$options": "i"}},
+                    {"to_emails": {"$elemMatch": {"$regex": user_email, "$options": "i"}}},
+                    {"cc_emails": {"$elemMatch": {"$regex": user_email, "$options": "i"}}}
+                ]
+            }
+            if "$and" in query:
+                query["$and"].append(user_filter)
+            else:
+                query = {"$and": [query, user_filter]}
+
     emails = await db.emails.find(query, {"_id": 0}).sort("sent_at", -1).to_list(500)
     
     enriched_emails = []
@@ -3061,16 +3111,51 @@ async def get_email_stats(
     current_user: dict = Depends(get_current_user)
 ):
     """Obter estatísticas de emails de um processo."""
+    # Construir query com fallback por email do cliente (mesma lógica de get_process_emails)
+    base_conditions = [{"process_id": process_id}]
+    process_doc = await db.processes.find_one(
+        {"id": process_id},
+        {"_id": 0, "client_email": 1, "monitored_emails": 1}
+    )
+    client_email_val = (process_doc or {}).get("client_email", "").lower().strip()
+    monitored = (process_doc or {}).get("monitored_emails", [])
+    if client_email_val or monitored:
+        client_emails = set()
+        if client_email_val:
+            client_emails.add(client_email_val)
+        for me in monitored:
+            if me and isinstance(me, str):
+                client_emails.add(me.lower().strip())
+        client_emails.discard("")
+        if client_emails:
+            email_match_or = []
+            for ce in client_emails:
+                escaped = re.escape(ce)
+                email_match_or.extend([
+                    {"from_email": {"$regex": escaped, "$options": "i"}},
+                    {"to_emails": {"$regex": escaped, "$options": "i"}},
+                ])
+            fallback_condition = {
+                "$and": [
+                    {"$or": [{"process_id": None}, {"process_id": {"$exists": False}}]},
+                    {"$or": email_match_or},
+                ]
+            }
+            base_conditions.append(fallback_condition)
+
+    stats_query = {"$or": base_conditions} if len(base_conditions) > 1 else base_conditions[0]
+    stats_query["is_archived"] = {"$ne": True}
+
     pipeline = [
-        {"$match": {"process_id": process_id, "is_archived": {"$ne": True}}},
+        {"$match": stats_query},
         {"$group": {
             "_id": "$direction",
             "count": {"$sum": 1}
         }}
     ]
-    
+
     results = await db.emails.aggregate(pipeline).to_list(10)
-    
+
     stats = {
         "total": 0,
         "sent": 0,
@@ -3079,29 +3164,25 @@ async def get_email_stats(
         "important": 0,
         "starred": 0
     }
-    
+
     for r in results:
         if r["_id"] == "sent":
             stats["sent"] = r["count"]
         elif r["_id"] == "received":
             stats["received"] = r["count"]
         stats["total"] += r["count"]
-    
+
     # Contar não lidos, importantes e estrelados
     stats["unread"] = await db.emails.count_documents({
-        "process_id": process_id,
-        "is_read": False,
-        "is_archived": {"$ne": True}
+        **stats_query, "is_read": False
     })
     stats["important"] = await db.emails.count_documents({
-        "process_id": process_id,
-        "is_important": True
+        **stats_query, "is_important": True
     })
     stats["starred"] = await db.emails.count_documents({
-        "process_id": process_id,
-        "is_starred": True
+        **stats_query, "is_starred": True
     })
-    
+
     return stats
 
 
@@ -3261,7 +3342,9 @@ async def search_emails(
     text_filter = {
         "$or": [
             {"subject": {"$regex": q, "$options": "i"}},
-            {"from_email": {"$regex": q, "$options": "i"}}
+            {"from_email": {"$regex": q, "$options": "i"}},
+            {"to_emails": {"$regex": q, "$options": "i"}},
+            {"body": {"$regex": q, "$options": "i"}},
         ]
     }
 

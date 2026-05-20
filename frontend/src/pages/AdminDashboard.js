@@ -37,7 +37,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { 
   FolderOpen, Loader2, CheckCircle, XCircle, FileText, 
   Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building,
-  TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight
+  TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight,
+  MessageSquare, Inbox
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
@@ -45,7 +46,7 @@ import { pt } from "date-fns/locale";
 import { 
   getStats, getUsers, getWorkflowStatuses, getOneDriveStatus, 
   getProcesses, getCalendarDeadlines, createDeadline, deleteDeadline, getUpcomingExpiries,
-  getActivities
+  getActivities, getCommunicationsFeed
 } from "../services/api";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
@@ -78,6 +79,7 @@ const AdminDashboard = () => {
   const [staleStats, setStaleStats] = useState(null);
   const [showStaleList, setShowStaleList] = useState(false);
   const [recentActivities, setRecentActivities] = useState([]);
+  const [commsFeed, setCommsFeed] = useState({ portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 });
   
   const [activeTab, setActiveTab] = useState("overview");
   const [consultorFilter, setConsultorFilter] = useState("all");
@@ -186,6 +188,12 @@ const AdminDashboard = () => {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (staleRes.ok) setStaleStats(await staleRes.json());
+      } catch { /* silent */ }
+      
+      // Fetch communications feed
+      try {
+        const commsRes = await getCommunicationsFeed();
+        setCommsFeed(commsRes.data || {});
       } catch { /* silent */ }
       
       // Fetch recent activities (latest 20 across all processes)
@@ -377,6 +385,96 @@ const AdminDashboard = () => {
           {/* Team Feed (Mural da Equipa) */}
           <TeamFeed />
         </div>
+
+        {/* ── Communications Feed: Portal Messages + Unread Emails ── */}
+        {(commsFeed.portal_unread_count > 0 || commsFeed.email_unread_count > 0) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Portal Messages Panel */}
+            <Card className={`border-border ${commsFeed.portal_unread_count > 0 ? "border-amber-200 dark:border-amber-800" : ""}`}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 shrink-0 text-amber-500" />
+                  Mensagens do Portal Não Lidas
+                  {commsFeed.portal_unread_count > 0 && (
+                    <Badge className="bg-amber-500 text-white ml-2">{commsFeed.portal_unread_count}</Badge>
+                  )}
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Mensagens de clientes aguardando resposta
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {commsFeed.portal_messages.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-6 text-sm">Sem mensagens por ler</p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {commsFeed.portal_messages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className="flex items-start gap-3 p-3 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/50 cursor-pointer hover:bg-amber-100/50 dark:hover:bg-amber-950/30 transition-colors"
+                        onClick={() => navigate(`/process/${msg.process_id}`)}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm truncate">{msg.sender_name || "Cliente"}</span>
+                            {msg.process_number && (
+                              <Badge variant="outline" className="text-[10px] px-1 py-0">#{msg.process_number}</Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">{msg.content}</p>
+                          {msg.client_name && (
+                            <p className="text-[10px] text-muted-foreground mt-1">Processo: {msg.client_name}</p>
+                          )}
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Unread Emails Panel */}
+            <Card className={`border-border ${commsFeed.email_unread_count > 0 ? "border-blue-200 dark:border-blue-800" : ""}`}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Inbox className="h-5 w-5 shrink-0 text-blue-500" />
+                  E-mails Recentes Não Lidos
+                  {commsFeed.email_unread_count > 0 && (
+                    <Badge className="bg-blue-500 text-white ml-2">{commsFeed.email_unread_count}</Badge>
+                  )}
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Emails recebidos por ler
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {commsFeed.unread_emails.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-6 text-sm">Sem emails por ler</p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {commsFeed.unread_emails.map((email) => (
+                      <div
+                        key={email.id}
+                        className="flex items-start gap-3 p-3 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/50 cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-950/30 transition-colors"
+                        onClick={() => email.process_id ? navigate(`/process/${email.process_id}`) : navigate('/webmail')}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-sm truncate">{email.subject}</p>
+                          <p className="text-xs text-muted-foreground truncate">De: {email.from_address}</p>
+                          {email.client_name && (
+                            <p className="text-[10px] text-muted-foreground mt-1">Processo: {email.client_name}</p>
+                          )}
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Stale Processes Alert */}
         {staleStats && staleStats.total > 0 && (

@@ -636,11 +636,9 @@ const SendDocumentationModal = ({
                     ))}
                   </div>
                 ) : (
-                  <Input
-                    value={config?.default_to || ""}
-                    disabled
-                    className="bg-muted"
-                  />
+                  <p className="text-xs text-muted-foreground italic p-2 bg-muted/50 rounded">
+                    Sem destinatários TO configurados. Configure em Definições do Sistema → Documentação.
+                  </p>
                 )}
               </div>
 

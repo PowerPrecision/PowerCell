@@ -354,6 +354,11 @@ const DashboardLayout = ({ children, title }) => {
         href: "/estatisticas",
       },
       {
+        label: "Documentos Pendentes",
+        icon: FileText,
+        href: "/validades",
+      },
+      {
         label: "Rascunhos",
         icon: FileSignature,
         href: "/rascunhos",
@@ -374,6 +379,13 @@ const DashboardLayout = ({ children, title }) => {
     // NÃO vê: Dashboard, Estatísticas, Gestão, Configuração
     // ====================================================================
     if (userRole === "indexacao") {
+      // Comunicações sem Minutas (restrito a outros roles)
+      const indexacaoComunicacoes = {
+        id: "comunicacoes",
+        label: "Comunicações e Ficheiros",
+        icon: Mail,
+        items: comunicacoesGroup.items.filter(i => i.href !== "/minutas"),
+      };
       return {
         main: [], // Sem Dashboard para indexação
         groups: [
@@ -387,8 +399,8 @@ const DashboardLayout = ({ children, title }) => {
               { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
             ],
           },
-          visaoGlobalGroup, // Indexação também tem acesso à Visão Global
-          comunicacoesGroup, // Indexação também tem acesso a Comunicações e Ficheiros
+          visaoGlobalGroup,
+          indexacaoComunicacoes,
         ],
         showAdminButton: false,
       };
@@ -403,6 +415,7 @@ const DashboardLayout = ({ children, title }) => {
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
         { label: "Os Meus Processos", icon: FileText, href: "/processos" },
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
+        { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
         { label: "Visitas", icon: Calendar, href: "/visitas" },
         { label: "Imóveis", icon: Search, href: "/imoveis" },
         { label: "Financeiro", icon: DollarSign, href: "/financeiro" },

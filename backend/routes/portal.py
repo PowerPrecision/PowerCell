@@ -724,6 +724,51 @@ async def confirm_portal_upload(
     document_id = data.get("document_id")  # ID do doc REQUESTED a satisfazer
     custom_label = data.get("custom_label")  # Custom label for "Outros" category
 
+    # ====================================================================
+    # TRIAGEM AUTOMÁTICA COM IA: Se a categoria for 'Outros', 'Auto' ou vazia,
+    # invocar IA para determinar a categoria correta com base no nome do
+    # ficheiro e no conteúdo (se disponível).
+    # ====================================================================
+    ai_categorization_info = None
+    if category.lower().strip() in ("outros", "auto", "", "other"):
+        try:
+            from services.document_categorization import (
+                extract_text_from_pdf,
+                categorize_document_with_ai,
+            )
+
+            # Tentar obter conteúdo do ficheiro do S3 para análise
+            file_content_for_ai = s3_service.get_file_content(file_key)
+
+            text_for_analysis = f"Ficheiro: {original_filename}"
+            if file_content_for_ai and original_filename.lower().endswith('.pdf'):
+                extracted = extract_text_from_pdf(file_content_for_ai, max_chars=3000)
+                if extracted:
+                    text_for_analysis = extracted
+
+            existing_categories = await db.document_metadata.distinct("ai_category")
+
+            ai_result = await categorize_document_with_ai(
+                text_content=text_for_analysis,
+                filename=original_filename,
+                existing_categories=existing_categories,
+            )
+
+            if ai_result.get("success") and ai_result.get("category"):
+                ai_suggested = ai_result["category"]
+                ai_categorization_info = {
+                    "original_category": category or "Outros",
+                    "ai_category": ai_suggested,
+                    "ai_confidence": ai_result.get("confidence"),
+                }
+                category = ai_suggested
+                logger.info(
+                    f"[PORTAL-IA] Categoria IA: {ai_suggested} "
+                    f"para {original_filename}"
+                )
+        except Exception as ai_err:
+            logger.warning(f"[PORTAL-IA] Erro na triagem IA: {ai_err}")
+
     if not file_key:
         raise HTTPException(status_code=400, detail="file_key é obrigatório")
     if not original_filename:
@@ -812,6 +857,7 @@ async def confirm_portal_upload(
         "category": category,
         "s3_path": file_key,
         "temporary_url": temporary_url,
+        "ai_categorization": ai_categorization_info,
     }
 
 
@@ -1968,12 +2014,62 @@ async def request_portal_visit(
     - notes: Notas adicionais (opcional)
     """
     process = client_data["process"]
-    process_id = data.get("process_id") or client_data["process_id"]
+    token_process_id = client_data["process_id"]
     url = data.get("url", "").strip()
     notes = data.get("notes", "").strip()
     
     if not url:
         raise HTTPException(status_code=400, detail="O link do imóvel é obrigatório.")
+    
+    # ── 0. Procurar o processo ativo do cliente ──
+    # O token do portal pode ter um process_id, mas vamos confirmar
+    # procurando o processo ativo (não concluído/não cancelado).
+    # Isto garante que a visita fica sempre associada ao processo correcto.
+    active_process = None
+    candidate_ids = [token_process_id]
+    if data.get("process_id"):
+        candidate_ids.insert(0, data.get("process_id"))
+    
+    for pid in candidate_ids:
+        if not pid:
+            continue
+        found = await db.processes.find_one(
+            {"id": pid, "status": {"$nin": ["concluido", "cancelado", "arquivado"]}},
+            {"_id": 0, "id": 1, "client_name": 1, "client_email": 1,
+             "client_phone": 1, "company_id": 1, "status": 1,
+             "assigned_consultor_id": 1, "process_number": 1}
+        )
+        if found:
+            active_process = found
+            break
+    
+    # Fallback: procurar por NIF do cliente se não encontramos por ID
+    if not active_process:
+        client_nif = process.get("client_nif") or (process.get("personal_data") or {}).get("nif")
+        if client_nif:
+            active_process = await db.processes.find_one(
+                {
+                    "$or": [
+                        {"client_nif": client_nif},
+                        {"personal_data.nif": client_nif},
+                    ],
+                    "status": {"$nin": ["concluido", "cancelado", "arquivado"]},
+                },
+                {"_id": 0, "id": 1, "client_name": 1, "client_email": 1,
+                 "client_phone": 1, "company_id": 1, "status": 1,
+                 "assigned_consultor_id": 1, "process_number": 1}
+            )
+    
+    if active_process:
+        process_id = active_process["id"]
+        # Refrescar dados do processo a partir do registo encontrado
+        client_name = active_process.get("client_name", process.get("client_name", "Cliente"))
+        logger.info(f"[PORTAL] Processo ativo encontrado: {process_id} (status={active_process.get('status')})")
+    else:
+        # Manter o process_id do token como último recurso (retrocompatibilidade)
+        process_id = token_process_id
+        client_name = process.get("client_name", "Cliente")
+        logger.warning(f"[PORTAL] Nenhum processo ativo encontrado para client_id={token_process_id}, a usar token process_id")
     
     # ── 1. Invocar Scraper para extrair dados do anúncio ──
     scraped_data = None
@@ -2008,7 +2104,11 @@ async def request_portal_visit(
     # ── 2. Criar registo de visita com status 'solicitada' ──
     now = datetime.now(timezone.utc).isoformat()
     visit_id = str(uuid.uuid4())
-    client_name = process.get("client_name", "Cliente")
+    # Usar dados do processo ativo (se encontrado) em vez do token
+    if active_process:
+        client_name = active_process.get("client_name", "Cliente")
+    else:
+        client_name = process.get("client_name", "Cliente")
     
     # Dados do imóvel extraídos pelo scraper (ou fallback vazio)
     property_title = scraped_data.get("title") if scraped_data else None
@@ -2029,10 +2129,10 @@ async def request_portal_visit(
         "property_photo": property_photo,
         "property_address": {"municipality": property_location, "district": ""} if property_location else {},
         "client_id": process_id,
-        "process_id": process_id,  # Explícito para queries e sincronização
+        "process_id": process_id,  # Explícito para queries e sincronização — processo ativo confirmado
         "client_name": client_name,
-        "client_email": process.get("client_email", ""),
-        "client_phone": process.get("client_phone", ""),
+        "client_email": (active_process or process).get("client_email", ""),
+        "client_phone": (active_process or process).get("client_phone", ""),
         "consultor_id": None,  # Ainda sem consultor atribuído
         "consultor_name": None,
         "scheduled_date": None,  # Ainda por agendar
@@ -2045,7 +2145,7 @@ async def request_portal_visit(
         "created_at": now,
         "updated_at": now,
         "created_by": "portal_client",
-        "company_id": process.get("company_id"),
+        "company_id": (active_process or process).get("company_id"),
     }
     
     await db.visits.insert_one(visit_doc)
@@ -2065,8 +2165,10 @@ async def request_portal_visit(
         logger.warning(f"[PORTAL] Erro ao registar histórico de visita: {e}")
     
     # ── 4. Notificar equipa atribuída ──
-    assigned_ids = _get_all_assigned_user_ids(process)
-    process_number = process.get("process_number", "")
+    # Usar o processo ativo (com assigned_consultor_id) em vez do token
+    notify_process = active_process if active_process else process
+    assigned_ids = _get_all_assigned_user_ids(notify_process)
+    process_number = notify_process.get("process_number", "")
     process_ref = f"#{process_number}" if process_number else process_id[:8]
     
     for uid in assigned_ids:
@@ -2138,16 +2240,31 @@ async def get_portal_visits(
             {"_id": 0, "scraped_data.raw_data": 0}  # Não enviar raw_data pesado
         ).sort("created_at", -1).limit(50).to_list(50)
         
-        # Mapear status para labels client-friendly
+        # Mapear status para labels client-friendly e enriquecer com data formatada
         status_labels = {
             "solicitada": "A aguardar agendamento",
             "agendada": "Agendada",
             "concluida": "Concluída",
             "cancelada": "Cancelada",
+            "recusada": "Recusada",
         }
         
         for visit in visits:
             visit["status_label"] = status_labels.get(visit.get("status", ""), visit.get("status", ""))
+            
+            # Incluir data da visita confirmada (para o portal mostrar ao cliente)
+            scheduled = visit.get("scheduled_date") or visit.get("portal_scheduled_date")
+            if scheduled and visit.get("status") == "agendada":
+                try:
+                    dt = datetime.fromisoformat(scheduled.replace("Z", "+00:00"))
+                    visit["formatted_date"] = dt.strftime("%d/%m/%Y às %H:%M")
+                except Exception:
+                    visit["formatted_date"] = scheduled
+            
+            # URL clicável do imóvel
+            scraped_url = visit.get("scraped_url")
+            if scraped_url:
+                visit["property_url"] = scraped_url
         
         return {
             "visits": visits,

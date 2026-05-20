@@ -590,33 +590,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
                 </Button>
               </div>
 
-              {/* Nome do remetente TO */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Nome TO</Label>
-                  <Input
-                    placeholder="Power Real Estate"
-                    value={defaultToName}
-                    onChange={(e) => {
-                      setDefaultToName(e.target.value);
-                      setHasChanges(true);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email TO primário (compatibilidade)</Label>
-                  <Input
-                    placeholder="geral@powerealestate.pt"
-                    value={defaultTo}
-                    onChange={(e) => {
-                      setDefaultTo(e.target.value);
-                      setHasChanges(true);
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Lista de emails TO */}
+              {/* Lista de emails TO — destinatário inferido via client_id relacional */}
               {defaultToEmails.length > 0 && (
                 <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">

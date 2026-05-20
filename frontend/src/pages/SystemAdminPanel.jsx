@@ -46,6 +46,8 @@ import {
   Palette, GitBranch, FileText, LayoutTemplate,
   // Comunicações
   MessageSquare, Mail, Bell,
+  // Emails de Sistema / Integrações (movidos para Comunicações)
+  MailCheck, Plug,
   // Compliance
   ShieldCheck, Scale, ClipboardList,
   // Técnico
@@ -71,6 +73,8 @@ import TemplatesPage from "./TemplatesPage";
 // Embedded pages — Comunicações
 import EmailAccountsPage from "./EmailAccountsPage";
 import NotificationSettingsPage from "./NotificationSettingsPage";
+// Secções movidas de SystemConfigPage para Comunicações
+import { SystemEmailsSection, IntegrationsConfigSection } from "./SystemConfigPage";
 
 // Embedded pages — Compliance
 import RGPDAdminPage from "./RGPDAdminPage";
@@ -303,23 +307,45 @@ const SystemAdminPanel = () => {
           {/* ================================================================ */}
           <TabsContent value="comunicacoes" className="mt-6">
             <Tabs defaultValue="email-accounts" className="w-full">
-              <TabsList>
-                <TabsTrigger value="email-accounts" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                  <Mail className="h-4 w-4" />
-                  <span className="hidden sm:inline">Contas de Email</span>
-                  <span className="sm:hidden">Email</span>
-                </TabsTrigger>
-                <TabsTrigger value="notifications" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                  <Bell className="h-4 w-4" />
-                  <span className="hidden sm:inline">Notificações</span>
-                  <span className="sm:hidden">Notif</span>
-                </TabsTrigger>
-              </TabsList>
+              <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
+                <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
+                  <TabsTrigger value="email-accounts" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                    <Mail className="h-4 w-4" />
+                    <span className="hidden sm:inline">Contas de Email</span>
+                    <span className="sm:hidden">Email</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="notifications" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                    <Bell className="h-4 w-4" />
+                    <span className="hidden sm:inline">Notificações</span>
+                    <span className="sm:hidden">Notif</span>
+                  </TabsTrigger>
+
+                  {/* Separador visual */}
+                  <div className="w-px h-6 bg-border mx-1 self-center" />
+
+                  <TabsTrigger value="system-emails" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                    <MailCheck className="h-4 w-4" />
+                    <span className="hidden sm:inline">Emails de Sistema</span>
+                    <span className="sm:hidden">SMTP</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="integrations" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                    <Plug className="h-4 w-4" />
+                    <span className="hidden sm:inline">Integrações</span>
+                    <span className="sm:hidden">Integ</span>
+                  </TabsTrigger>
+                </TabsList>
+              </div>
               <TabsContent value="email-accounts" className="mt-4">
                 <EmailAccountsPage embedded={true} />
               </TabsContent>
               <TabsContent value="notifications" className="mt-4">
                 <NotificationSettingsPage embedded={true} />
+              </TabsContent>
+              <TabsContent value="system-emails" className="mt-4">
+                <SystemEmailsSection token={localStorage.getItem("token")} />
+              </TabsContent>
+              <TabsContent value="integrations" className="mt-4">
+                <IntegrationsConfigSection />
               </TabsContent>
             </Tabs>
           </TabsContent>

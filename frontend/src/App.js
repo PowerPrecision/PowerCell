@@ -723,11 +723,11 @@ function App() {
             }
           />
           
-          {/* Minutas - All staff */}
+          {/* Minutas - Staff excepto indexacao */}
           <Route
             path="/minutas"
             element={
-              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]}>
                 <RouteBoundary name="Minutas">
                   <MinutasPage />
                 </RouteBoundary>

@@ -20,6 +20,13 @@ import { Label } from "../components/ui/label";
 import { Separator } from "../components/ui/separator";
 import { Badge } from "../components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -64,6 +71,7 @@ import {
   AlertTriangle,
   Info,
   PenLine,
+  Building2,
 } from "lucide-react";
 
 // ====================================================================
@@ -108,6 +116,10 @@ const ProfilePage = () => {
   const [emailConfigInfo, setEmailConfigInfo] = useState(null);
   const [loadingEmailConfig, setLoadingEmailConfig] = useState(false);
 
+  // MULTI-EMPRESA: seletor de empresa para config de email pessoal
+  const [emailCompanyId, setEmailCompanyId] = useState("default");
+  const [emailCompanies, setEmailCompanies] = useState([]);
+
   // Carregar dados do utilizador
   useEffect(() => {
     if (user) {
@@ -144,12 +156,42 @@ const ProfilePage = () => {
     try {
       const response = await api.get("/users/me/email-config");
       setEmailConfigInfo(response.data);
+      // MULTI-EMPRESA: popular lista de empresas disponíveis
+      if (response.data.available_companies) {
+        setEmailCompanies(response.data.available_companies);
+      }
     } catch (error) {
       setEmailConfigInfo(null);
     } finally {
       setLoadingEmailConfig(false);
     }
   };
+
+  // Carregar empresas do sistema para o dropdown (além das do user)
+  useEffect(() => {
+    const fetchSystemCompanies = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/system-config/companies`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const systemCompanies = (data.companies || []).map(c => c.company_id);
+          // Merge com as do user, sem duplicados
+          setEmailCompanies(prev => {
+            const merged = new Set([...prev, ...systemCompanies]);
+            return [...merged];
+          });
+        }
+      } catch (err) {
+        // Silently fail — não é crítico
+      }
+    };
+    if (user && !hasRole(user, "indexacao")) {
+      fetchSystemCompanies();
+    }
+  }, [user]);
 
   useEffect(() => {
     loadEmailConfigInfo();
@@ -827,6 +869,35 @@ const ProfilePage = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* MULTI-EMPRESA: Seletor de Empresa para config de email */}
+              {emailCompanies.length > 1 && (
+                <div className="flex items-center gap-3 p-3 bg-muted/50 border rounded-lg">
+                  <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div className="flex-1">
+                    <Label htmlFor="email-company-select" className="text-sm font-medium">
+                      Empresa / Perfil
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Selecione a empresa para a qual esta config de email se aplica
+                    </p>
+                  </div>
+                  <Select
+                    value={emailCompanyId}
+                    onValueChange={setEmailCompanyId}
+                  >
+                    <SelectTrigger id="email-company-select" className="w-48">
+                      <SelectValue placeholder="Empresa..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {emailCompanies.map((cid) => (
+                        <SelectItem key={cid} value={cid}>
+                          {cid === "default" ? "Principal (Padrão)" : cid}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               {/* Indicador de herança de config */}
               {emailConfigInfo?.config_source && emailConfigInfo.config_source !== "user" && emailConfigInfo.config_source !== "none" && (
                 <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
@@ -853,7 +924,7 @@ const ProfilePage = () => {
                   <span>A utilizar configuração individual. Os servidores foram definidos manualmente.</span>
                 </div>
               )}
-              <EmailConfigForm mode="self" onSuccess={refreshUser} />
+              <EmailConfigForm mode="self" onSuccess={refreshUser} companyId={emailCompanyId} />
             </CardContent>
           </Card>
         )}

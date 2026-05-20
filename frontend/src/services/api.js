@@ -457,6 +457,7 @@ export const testUserEmailConfig = (userId) => api.post(`/admin/users/${userId}/
 
 // Stats
 export const getStats = () => api.get("/stats");
+export const getCommunicationsFeed = () => api.get("/stats/communications");
 
 // Activities/Comments
 export const getActivities = (processId, limit = 50) => {

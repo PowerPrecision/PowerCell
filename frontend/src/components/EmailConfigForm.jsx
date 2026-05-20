@@ -49,7 +49,7 @@ const roleLabels = {
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onCancel }) => {
+const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onCancel, companyId = "default" }) => {
   const isSelf = mode === "self";
   const { user, effectiveRole } = useAuth();
 
@@ -241,6 +241,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         imap_port: emailConfig.imap_port,
         smtp_server: emailConfig.smtp_server,
         smtp_port: emailConfig.smtp_port,
+        company_id: companyId,  // MULTI-EMPRESA
       });
 
       // Now test with the just-saved stored credentials
@@ -284,6 +285,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         imap_port: emailConfig.imap_port,
         smtp_server: emailConfig.smtp_server,
         smtp_port: emailConfig.smtp_port,
+        company_id: companyId,  // MULTI-EMPRESA
       });
       toast.success("Configuração de webmail guardada com sucesso");
       setEmailConfig((prev) => ({ ...prev, password: "" }));

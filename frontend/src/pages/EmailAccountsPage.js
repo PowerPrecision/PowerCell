@@ -71,6 +71,8 @@ const SystemSmtpCard = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(null);
+  // Resultado do teste isolado por secção (evita bleed para outros sub-menus)
+  const [testResult, setTestResult] = useState(null);
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -127,6 +129,7 @@ const SystemSmtpCard = () => {
 
   const handleTestSmtp = async () => {
     setTesting("smtp");
+    setTestResult(null);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
@@ -141,20 +144,21 @@ const SystemSmtpCard = () => {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
+          setTestResult({ success: true, message: data.message || "Conexão bem sucedida" });
           toast.success("✅ Resend API conectado com sucesso!");
         } else {
+          setTestResult({ success: false, message: data.message || "Falha na conexão" });
           toast.error(data.message || "Falha na conexão");
         }
       } else {
         const data = await res.json();
+        setTestResult({ success: false, message: data.detail || data.message || "Falha na conexão" });
         toast.error(data.detail || data.message || "Falha na conexão");
       }
     } catch (err) {
-      if (err.name === "AbortError") {
-        toast.error("Timeout: o teste demorou demasiado tempo (30s)");
-      } else {
-        toast.error("Erro no teste de conexão");
-      }
+      const msg = err.name === "AbortError" ? "Timeout: o teste demorou demasiado tempo (30s)" : "Erro no teste de conexão";
+      setTestResult({ success: false, message: msg });
+      toast.error(msg);
     } finally {
       clearTimeout(timeoutId);
       setTesting(null);
@@ -264,6 +268,16 @@ const SystemSmtpCard = () => {
             {testing === "smtp" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
             Testar Conexão
           </Button>
+          {testResult && (
+            <div className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${
+              testResult.success
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+            }`}>
+              {testResult.success ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+              {testResult.message}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

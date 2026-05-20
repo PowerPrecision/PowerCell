@@ -1230,6 +1230,41 @@ async def sync_webmail_emails(
                                 resolved_process_id = tag_process_id
                                 logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id} via tag no assunto")
                     
+                    # === CLIENT EMAIL MATCH: Associar por endereço de email do cliente ===
+                    # Se Smart Threading e Tag Mágica não encontraram processo,
+                    # procurar processo activo cujo client_email ou monitored_emails
+                    # correspondam ao from_email ou to_emails deste email.
+                    if not resolved_process_id:
+                        all_addresses = set()
+                        from_addr = (em.get("from_email") or "").lower().strip()
+                        if from_addr:
+                            all_addresses.add(from_addr)
+                        for addr in (em.get("to_emails") or []):
+                            addr = (addr or "").lower().strip()
+                            if addr:
+                                all_addresses.add(addr)
+                        for addr in (em.get("cc_emails") or []):
+                            addr = (addr or "").lower().strip()
+                            if addr:
+                                all_addresses.add(addr)
+                        all_addresses.discard("")
+                        
+                        if all_addresses:
+                            # Procurar processo activo cujo client_email esteja nos endereços
+                            matched_process = await db.processes.find_one(
+                                {
+                                    "$or": [
+                                        {"client_email": {"$in": list(all_addresses)}},
+                                        {"monitored_emails": {"$in": list(all_addresses)}},
+                                    ],
+                                    "status": {"$nin": ["concluido", "cancelado", "arquivado"]},
+                                },
+                                {"_id": 0, "id": 1}
+                            )
+                            if matched_process:
+                                resolved_process_id = matched_process["id"]
+                                logger.info(f"[Client Email Match] Email {msg_id[:30]} associado ao processo {resolved_process_id} via endereço de cliente")
+                    
                     email_doc = {
                         "id": str(uuid.uuid4()),
                         "process_id": resolved_process_id,
