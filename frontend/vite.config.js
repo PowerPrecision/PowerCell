@@ -49,6 +49,9 @@ export default defineConfig(({ mode }) => {
       loader: 'jsx',
       include: /src\/.*\.jsx?$/,
       exclude: [],
+      // Segurança: remover TODAS as chamadas console.* e debugger em produção
+      // Em desenvolvimento os logs mantêm-se para debugging
+      drop: isProduction ? ['console', 'debugger'] : [],
     },
 
     // Optimizações de dependências - TAMBÉM precisa do loader JSX

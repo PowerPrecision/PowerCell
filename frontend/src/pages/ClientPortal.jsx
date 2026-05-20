@@ -1,13 +1,17 @@
 /**
- * ClientPortal — Portal do Cliente (Magic Link, passwordless).
+ * ClientPortal — Portal do Cliente (Login Obrigatório + Magic Link).
  *
  * Layout: Dashboard profissional full-width — horizontal stepper + 2 colunas.
  * - Topo (lg:col-span-12): Resumo + Timeline Horizontal (Stepper)
  * - Esquerda (lg:col-span-7): Gestão de Documentos + RGPD + Equipa
  * - Direita (lg:col-span-5): Mensagens / Chat
  *
- * Fluxo de autenticação:
- *   short_id → resolve → JWT (sessionStorage) → status + upload
+ * Fluxo de autenticação (v2 — Login obrigatório):
+ *   1. Utilizador acede ao portal (via link com client_id ou magic link)
+ *   2. Se não tem verified_session token → Mostra ecrã de login
+ *   3. Login: NIF + Nº Processo → POST /portal/{client_id}/verify → JWT
+ *   4. Token gravado em sessionStorage → Acesso concedido ao portal
+ *   5. Fluxo legado (magic link) ainda funciona como fallback
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import {
@@ -1022,35 +1026,367 @@ function IframeDetector({ children }) {
 }
 
 // ====================================================================
+// PORTAL LOGIN SCREEN — Ecrã de login obrigatório
+// ====================================================================
+function PortalLoginScreen({ onLoginSuccess, client_id }) {
+  const [nif, setNif] = useState('');
+  const [processNumber, setProcessNumber] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [showNif, setShowNif] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault();
+    setError(null);
+
+    const cleanNif = nif.replace(/\D/g, '');
+    if (cleanNif.length !== 9) {
+      setError('O NIF deve conter exatamente 9 dígitos.');
+      return;
+    }
+    if (!processNumber || isNaN(Number(processNumber))) {
+      setError('O Número do Processo é obrigatório e deve ser um número.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Determinar o client_id para o endpoint de verificação
+      // Pode vir da URL ou do sessionStorage (após resolver magic link)
+      const cid = client_id || sessionStorage.getItem('portal_client_id');
+
+      if (!cid) {
+        setError('Identificação do cliente não encontrada. Aceda através do link fornecido pelo consultor.');
+        setLoading(false);
+        return;
+      }
+
+      const res = await fetchWithRetry(`${BACKEND_URL}/portal/${cid}/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nif: cleanNif,
+          process_number: Number(processNumber),
+        }),
+      });
+
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        if (res.status === 503) {
+          setError('O servidor está a iniciar. Aguarde uns segundos e tente novamente.');
+          return;
+        }
+        setError('Erro inesperado. Tente novamente.');
+        return;
+      }
+
+      if (res.ok && data.token) {
+        // Guardar o token de sessão verificada
+        sessionStorage.setItem('portal_token', data.token);
+        sessionStorage.setItem('portal_verified', 'true');
+        sessionStorage.setItem('portal_client_name', data.client_name || '');
+        sessionStorage.setItem('portal_process_id', data.process_id || '');
+
+        if (onLoginSuccess) {
+          onLoginSuccess(data.token);
+        }
+      } else {
+        setError(data.detail || 'Credenciais inválidas. Verifique o seu NIF e Número de Processo.');
+      }
+    } catch (err) {
+      setError(err.message || 'Erro de ligação. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-gray-100 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="flex items-center justify-center mb-8">
+          <img
+            src="/PowerCell-default.png"
+            alt="PowerCell"
+            className="h-14 w-auto object-contain"
+          />
+        </div>
+
+        {/* Login Card */}
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
+          {/* Header */}
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <Shield className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-xl font-bold text-gray-900">Portal do Cliente</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Introduza as suas credenciais para aceder ao seu processo
+            </p>
+          </div>
+
+          {/* Security notice */}
+          <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-5">
+            <Shield className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-emerald-700">
+              <strong>Acesso seguro.</strong> Os seus dados são encriptados e nunca são partilhados.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* NIF */}
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                NIF (Número de Identificação Fiscal)
+              </label>
+              <input
+                type="text"
+                value={nif}
+                onChange={(e) => setNif(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                placeholder="123456789"
+                className="w-full px-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all"
+                inputMode="numeric"
+                disabled={loading}
+                autoFocus
+              />
+              <p className="text-[10px] text-gray-400 mt-1">9 dígitos do seu Cartão de Cidadão</p>
+            </div>
+
+            {/* Número do Processo */}
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                Número do Processo
+              </label>
+              <input
+                type="text"
+                value={processNumber}
+                onChange={(e) => setProcessNumber(e.target.value.replace(/\D/g, ''))}
+                placeholder="Ex: 1001"
+                className="w-full px-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all"
+                inputMode="numeric"
+                disabled={loading}
+              />
+              <p className="text-[10px] text-gray-400 mt-1">
+                Fornecido pelo seu consultor (ex: nº do processo no CRM)
+              </p>
+            </div>
+
+            {/* Error message */}
+            {error && (
+              <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-200">
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Submit button */}
+            <button
+              type="submit"
+              disabled={loading || nif.length !== 9 || !processNumber}
+              className="w-full py-3 text-sm font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  A verificar...
+                </>
+              ) : (
+                <>
+                  <Shield className="w-4 h-4" />
+                  Entrar no Portal
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+
+        {/* Footer */}
+        <div className="text-center mt-6">
+          <p className="text-xs text-gray-400">
+            Não tem as suas credenciais? Contacte o seu consultor.
+          </p>
+          <div className="flex items-center justify-center gap-1.5 mt-2 text-xs text-gray-400">
+            <Shield className="w-3 h-3" />
+            <span>Ligação segura e encriptada</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
 // MAIN CLIENT PORTAL
 // ====================================================================
 export default function ClientPortal() {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('A carregar o seu processo...');
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // ── Login obrigatório ──
+  const [isVerified, setIsVerified] = useState(false);
+  const [clientId, setClientId] = useState(null);
+
   const rawToken = useRef(window.location.pathname.split('/portal/')[1]);
 
+  // Verificar se já tem sessão verificada — validar token no backend
+  // (nunca confiar apenas no flag portal_verified; o token pode ter expirado)
+  useEffect(() => {
+    let cancelled = false;
+    const token = sessionStorage.getItem('portal_token');
+    const verified = sessionStorage.getItem('portal_verified') === 'true';
+
+    if (!token || !verified) {
+      // Sem token ou sem flag — mostrar login
+      sessionStorage.removeItem('portal_verified');
+      return;
+    }
+
+    // Tem token e flag — validar no backend antes de conceder acesso
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/portal/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (cancelled) return;
+
+        if (res.ok) {
+          // Token válido — auto-verificar
+          setIsVerified(true);
+        } else {
+          // Token inválido/expirado — limpar sessão e mostrar login
+          sessionStorage.removeItem('portal_token');
+          sessionStorage.removeItem('portal_verified');
+          sessionStorage.removeItem('portal_client_id');
+          sessionStorage.removeItem('portal_client_name');
+          sessionStorage.removeItem('portal_process_id');
+        }
+      } catch {
+        // Erro de rede — não auto-verificar, mostrar login
+        sessionStorage.removeItem('portal_verified');
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Extrair client_id da URL (para o login screen)
+  useEffect(() => {
+    const urlPart = rawToken.current;
+    if (urlPart) {
+      // Se é um UUID (client_id), guardar
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(urlPart);
+      if (isUuid) {
+        setClientId(urlPart);
+        sessionStorage.setItem('portal_client_id', urlPart);
+      }
+    }
+  }, []);
+
+  // ── Resolve magic link (apenas extrai client_id, NÃO carrega dados) ──
+  // Os dados do portal só são carregados APÓS o login ser verificado.
   useEffect(() => {
     let cancelled = false;
     const token = rawToken.current;
 
-    if (!token) { setError('Link inválido. Contacte o seu consultor.'); setLoading(false); return; }
+    if (!token) {
+      setError('Link inválido. Contacte o seu consultor.');
+      setLoading(false);
+      return;
+    }
 
     const isShortToken = !token.includes('.');
 
-    const fetchStatus = async (jwt) => {
-      if (cancelled) return;
+    const init = async () => {
       try {
-        sessionStorage.setItem('portal_token', jwt);
+        if (isShortToken) {
+          // Resolver magic link para obter client_id (não carregar dados ainda)
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 15000);
+          const r = await fetch(`${BACKEND_URL}/portal/resolve/${token}`, { signal: ctrl.signal });
+          clearTimeout(t);
+          if (cancelled) return;
+          if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            throw new Error(e.detail || 'Link não encontrado ou expirado');
+          }
+          const resolved = await r.json();
+          if (cancelled) return;
+          // Guardar client_id para o ecrã de login usar
+          if (resolved.client_id) {
+            setClientId(resolved.client_id);
+            sessionStorage.setItem('portal_client_id', resolved.client_id);
+          }
+        } else {
+          // Token JWT direto — guardar token e extrair client_id
+          // (não carregar dados — o login ainda é obrigatório)
+          sessionStorage.setItem('portal_token', token);
+          // Extrair client_id do processo via /portal/status (sem mostrar dados)
+          // Isto é necessário para o ecrã de login saber qual client_id verificar
+          try {
+            const ctrl2 = new AbortController();
+            const t2 = setTimeout(() => ctrl2.abort(), 10000);
+            const statusRes = await fetch(`${BACKEND_URL}/portal/status`, {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: ctrl2.signal,
+            });
+            clearTimeout(t2);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              const cid = statusData?.process?.client_id;
+              if (cid) {
+                setClientId(cid);
+                sessionStorage.setItem('portal_client_id', cid);
+              }
+            }
+          } catch {
+            // Se falhar, o utilizador pode ainda assim introduzir o client_id manualmente
+          }
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.name === 'AbortError' ? 'Ligação demorou demais. Tente novamente.' : err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    init();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Carregar dados do portal APENAS quando isVerified for true ──
+  useEffect(() => {
+    if (!isVerified) return;
+    let cancelled = false;
+
+    const fetchStatus = async () => {
+      const jwt = sessionStorage.getItem('portal_token');
+      if (!jwt) {
+        setError('Sessão inválida. Recarregue a página.');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setLoadingMessage('A carregar o seu processo...');
+      try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 20000);
-        const res = await fetch(`${BACKEND_URL}/portal/status`, { headers: { Authorization: `Bearer ${jwt}` }, signal: ctrl.signal });
+        const res = await fetch(`${BACKEND_URL}/portal/status`, {
+          headers: { Authorization: `Bearer ${jwt}` },
+          signal: ctrl.signal,
+        });
         clearTimeout(t);
         if (cancelled) return;
-        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || 'Erro ao carregar dados'); }
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.detail || 'Erro ao carregar dados');
+        }
         const result = await res.json();
         if (cancelled) return;
         setData(result);
@@ -1058,36 +1394,14 @@ export default function ClientPortal() {
       } catch (err) {
         if (cancelled) return;
         setError(err.name === 'AbortError' ? 'Ligação demorou demais. Tente novamente.' : err.message);
-      } finally { if (!cancelled) setLoading(false); }
-    };
-
-    const init = async () => {
-      try {
-        if (isShortToken) {
-          setLoadingMessage('A verificar link...');
-          const ctrl = new AbortController();
-          const t = setTimeout(() => ctrl.abort(), 15000);
-          const r = await fetch(`${BACKEND_URL}/portal/resolve/${token}`, { signal: ctrl.signal });
-          clearTimeout(t);
-          if (cancelled) return;
-          if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Link não encontrado ou expirado'); }
-          const jwt = (await r.json())?.token;
-          if (!jwt) throw new Error('Erro ao resolver link');
-          setLoadingMessage('A carregar o seu processo...');
-          await fetchStatus(jwt);
-        } else {
-          await fetchStatus(token);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(err.name === 'AbortError' ? 'Ligação demorou demais. Tente novamente.' : err.message);
-        setLoading(false);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
 
-    init();
+    fetchStatus();
     return () => { cancelled = true; };
-  }, [refreshKey]);
+  }, [isVerified, refreshKey]);
 
   const handleUploadSuccess = useCallback(() => setRefreshKey((k) => k + 1), []);
 
@@ -1234,6 +1548,23 @@ export default function ClientPortal() {
     return data?.welcome_message || '';
   }, [data?.welcome_message]);
 
+  // ── Login Gate — Se não está verificado, mostrar ecrã de login ──
+  const handleLoginSuccess = useCallback((token) => {
+    // Login verificado — o useEffect [isVerified, refreshKey] vai carregar os dados
+    setIsVerified(true);
+  }, []);
+
+  if (!isVerified) {
+    return (
+      <ClientOnly>
+        <PortalLoginScreen
+          onLoginSuccess={handleLoginSuccess}
+          client_id={clientId}
+        />
+      </ClientOnly>
+    );
+  }
+
   // ── Loading ──
   if (loading) {
     return (
@@ -1291,6 +1622,25 @@ export default function ClientPortal() {
             <Shield className="w-3.5 h-3.5" />
             <span>Acesso Seguro</span>
           </div>
+          {/* Botão Terminar Sessão */}
+          {sessionStorage.getItem('portal_verified') === 'true' && (
+            <button
+              onClick={() => {
+                sessionStorage.removeItem('portal_token');
+                sessionStorage.removeItem('portal_verified');
+                sessionStorage.removeItem('portal_client_id');
+                sessionStorage.removeItem('portal_client_name');
+                sessionStorage.removeItem('portal_process_id');
+                setIsVerified(false);
+                setData(null);
+              }}
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-500 transition-colors ml-2"
+              title="Terminar sessão"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sair</span>
+            </button>
+          )}
         </div>
       </header>
 

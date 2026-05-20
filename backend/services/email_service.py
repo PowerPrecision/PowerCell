@@ -1621,7 +1621,6 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
                 total_errors += 1
         
         logger.info(f"[User Email Sync] User {user_id}: {total_synced} novos, {total_duplicates} duplicados")
-        print(f"DEBUG [sync_user_emails] user_id={user_id} user_email={user_login_email} synced={total_synced} dup={total_duplicates}")
         
     except Exception as e:
         logger.error(f"[User Email Sync] Erro: {e}")

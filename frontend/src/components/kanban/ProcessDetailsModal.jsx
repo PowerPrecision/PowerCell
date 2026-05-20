@@ -41,11 +41,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import {
   User, Mail, Phone, Home, MapPin, Euro, Calendar, Users,
   AlertTriangle, Building2, CreditCard, FileText, ExternalLink,
-  Loader2, Save, Pencil, X
+  Loader2, Save, Pencil, X, CalendarClock, Inbox, CheckCircle2,
+  XCircle
 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { getClient, updateClient, updateProcess } from '../../services/api';
 import { toast } from 'sonner';
+import { useAuth } from '../../contexts/AuthContext';
+
+const API_URL_BASE = typeof window !== 'undefined'
+  ? (window.__ENV__?.REACT_APP_BACKEND_URL || '')
+  : '';
 
 // ── Helpers ────────────────────────────────────────────────────────
 const formatCurrency = (value) => {
@@ -70,6 +76,11 @@ const ProcessDetailsModal = memo(({
   const [clientData, setClientData] = useState(null);
   const [clientLoading, setClientLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('client');
+
+  // ── Estado de Visitas ──────────────────────────────────────────
+  const { token } = useAuth();
+  const [visits, setVisits] = useState([]);
+  const [visitsLoading, setVisitsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -369,25 +380,55 @@ const ProcessDetailsModal = memo(({
 
         {/* ── Tabs: Cliente / Processo ────────────────────────────── */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden">
-          <TabsList className="w-full grid grid-cols-2">
+          <TabsList className="w-full grid grid-cols-3">
             <TabsTrigger
               value="client"
               className="flex items-center gap-2 data-[state=active]:bg-teal-50 data-[state=active]:text-teal-700 dark:data-[state=active]:bg-teal-950/30 dark:data-[state=active]:text-teal-300"
             >
               <User className="h-3.5 w-3.5" />
-              Dados do Cliente
-              {process.client_id && (
-                <Badge variant="outline" className="text-[9px] border-teal-300 text-teal-600 dark:border-teal-700 dark:text-teal-400 ml-1 py-0">
-                  Ficha
-                </Badge>
-              )}
+              <span className="hidden sm:inline">Cliente</span>
+              <span className="sm:hidden">Cliente</span>
             </TabsTrigger>
             <TabsTrigger
               value="process"
               className="flex items-center gap-2 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 dark:data-[state=active]:bg-blue-950/30 dark:data-[state=active]:text-blue-300"
             >
               <FileText className="h-3.5 w-3.5" />
-              Dados do Processo
+              <span className="hidden sm:inline">Processo</span>
+              <span className="sm:hidden">Processo</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="visitas"
+              className="flex items-center gap-1.5 data-[state=active]:bg-violet-50 data-[state=active]:text-violet-700 dark:data-[state=active]:bg-violet-950/30 dark:data-[state=active]:text-violet-300"
+              onClick={() => {
+                // Fetch visitas quando a tab é clicada
+                if (visits.length === 0 && !visitsLoading) {
+                  (async () => {
+                    setVisitsLoading(true);
+                    try {
+                      const res = await fetch(`${API_URL_BASE}/api/visits?process_id=${process.id}`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
+                      if (res.ok) {
+                        const data = await res.json();
+                        setVisits(Array.isArray(data) ? data : []);
+                      }
+                    } catch {
+                      // silently fail
+                    } finally {
+                      setVisitsLoading(false);
+                    }
+                  })();
+                }
+              }}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+              <span>Visitas</span>
+              {visits.filter(v => v.status === 'solicitada').length > 0 && (
+                <Badge className="text-[9px] px-1 py-0 bg-violet-500 text-white ml-0.5">
+                  {visits.filter(v => v.status === 'solicitada').length}
+                </Badge>
+              )}
             </TabsTrigger>
           </TabsList>
 
@@ -809,6 +850,122 @@ const ProcessDetailsModal = memo(({
                 )}
               </div>
             </div>
+          </TabsContent>
+
+          {/* ══════════════════════════════════════════════════════════
+              TAB 3: VISITAS — Visitas associadas a este processo
+              Inclui pedidos do portal e visitas criadas pelo consultor
+              ══════════════════════════════════════════════════════════ */}
+          <TabsContent value="visitas" className="overflow-y-auto max-h-[60vh] mt-0">
+            {visitsLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-sm text-muted-foreground">A carregar visitas...</span>
+              </div>
+            ) : visits.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <CalendarClock className="h-10 w-10 text-muted-foreground/30 mb-3" />
+                <p className="text-sm font-medium text-muted-foreground">Sem visitas registadas</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  As visitas pedidas pelo portal e agendadas pelo consultor aparecerão aqui.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2 p-1">
+                {visits.map((visit) => {
+                  const statusConfig = {
+                    solicitada: { label: 'Solicitada', color: 'bg-violet-100 text-violet-800', icon: Inbox },
+                    agendada: { label: 'Agendada', color: 'bg-amber-100 text-amber-800', icon: CalendarClock },
+                    concluida: { label: 'Concluída', color: 'bg-emerald-100 text-emerald-800', icon: CheckCircle2 },
+                    cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800', icon: XCircle },
+                    recusada: { label: 'Recusada', color: 'bg-red-100 text-red-800', icon: XCircle },
+                  };
+                  const st = statusConfig[visit.status] || statusConfig.agendada;
+                  const StatusIcon = st.icon;
+                  const scraped = visit.scraped_data || {};
+                  const propTitle = visit.property_title || scraped.title || 'Imóvel';
+                  const propPhoto = visit.property_photo || scraped.photo_url;
+                  const propPrice = visit.scraped_price || scraped.price;
+                  const propTypology = visit.scraped_typology || scraped.typology;
+                  const propLocation = visit.property_address?.municipality || scraped.location || '';
+                  const sourceUrl = visit.scraped_url || scraped.url;
+
+                  return (
+                    <div key={visit.id} className={`flex items-start gap-3 p-3 rounded-lg border ${st.color} transition-colors`}>
+                      {/* Foto miniatura */}
+                      {propPhoto ? (
+                        <img src={propPhoto} alt="" className="h-10 w-10 rounded-md object-cover shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
+                      ) : (
+                        <div className="h-10 w-10 rounded-md bg-white/50 flex items-center justify-center shrink-0">
+                          <Building2 className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium truncate">{propTitle}</p>
+                          <Badge className={`text-[9px] px-1.5 py-0 ${st.color} shrink-0`}>
+                            <StatusIcon className="h-2.5 w-2.5 mr-0.5" />
+                            {st.label}
+                          </Badge>
+                        </div>
+
+                        {/* Dados do scraper */}
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                          {propPrice && (
+                            <span className="text-[11px] font-semibold text-amber-700">
+                              <Euro className="h-3 w-3 inline mr-0.5" />
+                              {typeof propPrice === 'number' ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(propPrice) : String(propPrice)}
+                            </span>
+                          )}
+                          {propTypology && (
+                            <span className="text-[11px] text-muted-foreground">
+                              <Home className="h-3 w-3 inline mr-0.5" />{propTypology}
+                            </span>
+                          )}
+                          {propLocation && (
+                            <span className="text-[11px] text-muted-foreground truncate">
+                              <MapPin className="h-3 w-3 inline mr-0.5" />{propLocation}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Link para fonte */}
+                        {sourceUrl && (
+                          <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-teal-600 hover:text-teal-800 hover:underline inline-flex items-center gap-0.5 mt-0.5" onClick={(e) => e.stopPropagation()}>
+                            <ExternalLink className="h-2.5 w-2.5" />Ver anúncio
+                          </a>
+                        )}
+
+                        {/* Data e consultor */}
+                        <div className="flex items-center gap-3 mt-1">
+                          {visit.scheduled_date && (
+                            <span className="text-[11px] text-muted-foreground">
+                              <Calendar className="h-3 w-3 inline mr-0.5" />
+                              {new Date(visit.scheduled_date).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                          {visit.consultor_name && (
+                            <span className="text-[11px] text-muted-foreground">
+                              <Users className="h-3 w-3 inline mr-0.5" />{visit.consultor_name}
+                            </span>
+                          )}
+                          {visit.source === 'portal_client' && (
+                            <span className="text-[9px] px-1.5 py-0 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                              Pedido pelo Cliente
+                            </span>
+                          )}
+                        </div>
+
+                        {visit.notes && (
+                          <p className="text-[11px] text-muted-foreground italic mt-1 truncate">{visit.notes}</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 

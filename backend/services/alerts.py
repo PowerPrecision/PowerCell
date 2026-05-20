@@ -386,7 +386,7 @@ async def create_deed_reminder(process: dict, deed_date: str, user: dict) -> Opt
         
         return deadline_id
     except (ValueError, TypeError) as e:
-        print(f"Erro ao criar lembrete de escritura: {e}")
+        logger.warning(f"Erro ao criar lembrete de escritura: {e}")
         return None
 
 

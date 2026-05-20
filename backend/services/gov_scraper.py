@@ -182,8 +182,9 @@ SEG_SOCIAL_SEL = {
 }
 
 # Tempo máximo de espera por elementos (ms)
-DEFAULT_TIMEOUT = 30000  # 30 segundos
-NAVIGATION_TIMEOUT = 60000  # 60 segundos
+# Aumentado para 90s para mitigar cold-start do headless browser no Render
+DEFAULT_TIMEOUT = 90000  # 90 segundos
+NAVIGATION_TIMEOUT = 90000  # 90 segundos
 
 # Tempo máximo total do scraper (segundos) — prevenir execuções infinitas
 MAX_SCRAPER_DURATION = 180  # 3 minutos
@@ -468,139 +469,164 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         # Aplicar stealth
         await _apply_stealth(page)
 
-        page.set_default_timeout(DEFAULT_TIMEOUT)
-        page.set_default_navigation_timeout(NAVIGATION_TIMEOUT)
+        # ── Configurar timeouts globais da página ──
+        # Aumentado para 90s para mitigar cold-start do headless browser no Render
+        page.set_default_timeout(DEFAULT_TIMEOUT)           # 90000 ms
+        page.set_default_navigation_timeout(NAVIGATION_TIMEOUT)  # 90000 ms
+        logger.info(
+            f"[GOV_SCRAPER] Timeouts configurados — default: {DEFAULT_TIMEOUT}ms, "
+            f"navigation: {NAVIGATION_TIMEOUT}ms"
+        )
 
         # ── 1. Navegar para a página de login ──
         step = "navigate_login"
         logger.info(f"[GOV_SCRAPER] Navegando para acesso.gov.pt (NIF {masked_nif})")
         await page.goto(FINANCAS_AUTH_URL, wait_until="domcontentloaded")
         # Esperar pelo formulário em vez de networkidle
-        await page.wait_for_load_state("domcontentloaded", timeout=15000)
+        await page.wait_for_load_state("domcontentloaded", timeout=90000)
 
-        # ── 2. Selecionar autenticação por NIF ──
-        step = "select_nif_tab"
-        tab_el, tab_sel = await _try_selectors(page, FINANCAS_SEL["login_tab_nif"], timeout=5000)
-        if tab_el:
-            try:
-                await tab_el.click()
-                await page.wait_for_load_state("domcontentloaded", timeout=5000)
-                logger.info(f"[GOV_SCRAPER] Tab NIF selecionada (selector: {tab_sel})")
-            except Exception:
-                logger.info("[GOV_SCRAPER] Tab NIF — clique falhou, pode já estar ativa")
-        else:
-            logger.info("[GOV_SCRAPER] Tab NIF não encontrada — pode já estar ativa")
-
-        # ── 3. Inserir credenciais ──
-        step = "fill_nif"
-        nif_el, nif_sel = await _try_selectors(page, FINANCAS_SEL["nif_input"], timeout=10000)
-        if not nif_el:
-            screenshot_b64 = await _take_screenshot(page, "nif_input_not_found")
-            return ScraperResult(
-                success=False,
-                error="selector_desatualizado",
-                step_failed="fill_nif",
-                screenshot_b64=screenshot_b64,
-            )
-        await nif_el.click()
-        await nif_el.fill(nif)
-        logger.info(f"[GOV_SCRAPER] NIF inserido via {nif_sel} ({masked_nif})")
-
-        step = "fill_password"
-        pass_el, pass_sel = await _try_selectors(page, FINANCAS_SEL["password_input"], timeout=5000)
-        if not pass_el:
-            screenshot_b64 = await _take_screenshot(page, "password_input_not_found")
-            return ScraperResult(
-                success=False,
-                error="selector_desatualizado",
-                step_failed="fill_password",
-                screenshot_b64=screenshot_b64,
-            )
-        await pass_el.click()
-        await pass_el.fill(password)
-
-        # ── 4. Submeter login ──
-        step = "submit_login"
-        login_el, login_sel = await _try_selectors(page, FINANCAS_SEL["login_button"], timeout=5000)
-        if not login_el:
-            screenshot_b64 = await _take_screenshot(page, "login_button_not_found")
-            return ScraperResult(
-                success=False,
-                error="selector_desatualizado",
-                step_failed="submit_login",
-                screenshot_b64=screenshot_b64,
-            )
-        await login_el.click()
-        logger.info(f"[GOV_SCRAPER] Login submetido via {login_sel}")
-
-        # Esperar navegação — usar domcontentloaded + pausa em vez de networkidle
+        # ── 2–5. Login (NIF + Password + Submit + Verificação) ──
+        # Bloco protegido com try/except para distinguir timeout no login
+        # vs. timeout na navegação interna (pós-login)
+        login_success = False
         try:
-            await page.wait_for_load_state("domcontentloaded", timeout=15000)
-            await asyncio.sleep(2)  # Dar tempo para redirects
-        except Exception:
-            pass
-
-        # ── 5. Verificar se o login falhou ──
-        step = "check_login"
-
-        # 5a. Verificar mensagem de erro
-        error_el, _ = await _try_selectors(page, FINANCAS_SEL["login_error"], timeout=5000)
-        if error_el:
-            error_text = await error_el.text_content()
-            logger.warning(f"[GOV_SCRAPER] Erro de login visível: {error_text[:100]}")
-            screenshot_b64 = await _take_screenshot(page, "login_error")
-            return ScraperResult(
-                success=False,
-                error="credenciais_invalidas",
-                step_failed="check_login",
-                screenshot_b64=screenshot_b64,
-            )
-
-        # 5b. Verificar se ainda estamos na página de login
-        if "acesso.gov.pt" in page.url and "unauthlogin" in page.url:
-            logger.warning(f"[GOV_SCRAPER] Ainda na página de login (NIF {masked_nif})")
-            screenshot_b64 = await _take_screenshot(page, "still_on_login")
-
-            # Verificar se há MFA / Chave Móvel Digital
-            mfa_selectors = [
-                "text=Chave Móvel Digital",
-                "text=código de segurança",
-                "text=autenticação multi-fator",
-                "input[placeholder*='código']",
-                "input[placeholder*='digito']",
-            ]
-            for sel in mfa_selectors:
+            # ── 2. Selecionar autenticação por NIF ──
+            step = "select_nif_tab"
+            tab_el, tab_sel = await _try_selectors(page, FINANCAS_SEL["login_tab_nif"], timeout=10000)
+            if tab_el:
                 try:
-                    mfa_el = page.locator(sel).first
-                    if await mfa_el.is_visible(timeout=2000):
-                        logger.warning(f"[GOV_SCRAPER] MFA/Chave Móvel Digital detectada")
-                        return ScraperResult(
-                            success=False,
-                            error="mfa_requerido",
-                            step_failed="check_login",
-                            screenshot_b64=screenshot_b64,
-                        )
+                    await tab_el.click()
+                    await page.wait_for_load_state("domcontentloaded", timeout=90000)
+                    logger.info(f"[GOV_SCRAPER] Tab NIF selecionada (selector: {tab_sel})")
                 except Exception:
-                    continue
+                    logger.info("[GOV_SCRAPER] Tab NIF — clique falhou, pode já estar ativa")
+            else:
+                logger.info("[GOV_SCRAPER] Tab NIF não encontrada — pode já estar ativa")
 
+            # ── 3. Inserir credenciais ──
+            step = "fill_nif"
+            nif_el, nif_sel = await _try_selectors(page, FINANCAS_SEL["nif_input"], timeout=15000)
+            if not nif_el:
+                screenshot_b64 = await _take_screenshot(page, "nif_input_not_found")
+                return ScraperResult(
+                    success=False,
+                    error="selector_desatualizado",
+                    step_failed="fill_nif",
+                    screenshot_b64=screenshot_b64,
+                )
+            await nif_el.click()
+            await nif_el.fill(nif)
+            logger.info(f"[GOV_SCRAPER] NIF inserido via {nif_sel} ({masked_nif})")
+
+            step = "fill_password"
+            pass_el, pass_sel = await _try_selectors(page, FINANCAS_SEL["password_input"], timeout=10000)
+            if not pass_el:
+                screenshot_b64 = await _take_screenshot(page, "password_input_not_found")
+                return ScraperResult(
+                    success=False,
+                    error="selector_desatualizado",
+                    step_failed="fill_password",
+                    screenshot_b64=screenshot_b64,
+                )
+            await pass_el.click()
+            await pass_el.fill(password)
+
+            # ── 4. Submeter login ──
+            step = "submit_login"
+            login_el, login_sel = await _try_selectors(page, FINANCAS_SEL["login_button"], timeout=10000)
+            if not login_el:
+                screenshot_b64 = await _take_screenshot(page, "login_button_not_found")
+                return ScraperResult(
+                    success=False,
+                    error="selector_desatualizado",
+                    step_failed="submit_login",
+                    screenshot_b64=screenshot_b64,
+                )
+            await login_el.click()
+            logger.info(f"[GOV_SCRAPER] Login submetido via {login_sel}")
+
+            # Esperar navegação — usar domcontentloaded + pausa em vez de networkidle
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=90000)
+                await asyncio.sleep(2)  # Dar tempo para redirects
+            except Exception:
+                pass
+
+            # ── 5. Verificar se o login falhou ──
+            step = "check_login"
+
+            # 5a. Verificar mensagem de erro
+            error_el, _ = await _try_selectors(page, FINANCAS_SEL["login_error"], timeout=10000)
+            if error_el:
+                error_text = await error_el.text_content()
+                logger.warning(f"[GOV_SCRAPER] Erro de login visível: {error_text[:100]}")
+                screenshot_b64 = await _take_screenshot(page, "login_error")
+                return ScraperResult(
+                    success=False,
+                    error="credenciais_invalidas",
+                    step_failed="check_login",
+                    screenshot_b64=screenshot_b64,
+                )
+
+            # 5b. Verificar se ainda estamos na página de login
+            if "acesso.gov.pt" in page.url and "unauthlogin" in page.url:
+                logger.warning(f"[GOV_SCRAPER] Ainda na página de login (NIF {masked_nif})")
+                screenshot_b64 = await _take_screenshot(page, "still_on_login")
+
+                # Verificar se há MFA / Chave Móvel Digital
+                mfa_selectors = [
+                    "text=Chave Móvel Digital",
+                    "text=código de segurança",
+                    "text=autenticação multi-fator",
+                    "input[placeholder*='código']",
+                    "input[placeholder*='digito']",
+                ]
+                for sel in mfa_selectors:
+                    try:
+                        mfa_el = page.locator(sel).first
+                        if await mfa_el.is_visible(timeout=2000):
+                            logger.warning(f"[GOV_SCRAPER] MFA/Chave Móvel Digital detectada")
+                            return ScraperResult(
+                                success=False,
+                                error="mfa_requerido",
+                                step_failed="check_login",
+                                screenshot_b64=screenshot_b64,
+                            )
+                    except Exception:
+                        continue
+
+                return ScraperResult(
+                    success=False,
+                    error="credenciais_invalidas",
+                    step_failed="check_login",
+                    screenshot_b64=screenshot_b64,
+                )
+
+            login_success = True
+            logger.info(f"[GOV_SCRAPER] Login bem-sucedido para NIF {masked_nif}! URL: {page.url[:80]}")
+
+        except asyncio.TimeoutError:
+            logger.error(
+                "Timeout na página de Login. Possível bloqueio de WAF/Captcha. "
+                f"Step: {step}, NIF: {masked_nif}"
+            )
+            screenshot_b64 = await _take_screenshot(page, f"login_timeout_{step}")
             return ScraperResult(
                 success=False,
-                error="credenciais_invalidas",
-                step_failed="check_login",
+                error="timeout_login",
+                step_failed=step,
                 screenshot_b64=screenshot_b64,
             )
 
-        logger.info(f"[GOV_SCRAPER] Login bem-sucedido para NIF {masked_nif}! URL: {page.url[:80]}")
-
-        # ── 6. Navegar para a secção de IRS ──
+        # ── 6. Navegar para a secção de IRS (pós-login) ──
         step = "navigate_irs"
         try:
-            await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            await page.wait_for_load_state("domcontentloaded", timeout=90000)
 
-            irs_el, irs_sel = await _try_selectors(page, FINANCAS_SEL["irs_menu"], timeout=10000)
+            irs_el, irs_sel = await _try_selectors(page, FINANCAS_SEL["irs_menu"], timeout=15000)
             if irs_el:
                 await irs_el.click()
-                await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                await page.wait_for_load_state("domcontentloaded", timeout=90000)
                 logger.info(f"[GOV_SCRAPER] Secção de IRS acedida via {irs_sel}")
             else:
                 logger.warning("[GOV_SCRAPER] Link IRS não encontrado — a tentar navegação directa")
@@ -608,12 +634,21 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                     await page.goto(
                         "https://www.portaldasfinancas.gov.pt/pt/irs.action",
                         wait_until="domcontentloaded",
-                        timeout=15000,
+                        timeout=90000,
                     )
                 except Exception:
                     pass
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Timeout na navegação interna (pós-login). "
+                f"Login OK mas falha ao navegar para IRS. NIF: {masked_nif}"
+            )
+            screenshot_b64 = await _take_screenshot(page, "irs_navigation_timeout")
         except Exception as e:
-            logger.warning(f"[GOV_SCRAPER] Erro ao navegar para IRS: {type(e).__name__}")
+            logger.error(
+                f"Erro na navegação interna (pós-login). "
+                f"Login OK mas falha ao navegar para IRS: {type(e).__name__}. NIF: {masked_nif}"
+            )
             screenshot_b64 = await _take_screenshot(page, "irs_navigation_failed")
 
         # ── 7. Descarregar Declaração de IRS ──
@@ -717,7 +752,7 @@ async def _download_financas_document(
                 el = page.locator(selector).first
                 if await el.is_visible(timeout=3000):
                     try:
-                        async with page.expect_download(timeout=30000) as download_info:
+                        async with page.expect_download(timeout=60000) as download_info:
                             await el.click()
                         download = await download_info.value
 
@@ -759,13 +794,13 @@ async def _download_financas_document(
                 el = page.locator(selector).first
                 if await el.is_visible(timeout=3000):
                     await el.click()
-                    await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    await page.wait_for_load_state("domcontentloaded", timeout=90000)
 
                     # Tentar download na nova página
-                    dl_el, _ = await _try_selectors(page, FINANCAS_SEL["download_button"], timeout=5000)
+                    dl_el, _ = await _try_selectors(page, FINANCAS_SEL["download_button"], timeout=10000)
                     if dl_el:
                         try:
-                            async with page.expect_download(timeout=30000) as download_info:
+                            async with page.expect_download(timeout=60000) as download_info:
                                 await dl_el.click()
                             download = await download_info.value
 
@@ -908,121 +943,95 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
         # Aplicar stealth
         await _apply_stealth(page)
 
-        page.set_default_timeout(DEFAULT_TIMEOUT)
-        page.set_default_navigation_timeout(NAVIGATION_TIMEOUT)
+        # ── Configurar timeouts globais da página ──
+        # Aumentado para 90s para mitigar cold-start do headless browser no Render
+        page.set_default_timeout(DEFAULT_TIMEOUT)           # 90000 ms
+        page.set_default_navigation_timeout(NAVIGATION_TIMEOUT)  # 90000 ms
+        logger.info(
+            f"[GOV_SCRAPER] Timeouts configurados — default: {DEFAULT_TIMEOUT}ms, "
+            f"navigation: {NAVIGATION_TIMEOUT}ms"
+        )
 
         # ── 1. Navegar para a página de login ──
         step = "navigate_login"
         logger.info(f"[GOV_SCRAPER] Navegando para Seg. Social (NISS {masked_niss})")
         await page.goto(SEG_SOCIAL_URL, wait_until="domcontentloaded")
-        await page.wait_for_load_state("domcontentloaded", timeout=15000)
+        await page.wait_for_load_state("domcontentloaded", timeout=90000)
         await asyncio.sleep(2)  # Dar tempo para redirects
 
-        # ── 2. Verificar se há redirecionamento para autenticação.gov.pt ──
-        # A Seg. Social pode redirecionar para acesso.gov.pt
-        current_url = page.url.lower()
-        if "acesso.gov.pt" in current_url:
-            logger.info("[GOV_SCRAPER] Redirecionado para acesso.gov.pt — usar fluxo de autenticação genérico")
-            # Usar os selectors do acesso.gov.pt (mesma plataforma)
-            niss_el, niss_sel = await _try_selectors(page, FINANCAS_SEL["nif_input"], timeout=10000)
-        else:
-            niss_el, niss_sel = await _try_selectors(page, SEG_SOCIAL_SEL["niss_input"], timeout=10000)
-
-        # ── 3. Inserir credenciais ──
-        step = "fill_niss"
-        if not niss_el:
-            screenshot_b64 = await _take_screenshot(page, "niss_input_not_found")
-            return ScraperResult(
-                success=False,
-                error="selector_desatualizado",
-                step_failed="fill_niss",
-                screenshot_b64=screenshot_b64,
-            )
-        await niss_el.click()
-        await niss_el.fill(niss)
-        logger.info(f"[GOV_SCRAPER] NISS inserido via {niss_sel} ({masked_niss})")
-
-        step = "fill_password"
-        # Determinar quais selectors de password usar
-        if "acesso.gov.pt" in page.url.lower():
-            pass_el, pass_sel = await _try_selectors(page, FINANCAS_SEL["password_input"], timeout=5000)
-        else:
-            pass_el, pass_sel = await _try_selectors(page, SEG_SOCIAL_SEL["password_input"], timeout=5000)
-
-        if not pass_el:
-            screenshot_b64 = await _take_screenshot(page, "password_input_not_found")
-            return ScraperResult(
-                success=False,
-                error="selector_desatualizado",
-                step_failed="fill_password",
-                screenshot_b64=screenshot_b64,
-            )
-        await pass_el.click()
-        await pass_el.fill(password)
-
-        # ── 4. Submeter login ──
-        step = "submit_login"
-        if "acesso.gov.pt" in page.url.lower():
-            login_el, login_sel = await _try_selectors(page, FINANCAS_SEL["login_button"], timeout=5000)
-        else:
-            login_el, login_sel = await _try_selectors(page, SEG_SOCIAL_SEL["login_button"], timeout=5000)
-
-        if login_el:
-            await login_el.click()
-            logger.info(f"[GOV_SCRAPER] Login submetido via {login_sel}")
-        else:
-            await page.keyboard.press("Enter")
-            logger.info("[GOV_SCRAPER] Login submetido via Enter")
-
-        # Esperar navegação
+        # ── 2–5. Login (NISS + Password + Submit + Verificação) ──
+        # Bloco protegido com try/except para distinguir timeout no login
+        # vs. timeout na navegação interna (pós-login)
+        login_success = False
         try:
-            await page.wait_for_load_state("domcontentloaded", timeout=20000)
-            await asyncio.sleep(2)
-        except Exception:
-            pass
-
-        # ── 5. Verificar se o login falhou ──
-        step = "check_login"
-
-        # Verificar erro visível
-        error_el, _ = await _try_selectors(page, SEG_SOCIAL_SEL["login_error"], timeout=5000)
-        if error_el:
-            screenshot_b64 = await _take_screenshot(page, "login_error")
-            return ScraperResult(
-                success=False,
-                error="credenciais_invalidas",
-                step_failed="check_login",
-                screenshot_b64=screenshot_b64,
-            )
-
-        # Verificar URL
-        current_url = page.url.lower()
-        if "login" in current_url or "autenticacao" in current_url:
-            await asyncio.sleep(3)
+            # ── 2. Verificar se há redirecionamento para autenticação.gov.pt ──
             current_url = page.url.lower()
-            if "login" in current_url or "autenticacao" in current_url:
-                # Verificar MFA
-                mfa_selectors = [
-                    "text=Chave Móvel Digital",
-                    "text=código de segurança",
-                    "text=autenticação multi-fator",
-                    "input[placeholder*='código']",
-                ]
-                for sel in mfa_selectors:
-                    try:
-                        mfa_el = page.locator(sel).first
-                        if await mfa_el.is_visible(timeout=2000):
-                            screenshot_b64 = await _take_screenshot(page, "mfa_required")
-                            return ScraperResult(
-                                success=False,
-                                error="mfa_requerido",
-                                step_failed="check_login",
-                                screenshot_b64=screenshot_b64,
-                            )
-                    except Exception:
-                        continue
+            if "acesso.gov.pt" in current_url:
+                logger.info("[GOV_SCRAPER] Redirecionado para acesso.gov.pt — usar fluxo de autenticação genérico")
+                niss_el, niss_sel = await _try_selectors(page, FINANCAS_SEL["nif_input"], timeout=15000)
+            else:
+                niss_el, niss_sel = await _try_selectors(page, SEG_SOCIAL_SEL["niss_input"], timeout=15000)
 
-                screenshot_b64 = await _take_screenshot(page, "still_on_login")
+            # ── 3. Inserir credenciais ──
+            step = "fill_niss"
+            if not niss_el:
+                screenshot_b64 = await _take_screenshot(page, "niss_input_not_found")
+                return ScraperResult(
+                    success=False,
+                    error="selector_desatualizado",
+                    step_failed="fill_niss",
+                    screenshot_b64=screenshot_b64,
+                )
+            await niss_el.click()
+            await niss_el.fill(niss)
+            logger.info(f"[GOV_SCRAPER] NISS inserido via {niss_sel} ({masked_niss})")
+
+            step = "fill_password"
+            # Determinar quais selectors de password usar
+            if "acesso.gov.pt" in page.url.lower():
+                pass_el, pass_sel = await _try_selectors(page, FINANCAS_SEL["password_input"], timeout=10000)
+            else:
+                pass_el, pass_sel = await _try_selectors(page, SEG_SOCIAL_SEL["password_input"], timeout=10000)
+
+            if not pass_el:
+                screenshot_b64 = await _take_screenshot(page, "password_input_not_found")
+                return ScraperResult(
+                    success=False,
+                    error="selector_desatualizado",
+                    step_failed="fill_password",
+                    screenshot_b64=screenshot_b64,
+                )
+            await pass_el.click()
+            await pass_el.fill(password)
+
+            # ── 4. Submeter login ──
+            step = "submit_login"
+            if "acesso.gov.pt" in page.url.lower():
+                login_el, login_sel = await _try_selectors(page, FINANCAS_SEL["login_button"], timeout=10000)
+            else:
+                login_el, login_sel = await _try_selectors(page, SEG_SOCIAL_SEL["login_button"], timeout=10000)
+
+            if login_el:
+                await login_el.click()
+                logger.info(f"[GOV_SCRAPER] Login submetido via {login_sel}")
+            else:
+                await page.keyboard.press("Enter")
+                logger.info("[GOV_SCRAPER] Login submetido via Enter")
+
+            # Esperar navegação
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=90000)
+                await asyncio.sleep(2)
+            except Exception:
+                pass
+
+            # ── 5. Verificar se o login falhou ──
+            step = "check_login"
+
+            # Verificar erro visível
+            error_el, _ = await _try_selectors(page, SEG_SOCIAL_SEL["login_error"], timeout=10000)
+            if error_el:
+                screenshot_b64 = await _take_screenshot(page, "login_error")
                 return ScraperResult(
                     success=False,
                     error="credenciais_invalidas",
@@ -1030,17 +1039,84 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
                     screenshot_b64=screenshot_b64,
                 )
 
-        logger.info(f"[GOV_SCRAPER] Login Seg. Social bem-sucedido para NISS {masked_niss}!")
+            # Verificar URL
+            current_url = page.url.lower()
+            if "login" in current_url or "autenticacao" in current_url:
+                await asyncio.sleep(3)
+                current_url = page.url.lower()
+                if "login" in current_url or "autenticacao" in current_url:
+                    # Verificar MFA
+                    mfa_selectors = [
+                        "text=Chave Móvel Digital",
+                        "text=código de segurança",
+                        "text=autenticação multi-fator",
+                        "input[placeholder*='código']",
+                    ]
+                    for sel in mfa_selectors:
+                        try:
+                            mfa_el = page.locator(sel).first
+                            if await mfa_el.is_visible(timeout=2000):
+                                screenshot_b64 = await _take_screenshot(page, "mfa_required")
+                                return ScraperResult(
+                                    success=False,
+                                    error="mfa_requerido",
+                                    step_failed="check_login",
+                                    screenshot_b64=screenshot_b64,
+                                )
+                        except Exception:
+                            continue
 
-        # ── 6. Navegar para Documentos ──
+                    screenshot_b64 = await _take_screenshot(page, "still_on_login")
+                    return ScraperResult(
+                        success=False,
+                        error="credenciais_invalidas",
+                        step_failed="check_login",
+                        screenshot_b64=screenshot_b64,
+                    )
+
+            login_success = True
+            logger.info(f"[GOV_SCRAPER] Login Seg. Social bem-sucedido para NISS {masked_niss}!")
+
+        except asyncio.TimeoutError:
+            logger.error(
+                "Timeout na página de Login. Possível bloqueio de WAF/Captcha. "
+                f"Step: {step}, NISS: {masked_niss}"
+            )
+            screenshot_b64 = await _take_screenshot(page, f"login_timeout_{step}")
+            return ScraperResult(
+                success=False,
+                error="timeout_login",
+                step_failed=step,
+                screenshot_b64=screenshot_b64,
+            )
+
+        # ── 6. Navegar para Documentos (pós-login) ──
         step = "navigate_documents"
-        doc_menu_el, _ = await _try_selectors(page, SEG_SOCIAL_SEL["documentos_menu"], timeout=10000)
-        if doc_menu_el:
-            try:
-                await doc_menu_el.click()
-                await page.wait_for_load_state("domcontentloaded", timeout=15000)
-            except Exception:
-                pass
+        try:
+            doc_menu_el, _ = await _try_selectors(page, SEG_SOCIAL_SEL["documentos_menu"], timeout=15000)
+            if doc_menu_el:
+                try:
+                    await doc_menu_el.click()
+                    await page.wait_for_load_state("domcontentloaded", timeout=90000)
+                except asyncio.TimeoutError:
+                    logger.error(
+                        f"Timeout na navegação interna (pós-login). "
+                        f"Login OK mas falha ao navegar para Documentos. NISS: {masked_niss}"
+                    )
+                    screenshot_b64 = await _take_screenshot(page, "documents_navigation_timeout")
+                except Exception:
+                    logger.error(
+                        f"Erro na navegação interna (pós-login). "
+                        f"Login OK mas falha ao navegar para Documentos. NISS: {masked_niss}"
+                    )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Timeout na navegação interna (pós-login). "
+                f"Login OK mas falha ao encontrar menu Documentos. NISS: {masked_niss}"
+            )
+            screenshot_b64 = await _take_screenshot(page, "documents_menu_timeout")
+        except Exception:
+            pass
 
         # ── 7. Descarregar Situação Contributiva ──
         step = "download_situacao"
@@ -1136,7 +1212,7 @@ async def _download_seg_social_document(
                 el = page.locator(selector).first
                 if await el.is_visible(timeout=3000):
                     try:
-                        async with page.expect_download(timeout=30000) as download_info:
+                        async with page.expect_download(timeout=60000) as download_info:
                             await el.click()
                         download = await download_info.value
 
@@ -1177,12 +1253,12 @@ async def _download_seg_social_document(
                 el = page.locator(selector).first
                 if await el.is_visible(timeout=3000):
                     await el.click()
-                    await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    await page.wait_for_load_state("domcontentloaded", timeout=90000)
 
-                    dl_el, _ = await _try_selectors(page, SEG_SOCIAL_SEL["download_button"], timeout=5000)
+                    dl_el, _ = await _try_selectors(page, SEG_SOCIAL_SEL["download_button"], timeout=10000)
                     if dl_el:
                         try:
-                            async with page.expect_download(timeout=30000) as download_info:
+                            async with page.expect_download(timeout=60000) as download_info:
                                 await dl_el.click()
                             download = await download_info.value
 
