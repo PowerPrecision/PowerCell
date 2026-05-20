@@ -1,0 +1,302 @@
+# ====================================================================
+# RENDER.YAML — PowerCell CRM/Crédito
+# ====================================================================
+# Configuração do Render via Blueprint (render.yaml).
+# Para usar: faz push para o GitHub e o Render deteta automaticamente.
+#
+# SERVIÇOS:
+#   1. backend  — API FastAPI com Playwright (Docker)
+#   2. worker   — Processamento assíncrono + scheduler (Docker)
+#   3. frontend — React SPA (Static Site)
+#
+# NOTA: As variáveis sensíveis (secrets) DEVEM ser configuradas
+# no Render Dashboard → Environment. O render.yaml só define
+# as não-sensíveis. As que dizem (sync: false) são secrets.
+# ====================================================================
+
+services:
+
+  # ────────────────────────────────────────────────────────────────
+  # 1. BACKEND — API FastAPI + Playwright/Chromium (Docker)
+  # ────────────────────────────────────────────────────────────────
+  # Usa a imagem oficial Playwright (Python + Chromium pré-instalado).
+  # Isto garante que o scraper de Portais Gov funciona em produção.
+  # RAM: ~400-500MB (Python + Chromium single-process)
+  #
+  # IMPORTANTE: O nome do serviço DEVE ser "powercell" para manter
+  # o URL https://powercell.onrender.com (evita quebrar links existentes).
+  # ────────────────────────────────────────────────────────────────
+  - type: web
+    name: powercell
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    region: frankfurt
+    branch: dev
+    healthCheckPath: /health
+    numInstances: 1
+
+    envVars:
+      # ── Identidade ──
+      - key: ENVIRONMENT
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: PORT
+        value: 8001
+
+      # ── Base de Dados (SECRETS) ──
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        sync: false
+
+      # ── JWT (SECRET) ──
+      - key: JWT_SECRET
+        sync: false
+
+      # ── CORS ──
+      - key: CORS_ORIGINS
+        value: https://powercell.onrender.com,https://powercell-frontend.onrender.com
+
+      # ── AWS S3 (SECRETS) ──
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: eu-west-3
+      - key: AWS_BUCKET_NAME
+        sync: false
+
+      # ── Email (SECRETS) ──
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: noreply@powerealestate.pt
+      - key: EMAIL_FROM_NAME
+        value: "Power Real Estate & Precision Crédito"
+
+      # ── AI / LLM (SECRETS) ──
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # ── Redis / Upstash (SECRETS) ──
+      - key: REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+      # ── Sentry (SECRETS) ──
+      - key: DSN_SENTRY_BACKEND
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
+
+      # ── Playwright ──
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /ms-playwright
+
+      # ── Uvicorn ──
+      - key: UVICORN_WORKERS
+        value: "1"
+
+      # ── Google OAuth (SECRETS) ──
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+
+      # ── OneDrive (SECRETS) ──
+      - key: ONEDRIVE_TENANT_ID
+        sync: false
+      - key: ONEDRIVE_CLIENT_ID
+        sync: false
+      - key: ONEDRIVE_CLIENT_SECRET
+        sync: false
+
+      # ── Trello (SECRETS) ──
+      - key: TRELLO_API_KEY
+        sync: false
+      - key: TRELLO_TOKEN
+        sync: false
+      - key: TRELLO_BOARD_ID
+        sync: false
+
+      # ── VAPID Push Notifications (SECRETS) ──
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+
+      # ── Webmail IMAP (SECRETS) ──
+      - key: PRECISION_EMAIL
+        sync: false
+      - key: PRECISION_PASSWORD
+        sync: false
+      - key: POWER_EMAIL
+        sync: false
+      - key: POWER_PASSWORD
+        sync: false
+
+  # ────────────────────────────────────────────────────────────────
+  # 2. WORKER — Tarefas assíncronas + scheduler (Docker)
+  # ────────────────────────────────────────────────────────────────
+  # Processa: webmail sync, lead matching, trello sync, cleanup.
+  # Só arranca quando ENVIRONMENT=production (kill switch interno).
+  # RAM: ~200-300MB (Python + lazy loading de módulos pesados)
+  #
+  # NOTA: Usa um Dockerfile dedicado (Dockerfile.worker) com CMD
+  # diferente do backend. O Render não suporta dockerCommand em
+  # workers Docker — o CMD do Dockerfile é sempre usado.
+  # ────────────────────────────────────────────────────────────────
+  - type: worker
+    name: powercell-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile.worker
+    dockerContext: ./backend
+    plan: starter
+    region: frankfurt
+    branch: dev
+    numInstances: 1
+
+    envVars:
+      # Herda as mesmas variáveis do backend
+      - key: ENVIRONMENT
+        value: production
+      - key: APP_ENV
+        value: production
+
+      # ── Base de Dados (SECRETS) ──
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        sync: false
+
+      # ── JWT (SECRET) ──
+      - key: JWT_SECRET
+        sync: false
+
+      # ── AWS S3 (SECRETS) ──
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: eu-west-3
+      - key: AWS_BUCKET_NAME
+        sync: false
+
+      # ── Email (SECRETS) ──
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: noreply@powerealestate.pt
+      - key: EMAIL_FROM_NAME
+        value: "Power Real Estate & Precision Crédito"
+
+      # ── AI / LLM (SECRETS) ──
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # ── Redis / Upstash (SECRETS) ──
+      - key: REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+      # ── Sentry (SECRETS) ──
+      - key: DSN_SENTRY_BACKEND
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
+
+      # ── Playwright ──
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /ms-playwright
+
+      # ── Google OAuth (SECRETS) ──
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+
+      # ── OneDrive (SECRETS) ──
+      - key: ONEDRIVE_TENANT_ID
+        sync: false
+      - key: ONEDRIVE_CLIENT_ID
+        sync: false
+      - key: ONEDRIVE_CLIENT_SECRET
+        sync: false
+
+      # ── Trello (SECRETS) ──
+      - key: TRELLO_API_KEY
+        sync: false
+      - key: TRELLO_TOKEN
+        sync: false
+      - key: TRELLO_BOARD_ID
+        sync: false
+
+      # ── Webmail IMAP (SECRETS) ──
+      - key: PRECISION_EMAIL
+        sync: false
+      - key: PRECISION_PASSWORD
+        sync: false
+      - key: POWER_EMAIL
+        sync: false
+      - key: POWER_PASSWORD
+        sync: false
+
+  # ────────────────────────────────────────────────────────────────
+  # 3. FRONTEND — React SPA (Static Site)
+  # ────────────────────────────────────────────────────────────────
+  # Build com Vite, servido como ficheiros estáticos.
+  # O REACT_APP_BACKEND_URL é injetado no build time.
+  #
+  # NOTA: routes e headers para SPA rewrite e cache devem ser
+  # configurados manualmente no Render Dashboard → Settings:
+  #   - Rewrite rule: /* → /index.html
+  #   - Headers: Cache-Control em /assets/*
+  #   - Security headers: X-Frame-Options, X-XSS-Protection
+  # O render.yaml Blueprint NÃO suporta estes campos.
+  # ────────────────────────────────────────────────────────────────
+  - type: web
+    name: powercell-frontend
+    runtime: static
+    buildCommand: cd frontend && yarn install && yarn build
+    staticPublishPath: frontend/dist
+    plan: free
+    region: frankfurt
+    branch: dev
+
+    envVars:
+      # ── Backend URL (injetado no build time) ──
+      # IMPORTANTE: Deve corresponder ao nome do serviço backend acima.
+      # Se o backend se chama "powercell", o URL é https://powercell.onrender.com
+      - key: REACT_APP_BACKEND_URL
+        value: https://powercell.onrender.com
+      # ── VAPID Public Key (SECRETS) ──
+      - key: REACT_APP_VAPID_PUBLIC_KEY
+        sync: false
+      # ── Sentry Frontend (SECRETS) ──
+      - key: VITE_DSN_SENTRY_FRONTEND
+        sync: false
+      - key: VITE_SENTRY_ENVIRONMENT
+        value: production
