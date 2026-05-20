@@ -510,6 +510,37 @@ def create_accent_insensitive_regex(search_term: str) -> dict:
     return {"$regex": pattern, "$options": ""}
 
 
+def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
+    """
+    Constrói filtro de pesquisa que suporta múltiplas palavras.
+    
+    Se o termo contém espaços, divide em palavras e exige que TODAS
+    apareçam em qualquer ordem no campo de nome (AND lógico).
+    
+    Exemplo: 'vera teixeira' encontra 'Vera Lucia Da Costa Teixeira'
+    porque 'vera' E 'teixeira' existem no nome.
+    
+    Se o termo não tem espaços, comporta-se como create_accent_insensitive_regex.
+    """
+    if not search_term:
+        return {}
+    
+    words = search_term.strip().split()
+    
+    if len(words) <= 1:
+        return {name_field: create_accent_insensitive_regex(search_term.strip())}
+    
+    word_filters = []
+    for word in words:
+        if len(word.strip()) >= 1:
+            word_filters.append({name_field: create_accent_insensitive_regex(word.strip())})
+    
+    if len(word_filters) == 1:
+        return word_filters[0]
+    
+    return {"$and": word_filters}
+
+
 async def sync_process_to_trello(process: dict):
     """Sincronizar processo com o Trello (nome e descrição do card)."""
     if not process.get("trello_card_id") or not trello_service.api_key:
@@ -1522,14 +1553,21 @@ async def get_processes_paginated(
         query["status"] = status
     
     if search:
-        name_regex = create_accent_insensitive_regex(search)
+        # Suporte multi-word + accent-insensitive (mesma lógica da pesquisa de clientes)
+        # Exemplo: 'vera teixeira' encontra 'Vera Lucia Da Costa Teixeira'
+        name_filter = build_multiword_search_filter(search, "client_name")
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
-        search_condition = {
-            "$or": [
-                {"client_name": name_regex},
-                {"client_email": simple_regex}
-            ]
-        }
+        
+        search_or_conditions = []
+        # Adicionar filtro de nome (pode ser $and se multi-word)
+        if "$and" in name_filter:
+            search_or_conditions.append(name_filter)
+        elif name_filter:
+            search_or_conditions.append(name_filter)
+        search_or_conditions.append({"client_email": simple_regex})
+        
+        search_condition = {"$or": search_or_conditions}
+        
         if "$and" not in query:
             query = {"$and": [query, search_condition]} if query else search_condition
         else:

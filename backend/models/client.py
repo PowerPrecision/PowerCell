@@ -132,7 +132,13 @@ class ClientCreate(BaseModel):
 
 
 class ClientUpdate(BaseModel):
-    """Schema para actualizar um cliente (sem dados financeiros)."""
+    """Schema para actualizar um cliente (sem dados financeiros).
+    
+    NOTA: Campos como financial_data, titular2_data, personal_data, etc.
+    enviados pelo frontend são ignorados silenciosamente (extra="ignore"),
+    pois pertencem ao endpoint de Processos, não ao de Clientes.
+    """
+    model_config = ConfigDict(extra="ignore")
     nome: Optional[str] = None
     contacto: Optional[ClientContact] = None
     dados_pessoais: Optional[ClientPersonalData] = None

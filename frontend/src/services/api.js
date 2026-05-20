@@ -219,21 +219,33 @@ api.interceptors.response.use(
       }
       
       if (!isLoginAttempt) {
-        toast({
-          variant: "destructive",
-          title: "Sessão Expirada",
-          description: "A sua sessão expirou. Por favor, faça login novamente.",
-        });
-        
-        // Limpar dados de autenticação
+        // ============================================================
+        // PORTAL: Não redirecionar utilizadores do portal para /login
+        // O portal tem o seu próprio sistema de autenticação (portal_token).
+        // Se um token de staff expirou enquanto o utilizador está no
+        // portal, limpar apenas o token de staff sem redirecionar.
+        // ============================================================
+        const isOnPortal = window.location.pathname.startsWith('/portal');
+
+        if (!isOnPortal) {
+          toast({
+            variant: "destructive",
+            title: "Sessão Expirada",
+            description: "A sua sessão expirou. Por favor, faça login novamente.",
+          });
+        }
+
+        // Limpar dados de autenticação de staff
         localStorage.removeItem("token");
         localStorage.removeItem("user");
         localStorage.removeItem("originalToken");
-        
-        // Redirecionar para login (com delay para mostrar toast)
-        setTimeout(() => {
-          window.location.href = "/login";
-        }, 1500);
+
+        // Redirecionar apenas se NÃO estiver no portal
+        if (!isOnPortal) {
+          setTimeout(() => {
+            window.location.href = "/login";
+          }, 1500);
+        }
       }
       
       return Promise.reject(error);
@@ -604,7 +616,7 @@ export const syncProcessWithTrello = (processId) => api.post(`/trello/sync/${pro
 // Clients
 export const getClients = (params = {}) => api.get("/clients", { params });
 export const getClient = (id) => api.get(`/clients/${id}`);
-export const getClientFiles = (clientId) => api.get(`/clients/${clientId}/files`);
+export const getClientFiles = (clientId) => api.get(`/documents/client/${clientId}/files`);
 export const createClient = (data) => api.post("/clients", data);
 export const updateClient = (id, data) => api.put(`/clients/${id}`, data);
 export const deleteClient = (id) => api.delete(`/clients/${id}`);

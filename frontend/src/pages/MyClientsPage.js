@@ -385,7 +385,7 @@ const MyClientsPage = () => {
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-blue-600 hover:text-blue-800 hover:underline">{client.client_name}</span>
-                              {(!client.is_active || !client.process_count || client.process_count === 0) && (
+                              {TERMINAL_STATUSES.includes(client.status) && (
                                 <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-[10px]">
                                   Inativo
                                 </Badge>

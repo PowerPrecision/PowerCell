@@ -89,7 +89,8 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
             "updated_at": 1,
             "assigned_consultor_id": 1,
             "assigned_mediador_id": 1,
-            "next_action": 1
+            "next_action": 1,
+            "is_active": 1
         }
     ).sort("client_name", 1).limit(100).to_list(100)
     

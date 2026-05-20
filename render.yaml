@@ -58,7 +58,7 @@ services:
 
       # ── CORS ──
       - key: CORS_ORIGINS
-        value: https://powercell.onrender.com,https://powercell-frontend.onrender.com
+        value: https://powercell.onrender.com,https://powercell-frontend.onrender.com,https://powercell.pt,https://www.powercell.pt
 
       # ── AWS S3 (SECRETS) ──
       - key: AWS_ACCESS_KEY_ID

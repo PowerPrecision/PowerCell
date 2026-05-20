@@ -1465,21 +1465,32 @@ const ProcessDetails = () => {
       const cleanedPersonalData = cleanPersonalDataForSubmit(personalData);
       const cleanedFinancialData = cleanFinancialDataForSubmit(financialData);
 
-      // 2. PREPARAR DADOS DO CLIENTE
+      // 2. PREPARAR DADOS DO CLIENTE (mapear para o schema ClientUpdate do backend)
+      // O backend espera: { nome, contacto: { email, telefone }, dados_pessoais: {...} }
+      if (cleanedPersonalData.nome_completo) clientUpdateData.nome = cleanedPersonalData.nome_completo;
+      
+      // Mapear email e telefone para o objecto aninhado 'contacto'
+      const contactoData = {};
       if (process?.client_email !== undefined && process?.client_email !== null) {
-        clientUpdateData.email = String(process.client_email || '');
+        contactoData.email = String(process.client_email || '');
       }
       if (process?.client_phone !== undefined && process?.client_phone !== null) {
-        clientUpdateData.phone = String(process.client_phone || '');
+        contactoData.telefone = String(process.client_phone || '');
       }
-      if (cleanedPersonalData.nome_completo) clientUpdateData.name = cleanedPersonalData.nome_completo;
-      if (cleanedPersonalData.nif) clientUpdateData.nif = cleanedPersonalData.nif;
+      if (Object.keys(contactoData).length > 0) {
+        clientUpdateData.contacto = contactoData;
+      }
       
-      clientUpdateData.personal_data = cleanedPersonalData;
-      clientUpdateData.financial_data = cleanedFinancialData;
-      clientUpdateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
+      // Mapear dados pessoais — o backend espera 'dados_pessoais', não 'personal_data'
+      if (cleanedPersonalData && Object.keys(cleanedPersonalData).length > 0) {
+        clientUpdateData.dados_pessoais = cleanedPersonalData;
+      }
 
-      // 3. PREPARAR DADOS DO PROCESSO
+      // 3. PREPARAR DADOS DO PROCESSO (inclui dados pessoais e titular2 que vivem no processo)
+      processUpdateData.personal_data = cleanedPersonalData;
+      processUpdateData.financial_data = cleanedFinancialData;
+      processUpdateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
+
       if (hasAnyRole(user, ["consultor", "admin"])) {
         processUpdateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
       }
