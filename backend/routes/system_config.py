@@ -802,14 +802,14 @@ async def test_service_connection(
                     logger.info(f"[Test Resend] Email de teste enviado com sucesso: id={email_id}")
                     return {"success": True, "message": f"Resend API conectado com sucesso! Email de teste enviado (id: {email_id})"}
 
-                except resend.exceptions.AuthenticationError as e:
+                except resend.exceptions.InvalidApiKeyError as e:
                     error_msg = str(e)
-                    logger.error(f"[Test Resend] AuthenticationError: {error_msg}")
+                    logger.error(f"[Test Resend] InvalidApiKeyError: {error_msg}")
                     return {"success": False, "message": f"Resend API Key inválida ou expirada. Verifique a chave no dashboard do Resend (https://resend.com/api-keys). Detalhe: {error_msg}"}
-                except resend.exceptions.RateLimitError as e:
+                except resend.exceptions.ApplicationError as e:
                     error_msg = str(e)
-                    logger.error(f"[Test Resend] RateLimitError: {error_msg}")
-                    return {"success": False, "message": f"Limite de envio Resend atingido. Aguarde alguns minutos ou verifique o seu plano. Detalhe: {error_msg}"}
+                    logger.error(f"[Test Resend] ApplicationError: {error_msg}")
+                    return {"success": False, "message": f"Erro da API Resend (possível limite de envio ou domínio não verificado). Verifique o seu plano e domínios em https://resend.com. Detalhe: {error_msg}"}
                 except Exception as e:
                     error_msg = str(e)
                     logger.error(f"[Test Resend] Erro inesperado: {type(e).__name__}: {error_msg}")
