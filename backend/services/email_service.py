@@ -360,7 +360,7 @@ def _send_via_resend(
     import resend
 
     try:
-        resend.ApiKey = api_key
+        resend.api_key = api_key
 
         # Construir header From
         if from_name:
