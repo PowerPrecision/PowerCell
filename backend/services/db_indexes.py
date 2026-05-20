@@ -193,6 +193,14 @@ async def cleanup_deprecated_indexes(db) -> dict:
                         await collection.drop_index(idx_name)
                         results["dropped"].append(f"{collection_name}.{idx_name}")
                         logger.info(f"🗑️ Índice removido: {collection_name}.{idx_name}")
+                    except OperationFailure as e:
+                        # IndexNotFound (code 27) — índice já não existe, não é erro
+                        if e.code == 27:
+                            results["not_found"].append(f"{collection_name}.{idx_name}")
+                            logger.debug(f"Índice {collection_name}.{idx_name} já não existe (code 27)")
+                        else:
+                            results["errors"].append(f"{collection_name}.{idx_name}: {str(e)}")
+                            logger.error(f"Erro ao remover índice {collection_name}.{idx_name}: {e}")
                     except Exception as e:
                         results["errors"].append(f"{collection_name}.{idx_name}: {str(e)}")
                         logger.error(f"Erro ao remover índice {collection_name}.{idx_name}: {e}")
@@ -262,8 +270,10 @@ async def create_indexes(db) -> dict:
         # Índice composto email + status - usado em lookup de processos
         {"keys": [("client_email", 1), ("status", 1)], "name": "idx_email_status"},
         
-        # Índice no NIF para pesquisa rápida
-        {"keys": [("personal_data.nif", 1)], "name": "idx_nif", "sparse": True},
+        # NOTA: NÃO criar índice em personal_data.nif — o campo está encriptado (Fernet).
+        # Para pesquisa por NIF, usar o blind index idx_process_nif_hash (personal_data.nif_hash)
+        # que é criado mais abaixo na secção de process_blind_indexes.
+        # O idx_nif antigo está na lista DEPRECATED_INDEXES para ser removido.
         
         # Índice no tipo de processo
         {"keys": [("process_type", 1)], "name": "idx_process_type"},
