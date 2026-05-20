@@ -4933,11 +4933,6 @@ const ProcessDetails = () => {
                     </div>
                   </TabsContent>
 
-                  {/* Smart Match Tab — Motor de Cruzamento Imobiliário */}
-                  <TabsContent value="smartmatch" className="mt-4">
-                    <SmartMatchTab />
-                  </TabsContent>
-
                   {/* Visitas / Imóveis Tab */}
                   <TabsContent value="visitas" className="mt-4">
                     <VisitasTab />

@@ -1233,13 +1233,45 @@ export default function ClientPortal() {
 
   const rawToken = useRef(window.location.pathname.split('/portal/')[1]);
 
-  // Verificar se já tem sessão verificada no sessionStorage
+  // Verificar se já tem sessão verificada — validar token no backend
+  // (nunca confiar apenas no flag portal_verified; o token pode ter expirado)
   useEffect(() => {
-    const verified = sessionStorage.getItem('portal_verified') === 'true';
+    let cancelled = false;
     const token = sessionStorage.getItem('portal_token');
-    if (verified && token) {
-      setIsVerified(true);
+    const verified = sessionStorage.getItem('portal_verified') === 'true';
+
+    if (!token || !verified) {
+      // Sem token ou sem flag — mostrar login
+      sessionStorage.removeItem('portal_verified');
+      return;
     }
+
+    // Tem token e flag — validar no backend antes de conceder acesso
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/portal/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (cancelled) return;
+
+        if (res.ok) {
+          // Token válido — auto-verificar
+          setIsVerified(true);
+        } else {
+          // Token inválido/expirado — limpar sessão e mostrar login
+          sessionStorage.removeItem('portal_token');
+          sessionStorage.removeItem('portal_verified');
+          sessionStorage.removeItem('portal_client_id');
+          sessionStorage.removeItem('portal_client_name');
+          sessionStorage.removeItem('portal_process_id');
+        }
+      } catch {
+        // Erro de rede — não auto-verificar, mostrar login
+        sessionStorage.removeItem('portal_verified');
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, []);
 
   // Extrair client_id da URL (para o login screen)
