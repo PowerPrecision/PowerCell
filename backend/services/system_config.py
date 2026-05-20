@@ -217,13 +217,24 @@ async def update_config_section(section: str, data: Dict[str, Any]) -> SystemCon
     elif section == "auto_draft":
         current = config.auto_draft.model_dump()
         current.update(filtered_data)
-        # Se eligible_doc_types é uma string, tentar parsear para lista
+        # Se eligible_doc_types é uma string, converter para lista
+        # Suporta tanto formato JSON como formato separado por vírgulas
         if isinstance(current.get("eligible_doc_types"), str):
-            import json
-            try:
-                current["eligible_doc_types"] = json.loads(current["eligible_doc_types"])
-            except json.JSONDecodeError:
-                logger.warning("eligible_doc_types não é um JSON válido, a manter valor original")
+            raw = current["eligible_doc_types"].strip()
+            if not raw:
+                current["eligible_doc_types"] = []
+            else:
+                # Tentar JSON primeiro (compatibilidade retroativa)
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        current["eligible_doc_types"] = parsed
+                    else:
+                        # Fallback: separar por vírgulas
+                        current["eligible_doc_types"] = [s.strip() for s in raw.split(",") if s.strip()]
+                except (json.JSONDecodeError, ValueError):
+                    # Formato separado por vírgulas: "irs, recibo_vencimento, cc"
+                    current["eligible_doc_types"] = [s.strip() for s in raw.split(",") if s.strip()]
         config.auto_draft = AutoDraftConfig(**current)
     elif section == "dsti_analysis":
         current = config.dsti_analysis.model_dump()

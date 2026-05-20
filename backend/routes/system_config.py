@@ -562,9 +562,9 @@ CONFIG_FIELDS = {
             ConfigField(
                 key="eligible_doc_types",
                 label="Tipos de Documento Elegíveis",
-                type="textarea",
-                placeholder='["irs", "recibo_vencimento", "extrato_bancario"]',
-                help_text="Lista JSON com os tipos de documento que geram rascunhos automáticos quando em falta",
+                type="text",
+                placeholder="irs, recibo_vencimento, extrato_bancario, cc",
+                help_text="Tipos de documento separados por vírgula que geram rascunhos automáticos quando em falta",
                 depends_on={"enabled": True},
             ),
         ]

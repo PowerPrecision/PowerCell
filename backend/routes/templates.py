@@ -11,7 +11,8 @@ from typing import Optional, List
 from pydantic import BaseModel
 
 from database import db
-from services.auth import get_current_user
+from services.auth import get_current_user, require_roles
+from models.auth import UserRole
 from services.template_generator import (
     get_template_for_process,
     WEBMAIL_URLS,
@@ -25,7 +26,17 @@ from services.document_checklist import (
     DOCUMENTOS_CREDITO_HABITACAO
 )
 
-router = APIRouter(prefix="/templates", tags=["Templates"])
+# Roles que NÃO podem aceder a templates (indexacao = acesso restrito)
+TEMPLATES_ALLOWED_ROLES = [
+    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+    UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
+]
+
+router = APIRouter(
+    prefix="/templates",
+    tags=["Templates"],
+    dependencies=[Depends(require_roles(TEMPLATES_ALLOWED_ROLES))],
+)
 
 
 class DocumentRequestData(BaseModel):

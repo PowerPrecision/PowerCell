@@ -133,6 +133,12 @@ const ProcessesPage = () => {
     }, { replace: true });
   };
 
+  // Ref para manter searchTerm actualizado sem causar re-render do fetchProcesses
+  const searchTermRef = useRef(searchTerm);
+  useEffect(() => {
+    searchTermRef.current = searchTerm;
+  }, [searchTerm]);
+
   // Ref para prevenir pedidos duplicados concorrentes
   const fetchControllerRef = useRef(null);
 
@@ -153,7 +159,7 @@ const ProcessesPage = () => {
       const response = await getProcesses({
         page: pagination.page,
         size: pagination.size,
-        search: searchTerm || undefined,
+        search: searchTermRef.current || undefined,
         view_mode: showCompleted ? "all" : "active_only",
         sort_field: sortField,
         sort_order: sortOrder,
@@ -188,7 +194,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, searchTerm, showCompleted, sortField, sortOrder, location.pathname]);
+  }, [pagination.page, pagination.size, showCompleted, sortField, sortOrder, location.pathname]);
   
   // Handler para toggle de processos concluídos
   const handleToggleCompleted = (checked) => {
@@ -249,6 +255,11 @@ const ProcessesPage = () => {
   useEffect(() => {
     fetchProcesses();
   }, [fetchProcesses, filterByRole]);
+
+  // Re-fetch when searchTerm changes (debounced via URL param)
+  useEffect(() => {
+    fetchProcesses();
+  }, [searchTerm]);
 
   // Funções de paginação
   const goToPage = useCallback((page) => {

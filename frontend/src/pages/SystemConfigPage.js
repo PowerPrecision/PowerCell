@@ -465,6 +465,8 @@ const IntegrationsConfigSection = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
   const [testing, setTesting] = useState(null);
+  // Resultado do teste isolado por secção (evita bleed de notificações entre sub-menus)
+  const [testResults, setTestResults] = useState({});
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -554,6 +556,7 @@ const IntegrationsConfigSection = () => {
 
   const handleTestSmtp = async () => {
     setTesting("smtp");
+    setTestResults(prev => ({ ...prev, smtp: null }));
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
@@ -568,20 +571,21 @@ const IntegrationsConfigSection = () => {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
+          setTestResults(prev => ({ ...prev, smtp: { success: true, message: data.message || "Conexão bem sucedida" } }));
           toast.success("✅ Resend API conectado com sucesso!");
         } else {
+          setTestResults(prev => ({ ...prev, smtp: { success: false, message: data.message || "Falha na conexão" } }));
           toast.error(data.message || "Falha na conexão");
         }
       } else {
         const data = await res.json();
+        setTestResults(prev => ({ ...prev, smtp: { success: false, message: data.detail || data.message || "Falha na conexão" } }));
         toast.error(data.detail || data.message || "Falha na conexão");
       }
     } catch (err) {
-      if (err.name === "AbortError") {
-        toast.error("Timeout: o teste demorou demasiado tempo (30s)");
-      } else {
-        toast.error("Erro no teste de conexão");
-      }
+      const msg = err.name === "AbortError" ? "Timeout: o teste demorou demasiado tempo (30s)" : "Erro no teste de conexão";
+      setTestResults(prev => ({ ...prev, smtp: { success: false, message: msg } }));
+      toast.error(msg);
     } finally {
       clearTimeout(timeoutId);
       setTesting(null);
@@ -685,6 +689,16 @@ const IntegrationsConfigSection = () => {
               {testing === "smtp" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
               Testar Conexão
             </Button>
+            {testResults.smtp && (
+              <div className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${
+                testResults.smtp.success
+                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                  : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+              }`}>
+                {testResults.smtp.success ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                {testResults.smtp.message}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1732,11 +1746,11 @@ const SystemConfigPage = ({ embedded = false }) => {
 
       if (response.ok) {
         const data = await response.json();
-        // Converter arrays para string em campos textarea
+        // Converter arrays para string separada por vírgulas em campos de texto
         if (data.config?.auto_draft?.eligible_doc_types != null) {
           const docTypes = data.config.auto_draft.eligible_doc_types;
           data.config.auto_draft.eligible_doc_types = Array.isArray(docTypes)
-            ? JSON.stringify(docTypes, null, 2)
+            ? docTypes.join(", ")
             : String(docTypes);
         }
         setConfig(data.config);
@@ -1764,15 +1778,11 @@ const SystemConfigPage = ({ embedded = false }) => {
       if (!trimmed) {
         processedData.eligible_doc_types = [];
       } else {
-        try {
-          processedData.eligible_doc_types = JSON.parse(trimmed);
-          if (!Array.isArray(processedData.eligible_doc_types)) {
-            processedData.eligible_doc_types = [];
-          }
-        } catch {
-          // If not valid JSON, send as empty array rather than blocking the save
-          processedData.eligible_doc_types = [];
-        }
+        // Parsear string separada por vírgulas em array
+        processedData.eligible_doc_types = trimmed
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean);
       }
     }
     // Pré-processar audit_trail: critical_fields (textarea → lista) e retention_days (string → int)
