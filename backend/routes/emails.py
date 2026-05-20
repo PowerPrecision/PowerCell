@@ -2229,7 +2229,7 @@ async def webmail_list(
     effective_role = get_effective_role(request, current_user)  # Used for data filtering
     can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     
-    print(f"DEBUG: User {current_user.get('email')} (id={user_id}, role={user_role}, effective_role={effective_role}) querying box={box} folder={folder} account={account}")
+    logger.debug(f"User {current_user.get('email')} (id={user_id}, role={user_role}, effective_role={effective_role}) querying box={box} folder={folder} account={account}")
     
     # === BOX FILTER: permissões e isolamento por caixa ===
     if box == "general":
@@ -2478,12 +2478,12 @@ async def webmail_list(
     else:
         query = {}
     
-    print(f"DEBUG: User {user_email} querying box {box} with filter {query}")
+    logger.debug(f"User {user_email} querying box {box} with filter {query}")
     
     skip = (page - 1) * limit
     total = await db.emails.count_documents(query)
     
-    print(f"DEBUG: User {user_email} box={box} => total={total}")
+    logger.debug(f"User {user_email} box={box} => total={total}")
     
     logger.info(f"[Webmail List] folder={folder}, account={account}, user={user_email}, total={total}")
     
