@@ -44,7 +44,9 @@ import { hasAnyRole } from '../utils/roleUtils';
 
 // React Query hooks
 import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';
+import { useKanbanCompletedQuery } from '../hooks/queries/useKanbanCompletedQuery';
 import { useKanbanRealtime } from '../hooks/queries/useKanbanRealtime';
+import { useCompletedDaysFilter } from '../hooks/queries/useCompletedDaysFilter';
 import { useMoveProcessMutation } from '../hooks/mutations/useProcessMutations';
 
 // Importar componentes refatorados
@@ -110,9 +112,14 @@ const KanbanBoard = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
   const [urgencyFilter, setUrgencyFilter] = useState('all');
-  const [completedDays, setCompletedDays] = useState(30);
   const [viewMode, setViewMode] = useState('kanban');
   const [scrollPosition, setScrollPosition] = useState(0);
+
+  // === FILTRO ISOLADO DE CONCLUÍDOS ===
+  // O estado do completedDays vive isolado NESTE hook, NÃO no estado global.
+  // Isto impede que a mudança de período nos Concluídos provoque re-render
+  // de todo o quadro. A query dos Concluídos tem cache key independente.
+  const { completedDays, setCompletedDays, resetCompletedDays } = useCompletedDaysFilter();
   
   // === ESTADO DE DRAG & DROP ===
   const [draggingCard, setDraggingCard] = useState(null);
@@ -134,15 +141,15 @@ const KanbanBoard = ({
   // Verificar se o utilizador pode criar processos (qualquer staff)
   const canCreateProcess = hasAnyRole(user, ['admin', 'ceo', 'consultor', 'intermediario', 'administrativo', 'diretor', 'indexacao']);
 
-  // === REACT QUERY - DATA FETCHING ===
+  // === REACT QUERY - DATA FETCHING (QUERIES SEPARADAS) ===
   // Memoize filters to prevent infinite re-renders in dependent hooks
   const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter]);
-  
+
+  // QUERY 1: Colunas ACTIVAS (sem completedDays — não re-fetch quando o filtro muda)
   const {
     kanbanData,
-    columns,
+    columns: activeColumns,
     totalProcesses,
-    totalInactive,
     isLoading,
     isFetching,
     isError,
@@ -150,8 +157,42 @@ const KanbanBoard = ({
   } = useKanbanQuery({
     token,
     ...filters,
+    completedDays: undefined, // NÃO enviar completedDays — a query activa não precisa deste filtro
+  });
+
+  // QUERY 2: Colunas CONCLUÍDOS (cache key INDEPENDENTE — re-fetch apenas quando completedDays muda)
+  const {
+    columns: completedColumns,
+    isFetching: isFetchingCompleted,
+    isLoading: isLoadingCompleted,
+  } = useKanbanCompletedQuery({
+    token,
+    ...filters,
     completedDays,
   });
+
+  // === MERGE: Colunas activas + concluídos ===
+  // Substituir as colunas concluidos/desistencias da query activa pelos dados
+  // da query isolada de Concluídos. Isto garante que quando o utilizador muda
+  // o período, apenas as colunas inactivas são actualizadas.
+  const columns = useMemo(() => {
+    if (!activeColumns.length) return activeColumns;
+
+    const completedMap = new Map(
+      completedColumns.map(col => [col.name, col])
+    );
+
+    return activeColumns.map(col => {
+      // Se é coluna concluidos/desistencias, usar dados da query isolada
+      if (completedMap.has(col.name)) {
+        return completedMap.get(col.name);
+      }
+      // Caso contrário, manter dados da query activa (não afectada pelo filtro)
+      return col;
+    });
+  }, [activeColumns, completedColumns]);
+
+  const totalInactive = completedColumns.reduce((acc, col) => acc + (col.count || 0), 0);
 
   // === REACT QUERY - WEBSOCKET REAL-TIME ===
   const {
@@ -363,6 +404,7 @@ const KanbanBoard = ({
         onScrollLeft={() => scrollContainer('left')}
         onScrollRight={() => scrollContainer('right')}
         isFetching={isFetching}
+        isFetchingCompleted={isFetchingCompleted}
       />
 
       {/* Search Results List View */}
@@ -398,6 +440,7 @@ const KanbanBoard = ({
                   lockedProcesses={lockedProcesses}
                   completedDays={completedDays}
                   onCompletedDaysChange={setCompletedDays}
+                  isFetchingCompleted={isFetchingCompleted && (column.name === 'concluidos' || column.name === 'desistencias')}
                 />
               ))}
             </div>

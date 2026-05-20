@@ -34,7 +34,7 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '../ui/select';
-import { ChevronLeft, ChevronRight, Users, Calendar, History } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, Calendar, History, Loader2 } from 'lucide-react';
 import KanbanCard from './KanbanCard';
 import { statusColors, statusHeaderColors } from './constants';
 import { safeLabel } from '../dashboard/DashboardShared';
@@ -53,6 +53,7 @@ const KanbanColumn = memo(({
   lockedProcesses = {},
   completedDays = 30,
   onCompletedDaysChange,
+  isFetchingCompleted = false,
 }) => {
   const isEmpty = column.count === 0;
   const isDragOver = dragOverColumn === column.name;
@@ -173,7 +174,13 @@ const KanbanColumn = memo(({
       <div className={`${statusColors[column.color] || "bg-gray-100"} min-h-[60vh] rounded-b-lg p-2 flex flex-col`}>
         <ScrollArea className="h-[60vh]">
           <div className="space-y-2 pr-2">
-            {column.processes.length === 0 ? (
+            {/* Skeleton de loading LOCAL — aparece APENAS na coluna Concluídos enquanto a query segmentada está a fetching */}
+            {isFetchingCompleted && column.processes.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50" />
+                <p>A carregar processos...</p>
+              </div>
+            ) : column.processes.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground text-sm">
                 <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p>Nenhum processo</p>
@@ -184,18 +191,27 @@ const KanbanColumn = memo(({
                 )}
               </div>
             ) : (
-              column.processes.map((process) => (
-                <KanbanCard
-                  key={process.id}
-                  process={process}
-                  columnName={column.name}
-                  draggingCard={draggingCard}
-                  onDragStart={onDragStart}
-                  onCardClick={onCardClick}
-                  isLocked={!!lockedProcesses[process.id]}
-                  lockedBy={lockedProcesses[process.id]?.user_name}
-                />
-              ))
+              <>
+                {/* Indicador de loading no topo da coluna — sem deslocar os cards existentes */}
+                {isFetchingCompleted && (
+                  <div className="flex items-center justify-center gap-1.5 py-1 mb-1 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>A actualizar...</span>
+                  </div>
+                )}
+                {column.processes.map((process) => (
+                  <KanbanCard
+                    key={process.id}
+                    process={process}
+                    columnName={column.name}
+                    draggingCard={draggingCard}
+                    onDragStart={onDragStart}
+                    onCardClick={onCardClick}
+                    isLocked={!!lockedProcesses[process.id]}
+                    lockedBy={lockedProcesses[process.id]?.user_name}
+                  />
+                ))}
+              </>
             )}
           </div>
         </ScrollArea>

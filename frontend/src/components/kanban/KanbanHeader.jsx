@@ -49,6 +49,7 @@ const KanbanHeader = memo(({
   onCompletedDaysChange,
   onScrollLeft,
   onScrollRight,
+  isFetchingCompleted = false,
 }) => {
   const handleSearchChange = useCallback((e) => {
     onSearchChange?.(e.target.value);
@@ -175,20 +176,29 @@ const KanbanHeader = memo(({
           </SelectContent>
         </Select>
         
-        {/* Filtro de Concluídos — período de datas */}
-        <Select value={String(completedDays)} onValueChange={(v) => onCompletedDaysChange?.(Number(v))}>
-          <SelectTrigger className="h-8 w-full sm:w-[160px] text-xs" data-testid="kanban-completed-filter">
-            <Archive className="h-3 w-3 mr-1" />
-            <SelectValue placeholder="Concluídos" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="7">Últimos 7 dias</SelectItem>
-            <SelectItem value="15">Últimos 15 dias</SelectItem>
-            <SelectItem value="30">Últimos 30 dias</SelectItem>
-            <SelectItem value="90">Últimos 90 dias</SelectItem>
-            <SelectItem value="0">Todos (sem limite)</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* Filtro de Concluídos — período de datas (com indicador de loading isolado) */}
+        <div className="relative">
+          <Select value={String(completedDays)} onValueChange={(v) => onCompletedDaysChange?.(Number(v))}>
+            <SelectTrigger className="h-8 w-full sm:w-[160px] text-xs" data-testid="kanban-completed-filter">
+              <Archive className="h-3 w-3 mr-1" />
+              <SelectValue placeholder="Concluídos" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">Últimos 7 dias</SelectItem>
+              <SelectItem value="15">Últimos 15 dias</SelectItem>
+              <SelectItem value="30">Últimos 30 dias</SelectItem>
+              <SelectItem value="90">Últimos 90 dias</SelectItem>
+              <SelectItem value="0">Todos (sem limite)</SelectItem>
+            </SelectContent>
+          </Select>
+          {/* Spinner de loading — aparece APENAS quando a query isolada de Concluídos está a fetching */}
+          {isFetchingCompleted && (
+            <div className="absolute -top-1 -right-1 h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500" />
+            </div>
+          )}
+        </div>
         
         {(dateFilter !== 'all' || urgencyFilter !== 'all' || completedDays !== 30) && (
           <Button 
