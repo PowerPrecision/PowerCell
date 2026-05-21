@@ -109,11 +109,11 @@ const getStatusBadgeClasses = (statusColor) => {
 };
 
 const formatDate = (dateString) => {
-  if (!dateString) return "-";
+  if (!dateString || typeof dateString !== 'string') return "-";
   try {
     return format(parseISO(dateString), "dd MMM yyyy", { locale: pt });
   } catch {
-    return dateString;
+    return "-";
   }
 };
 
@@ -234,6 +234,9 @@ function ContactRow({ icon: Icon, label, children, editable, onEdit, saving }) {
   );
 }
 
+/** Render-safe: garante que nunca se renderiza um objecto como React child. */
+const renderSafe = (val) => (typeof val === 'string' || typeof val === 'number' ? val : "-");
+
 export default function ClientDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -283,7 +286,8 @@ export default function ClientDetailPage() {
     setDocsLoading(true);
     try {
       const res = await getClientFiles(id);
-      setClientDocs(res.data?.files || res.data || []);
+      const docs = res.data?.files || res.data;
+      setClientDocs(Array.isArray(docs) ? docs : []);
     } catch {
       // Silently ignore — docs section is supplementary
       setClientDocs([]);
@@ -381,11 +385,11 @@ export default function ClientDetailPage() {
                 <div className="relative">
                   <div className="h-20 w-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto ring-4 ring-white/30 shadow-lg">
                     <span className="text-3xl font-bold text-white">
-                      {client.nome?.charAt(0)?.toUpperCase() || "?"}
+                      {(typeof client.nome === 'string' && client.nome.charAt(0)?.toUpperCase()) || "?"}
                     </span>
                   </div>
                   <h1 className="text-2xl font-bold text-white mt-4 leading-tight">
-                    {client.nome}
+                    {renderSafe(client.nome)}
                   </h1>
                   <p className="text-teal-100 text-sm mt-1">
                     Ficha do Cliente
@@ -463,19 +467,19 @@ export default function ClientDetailPage() {
                   </ContactRow>
 
                   <ContactRow icon={Hash} label="NIF">
-                    <span className="font-mono">{dadosPessoais.nif || "-"}</span>
+                    <span className="font-mono">{renderSafe(dadosPessoais.nif)}</span>
                   </ContactRow>
 
                   <ContactRow icon={Heart} label="Estado Civil">
-                    {dadosPessoais.estado_civil || <span className="text-muted-foreground">-</span>}
+                    {renderSafe(dadosPessoais.estado_civil)}
                   </ContactRow>
 
                   <ContactRow icon={Briefcase} label="Profissão">
-                    {dadosPessoais.profissao || <span className="text-muted-foreground">-</span>}
+                    {renderSafe(dadosPessoais.profissao)}
                   </ContactRow>
 
                   <ContactRow icon={MapPin} label="Morada Fiscal">
-                    {dadosPessoais.morada_fiscal || <span className="text-muted-foreground">-</span>}
+                    {renderSafe(dadosPessoais.morada_fiscal)}
                   </ContactRow>
                 </div>
 
@@ -489,7 +493,7 @@ export default function ClientDetailPage() {
                   <div className="flex items-center gap-3">
                     <Info className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                     <span className="text-sm text-muted-foreground">Fonte</span>
-                    {client.fonte ? (
+                    {typeof client.fonte === 'string' || typeof client.fonte === 'number' ? (
                       <Badge variant="outline" className="ml-auto text-xs border-teal-300 text-teal-700 dark:border-teal-700 dark:text-teal-300">
                         {client.fonte}
                       </Badge>
@@ -503,7 +507,7 @@ export default function ClientDetailPage() {
                     <Tag className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
                     <span className="text-sm text-muted-foreground flex-shrink-0">Tags</span>
                     <div className="flex flex-wrap gap-1.5 ml-auto justify-end">
-                      {client.tags && client.tags.length > 0 ? (
+                      {Array.isArray(client.tags) && client.tags.length > 0 ? (
                         client.tags.map((tag, idx) => (
                           <Badge
                             key={idx}
@@ -695,7 +699,7 @@ export default function ClientDetailPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {clientDocs.map((doc, idx) => (
+                        {Array.isArray(clientDocs) && clientDocs.map((doc, idx) => (
                           <TableRow key={doc.id || idx}>
                             <TableCell className="font-medium">{doc.name || doc.filename || "-"}</TableCell>
                             <TableCell>{doc.type || doc.category || "-"}</TableCell>
