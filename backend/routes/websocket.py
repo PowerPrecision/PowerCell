@@ -228,17 +228,6 @@ async def websocket_notifications(
                 elif msg_type == "join_process_room":
                     process_id = data.get("process_id")
                     if process_id:
-                        await manager.join_room(f"process_{process_id}", user_id)
-
-                elif msg_type == "leave_process_room":
-                    process_id = data.get("process_id")
-                    if process_id:
-                        await manager.leave_room(f"process_{process_id}", user_id)
-                
-                elif data.get("type") == "join_process_room":
-                    # Juntar-se à room do processo para receber mensagens em tempo real
-                    process_id = data.get("process_id")
-                    if process_id:
                         room_name = f"process_{process_id}"
                         manager.join_room(room_name, user_id)
                         try:
@@ -250,9 +239,8 @@ async def websocket_notifications(
                             connected = False
                             break
                         logger.info(f"[ROOM] Utilizador {user_id} juntou-se à room '{room_name}'")
-                
-                elif data.get("type") == "leave_process_room":
-                    # Sair da room do processo
+
+                elif msg_type == "leave_process_room":
                     process_id = data.get("process_id")
                     if process_id:
                         room_name = f"process_{process_id}"

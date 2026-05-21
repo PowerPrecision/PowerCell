@@ -325,35 +325,52 @@ async def list_client_files(
 ):
     """Lista todos os ficheiros do cliente no S3 organizados por pastas.
     
-    Suporta tanto IDs de processo como IDs de cliente:
-    - Se client_id corresponder a um processo, usa-o directamente.
-    - Se for um ID de cliente (coleção clients), procura o processo associado.
+    Suporta múltiplos tipos de ID:
+    - ID de processo (procura em processes por "id")
+    - ID de cliente (procura em clients por "id", depois em processes por "client_id")
     """
+    effective_id = client_id
+    process = None
+    
     # 1. Tentar como ID de processo (comportamento original)
     process = await db.processes.find_one({"id": client_id})
-    effective_id = client_id
+    if process:
+        logger.debug(f"[FILES] Encontrado processo por ID: {client_id}")
     
-    # 2. Se não encontrado, tentar como ID de cliente
+    # 2. Se não encontrado, tentar como ID de cliente na coleção clients
     if not process:
         client = await db.clients.find_one({"id": client_id})
         if client:
-            # Procurar processo associado a este cliente
+            logger.debug(f"[FILES] Encontrado cliente por ID: {client_id}")
+            # Procurar processo associado via process_ids
             process_ids = client.get("process_ids", [])
             if process_ids:
                 process = await db.processes.find_one({"id": process_ids[0]})
                 if process:
                     effective_id = process["id"]
+                    logger.debug(f"[FILES] Processo encontrado via process_ids: {effective_id}")
+            
+            # 3. Se ainda sem processo, tentar procurar processo por client_id
             if not process:
-                # Cliente existe mas sem processo — usar dados do cliente
-                client_name = client.get("nome", DEFAULT_CLIENT_NAME)
-                loop = asyncio.get_event_loop()
-                files = await loop.run_in_executor(
-                    None,
-                    lambda: s3_service.list_files(client_id, client_name, None, None)
-                )
-                return files
+                process = await db.processes.find_one({"client_id": client_id})
+                if process:
+                    effective_id = process["id"]
+                    logger.debug(f"[FILES] Processo encontrado via client_id: {effective_id}")
+            
+            # 4. Cliente existe mas sem processo — retornar lista vazia
+            if not process:
+                logger.info(f"[FILES] Cliente {client_id} existe mas sem processo associado — retornando lista vazia")
+                return {"files": {}, "categories": []}
+    
+    # 5. Se ainda sem processo, tentar procura por client_id no processo
+    if not process:
+        process = await db.processes.find_one({"client_id": client_id})
+        if process:
+            effective_id = process["id"]
+            logger.debug(f"[FILES] Processo encontrado via client_id (fallback): {effective_id}")
     
     if not process:
+        logger.warning(f"[FILES] Nenhum processo ou cliente encontrado para ID: {client_id}")
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
@@ -364,7 +381,7 @@ async def list_client_files(
     # Executar operação síncrona do S3 em thread separada para não bloquear o event loop
     loop = asyncio.get_event_loop()
     files = await loop.run_in_executor(
-        None,  # Usar executor default (ThreadPool)
+        None,
         lambda: s3_service.list_files(effective_id, client_name, second_client_name, s3_folder)
     )
     return files
@@ -444,13 +461,35 @@ async def upload_file_s3(
         if not process:
             client = await db.clients.find_one({"id": client_id})
             if client:
+                logger.debug(f"[UPLOAD] Encontrado cliente por ID: {client_id}")
                 process_ids = client.get("process_ids", [])
                 if process_ids:
                     process = await db.processes.find_one({"id": process_ids[0]})
                     if process:
                         effective_id = process["id"]
+                        logger.debug(f"[UPLOAD] Processo encontrado via process_ids: {effective_id}")
+                
+                # Fallback: procurar processo por client_id
+                if not process:
+                    process = await db.processes.find_one({"client_id": client_id})
+                    if process:
+                        effective_id = process["id"]
+                        logger.debug(f"[UPLOAD] Processo encontrado via client_id: {effective_id}")
+                
+                # Cliente existe mas sem processo
+                if not process:
+                    logger.info(f"[UPLOAD] Cliente {client_id} existe mas sem processo associado")
+                    raise HTTPException(status_code=404, detail="Cliente encontrado mas sem processo associado. Não é possível fazer upload.")
+        
+        # Fallback final: procurar processo por client_id mesmo sem cliente na coleção
+        if not process:
+            process = await db.processes.find_one({"client_id": client_id})
+            if process:
+                effective_id = process["id"]
+                logger.debug(f"[UPLOAD] Processo encontrado via client_id (fallback): {effective_id}")
         
         if not process:
+            logger.warning(f"[UPLOAD] Nenhum processo ou cliente encontrado para ID: {client_id}")
             raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
         
         # Usar effective_id (processo) para operações S3, não o client_id original
@@ -1128,16 +1167,41 @@ async def check_file_upload(
 async def initialize_folders(client_id: str, user: dict = Depends(get_current_user)):
     """Cria a estrutura de pastas inicial no S3 (se não existir)."""
     process = await db.processes.find_one({"id": client_id})
+    effective_id = client_id
     
     # Se não encontrado como processo, tentar como ID de cliente
     if not process:
         client = await db.clients.find_one({"id": client_id})
         if client:
+            logger.debug(f"[INIT-FOLDERS] Encontrado cliente por ID: {client_id}")
             process_ids = client.get("process_ids", [])
             if process_ids:
                 process = await db.processes.find_one({"id": process_ids[0]})
+                if process:
+                    effective_id = process["id"]
+                    logger.debug(f"[INIT-FOLDERS] Processo encontrado via process_ids: {effective_id}")
+            
+            # Fallback: procurar processo por client_id
+            if not process:
+                process = await db.processes.find_one({"client_id": client_id})
+                if process:
+                    effective_id = process["id"]
+                    logger.debug(f"[INIT-FOLDERS] Processo encontrado via client_id: {effective_id}")
+            
+            # Cliente existe mas sem processo
+            if not process:
+                logger.info(f"[INIT-FOLDERS] Cliente {client_id} existe mas sem processo associado")
+                raise HTTPException(status_code=404, detail="Cliente encontrado mas sem processo associado. Não é possível inicializar pastas.")
+    
+    # Fallback final: procurar processo por client_id mesmo sem cliente na coleção
+    if not process:
+        process = await db.processes.find_one({"client_id": client_id})
+        if process:
+            effective_id = process["id"]
+            logger.debug(f"[INIT-FOLDERS] Processo encontrado via client_id (fallback): {effective_id}")
     
     if not process:
+        logger.warning(f"[INIT-FOLDERS] Nenhum processo ou cliente encontrado para ID: {client_id}")
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
     # Verificar se já existe mapeamento S3 - NÃO criar duplicados
@@ -1155,7 +1219,7 @@ async def initialize_folders(client_id: str, user: dict = Depends(get_current_us
     second_client_name = process.get("second_client_name") or titular2_init.get("nome") or titular2_init.get("name")
     
     success, s3_folder_path = s3_service.initialize_client_folders(
-        client_id, 
+        effective_id, 
         client_name,
         second_client_name=second_client_name
     )
@@ -1163,7 +1227,7 @@ async def initialize_folders(client_id: str, user: dict = Depends(get_current_us
     # Se criou as pastas, guardar mapeamento no processo
     if success and s3_folder_path:
         await db.processes.update_one(
-            {"id": client_id},
+            {"id": effective_id},
             {"$set": {"s3_folder": s3_folder_path}}
         )
     
@@ -1183,11 +1247,32 @@ async def get_download_url(
     if not process:
         client = await db.clients.find_one({"id": client_id})
         if client:
+            logger.debug(f"[DOWNLOAD] Encontrado cliente por ID: {client_id}")
             process_ids = client.get("process_ids", [])
             if process_ids:
                 process = await db.processes.find_one({"id": process_ids[0]})
+                if process:
+                    logger.debug(f"[DOWNLOAD] Processo encontrado via process_ids: {process['id']}")
+            
+            # Fallback: procurar processo por client_id
+            if not process:
+                process = await db.processes.find_one({"client_id": client_id})
+                if process:
+                    logger.debug(f"[DOWNLOAD] Processo encontrado via client_id: {process['id']}")
+            
+            # Cliente existe mas sem processo
+            if not process:
+                logger.info(f"[DOWNLOAD] Cliente {client_id} existe mas sem processo associado")
+                raise HTTPException(status_code=404, detail="Cliente encontrado mas sem processo associado. Não é possível gerar link de download.")
+    
+    # Fallback final: procurar processo por client_id mesmo sem cliente na coleção
+    if not process:
+        process = await db.processes.find_one({"client_id": client_id})
+        if process:
+            logger.debug(f"[DOWNLOAD] Processo encontrado via client_id (fallback): {process['id']}")
     
     if not process:
+        logger.warning(f"[DOWNLOAD] Nenhum processo ou cliente encontrado para ID: {client_id}")
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
     # Verificar se o ficheiro pertence ao cliente (segurança)
@@ -1446,16 +1531,41 @@ async def delete_file_s3(
         JSONResponse: Sucesso ou erro 409 com detalhes do conflito.
     """
     process = await db.processes.find_one({"id": client_id})
+    effective_id = client_id
     
     # Se não encontrado como processo, tentar como ID de cliente
     if not process:
         client = await db.clients.find_one({"id": client_id})
         if client:
+            logger.debug(f"[DELETE] Encontrado cliente por ID: {client_id}")
             process_ids = client.get("process_ids", [])
             if process_ids:
                 process = await db.processes.find_one({"id": process_ids[0]})
+                if process:
+                    effective_id = process["id"]
+                    logger.debug(f"[DELETE] Processo encontrado via process_ids: {effective_id}")
+            
+            # Fallback: procurar processo por client_id
+            if not process:
+                process = await db.processes.find_one({"client_id": client_id})
+                if process:
+                    effective_id = process["id"]
+                    logger.debug(f"[DELETE] Processo encontrado via client_id: {effective_id}")
+            
+            # Cliente existe mas sem processo
+            if not process:
+                logger.info(f"[DELETE] Cliente {client_id} existe mas sem processo associado")
+                raise HTTPException(status_code=404, detail="Cliente encontrado mas sem processo associado. Não é possível eliminar ficheiros.")
+    
+    # Fallback final: procurar processo por client_id mesmo sem cliente na coleção
+    if not process:
+        process = await db.processes.find_one({"client_id": client_id})
+        if process:
+            effective_id = process["id"]
+            logger.debug(f"[DELETE] Processo encontrado via client_id (fallback): {effective_id}")
     
     if not process:
+        logger.warning(f"[DELETE] Nenhum processo ou cliente encontrado para ID: {client_id}")
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
     
     # Verificar se é um caminho de ficheiro válido (não pode terminar com /)
