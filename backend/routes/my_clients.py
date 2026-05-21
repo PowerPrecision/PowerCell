@@ -98,6 +98,15 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     from services.process_service import decrypt_processes_list
     processes = decrypt_processes_list(processes)
     
+    # Enriquecer processos com status_label do workflow
+    if processes:
+        statuses = await db.workflow_statuses.find({}, {"_id": 0}).to_list(100)
+        status_map = {s["name"]: s for s in statuses}
+        for p in processes:
+            status_info = status_map.get(p.get("status"), {})
+            p["status_label"] = status_info.get("label", p.get("status", ""))
+            p["status_color"] = status_info.get("color", "#6B7280")
+    
     # Para cada processo, buscar tarefas pendentes detalhadas
     for process in processes:
         pending_tasks = await db.tasks.find(
