@@ -498,3 +498,23 @@ Stage Summary:
 - Enhanced status labels: "A aguardar contacto do consultor", "Agendada para dia X", "Visita Concluída", "Visita Cancelada"
 - Horizontal card layout with photo, price, location, typology, and status badge
 - Full bidirectional flow: Client pastes URL → Scraper extracts data → Visit in 'solicitada' → Consultant schedules in CRM
+
+---
+Task ID: fix-zindex-select-dialog
+Agent: Main Agent
+Task: Fix opcao download em partilha de links (Select invisivel dentro de Dialog)
+
+Work Log:
+- Investigou TempLinkButton.js: Select com opcoes "Upload" e "Download" existe no codigo (linhas 245-263)
+- Diagnou causa raiz: Select dropdown tem z-[60], Dialog overlay tem z-[100] — dropdown fica ATRAS do dialog e invisivel
+- Como o Select default e "upload", o utilizador nunca consegue mudar para "download"
+- Corrigiu select.jsx: z-[60] -> z-[200] (acima de Dialog z-[100])
+- Corrigiu dropdown-menu.jsx: z-[60] -> z-[200] (mesmo problema afectava todos os dropdowns dentro de dialogs)
+- Corrigiu popover.jsx: z-50 -> z-[200] (mesmo problema potencial)
+- Commit c6ef145 pushed para origin/dev
+
+Stage Summary:
+- 3 ficheiros modificados: select.jsx, dropdown-menu.jsx, popover.jsx
+- Selects dentro de Dialogs agora sao visiveis (z-[200] > Dialog z-[100])
+- Opcao "Download - Cliente descarrega documentos" agora acessivel na partilha de links
+- Fix afecta toda a app: todos os Selects/Dropdowns dentro de Dialogs agora funcionam correctamente
