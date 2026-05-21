@@ -78,7 +78,7 @@ const ProcessDetailsModal = memo(({
   const [activeTab, setActiveTab] = useState('client');
 
   // ── Estado de Visitas ──────────────────────────────────────────
-  const { token, user } = useAuth();
+  const { token, user, effectiveRole } = useAuth();
   const [visits, setVisits] = useState([]);
   const [visitsLoading, setVisitsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -620,7 +620,7 @@ const ProcessDetailsModal = memo(({
               </div>
 
               {/* Botão Marcar Trabalho Concluído — apenas para role indexacao */}
-              {user?.role?.toLowerCase() === 'indexacao' && !process.is_indexed && (
+              {(effectiveRole?.toLowerCase() === 'indexacao' || user?.role?.toLowerCase() === 'indexacao') && !process.is_indexed && (
                 <div className="mt-2">
                   <Button
                     onClick={async () => {
@@ -632,6 +632,7 @@ const ProcessDetailsModal = memo(({
                           headers: {
                             'Content-Type': 'application/json',
                             Authorization: `Bearer ${token}`,
+                            ...(effectiveRole ? { 'X-Active-Role': effectiveRole } : {}),
                           },
                         });
                         if (!res.ok) {

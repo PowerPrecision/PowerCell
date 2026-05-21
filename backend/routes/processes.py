@@ -2515,21 +2515,25 @@ async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_
 @router.patch("/{process_id}/mark-indexed")
 async def mark_process_indexed(
     process_id: str,
+    request: Request,
     user: dict = Depends(get_current_user),
 ):
     """
     Marca o processo como tendo a indexação documental concluída (is_indexed=true).
     
     Apenas utilizadores com role 'indexacao' podem marcar a indexação.
+    Usa o effectiveRole (X-Active-Role header) para suportar utilizadores
+    com múltiplos perfis (additional_roles).
     Quando is_indexed passa a true, dispara automaticamente uma notificação
     para todos os utilizadores atribuídos ao processo (assigned_users).
     
     Body (opcional):
     - is_indexed: boolean (default true)
     """
-    # Verificar permissão — apenas role indexacao
-    user_role = (user.get("role") or "").lower()
-    if user_role != "indexacao":
+    # Verificar permissão — apenas role indexacao (usar effectiveRole)
+    user_role = get_effective_role(request, user).lower()
+    all_roles = get_all_user_roles(user)
+    if user_role != "indexacao" and "indexacao" not in all_roles:
         raise HTTPException(
             status_code=403,
             detail="Apenas utilizadores com perfil de Indexação podem marcar a indexação como concluída."
