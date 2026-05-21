@@ -536,6 +536,16 @@ def extract_client_updates_from_body(body: dict) -> dict:
     if isinstance(t2, dict):
         client_updates["titular2_data"] = t2
 
+    # client_email / client_phone do body — o Frontend envia estes campos
+    # directamente no update do processo quando o utilizador edita contactos
+    client_email = body.get("client_email")
+    if client_email:
+        client_updates["contacto.email"] = client_email.lower().strip()
+
+    client_phone = body.get("client_phone")
+    if client_phone:
+        client_updates["contacto.telefone"] = client_phone
+
     return client_updates
 
 

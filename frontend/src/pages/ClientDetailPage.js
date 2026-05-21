@@ -11,13 +11,14 @@
  * @context {AuthContext} — Consome user para autenticação e permissões
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
+import { Input } from "../components/ui/input";
 import {
   ArrowLeft,
   User,
@@ -38,9 +39,12 @@ import {
   StickyNote,
   FolderOpen,
   FileStack,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getClient, getClientFiles } from "../services/api";
+import { getClient, getClientFiles, updateClient } from "../services/api";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
@@ -137,8 +141,43 @@ const getStatusBorderClass = (statusColor) => {
 
 /**
  * Contact info row component for the profile card.
+ * Supports inline editing when onEdit prop is provided.
  */
-function ContactRow({ icon: Icon, label, children }) {
+function ContactRow({ icon: Icon, label, children, editable, onEdit, saving }) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef(null);
+
+  const startEdit = () => {
+    // Extract current text value from children
+    let currentValue = "";
+    if (typeof children === "string") {
+      currentValue = children;
+    } else if (children?.props?.children) {
+      currentValue = children.props.children;
+    }
+    setEditValue(currentValue || "");
+    setEditing(true);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditValue("");
+  };
+
+  const saveEdit = () => {
+    if (onEdit) {
+      onEdit(editValue);
+    }
+    setEditing(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") saveEdit();
+    if (e.key === "Escape") cancelEdit();
+  };
+
   return (
     <div className="flex items-center gap-3 py-2.5 px-3 rounded-lg transition-all duration-200 hover:bg-muted/60 group">
       <div className="flex-shrink-0 p-2 rounded-md bg-muted/80 group-hover:bg-teal-50 dark:group-hover:bg-teal-900/20 transition-colors duration-200">
@@ -146,7 +185,50 @@ function ContactRow({ icon: Icon, label, children }) {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-muted-foreground leading-none mb-0.5">{label}</p>
-        <div className="font-medium text-sm truncate">{children}</div>
+        {editing ? (
+          <div className="flex items-center gap-1.5">
+            <Input
+              ref={inputRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="h-7 text-sm py-0"
+              disabled={saving}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={saveEdit}
+              disabled={saving}
+              className="h-7 w-7 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={cancelEdit}
+              disabled={saving}
+              className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <div className="font-medium text-sm truncate flex-1">{children}</div>
+            {editable && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={startEdit}
+                className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-teal-600 hover:bg-teal-50"
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -161,6 +243,7 @@ export default function ClientDetailPage() {
   const [error, setError] = useState(null);
   const [clientDocs, setClientDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [savingField, setSavingField] = useState(null);
 
   const fetchClientData = useCallback(async () => {
     if (!id) return;
@@ -313,7 +396,27 @@ export default function ClientDetailPage() {
               <CardContent className="p-0">
                 {/* Contact info rows */}
                 <div className="px-2 pt-4 pb-2 space-y-0.5">
-                  <ContactRow icon={Mail} label="Email">
+                  <ContactRow
+                    icon={Mail}
+                    label="Email"
+                    editable
+                    saving={savingField === "email"}
+                    onEdit={async (value) => {
+                      setSavingField("email");
+                      try {
+                        await updateClient(id, { contacto: { email: value } });
+                        setClient((prev) => ({
+                          ...prev,
+                          contacto: { ...(prev.contacto || {}), email: value },
+                        }));
+                        toast.success("Email atualizado com sucesso");
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || "Erro ao guardar email");
+                      } finally {
+                        setSavingField(null);
+                      }
+                    }}
+                  >
                     {contato.email ? (
                       <a
                         href={`mailto:${contato.email}`}
@@ -322,11 +425,31 @@ export default function ClientDetailPage() {
                         {contato.email}
                       </a>
                     ) : (
-                      <span className="text-muted-foreground">-</span>
+                      <span className="text-muted-foreground italic text-xs">Adicionar email...</span>
                     )}
                   </ContactRow>
 
-                  <ContactRow icon={Phone} label="Telefone">
+                  <ContactRow
+                    icon={Phone}
+                    label="Telefone"
+                    editable
+                    saving={savingField === "telefone"}
+                    onEdit={async (value) => {
+                      setSavingField("telefone");
+                      try {
+                        await updateClient(id, { contacto: { telefone: value } });
+                        setClient((prev) => ({
+                          ...prev,
+                          contacto: { ...(prev.contacto || {}), telefone: value },
+                        }));
+                        toast.success("Telefone atualizado com sucesso");
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || "Erro ao guardar telefone");
+                      } finally {
+                        setSavingField(null);
+                      }
+                    }}
+                  >
                     {contato.telefone ? (
                       <a
                         href={`tel:${contato.telefone}`}
@@ -335,7 +458,7 @@ export default function ClientDetailPage() {
                         {contato.telefone}
                       </a>
                     ) : (
-                      <span className="text-muted-foreground">-</span>
+                      <span className="text-muted-foreground italic text-xs">Adicionar telefone...</span>
                     )}
                   </ContactRow>
 

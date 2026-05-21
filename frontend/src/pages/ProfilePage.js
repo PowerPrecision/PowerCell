@@ -171,19 +171,13 @@ const ProfilePage = () => {
   useEffect(() => {
     const fetchSystemCompanies = async () => {
       try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/system-config/companies`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await api.get("/system-config/companies");
+        const systemCompanies = (res.data?.companies || []).map(c => c.company_id);
+        // Merge com as do user, sem duplicados
+        setEmailCompanies(prev => {
+          const merged = new Set([...prev, ...systemCompanies]);
+          return [...merged];
         });
-        if (res.ok) {
-          const data = await res.json();
-          const systemCompanies = (data.companies || []).map(c => c.company_id);
-          // Merge com as do user, sem duplicados
-          setEmailCompanies(prev => {
-            const merged = new Set([...prev, ...systemCompanies]);
-            return [...merged];
-          });
-        }
       } catch (err) {
         // Silently fail — não é crítico
       }
