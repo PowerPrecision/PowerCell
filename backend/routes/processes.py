@@ -2508,6 +2508,144 @@ async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_
     }
 
 
+# ====================================================================
+# MARCAÇÃO DE INDEXAÇÃO CONCLUÍDA — PATCH /processes/{id}/mark-indexed
+# ====================================================================
+
+@router.patch("/{process_id}/mark-indexed")
+async def mark_process_indexed(
+    process_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Marca o processo como tendo a indexação documental concluída (is_indexed=true).
+    
+    Apenas utilizadores com role 'indexacao' podem marcar a indexação.
+    Quando is_indexed passa a true, dispara automaticamente uma notificação
+    para todos os utilizadores atribuídos ao processo (assigned_users).
+    
+    Body (opcional):
+    - is_indexed: boolean (default true)
+    """
+    # Verificar permissão — apenas role indexacao
+    user_role = (user.get("role") or "").lower()
+    if user_role != "indexacao":
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas utilizadores com perfil de Indexação podem marcar a indexação como concluída."
+        )
+    
+    # Buscar processo
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    # Se já está indexado, informar
+    if process.get("is_indexed") is True:
+        return {
+            "success": True,
+            "message": "Este processo já estava marcado como indexado.",
+            "process_id": process_id,
+            "is_indexed": True,
+        }
+    
+    # Atualizar para is_indexed=true
+    now = datetime.now(timezone.utc).isoformat()
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": {
+            "is_indexed": True,
+            "indexed_at": now,
+            "indexed_by": user.get("id"),
+            "indexed_by_name": user.get("name", ""),
+            "updated_at": now,
+        }}
+    )
+    
+    # ── Registar no histórico ──
+    try:
+        await log_history(
+            process_id,
+            user=user,
+            action="INDEXACAO_CONCLUIDA",
+            field="is_indexed",
+            old_value="false",
+            new_value="true"
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao registar histórico de indexação: {e}")
+    
+    # ── Disparar notificação para utilizadores atribuídos ──
+    client_name = process.get("client_name", "Cliente")
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else process_id[:8]
+    
+    # Recolher todos os IDs de utilizadores atribuídos
+    assigned_ids = list(set(filter(None, (
+        (process.get("assigned_consultor_ids") or []) +
+        ([process["assigned_consultor_id"]] if process.get("assigned_consultor_id") else []) +
+        (process.get("assigned_mediador_ids") or []) +
+        ([process["assigned_mediador_id"]] if process.get("assigned_mediador_id") else []) +
+        ([process["assigned_indexacao_id"]] if process.get("assigned_indexacao_id") else [])
+    ))))
+    
+    notification_message = f"A Indexação concluiu o tratamento documental do processo {process_ref} — {client_name}"
+    
+    for uid in assigned_ids:
+        try:
+            user_doc = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
+            if user_doc:
+                # Notificação por email (com verificação de preferências)
+                await send_notification_with_preference_check(
+                    user_doc.get("email"),
+                    "Indexação Concluída",
+                    notification_message,
+                    notification_type="indexing_complete"
+                )
+                # Notificação in-app em tempo real
+                try:
+                    from services.realtime_notifications import send_realtime_notification
+                    await send_realtime_notification(
+                        user_id=uid,
+                        title="Indexação Concluída",
+                        message=notification_message,
+                        notification_type="indexing_complete",
+                        link=f"/process/${process_id}",
+                        process_id=process_id,
+                    )
+                except Exception as notif_err:
+                    logger.debug(f"Erro ao enviar notificação in-app para {uid}: {notif_err}")
+        except Exception as e:
+            logger.warning(f"Erro ao notificar utilizador {uid} sobre indexação concluída: {e}")
+    
+    # ── Broadcast WebSocket ──
+    try:
+        await broadcast_process_delta(
+            event_type=WSEventType.PROCESS_UPDATED,
+            process_id=process_id,
+            client_name=client_name,
+            updated_at=now,
+        )
+    except Exception as ws_err:
+        logger.debug(f"Erro ao broadcast indexação concluída via WS: {ws_err}")
+    
+    logger.info(
+        f"[INDEXACAO] Processo {process_ref} marcado como indexado por {user.get('email')}. "
+        f"Notificações enviadas para {len(assigned_ids)} utilizadores."
+    )
+    
+    return {
+        "success": True,
+        "message": f"Indexação do processo {process_ref} marcada como concluída.",
+        "process_id": process_id,
+        "is_indexed": True,
+        "notified_users": len(assigned_ids),
+    }
+
+
 @router.put("/{process_id}", response_model=ProcessResponse)
 async def update_process(process_id: str, data: ProcessUpdate, request: Request, user: dict = Depends(get_current_user)):
     """Atualiza os dados de um processo existente com controlo de acesso por role.

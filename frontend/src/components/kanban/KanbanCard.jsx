@@ -24,7 +24,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle } from 'lucide-react';
+import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { format } from 'date-fns';
 
@@ -225,6 +225,12 @@ const KanbanCard = memo(({
               <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 truncate max-w-[100px]">
                 {process.process_type.replace(/_/g, ' ')}
               </Badge>
+            )}
+            {/* Indexação concluída badge */}
+            {process.is_indexed && (
+              <span className="text-[9px] bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 px-2 py-0.5 rounded-full font-medium whitespace-nowrap border border-emerald-200 dark:border-emerald-800 flex items-center gap-0.5">
+                <CheckCircle2 className="h-2.5 w-2.5" /> Indexado
+              </span>
             )}
             {/* Completion date badge for concluded processes */}
             {(columnName === 'concluidos' || columnName === 'desistencias') && process.updated_at && (

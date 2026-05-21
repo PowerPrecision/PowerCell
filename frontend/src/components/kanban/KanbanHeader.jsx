@@ -8,7 +8,7 @@
  * - Gerir estado de pesquisa e filtros
  * - Fornecer controlos de navegação horizontal
  */
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { 
@@ -28,7 +28,9 @@ import {
   LayoutGrid,
   Wifi,
   WifiOff,
-  Archive
+  Archive,
+  Download,
+  Loader2
 } from 'lucide-react';
 
 const KanbanHeader = memo(({
@@ -50,7 +52,61 @@ const KanbanHeader = memo(({
   onScrollLeft,
   onScrollRight,
   isFetchingCompleted = false,
+  columns = [],
 }) => {
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportExcel = useCallback(async () => {
+    setExporting(true);
+    try {
+      const XLSX = await import('xlsx');
+      // Achatar todos os processos de todas as colunas
+      const allProcesses = columns.flatMap(col => 
+        (col.processes || []).map(p => ({
+          'Nome do Cliente': p.client_name || '—',
+          'Nº Processo': p.process_number || '—',
+          'Fase/Status': col.label || p.status || '—',
+          'Valor Imóvel': p.real_estate_data?.valor_imovel 
+            ? Number(p.real_estate_data.valor_imovel).toLocaleString('pt-PT') + '€' 
+            : p.property_value 
+              ? Number(p.property_value).toLocaleString('pt-PT') + '€' 
+              : '—',
+          'Consultor': p.consultor_name || p.assigned_consultor_name || '—',
+          'Intermediário': p.mediador_name || p.assigned_intermediario_name || '—',
+          'Prioridade': (p.prioridade || p.priority || '—').charAt(0).toUpperCase() + (p.prioridade || p.priority || '—').slice(1),
+          'Indexado': p.is_indexed ? 'Sim' : 'Não',
+          'Atualizado': p.updated_at ? new Date(p.updated_at).toLocaleDateString('pt-PT') : '—',
+        }))
+      );
+
+      if (allProcesses.length === 0) {
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(allProcesses);
+      // Ajustar larguras das colunas
+      ws['!cols'] = [
+        { wch: 30 }, // Nome do Cliente
+        { wch: 12 }, // Nº Processo
+        { wch: 25 }, // Fase/Status
+        { wch: 16 }, // Valor Imóvel
+        { wch: 22 }, // Consultor
+        { wch: 22 }, // Intermediário
+        { wch: 12 }, // Prioridade
+        { wch: 10 }, // Indexado
+        { wch: 14 }, // Atualizado
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Processos');
+      const filename = `PowerCell_Processos_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    } catch (error) {
+      console.error('Erro ao exportar Excel:', error);
+    } finally {
+      setExporting(false);
+    }
+  }, [columns]);
+
   const handleSearchChange = useCallback((e) => {
     onSearchChange?.(e.target.value);
   }, [onSearchChange]);
@@ -215,6 +271,22 @@ const KanbanHeader = memo(({
         <span className="text-xs text-muted-foreground ml-auto">
           {visibleCount} processos visíveis
         </span>
+        
+        {/* Exportar Excel */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs gap-1.5 shrink-0"
+          onClick={handleExportExcel}
+          disabled={exporting || columns.length === 0}
+        >
+          {exporting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Download className="h-3.5 w-3.5" />
+          )}
+          Exportar Excel
+        </Button>
       </div>
     </>
   );

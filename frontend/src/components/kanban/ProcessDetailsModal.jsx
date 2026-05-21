@@ -42,7 +42,7 @@ import {
   User, Mail, Phone, Home, MapPin, Euro, Calendar, Users,
   AlertTriangle, Building2, CreditCard, FileText, ExternalLink,
   Loader2, Save, Pencil, X, CalendarClock, Inbox, CheckCircle2,
-  XCircle
+  XCircle, ClipboardCheck
 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { getClient, updateClient, updateProcess } from '../../services/api';
@@ -78,12 +78,13 @@ const ProcessDetailsModal = memo(({
   const [activeTab, setActiveTab] = useState('client');
 
   // ── Estado de Visitas ──────────────────────────────────────────
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [visits, setVisits] = useState([]);
   const [visitsLoading, setVisitsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [markingIndexed, setMarkingIndexed] = useState(false);
 
   // ── Estado editável do Cliente ───────────────────────────────────
   const [editClient, setEditClient] = useState({
@@ -609,7 +610,55 @@ const ProcessDetailsModal = memo(({
                     {process.process_type.replace(/_/g, ' ')}
                   </Badge>
                 )}
+                {/* Badge de Indexação Concluída */}
+                {process.is_indexed && (
+                  <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800 gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    ✅ Indexado
+                  </Badge>
+                )}
               </div>
+
+              {/* Botão Marcar Trabalho Concluído — apenas para role indexacao */}
+              {user?.role?.toLowerCase() === 'indexacao' && !process.is_indexed && (
+                <div className="mt-2">
+                  <Button
+                    onClick={async () => {
+                      if (!process?.id) return;
+                      setMarkingIndexed(true);
+                      try {
+                        const res = await fetch(`${API_URL_BASE}/api/processes/${process.id}/mark-indexed`, {
+                          method: 'PATCH',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`,
+                          },
+                        });
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}));
+                          throw new Error(err.detail || 'Erro ao marcar indexação.');
+                        }
+                        toast.success('Indexação marcada como concluída! A equipa foi notificada.');
+                        // Atualizar o processo localmente para refletir o estado
+                        process.is_indexed = true;
+                      } catch (error) {
+                        toast.error(error.message || 'Erro ao marcar indexação.');
+                      } finally {
+                        setMarkingIndexed(false);
+                      }
+                    }}
+                    disabled={markingIndexed}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                  >
+                    {markingIndexed ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ClipboardCheck className="h-4 w-4" />
+                    )}
+                    Marcar Trabalho Concluído
+                  </Button>
+                </div>
+              )}
 
               {/* ── Imóvel ──────────────────────────────────────────── */}
               <div className="bg-blue-50/50 dark:bg-blue-950/10 rounded-lg p-3 border border-blue-100 dark:border-blue-900/30">
