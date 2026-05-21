@@ -518,3 +518,25 @@ Stage Summary:
 - Selects dentro de Dialogs agora sao visiveis (z-[200] > Dialog z-[100])
 - Opcao "Download - Cliente descarrega documentos" agora acessivel na partilha de links
 - Fix afecta toda a app: todos os Selects/Dropdowns dentro de Dialogs agora funcionam correctamente
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix 404 on /api/documents/client/{id}/files + WebSocket TypeError + OOM + Inativo label
+
+Work Log:
+- Investigou 404 persistente em /api/documents/client/{id}/files
+- Causa raiz: fallback não procurava processo por campo client_id, e não retornava lista vazia quando cliente existe sem processo
+- Adicionou 5-step lookup chain: process ID → client ID → process_ids → client_id field → empty response
+- Melhorou 5 endpoints com mesmo padrão: list_client_files, upload_file_s3, initialize_folders, get_download_url, delete_file_s3
+- Adicionou debug logging em cada step para troubleshooting em produção
+- Merge do fix WebSocket (commit a3f9287) de dev para main
+- Adicionou safety cap no Dockerfile: UVICORN_WORKERS max 2 (previne OOM com 4 workers em 2GB RAM)
+- Corrigiu label "Inativo" nos Meus Clientes: adicionado enrichment de status_label via workflow_statuses
+
+Stage Summary:
+- 3 commits pushed para dev e merged para main:
+  - 56fc945: fix 404 documentos (5 endpoints com fallback por client_id)
+  - a3f9287: fix WebSocket TypeError (join_room/leave_room são sync, não async)
+  - 65d2d5f: fix OOM safety cap + status_label nos Meus Clientes
+- Render fará auto-deploy a partir do main branch
