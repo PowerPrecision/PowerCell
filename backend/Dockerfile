@@ -75,4 +75,4 @@ EXPOSE 8001
 # DEV: 1 worker (poupar RAM — 512MB no Render)
 # PROD: múltiplos workers (definir UVICORN_WORKERS no Render)
 # Se ENVIRONMENT=dev, força 1 worker independentemente de UVICORN_WORKERS.
-CMD ["sh", "-c", "if [ \"$ENVIRONMENT\" = 'dev' ] || [ \"$ENVIRONMENT\" = 'development' ]; then WORKERS=1; else WORKERS=${UVICORN_WORKERS:-1}; fi && uvicorn server:app --host 0.0.0.0 --port ${PORT:-${UVICORN_PORT}} --workers $WORKERS"]
+CMD ["sh", "-c", "if [ \"$ENVIRONMENT\" = 'dev' ] || [ \"$ENVIRONMENT\" = 'development' ]; then WORKERS=1; else WORKERS=${UVICORN_WORKERS:-1}; if [ \"$WORKERS\" -gt 2 ] 2>/dev/null; then echo 'WARNING: UVICORN_WORKERS capped to 2 (2GB RAM limit)'; WORKERS=2; fi; fi && echo \"Starting Uvicorn with $WORKERS workers\" && uvicorn server:app --host 0.0.0.0 --port ${PORT:-${UVICORN_PORT}} --workers $WORKERS"]
