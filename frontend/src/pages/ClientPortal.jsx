@@ -14,6 +14,7 @@
  *   5. Fluxo legado (magic link) ainda funciona como fallback
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
+import { toast } from 'sonner';
 import {
   FileText,
   Upload,
@@ -1859,6 +1860,7 @@ export default function ClientPortal() {
                       if (res.ok) {
                         setVisitRequestResult({ success: true, message: 'Pedido enviado com sucesso! O seu consultor será notificado e os dados do imóvel serão extraídos automaticamente.' });
                         setVisitUrl('');
+                        toast.success('Pedido de visita enviado com sucesso!');
                         // Refresh visits list
                         const vRes = await fetch(`${BACKEND_URL}/portal/visits`, { headers: { Authorization: `Bearer ${token}` } });
                         if (vRes.ok) { const vData = await vRes.json(); setVisits(vData.visits || []); }
