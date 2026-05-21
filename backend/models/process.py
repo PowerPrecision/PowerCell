@@ -180,7 +180,8 @@ class ProcessUpdate(BaseModel):
     monitored_emails: Optional[List[str]] = None  
     notes: Optional[str] = None  
     prioridade: Optional[str] = None  
-    labels: Optional[List[str]] = None  
+    labels: Optional[List[str]] = None
+    is_indexed: Optional[bool] = None  # Marcação de conclusão da indexação documental  
 
 class ProcessResponse(BaseModel):
     """Modelo de resposta para dados de processo."""
@@ -225,6 +226,7 @@ class ProcessResponse(BaseModel):
     co_applicants: Optional[List[dict]] = None  
     vendedor: Optional[dict] = None  
     mediador: Optional[dict] = None
+    is_indexed: Optional[bool] = None  # Indica se a indexação documental está concluída
 
 
 class PublicClientRegistration(BaseModel):

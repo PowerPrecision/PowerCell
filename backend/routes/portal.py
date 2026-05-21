@@ -28,7 +28,7 @@ import uuid
 import logging
 import os
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from database import db
@@ -1997,16 +1997,20 @@ async def get_recommendations_for_client(
 @router.post("/visits/request")
 async def request_portal_visit(
     data: dict,
+    background_tasks: BackgroundTasks,
     client_data: dict = Depends(get_current_client),
 ):
     """
     Cliente pede uma visita a um imóvel através do Portal.
     
-    Fluxo:
+    Fluxo (v2 — non-blocking com BackgroundTasks):
     1. Recebe URL do anúncio do imóvel
-    2. Invoca o Scraper para extrair dados (Preço, Tipologia, Morada, Foto)
-    3. Cria registo de visita com status 'solicitada'
-    4. Notifica a equipa atribuída
+    2. Procura o processo ativo do cliente e guarda o _id como process_id
+    3. Cria o registo de visita na BD IMEDIATAMENTE com status 'solicitada'
+    4. Coloca a execução do scraper (Idealista) em BackgroundTask
+       (que atualizará a visita na BD depois de extrair foto/preço)
+    5. Devolve status 200 IMEDIATAMENTE para libertar o frontend
+    6. Notifica a equipa atribuída em background
     
     Body:
     - url: Link do imóvel (obrigatório)
@@ -2021,7 +2025,7 @@ async def request_portal_visit(
     if not url:
         raise HTTPException(status_code=400, detail="O link do imóvel é obrigatório.")
     
-    # ── 0. Procurar o processo ativo do cliente ──
+    # ── 1. Procurar o processo ativo do cliente ──
     # O token do portal pode ter um process_id, mas vamos confirmar
     # procurando o processo ativo (não concluído/não cancelado).
     # Isto garante que a visita fica sempre associada ao processo correcto.
@@ -2062,16 +2066,101 @@ async def request_portal_visit(
     
     if active_process:
         process_id = active_process["id"]
-        # Refrescar dados do processo a partir do registo encontrado
         client_name = active_process.get("client_name", process.get("client_name", "Cliente"))
         logger.info(f"[PORTAL] Processo ativo encontrado: {process_id} (status={active_process.get('status')})")
     else:
-        # Manter o process_id do token como último recurso (retrocompatibilidade)
         process_id = token_process_id
         client_name = process.get("client_name", "Cliente")
         logger.warning(f"[PORTAL] Nenhum processo ativo encontrado para client_id={token_process_id}, a usar token process_id")
     
-    # ── 1. Invocar Scraper para extrair dados do anúncio ──
+    # ── 2. Criar registo de visita IMEDIATAMENTE com status 'solicitada' ──
+    # Não esperamos pelo scraper — a visita nasce com dados mínimos
+    # e será enriquecida em background pela BackgroundTask.
+    now = datetime.now(timezone.utc).isoformat()
+    visit_id = str(uuid.uuid4())
+    
+    # Título provisório (será atualizado pelo scraper)
+    property_title = f"Imóvel de {url.split('//')[-1][:50]}..."
+    
+    visit_doc = {
+        "id": visit_id,
+        "property_id": None,
+        "property_title": property_title,
+        "property_photo": None,
+        "property_address": {},
+        "client_id": process_id,
+        "process_id": process_id,  # Explícito — processo ativo confirmado
+        "client_name": client_name,
+        "client_email": (active_process or process).get("client_email", ""),
+        "client_phone": (active_process or process).get("client_phone", ""),
+        "consultor_id": None,
+        "consultor_name": None,
+        "scheduled_date": None,
+        "status": "solicitada",
+        "notes": notes,
+        "source": "portal_client",
+        "scraped_url": url,
+        "scraper_status": "pending",  # Será atualizado pela BackgroundTask
+        "created_at": now,
+        "updated_at": now,
+        "created_by": "portal_client",
+        "company_id": (active_process or process).get("company_id"),
+    }
+    
+    await db.visits.insert_one(visit_doc)
+    
+    # ── 3. Registar no histórico do processo ──
+    try:
+        from services.history import log_history
+        await log_history(
+            process_id,
+            user={"id": None, "name": f"{client_name} (Portal)", "role": "client_portal"},
+            action="VISIT_REQUESTED_BY_CLIENT",
+            field="visita",
+            old_value=None,
+            new_value=f"Pedido de visita a imóvel ({url})"
+        )
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao registar histórico de visita: {e}")
+    
+    # ── 4. Colocar o scraper e as notificações em BackgroundTask ──
+    # O scraper é lento (5-15s) — não deve bloquear a resposta ao cliente.
+    notify_process = active_process if active_process else process
+    background_tasks.add_task(
+        _background_visit_scraper_and_notify,
+        visit_id=visit_id,
+        url=url,
+        process_id=process_id,
+        client_name=client_name,
+        notify_process=notify_process,
+    )
+    
+    logger.info(
+        f"[PORTAL] Pedido de visita criado: {visit_id} — "
+        f"Cliente {client_name}, URL {url}, Scraper em background"
+    )
+    
+    # ── 5. Devolver 200 IMEDIATAMENTE ──
+    visit_doc.pop("_id", None)
+    return visit_doc
+
+
+async def _background_visit_scraper_and_notify(
+    visit_id: str,
+    url: str,
+    process_id: str,
+    client_name: str,
+    notify_process: dict,
+):
+    """
+    Background task que:
+    1. Invoca o scraper para extrair dados do imóvel (Idealista/Imovirtual)
+    2. Atualiza o registo de visita com os dados extraídos
+    3. Notifica a equipa atribuída ao processo
+    
+    Executa de forma assíncrona após o endpoint devolver 200 ao cliente.
+    """
+    # ── Scraper ──
     scraped_data = None
     scraper_error = None
     try:
@@ -2094,82 +2183,59 @@ async def request_portal_visit(
             } if scraped_result.consultant else None,
             "raw_data": scraped_result.raw_data,
         }
-        # Se o scraper retornou erro, guardar
         if scraped_result.source == "error":
             scraper_error = scraped_result.raw_data.get("error", "Erro desconhecido no scraper")
     except Exception as e:
         scraper_error = str(e)
-        logger.warning(f"[PORTAL] Erro no scraper para URL {url}: {e}")
+        logger.warning(f"[PORTAL-BG] Erro no scraper para URL {url}: {e}")
     
-    # ── 2. Criar registo de visita com status 'solicitada' ──
-    now = datetime.now(timezone.utc).isoformat()
-    visit_id = str(uuid.uuid4())
-    # Usar dados do processo ativo (se encontrado) em vez do token
-    if active_process:
-        client_name = active_process.get("client_name", "Cliente")
-    else:
-        client_name = process.get("client_name", "Cliente")
-    
-    # Dados do imóvel extraídos pelo scraper (ou fallback vazio)
-    property_title = scraped_data.get("title") if scraped_data else None
-    property_price = scraped_data.get("price") if scraped_data else None
-    property_photo = scraped_data.get("photo_url") if scraped_data else None
-    property_location = scraped_data.get("location") if scraped_data else None
-    property_typology = scraped_data.get("typology") if scraped_data else None
-    property_source = scraped_data.get("source") if scraped_data else None
-    
-    # Se o scraper não conseguiu extrair título, usar o URL
-    if not property_title:
-        property_title = f"Imóvel de {url.split('//')[-1][:50]}..."
-    
-    visit_doc = {
-        "id": visit_id,
-        "property_id": None,  # Sem imóvel interno — veio do scraper
-        "property_title": property_title,
-        "property_photo": property_photo,
-        "property_address": {"municipality": property_location, "district": ""} if property_location else {},
-        "client_id": process_id,
-        "process_id": process_id,  # Explícito para queries e sincronização — processo ativo confirmado
-        "client_name": client_name,
-        "client_email": (active_process or process).get("client_email", ""),
-        "client_phone": (active_process or process).get("client_phone", ""),
-        "consultor_id": None,  # Ainda sem consultor atribuído
-        "consultor_name": None,
-        "scheduled_date": None,  # Ainda por agendar
-        "status": "solicitada",
-        "notes": notes,
-        "source": "portal_client",  # Marca que veio do portal
-        "scraped_data": scraped_data,  # Dados extraídos pelo scraper
-        "scraped_url": url,  # URL original colada pelo cliente
-        "scraper_error": scraper_error,  # Se houve erro no scraper
-        "created_at": now,
-        "updated_at": now,
-        "created_by": "portal_client",
-        "company_id": (active_process or process).get("company_id"),
+    # ── Atualizar visita com dados do scraper ──
+    update_fields = {
+        "scraper_status": "completed" if scraped_data and not scraper_error else "error",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     
-    await db.visits.insert_one(visit_doc)
+    if scraped_data:
+        update_fields["scraped_data"] = scraped_data
+        
+        # Auto-popular campos com dados extraídos
+        if scraped_data.get("title") and scraped_data.get("source") != "error":
+            update_fields["property_title"] = scraped_data["title"]
+        
+        if scraped_data.get("price"):
+            update_fields["scraped_price"] = scraped_data["price"]
+        
+        if scraped_data.get("photo_url"):
+            update_fields["property_photo"] = scraped_data["photo_url"]
+        
+        if scraped_data.get("location"):
+            update_fields["property_address"] = {
+                "municipality": scraped_data["location"],
+                "district": "",
+            }
+        
+        if scraped_data.get("typology"):
+            update_fields["scraped_typology"] = scraped_data["typology"]
     
-    # ── 3. Registar no histórico do processo ──
+    if scraper_error:
+        update_fields["scraper_error"] = scraper_error
+    
     try:
-        from services.history import log_history
-        await log_history(
-            process_id,
-            user={"id": None, "name": f"{client_name} (Portal)", "role": "client_portal"},
-            action="VISIT_REQUESTED_BY_CLIENT",
-            field="visita",
-            old_value=None,
-            new_value=f"Pedido de visita a '{property_title}' ({url})"
+        await db.visits.update_one(
+            {"id": visit_id},
+            {"$set": update_fields}
         )
+        logger.info(f"[PORTAL-BG] Visita {visit_id} atualizada com dados do scraper")
     except Exception as e:
-        logger.warning(f"[PORTAL] Erro ao registar histórico de visita: {e}")
+        logger.warning(f"[PORTAL-BG] Erro ao atualizar visita {visit_id}: {e}")
     
-    # ── 4. Notificar equipa atribuída ──
-    # Usar o processo ativo (com assigned_consultor_id) em vez do token
-    notify_process = active_process if active_process else process
+    # ── Notificar equipa atribuída ──
     assigned_ids = _get_all_assigned_user_ids(notify_process)
     process_number = notify_process.get("process_number", "")
     process_ref = f"#{process_number}" if process_number else process_id[:8]
+    
+    # Usar o título final (após scraper) ou fallback
+    final_title = update_fields.get("property_title", f"Imóvel de {url.split('//')[-1][:50]}...")
     
     for uid in assigned_ids:
         try:
@@ -2187,38 +2253,30 @@ async def request_portal_visit(
                     await send_realtime_notification(
                         user_id=uid,
                         title="Pedido de Visita do Cliente",
-                        message=f"O cliente {client_name} pediu uma visita a '{property_title}' no processo {process_ref}.",
+                        message=f"O cliente {client_name} pediu uma visita a '{final_title}' no processo {process_ref}.",
                         notification_type="visit_request",
-                        link=f"/visitas",
+                        link="/visitas",
                         process_id=process_id,
                     )
                 except Exception as notif_err:
                     logger.debug(f"Erro ao enviar notificação in-app para {uid}: {notif_err}")
         except Exception as e:
-            logger.warning(f"[PORTAL] Erro ao notificar utilizador {uid} sobre pedido de visita: {e}")
+            logger.warning(f"[PORTAL-BG] Erro ao notificar utilizador {uid} sobre pedido de visita: {e}")
     
-    # Broadcast WebSocket
+    # ── Broadcast WebSocket ──
     try:
         ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
             "id": visit_id,
             "process_id": process_id,
             "type": "visit_request",
             "client_name": client_name,
-            "property_title": property_title,
+            "property_title": final_title,
             "url": url,
-            "created_at": now,
+            "created_at": datetime.now(timezone.utc).isoformat(),
         })
         await manager.broadcast_to_room(f"process_{process_id}", ws_message)
     except Exception as ws_err:
-        logger.debug(f"Erro ao broadcast pedido de visita via WebSocket: {ws_err}")
-    
-    logger.info(
-        f"[PORTAL] Pedido de visita criado: {visit_id} — "
-        f"Cliente {client_name}, URL {url}, Processo {process_ref}"
-    )
-    
-    visit_doc.pop("_id", None)
-    return visit_doc
+        logger.debug(f"[PORTAL-BG] Erro ao broadcast pedido de visita via WS: {ws_err}")
 
 
 @router.get("/visits")

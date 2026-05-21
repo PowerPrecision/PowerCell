@@ -3,6 +3,28 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-09] — Melhorias Operacionais: Indexação, Exportação Excel e Fix Portal Visitas
+
+### Adicionado
+- **Estado de Conclusão da Indexação** (`feat` — **BACKEND + FRONTEND**): Novo campo `is_indexed` (booleano, default false) no modelo de Processos que permite ao perfil de Indexação marcar o tratamento documental como concluído:
+  - Modelo: Adicionado `is_indexed` ao `ProcessUpdate` e `ProcessResponse` em `backend/models/process.py`
+  - Backend: Novo endpoint `PATCH /processes/{id}/mark-indexed` — apenas role `indexacao` pode marcar; quando `is_indexed` passa a `true`, dispara automaticamente uma notificação (email + in-app + WebSocket) para todos os utilizadores atribuídos ao processo com a mensagem: "A Indexação concluiu o tratamento documental do processo [Ref] — [Nome Cliente]"
+  - Frontend KanbanCard: Badge "✅ Indexado" (verde) visível quando `is_indexed=true`
+  - Frontend ProcessDetailsModal: Badge "✅ Indexado" na tab Processo + botão "Marcar Trabalho Concluído" (verde) visível apenas para role `indexacao` quando o processo ainda não está indexado
+  - Registo no histórico: `INDEXACAO_CONCLUIDA` com detalhes de quem marcou e quando
+- **Exportação para Excel** (`feat` — **FRONTEND**): Botão "Exportar Excel" na barra de filtros do Kanban que exporta todos os processos visíveis (após filtros) para um ficheiro `.xlsx`:
+  - Biblioteca SheetJS (`xlsx`) instalada no frontend com importação dinâmica (lazy loading)
+  - Colunas exportadas: Nome do Cliente, Nº Processo, Fase/Status, Valor Imóvel, Consultor, Intermediário, Prioridade, Indexado, Atualizado
+  - Larguras de coluna otimizadas e nome de ficheiro com data: `PowerCell_Processos_YYYY-MM-DD.xlsx`
+  - Botão com estado de loading (spinner) durante a exportação
+
+### Corrigido
+- **Portal de Visitas: frontend fica a pensar infinitamente** (`fix` — **CRÍTICO**): O endpoint `POST /portal/visits/request` invocava o scraper do Idealista de forma síncrona (5-15s), bloqueando a resposta ao cliente. O portal ficava com loading infinito e a visita não se associava ao processo:
+  - Backend: Reescrito com `BackgroundTasks` do FastAPI — o endpoint agora: (1) Procura o processo ativo do cliente e guarda o `_id` como `process_id` na visita; (2) Cria a visita na BD IMEDIATAMENTE com status `solicitada` e `scraper_status: "pending"`; (3) Coloca a execução do scraper em `BackgroundTask` (que atualizará a visita na BD depois de extrair foto/preço); (4) Devolve status 200 IMEDIATAMENTE para libertar o frontend
+  - Nova função `_background_visit_scraper_and_notify()`: Executa em background após o 200 — invoca o scraper, atualiza a visita com dados extraídos, notifica a equipa atribuída e faz broadcast WebSocket
+  - Frontend: Botão "Pedir Visita" agora mostra "A enviar..." em vez de "A extrair dados..." — mensagem de sucesso atualizada para refletir o processamento assíncrono
+  - `try/catch/finally` já existia no ClientPortal.jsx — confirmado que `setIsLoading(false)` e limpeza do URL estão corretos no `finally`
+
 ## [2026-03-08] — Correções Críticas: Sidebar, Edição Retroativa e Sincronização Financeira
 
 ### Corrigido

@@ -405,6 +405,7 @@ const KanbanBoard = ({
         onScrollRight={() => scrollContainer('right')}
         isFetching={isFetching}
         isFetchingCompleted={isFetchingCompleted}
+        columns={filteredColumns}
       />
 
       {/* Search Results List View */}

@@ -1857,7 +1857,7 @@ export default function ClientPortal() {
                       let data;
                       try { data = await res.json(); } catch { throw new Error('Erro inesperado do servidor.'); }
                       if (res.ok) {
-                        setVisitRequestResult({ success: true, message: 'Pedido enviado com sucesso! O nosso sistema extraiu os dados do imóvel e o seu consultor será notificado.' });
+                        setVisitRequestResult({ success: true, message: 'Pedido enviado com sucesso! O seu consultor será notificado e os dados do imóvel serão extraídos automaticamente.' });
                         setVisitUrl('');
                         // Refresh visits list
                         const vRes = await fetch(`${BACKEND_URL}/portal/visits`, { headers: { Authorization: `Bearer ${token}` } });
@@ -1875,7 +1875,7 @@ export default function ClientPortal() {
                   className="px-5 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 shrink-0 shadow-sm"
                 >
                   {requestingVisit ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> A extrair dados...</>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> A enviar...</>
                   ) : (
                     <><ExternalLink className="w-4 h-4" /> Pedir Visita</>
                   )}
