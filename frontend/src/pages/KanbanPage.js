@@ -5,6 +5,7 @@
  * consultor, intermediário, indexação e parceiro. Filtros são persistidos na URL.
  */
 import { useState, useEffect, useMemo } from "react";
+import * as XLSX from 'xlsx';
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -13,11 +14,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Loader2, LayoutGrid, Plus } from "lucide-react";
+import { Loader2, LayoutGrid, Plus, Download } from "lucide-react";
 import { getUsers } from "../services/api";
 import { toast } from "sonner";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { filterByAnyRole, filterByRole, hasRole } from "../utils/roleUtils";
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com";
+const API_URL = BACKEND_URL + "/api";
 
 const KanbanPage = () => {
   const { token, user } = useAuth();
@@ -25,6 +29,7 @@ const KanbanPage = () => {
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
   const [showCreateProcess, setShowCreateProcess] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Ler filtros da URL
   const consultorFilter = searchParams.get("consultor") || "all";
@@ -51,6 +56,40 @@ const KanbanPage = () => {
       toast.error("Erro ao carregar utilizadores");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch(`${API_URL}/processes/kanban?consultor=${consultorFilter}&mediador=${mediadorFilter}&indexacao=${indexacaoFilter}&parceiro=${parceiroFilter}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Erro ao obter dados');
+      const data = await res.json();
+      // Extract processes from columns
+      const allProcesses = (data.columns || []).flatMap(col =>
+        (col.processes || col.items || []).map(p => ({
+          'Processo': p.process_number || '',
+          'Cliente': p.client_name || '',
+          'Fase': (p.status || '').replace(/_/g, ' '),
+          'Valor': p.real_estate_data?.valor_imovel || p.property_value || '',
+          'Consultor': p.consultor_name || p.assigned_consultor_name || '',
+        }))
+      );
+      if (allProcesses.length === 0) {
+        toast.error('Nenhum processo para exportar');
+        return;
+      }
+      const ws = XLSX.utils.json_to_sheet(allProcesses);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Processos');
+      XLSX.writeFile(wb, 'processos_powercell.xlsx');
+      toast.success(`${allProcesses.length} processos exportados com sucesso!`);
+    } catch (err) {
+      toast.error('Erro ao exportar Excel');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -97,13 +136,28 @@ const KanbanPage = () => {
               Filtre por consultor, intermediário, indexação ou parceiro
             </p>
           </div>
-          <Button
-            className="gap-2 shrink-0"
-            onClick={() => setShowCreateProcess(true)}
-          >
-            <Plus className="h-4 w-4" />
-            Novo Processo
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={handleExportExcel}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              Exportar Excel
+            </Button>
+            <Button
+              className="gap-2"
+              onClick={() => setShowCreateProcess(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Novo Processo
+            </Button>
+          </div>
         </div>
 
         {/* Kanban Board */}
