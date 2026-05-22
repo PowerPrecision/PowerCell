@@ -3,6 +3,36 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-10] — Correções Críticas: CORS/Timeout Scraper, Visitas, Indexação e Excel
+
+### Corrigido
+- **CORS e 502 Bad Gateway no Scraper de Finanças/Seg. Social** (`fix` — **CRÍTICO**): Os endpoints `POST /api/portal/fetch-financas` e `POST /api/portal/fetch-seguranca-social` executavam o scraper Playwright de forma síncrona, causando timeout do Render (30s) e erro 502/CORS:
+  - Ambos os endpoints agora usam `BackgroundTasks` do FastAPI
+  - Respondem IMEDIATAMENTE com HTTP 200 `{"status": "processing", "message": "A obter documentos em background"}`
+  - Execução pesada do `gov_scraper` corre em background via `_run_financas_background()` e `_run_seguranca_social_background()`
+  - Novo endpoint `GET /api/portal/scraper-job/{job_id}` para polling do estado pelo frontend
+  - Job registado na coleção `portal_scraper_jobs` (MongoDB) com status processing/success/error
+  - Notificações WebSocket e email disparadas quando o background task completa
+  - Rotas `/api/portal/*` já cobertas pelo middleware CORS global (config.py adiciona www/non-www variants)
+- **Portal do Cliente: visita não aparece após submissão** (`fix` — **UX**): Após submeter com sucesso um pedido de visita, o cartão 'As Minhas Visitas' não atualizava sem refresh da página:
+  - Refresh da lista de visitas agora forçado imediatamente após submissão com try/catch seguro
+  - Antes: `fetch()` sem tratamento de erro podia falhar silenciosamente
+- **CRM: visitas do portal não eram clicáveis** (`fix` — **UX**): Na Aba Visitas do ProcessDetailsModal, não existia forma de ver detalhes completos:
+  - Cada visita agora é clicável (cursor-pointer + hover)
+  - Adicionado `VisitDetailsModal` com: Foto do Imóvel, Preço, Tipologia, Morada completa, URL do anúncio, Comentários, Data agendada, Consultor, Badge "Pedido pelo Cliente via Portal"
+
+### Alterado
+- **Botão 'Marcar Trabalho Concluído' agora visível para admin** (`refactor` — **Permissões**): A lógica de visibilidade foi alterada de `role === 'indexacao'` para `role === 'indexacao' || role === 'admin'`, permitindo testes administrativos do fluxo de indexação sem necessidade de trocar de role.
+- **Menu 'Registos de Clientes' removido para role indexação** (`refactor` — **RBAC**): O item "Registos de Clientes" foi removido do menu da role `indexacao` no DashboardLayout — este perfil não necessita de acesso a registos de clientes, apenas a "Os Meus Processos" e "Documentos Pendentes".
+
+### Adicionado
+- **Colunas extra na Exportação Excel** (`feat` — **FRONTEND**): O KanbanPage export enriquecido com 4 novas colunas:
+  - `NIF` — NIF do cliente (`p.client_nif || p.personal_data?.nif`)
+  - `Telefone` — Telefone do cliente (`p.client_phone || p.contacto?.telefone`)
+  - `Consultor Responsável` — Nome do consultor (renomeado de "Consultor" para clareza)
+  - `Indexado` — Estado de indexação (`p.is_indexed ? 'Sim' : 'Não'`)
+  - Colunas anteriores mantidas: Processo, Cliente, Fase, Valor
+
 ## [2026-03-09] — Melhorias Operacionais: Indexação, Exportação Excel e Fix Portal Visitas
 
 ### Adicionado
