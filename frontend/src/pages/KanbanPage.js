@@ -65,29 +65,51 @@ const KanbanPage = () => {
   const handleExportExcel = async () => {
     setExporting(true);
     try {
-      const res = await fetch(`${API_URL}/processes/kanban?consultor=${consultorFilter}&mediador=${mediadorFilter}&indexacao=${indexacaoFilter}&parceiro=${parceiroFilter}`, {
+      // Construir query params com TODOS os filtros ativos
+      const params = new URLSearchParams();
+      if (consultorFilter !== 'all') params.set('consultor', consultorFilter);
+      if (mediadorFilter !== 'all') params.set('mediador', mediadorFilter);
+      if (indexacaoFilter !== 'all') params.set('indexacao', indexacaoFilter);
+      if (parceiroFilter !== 'all') params.set('parceiro', parceiroFilter);
+
+      const res = await fetch(`${API_URL}/processes/kanban?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Erro ao obter dados');
       const data = await res.json();
       // Extract processes from columns
-      const allProcesses = (data.columns || []).flatMap(col =>
+      let allProcesses = (data.columns || []).flatMap(col =>
         (col.processes || col.items || []).map(p => ({
           'Processo': p.process_number || '',
           'Cliente': p.client_name || '',
-          'NIF': p.client_nif || p.personal_data?.nif || '',
-          'Telefone': p.client_phone || p.contacto?.telefone || '',
-          'Consultor Responsável': p.consultor_name || p.assigned_consultor_name || '',
+          'NIF': p.client_nif || '',
+          'Telefone': p.client_phone || '',
+          'Consultores': p.consultor_name || '',
+          'Intermediários': p.mediador_name || '',
+          'Indexação': p.indexacao_name || '',
+          'Parceiro': p.parceiro_name || '',
           'Fase': (p.status || '').replace(/_/g, ' '),
           'Valor': p.real_estate_data?.valor_imovel || p.property_value || '',
           'Indexado': p.is_indexed ? 'Sim' : 'Não',
         }))
       );
+      // Aplicar filtro de estado de indexação no lado do cliente
+      if (indexStatusFilter === 'completed') {
+        allProcesses = allProcesses.filter(p => p['Indexado'] === 'Sim');
+      } else if (indexStatusFilter === 'pending') {
+        allProcesses = allProcesses.filter(p => p['Indexado'] === 'Não');
+      }
       if (allProcesses.length === 0) {
-        toast.error('Nenhum processo para exportar');
+        toast.error('Nenhum processo para exportar com os filtros selecionados');
         return;
       }
       const ws = XLSX.utils.json_to_sheet(allProcesses);
+      // Ajustar larguras das colunas
+      ws['!cols'] = [
+        { wch: 10 }, { wch: 25 }, { wch: 12 }, { wch: 15 },
+        { wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 20 },
+        { wch: 18 }, { wch: 12 }, { wch: 8 },
+      ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Processos');
       XLSX.writeFile(wb, 'processos_powercell.xlsx');
