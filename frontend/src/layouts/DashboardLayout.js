@@ -394,7 +394,7 @@ const DashboardLayout = ({ children, title }) => {
             label: "Listas de Trabalho",
             icon: ClipboardList,
             items: [
-              { label: "Registos de Clientes", icon: ClipboardList, href: "/registos-clientes" },
+              // "Registos de Clientes" REMOVIDO para role indexacao — não necessita de acesso a registos de clientes
               { label: "Os Meus Processos", icon: FileText, href: "/processos" },
               { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
             ],

@@ -1861,9 +1861,13 @@ export default function ClientPortal() {
                         setVisitRequestResult({ success: true, message: 'Pedido enviado com sucesso! O seu consultor será notificado e os dados do imóvel serão extraídos automaticamente.' });
                         setVisitUrl('');
                         toast.success('Pedido de visita enviado com sucesso!');
-                        // Refresh visits list
-                        const vRes = await fetch(`${BACKEND_URL}/portal/visits`, { headers: { Authorization: `Bearer ${token}` } });
-                        if (vRes.ok) { const vData = await vRes.json(); setVisits(vData.visits || []); }
+                        // Refresh visits list immediately (force reload even if already loaded)
+                        try {
+                          const vRes = await fetch(`${BACKEND_URL}/portal/visits`, { headers: { Authorization: `Bearer ${token}` } });
+                          if (vRes.ok) { const vData = await vRes.json(); setVisits(vData.visits || []); }
+                        } catch (vErr) {
+                          console.warn('[PORTAL] Erro ao atualizar lista de visitas:', vErr);
+                        }
                       } else {
                         setVisitRequestResult({ error: data.detail || 'Erro ao pedir visita.' });
                       }
