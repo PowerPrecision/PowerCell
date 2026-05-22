@@ -19,14 +19,16 @@
  * @param {Function} onCardClick - Handler de clique no cartão
  * @param {Function} onViewProcess - Handler para ver processo completo
  */
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle, CheckCircle2, Loader2, ClipboardCheck } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { format } from 'date-fns';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
 
 // Comparador customizado para React.memo
 // Só re-renderiza se o processo ou estado de drag mudar
@@ -42,6 +44,7 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.under_35 === nextProps.process.under_35 &&
     prevProps.process.updated_at === nextProps.process.updated_at &&
     prevProps.process.labels === nextProps.process.labels &&
+    prevProps.process.is_indexed === nextProps.process.is_indexed &&
     prevProps.isDragging === nextProps.isDragging &&
     prevProps.isLocked === nextProps.isLocked &&
     prevProps.lockedBy === nextProps.lockedBy
@@ -59,6 +62,37 @@ const KanbanCard = memo(({
   lockedBy,
 }) => {
   const navigate = useNavigate();
+  const { user, token } = useAuth();
+  const [marking, setMarking] = useState(false);
+
+  const handleMarkIndexed = async (e) => {
+    e.stopPropagation();
+    if (!process?.id || marking) return;
+    setMarking(true);
+    try {
+      const API_URL_BASE = typeof window !== 'undefined'
+        ? (window.__ENV__?.REACT_APP_BACKEND_URL || '')
+        : '';
+      const res = await fetch(`${API_URL_BASE}/api/processes/${process.id}/mark-indexed`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          ...(user?.role ? { 'X-Active-Role': user.role.toLowerCase() } : {}),
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Erro ao marcar indexação.');
+      }
+      toast.success('Indexação concluída! A equipa foi notificada.');
+      process.is_indexed = true;
+    } catch (error) {
+      toast.error(error.message || 'Erro ao marcar indexação.');
+    } finally {
+      setMarking(false);
+    }
+  };
 
   // Check if process has a 2nd proponent
   const hasSecondProponent = 
@@ -165,16 +199,30 @@ const KanbanCard = memo(({
                 </Badge>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 flex-shrink-0"
-              onClick={handleViewProcess}
-              title="Ver processo"
-              data-testid={`view-process-${process.id}`}
-            >
-              <Eye className="h-3 w-3" />
-            </Button>
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              {(user?.role?.toLowerCase() === 'indexacao' || user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'ceo') && !process.is_indexed && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                  onClick={handleMarkIndexed}
+                  disabled={marking}
+                  title="Marcar indexação como concluída"
+                >
+                  {marking ? <Loader2 className="h-3 w-3 animate-spin" /> : <ClipboardCheck className="h-3 w-3" />}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5"
+                onClick={handleViewProcess}
+                title="Ver processo"
+                data-testid={`view-process-${process.id}`}
+              >
+                <Eye className="h-3 w-3" />
+              </Button>
+            </div>
           </div>
           
           {/* Linha 2: Nome do cliente - SEMPRE VISÍVEL, com 🔥 para Alta */}

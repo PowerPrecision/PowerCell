@@ -629,7 +629,7 @@ const ProcessDetailsModal = memo(({
                       setMarkingIndexed(true);
                       try {
                         const res = await fetch(`${API_URL_BASE}/api/processes/${process.id}/mark-indexed`, {
-                          method: 'PATCH',
+                          method: 'POST',
                           headers: {
                             'Content-Type': 'application/json',
                             Authorization: `Bearer ${token}`,

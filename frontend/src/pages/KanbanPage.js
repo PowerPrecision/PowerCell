@@ -36,6 +36,9 @@ const KanbanPage = () => {
   const mediadorFilter = searchParams.get("mediador") || "all";
   const indexacaoFilter = searchParams.get("indexacao") || "all";
   const parceiroFilter = searchParams.get("parceiro") || "all";
+  // Filtro de estado de indexação — 'pending' por omissão para role indexacao
+  const indexStatusFilter = searchParams.get("indexStatus") ||
+    (user?.role?.toLowerCase() === 'indexacao' ? 'pending' : 'all');
 
   const consultors = useMemo(() => filterByAnyRole(users, ["consultor", "diretor"]), [users]);
   const intermediarios = useMemo(() => filterByAnyRole(users, ["intermediario", "diretor"]), [users]);
@@ -136,7 +139,7 @@ const KanbanPage = () => {
               Quadro Geral de Processos
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Filtre por consultor, intermediário, indexação ou parceiro
+              Filtre por consultor, intermediário, indexação, parceiro ou estado de indexação
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -176,7 +179,7 @@ const KanbanPage = () => {
           </CardHeader>
           <CardContent className="pt-0">
             {/* Filter Controls */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
               <div className="space-y-2">
                 <Label>Filtrar por Consultor</Label>
                 <Select value={consultorFilter} onValueChange={(v) => updateFilter("consultor", v)}>
@@ -221,6 +224,17 @@ const KanbanPage = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Estado de Indexação</Label>
+                <Select value={indexStatusFilter} onValueChange={(v) => updateFilter("indexStatus", v)}>
+                  <SelectTrigger><SelectValue placeholder="Todos os estados" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="pending">Pendentes (por indexar)</SelectItem>
+                    <SelectItem value="completed">Concluídos (indexados)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Kanban Board Component */}
@@ -231,6 +245,7 @@ const KanbanPage = () => {
               mediadorFilter={mediadorFilter}
               indexacaoFilter={indexacaoFilter}
               parceiroFilter={parceiroFilter}
+              indexStatusFilter={indexStatusFilter}
             />
           </CardContent>
         </Card>

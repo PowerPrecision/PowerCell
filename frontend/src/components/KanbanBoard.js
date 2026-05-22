@@ -106,7 +106,8 @@ const KanbanBoard = ({
   consultorFilter = 'all', 
   mediadorFilter = 'all', 
   indexacaoFilter = 'all',
-  parceiroFilter = 'all' 
+  parceiroFilter = 'all',
+  indexStatusFilter = 'all' 
 }) => {
   // === ESTADO LOCAL (apenas UI state, não server state) ===
   const [searchTerm, setSearchTerm] = useState('');
@@ -143,7 +144,7 @@ const KanbanBoard = ({
 
   // === REACT QUERY - DATA FETCHING (QUERIES SEPARADAS) ===
   // Memoize filters to prevent infinite re-renders in dependent hooks
-  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter]);
+  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter]);
 
   // QUERY 1: Colunas ACTIVAS (sem completedDays — não re-fetch quando o filtro muda)
   const {
@@ -344,7 +345,12 @@ const KanbanBoard = ({
           }
         }
 
-        return matchesSearch && matchesDate && matchesUrgency;
+        // Index status filter
+        let matchesIndexStatus = true;
+        if (indexStatusFilter === 'completed' && !process.is_indexed) matchesIndexStatus = false;
+        if (indexStatusFilter === 'pending' && process.is_indexed) matchesIndexStatus = false;
+
+        return matchesSearch && matchesDate && matchesUrgency && matchesIndexStatus;
       }),
       column.name
     ),
