@@ -84,12 +84,18 @@ const KanbanPage = () => {
           'Cliente': p.client_name || '',
           'NIF': p.client_nif || '',
           'Telefone': p.client_phone || '',
+          'Tipo de Processo': p.process_type ? String(p.process_type).replace(/_/g, ' ') : '',
           'Consultores': p.consultor_name || '',
           'Intermediários': p.mediador_name || '',
           'Indexação': p.indexacao_name || '',
           'Parceiro': p.parceiro_name || '',
           'Fase': (p.status || '').replace(/_/g, ' '),
-          'Valor': p.real_estate_data?.valor_imovel || p.property_value || '',
+          'Valor Imóvel': p.real_estate_data?.valor_imovel || p.property_value || '',
+          'Morada do Imóvel': p.real_estate_data?.morada_imovel || p.real_estate_data?.morada || p.property_address || '',
+          'Link Imóvel': p.real_estate_data?.link_imovel || '',
+          'Notas/Descrição': p.description || '',
+          'Previsão Escritura': p.deadlines?.escritura || '',
+          'Data de Criação': p.created_at || '',
           'Indexado': p.is_indexed ? 'Sim' : 'Não',
         }))
       );
@@ -106,9 +112,23 @@ const KanbanPage = () => {
       const ws = XLSX.utils.json_to_sheet(allProcesses);
       // Ajustar larguras das colunas
       ws['!cols'] = [
-        { wch: 10 }, { wch: 25 }, { wch: 12 }, { wch: 15 },
-        { wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 20 },
-        { wch: 18 }, { wch: 12 }, { wch: 8 },
+        { wch: 10 }, // Processo
+        { wch: 25 }, // Cliente
+        { wch: 12 }, // NIF
+        { wch: 15 }, // Telefone
+        { wch: 18 }, // Tipo de Processo
+        { wch: 25 }, // Consultores
+        { wch: 25 }, // Intermediários
+        { wch: 20 }, // Indexação
+        { wch: 20 }, // Parceiro
+        { wch: 18 }, // Fase
+        { wch: 14 }, // Valor Imóvel
+        { wch: 30 }, // Morada do Imóvel
+        { wch: 35 }, // Link Imóvel
+        { wch: 40 }, // Notas/Descrição
+        { wch: 16 }, // Previsão Escritura
+        { wch: 18 }, // Data de Criação
+        { wch: 8 },  // Indexado
       ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Processos');
