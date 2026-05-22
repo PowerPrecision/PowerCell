@@ -3,6 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-11] — Afinamento de Permissões: Quadro Geral para Indexação
+
+### Alterado
+- **Menu 'Quadro Geral' adicionado para role indexação** (`refactor` — **RBAC**): O utilizador com role `indexacao` não tinha acesso ao Quadro Geral (Kanban) no menu lateral, impedindo-o de marcar processos como concluídos diretamente no quadro. Adicionado item `{ label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" }` ao grupo "Listas de Trabalho" da role `indexacao` no `DashboardLayout.js`. O "Registo de Clientes" mantém-se oculto para esta role.
+
+### Notas
+- Verificação completa do código: Todos os bugs reportados já estavam resolvidos em sessões anteriores:
+  - ✅ CORS/Timeout Scraper: `BackgroundTasks` já implementado nos endpoints `/fetch-financas` e `/fetch-seguranca-social`
+  - ✅ Portal do Cliente: Refresh da lista de visitas já forçado após submissão
+  - ✅ CRM: Visitas já são clicáveis com `VisitDetailsModal` completo
+  - ✅ Botão "Marcar Trabalho Concluído": já visível para `indexacao` E `admin`
+  - ✅ "Registo de Clientes": já oculto para role `indexacao`
+  - ✅ Excel export: já inclui NIF, Telefone, Consultor Responsável, Indexado
+
 ## [2026-03-10] — Correções Críticas: CORS/Timeout Scraper, Visitas, Indexação e Excel
 
 ### Corrigido
