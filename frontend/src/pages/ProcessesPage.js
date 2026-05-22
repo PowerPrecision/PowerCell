@@ -109,6 +109,9 @@ const ProcessesPage = () => {
     return role === 'indexacao' || role === 'admin' || role === 'ceo';
   }, [user?.role]);
 
+  // Sync filters with URL — searchTerm precisa de ser declarado antes de handleExportExcel
+  const searchTerm = searchParams.get("search") || "";
+
   const handleExportExcel = useCallback(async () => {
     setExporting(true);
     try {
@@ -239,8 +242,7 @@ const ProcessesPage = () => {
       : <ArrowDown className="h-3 w-3 ml-1" />;
   };
 
-  // Sync filters with URL
-  const searchTerm = searchParams.get("search") || "";
+  // Sync filters with URL — searchTerm já declarado acima (antes de handleExportExcel)
   const setSearchTerm = (value) => {
     setSearchParams(prev => {
       if (value) prev.set("search", value);
