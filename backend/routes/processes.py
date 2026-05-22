@@ -1810,6 +1810,10 @@ async def get_kanban_board(
         "assigned_mediador_ids": 1,
         "assigned_indexacao_id": 1,
         "assigned_parceiro_id": 1,
+        "indexacao_name": 1,
+        "parceiro_name": 1,
+        "consultor_name": 1,
+        "mediador_name": 1,
         "created_at": 1,
         "updated_at": 1,
         "notes": 1,
@@ -1874,6 +1878,15 @@ async def get_kanban_board(
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
     user_map = {u["id"]: u for u in users}
     
+    # Debug: verificar se há processos com indexação/parceiro atribuído
+    indexacao_count = sum(1 for p in processes if p.get("assigned_indexacao_id"))
+    parceiro_count = sum(1 for p in processes if p.get("assigned_parceiro_id"))
+    logger.info(f"[Kanban Export] {len(processes)} processos: {indexacao_count} com indexação, {parceiro_count} com parceiro")
+    if indexacao_count > 0:
+        sample_ids = [p.get("assigned_indexacao_id") for p in processes if p.get("assigned_indexacao_id")][:3]
+        logger.info(f"[Kanban Export] Sample indexacao IDs: {sample_ids}")
+        logger.info(f"[Kanban Export] User map has keys: {list(user_map.keys())[:5]}...")
+    
     # Organize by status - usando dict para lookup O(1) em vez de O(n) por coluna
     processes_by_status = {}
     for p in processes:
@@ -1923,11 +1936,11 @@ async def get_kanban_board(
                 mediador_ids.append(p["assigned_mediador_id"])
             mediador_names = [user_map.get(mid, {}).get("name", "") for mid in mediador_ids if user_map.get(mid)]
             
-            # === Indexação ===
-            indexacao_name = user_map.get(p.get("assigned_indexacao_id"), {}).get("name", "")
+            # === Indexação (usar nome da BD com fallback para user_map) ===
+            indexacao_name = p.get("indexacao_name") or user_map.get(p.get("assigned_indexacao_id"), {}).get("name", "")
             
-            # === Parceiro ===
-            parceiro_name = user_map.get(p.get("assigned_parceiro_id"), {}).get("name", "")
+            # === Parceiro (usar nome da BD com fallback para user_map) ===
+            parceiro_name = p.get("parceiro_name") or user_map.get(p.get("assigned_parceiro_id"), {}).get("name", "")
             
             # Verificar se o utilizador actual está atribuído
             is_my_consultor = p.get("assigned_consultor_id") == user_id or user_id in (p.get("assigned_consultor_ids") or [])
@@ -1935,8 +1948,8 @@ async def get_kanban_board(
             
             enriched_processes.append({
                 **p,
-                "consultor_name": ", ".join(consultor_names) if consultor_names else "",
-                "mediador_name": ", ".join(mediador_names) if mediador_names else "",
+                "consultor_name": ", ".join(consultor_names) if consultor_names else (p.get("consultor_name") or ""),
+                "mediador_name": ", ".join(mediador_names) if mediador_names else (p.get("mediador_name") or ""),
                 "indexacao_name": indexacao_name,
                 "parceiro_name": parceiro_name,
                 "is_assigned_to_me": is_my_consultor or is_my_mediador,
