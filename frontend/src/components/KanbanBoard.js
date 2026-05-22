@@ -464,6 +464,10 @@ const KanbanBoard = ({
         process={selectedProcess}
         isLockedByOther={selectedProcess ? !!lockedProcesses[selectedProcess.id] && lockedProcesses[selectedProcess.id]?.user_id !== user?.id : false}
         lockedBy={selectedProcess ? lockedProcesses[selectedProcess.id]?.user_name : undefined}
+        onProcessUpdate={(processId, updates) => {
+          // Atualizar o processo nas colunas locais e refetch para garantir consistência
+          refetch();
+        }}
       />
 
       {canCreateProcess && (

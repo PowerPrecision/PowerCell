@@ -5,7 +5,6 @@
  * consultor, intermediário, indexação e parceiro. Filtros são persistidos na URL.
  */
 import { useState, useEffect, useMemo } from "react";
-import * as XLSX from 'xlsx';
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -15,7 +14,7 @@ import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Loader2, LayoutGrid, Plus, Download } from "lucide-react";
-import { getUsers, getExportPermission } from "../services/api";
+import { getUsers } from "../services/api";
 import { toast } from "sonner";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { filterByAnyRole, filterByRole, hasRole } from "../utils/roleUtils";
@@ -30,10 +29,6 @@ const KanbanPage = () => {
   const [users, setUsers] = useState([]);
   const [showCreateProcess, setShowCreateProcess] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [allowExcelExport, setAllowExcelExport] = useState(true);
-
-  // Admin/CEO sempre podem exportar, independentemente da config
-  const canExportExcel = allowExcelExport || hasRole(user, 'admin') || hasRole(user, 'ceo');
 
   // Ler filtros da URL
   const consultorFilter = searchParams.get("consultor") || "all";
@@ -51,17 +46,7 @@ const KanbanPage = () => {
 
   useEffect(() => {
     fetchUsers();
-    checkExportPermission();
   }, []);
-
-  const checkExportPermission = async () => {
-    try {
-      const res = await getExportPermission();
-      setAllowExcelExport(res.data.allow_excel_export !== false);
-    } catch {
-      // Em caso de erro, manter default (true)
-    }
-  };
 
   const fetchUsers = async () => {
     try {
@@ -79,6 +64,7 @@ const KanbanPage = () => {
   const handleExportExcel = async () => {
     setExporting(true);
     try {
+      const XLSX = await import('xlsx');
       // Construir query params com TODOS os filtros ativos
       const params = new URLSearchParams();
       if (consultorFilter !== 'all') params.set('consultor', consultorFilter);
@@ -98,6 +84,7 @@ const KanbanPage = () => {
           'Cliente': p.client_name || '',
           'NIF': p.client_nif || '',
           'Telefone': p.client_phone || '',
+          'Email': p.client_email || '',
           'Tipo de Processo': p.process_type ? String(p.process_type).replace(/_/g, ' ') : '',
           'Consultores': p.consultor_name || '',
           'Intermediários': p.mediador_name || '',
@@ -130,6 +117,7 @@ const KanbanPage = () => {
         { wch: 25 }, // Cliente
         { wch: 12 }, // NIF
         { wch: 15 }, // Telefone
+        { wch: 25 }, // Email
         { wch: 18 }, // Tipo de Processo
         { wch: 25 }, // Consultores
         { wch: 25 }, // Intermediários
@@ -146,7 +134,8 @@ const KanbanPage = () => {
       ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Processos');
-      XLSX.writeFile(wb, 'processos_powercell.xlsx');
+      const filename = `PowerCell_Processos_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
       toast.success(`${allProcesses.length} processos exportados com sucesso!`);
     } catch (err) {
       toast.error('Erro ao exportar Excel');
@@ -199,21 +188,19 @@ const KanbanPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {canExportExcel && (
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={handleExportExcel}
-                disabled={exporting}
-              >
-                {exporting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                Exportar Excel
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={handleExportExcel}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              Exportar Excel
+            </Button>
             <Button
               className="gap-2"
               onClick={() => setShowCreateProcess(true)}

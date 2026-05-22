@@ -2594,7 +2594,7 @@ async def mark_process_indexed(
     
     # Atualizar para is_indexed=true
     now = datetime.now(timezone.utc).isoformat()
-    await db.processes.update_one(
+    result = await db.processes.update_one(
         {"id": process_id},
         {"$set": {
             "is_indexed": True,
@@ -2604,6 +2604,16 @@ async def mark_process_indexed(
             "updated_at": now,
         }}
     )
+    
+    # Verificar se a atualização foi persistida
+    if result.matched_count == 0:
+        logger.error(f"[INDEXACAO] update_one matched 0 documents para processo {process_id}")
+        raise HTTPException(
+            status_code=404,
+            detail="Processo não encontrado durante atualização. A indexação pode não ter sido persistida."
+        )
+    if result.modified_count == 0 and not process.get("is_indexed"):
+        logger.warning(f"[INDEXACAO] update_one modified 0 documents para processo {process_id} (já estava indexado?)")
     
     # ── Registar no histórico ──
     try:
