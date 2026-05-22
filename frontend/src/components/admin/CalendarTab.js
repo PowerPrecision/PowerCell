@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Calendar } from "../ui/calendar";
 import { Plus, Trash2, Eye, CalendarDays, Users } from "lucide-react";
 import { hasAnyRole, excludeRoles } from "../../utils/roleUtils";
-import { safeDateStr } from "../../../lib/utils";
+import { safeDateStr } from "../../lib/utils";
 
 const priorityOrder = { high: 1, medium: 2, low: 3 };
 const priorityLabels = { high: "Alta", medium: "Média", low: "Baixa" };
