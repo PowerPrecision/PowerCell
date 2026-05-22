@@ -45,14 +45,10 @@ import {
   XCircle, ClipboardCheck
 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
-import { getClient, updateClient, updateProcess } from '../../services/api';
+import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits } from '../../services/api';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { safeDateStr } from '../../lib/utils';
-
-const API_URL_BASE = typeof window !== 'undefined'
-  ? (window.__ENV__?.REACT_APP_BACKEND_URL || '')
-  : '';
 
 // ── Helpers ────────────────────────────────────────────────────────
 const formatCurrency = (value) => {
@@ -79,7 +75,7 @@ const ProcessDetailsModal = memo(({
   const [activeTab, setActiveTab] = useState('client');
 
   // ── Estado de Visitas ──────────────────────────────────────────
-  const { token, user, effectiveRole } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const [visits, setVisits] = useState([]);
   const [visitsLoading, setVisitsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -409,13 +405,8 @@ const ProcessDetailsModal = memo(({
                   (async () => {
                     setVisitsLoading(true);
                     try {
-                      const res = await fetch(`${API_URL_BASE}/api/visits?process_id=${process.id}`, {
-                        headers: { Authorization: `Bearer ${token}` },
-                      });
-                      if (res.ok) {
-                        const data = await res.json();
-                        setVisits(Array.isArray(data) ? data : []);
-                      }
+                      const res = await getVisits(process.id);
+                      setVisits(Array.isArray(res.data) ? res.data : []);
                     } catch {
                       // silently fail
                     } finally {
@@ -629,23 +620,13 @@ const ProcessDetailsModal = memo(({
                       if (!process?.id) return;
                       setMarkingIndexed(true);
                       try {
-                        const res = await fetch(`${API_URL_BASE}/api/processes/${process.id}/mark-indexed`, {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${token}`,
-                            ...(effectiveRole ? { 'X-Active-Role': effectiveRole } : {}),
-                          },
-                        });
-                        if (!res.ok) {
-                          const err = await res.json().catch(() => ({}));
-                          throw new Error(err.detail || 'Erro ao marcar indexação.');
-                        }
+                        await markProcessIndexed(process.id);
                         toast.success('Indexação marcada como concluída! A equipa foi notificada.');
                         // Atualizar o processo localmente para refletir o estado
                         process.is_indexed = true;
                       } catch (error) {
-                        toast.error(error.message || 'Erro ao marcar indexação.');
+                        const detail = error.response?.data?.detail || error.message || 'Erro ao marcar indexação.';
+                        toast.error(typeof detail === 'string' ? detail : 'Erro ao marcar indexação.');
                       } finally {
                         setMarkingIndexed(false);
                       }
