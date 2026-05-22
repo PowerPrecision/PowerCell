@@ -66,6 +66,7 @@ const ProcessDetailsModal = memo(({
   process,
   isLockedByOther = false,
   lockedBy,
+  onProcessUpdate,
 }) => {
   const navigate = useNavigate();
 
@@ -620,10 +621,18 @@ const ProcessDetailsModal = memo(({
                       if (!process?.id) return;
                       setMarkingIndexed(true);
                       try {
-                        await markProcessIndexed(process.id);
+                        const res = await markProcessIndexed(process.id);
+                        if (res.data?.success === false) {
+                          toast.error(res.data?.message || 'Erro ao marcar indexação.');
+                          return;
+                        }
                         toast.success('Indexação marcada como concluída! A equipa foi notificada.');
                         // Atualizar o processo localmente para refletir o estado
                         process.is_indexed = true;
+                        // Notificar o componente pai para atualizar os dados
+                        if (onProcessUpdate) {
+                          onProcessUpdate(process.id, { is_indexed: true });
+                        }
                       } catch (error) {
                         const detail = error.response?.data?.detail || error.message || 'Erro ao marcar indexação.';
                         toast.error(typeof detail === 'string' ? detail : 'Erro ao marcar indexação.');

@@ -36,9 +36,8 @@ import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeDateStr } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
+import { getExportPermission } from "../services/api";
 import { hasAnyRole } from "../utils/roleUtils";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -104,14 +103,8 @@ const MyClientsPage = () => {
 
   const checkExportPermission = async () => {
     try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(`${API_URL}/system-config/public/export-permission`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAllowExcelExport(data.allow_excel_export !== false);
-      }
+      const res = await getExportPermission();
+      setAllowExcelExport(res.data.allow_excel_export !== false);
     } catch {
       // Em caso de erro, manter default (true)
     }

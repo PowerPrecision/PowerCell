@@ -77,8 +77,9 @@ import { TableSkeleton, StatsCardSkeleton } from "../components/ui/skeletons";
 import SmartClientSearch from "../components/SmartClientSearch";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import CreateProcessModal from "../components/CreateProcessModal";
+import { getExportPermission } from "../services/api";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+const API_URL = (process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com") + "/api";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -204,7 +205,7 @@ export default function ClientsPage() {
       // Hide deleted clients by default
       if (!showDeleted) params.append("exclude_deleted", "true");
 
-      const response = await fetch(`${API_URL}/api/clients?${params}`, {
+      const response = await fetch(`${API_URL}/clients?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -229,14 +230,8 @@ export default function ClientsPage() {
   useEffect(() => {
     const checkExportPermission = async () => {
       try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(`${API_URL}/system-config/public/export-permission`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setAllowExcelExport(data.allow_excel_export !== false);
-        }
+        const res = await getExportPermission();
+        setAllowExcelExport(res.data.allow_excel_export !== false);
       } catch {
         // Em caso de erro, manter default (true)
       }
@@ -352,7 +347,7 @@ export default function ClientsPage() {
       if (newClient.telefone?.trim()) payload.telefone = newClient.telefone.trim();
       if (nifClean) payload.nif = nifClean;
       
-      const response = await fetch(`${API_URL}/api/clients`, {
+      const response = await fetch(`${API_URL}/clients`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -383,7 +378,7 @@ export default function ClientsPage() {
 
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/clients/${clientId}`, {
+      const response = await fetch(`${API_URL}/clients/${clientId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });

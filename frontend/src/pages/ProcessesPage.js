@@ -21,7 +21,7 @@ import {
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
   User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
-  Flame, X, ClipboardCheck, CheckCircle2
+  Flame, X, ClipboardCheck, CheckCircle2, Download
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses, markProcessIndexed } from "../services/api";
@@ -102,11 +102,94 @@ const ProcessesPage = () => {
   );
   // Estado para tracking de mark-indexed em cada processo
   const [markingProcessIds, setMarkingProcessIds] = useState(new Set());
+  const [exporting, setExporting] = useState(false);
 
   const canMarkIndexed = useMemo(() => {
     const role = user?.role?.toLowerCase();
     return role === 'indexacao' || role === 'admin' || role === 'ceo';
   }, [user?.role]);
+
+  const handleExportExcel = useCallback(async () => {
+    setExporting(true);
+    try {
+      const XLSX = await import('xlsx');
+      // Buscar TODOS os processos (sem paginação) com os filtros atuais
+      const response = await getProcesses({
+        page: 1,
+        size: 9999,
+        search: searchTerm || undefined,
+        view_mode: showCompleted ? 'all' : 'active_only',
+        sort_field: sortField,
+        sort_order: sortOrder,
+        ...(isGlobalView ? { show_all: true } : {}),
+      });
+
+      const procs = response.data.items || response.data;
+      let exportData = procs.map(p => ({
+        'Processo': p.process_number || '',
+        'Cliente': p.client_name || '',
+        'NIF': p.client_nif || '',
+        'Telefone': p.client_phone || '',
+        'Email': p.client_email || '',
+        'Tipo de Processo': p.process_type ? String(p.process_type).replace(/_/g, ' ') : '',
+        'Consultores': p.consultor_name || '',
+        'Intermediários': p.mediador_name || '',
+        'Indexação': p.indexacao_name || '',
+        'Parceiro': p.parceiro_name || '',
+        'Fase': (p.status || '').replace(/_/g, ' '),
+        'Valor Imóvel': p.real_estate_data?.valor_imovel || p.property_value || '',
+        'Morada do Imóvel': p.real_estate_data?.morada_imovel || p.real_estate_data?.morada || p.property_address || '',
+        'Link Imóvel': p.real_estate_data?.link_imovel || '',
+        'Notas/Descrição': p.description || '',
+        'Prioridade': p.prioridade || p.priority || '',
+        'Data de Criação': p.created_at || '',
+        'Indexado': p.is_indexed ? 'Sim' : 'Não',
+      }));
+
+      // Aplicar filtro de indexação no lado do cliente
+      if (indexStatusFilter === 'completed') {
+        exportData = exportData.filter(p => p['Indexado'] === 'Sim');
+      } else if (indexStatusFilter === 'pending') {
+        exportData = exportData.filter(p => p['Indexado'] === 'Não');
+      }
+
+      if (exportData.length === 0) {
+        toast.error('Nenhum processo para exportar com os filtros selecionados');
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws['!cols'] = [
+        { wch: 10 }, // Processo
+        { wch: 25 }, // Cliente
+        { wch: 12 }, // NIF
+        { wch: 15 }, // Telefone
+        { wch: 25 }, // Email
+        { wch: 18 }, // Tipo de Processo
+        { wch: 25 }, // Consultores
+        { wch: 25 }, // Intermediários
+        { wch: 20 }, // Indexação
+        { wch: 20 }, // Parceiro
+        { wch: 18 }, // Fase
+        { wch: 14 }, // Valor Imóvel
+        { wch: 30 }, // Morada do Imóvel
+        { wch: 35 }, // Link Imóvel
+        { wch: 40 }, // Notas/Descrição
+        { wch: 12 }, // Prioridade
+        { wch: 18 }, // Data de Criação
+        { wch: 8 },  // Indexado
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Processos');
+      const filename = `PowerCell_Processos_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+      toast.success(`${exportData.length} processos exportados com sucesso!`);
+    } catch (err) {
+      toast.error('Erro ao exportar Excel');
+    } finally {
+      setExporting(false);
+    }
+  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter]);
 
   const handleMarkIndexed = useCallback(async (e, processId) => {
     e.stopPropagation();
@@ -451,13 +534,28 @@ const ProcessesPage = () => {
                   Total de {pagination.total} processos no sistema
                 </CardDescription>
               </div>
-              <Button
-                className="gap-2"
-                onClick={() => setShowCreateProcess(true)}
-              >
-                <Plus className="h-4 w-4" />
-                Novo Processo
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={handleExportExcel}
+                  disabled={exporting}
+                >
+                  {exporting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  Exportar Excel
+                </Button>
+                <Button
+                  className="gap-2"
+                  onClick={() => setShowCreateProcess(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Novo Processo
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>

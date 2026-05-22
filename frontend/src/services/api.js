@@ -447,6 +447,10 @@ export const markProcessIndexed = (processId) =>
 // Visits
 export const getVisits = (processId) => api.get("/visits", { params: { process_id: processId } });
 
+// Excel Export Permission
+export const getExportPermission = (companyId = "default") =>
+  api.get("/system-config/public/export-permission", { params: { company_id: companyId } });
+
 // Deadlines
 export const getDeadlines = (processId) => 
   api.get("/deadlines", { params: { process_id: processId } });
