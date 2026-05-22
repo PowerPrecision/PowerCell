@@ -35,6 +35,10 @@ import * as XLSX from 'xlsx';
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeDateStr } from "../lib/utils";
+import { useAuth } from "../contexts/AuthContext";
+import { hasAnyRole } from "../utils/roleUtils";
+
+const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -56,12 +60,17 @@ const getContrastColor = (bgColor) => {
 };
 
 const MyClientsPage = () => {
+  const { user } = useAuth();
   const [clients, setClients] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [allowExcelExport, setAllowExcelExport] = useState(true);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  
+  // Admin/CEO sempre podem exportar
+  const canExportExcel = allowExcelExport || hasAnyRole(user, ['admin', 'ceo']);
   
   // Sync filters with URL
   const searchTerm = searchParams.get("search") || "";
@@ -90,7 +99,23 @@ const MyClientsPage = () => {
 
   useEffect(() => {
     fetchData();
+    checkExportPermission();
   }, []);
+
+  const checkExportPermission = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_URL}/system-config/public/export-permission`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAllowExcelExport(data.allow_excel_export !== false);
+      }
+    } catch {
+      // Em caso de erro, manter default (true)
+    }
+  };
 
   const handleCreateSuccess = useCallback(() => {
     setShowCreateModal(false);
@@ -281,16 +306,18 @@ const MyClientsPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportExcel}
-              className="gap-2"
-              disabled={filteredClients.length === 0}
-            >
-              <Download className="h-4 w-4" />
-              Exportar Excel
-            </Button>
+            {canExportExcel && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportExcel}
+                className="gap-2"
+                disabled={filteredClients.length === 0}
+              >
+                <Download className="h-4 w-4" />
+                Exportar Excel
+              </Button>
+            )}
             <Button
               onClick={() => setShowCreateModal(true)}
               className="gap-2"

@@ -30,6 +30,10 @@ const KanbanPage = () => {
   const [users, setUsers] = useState([]);
   const [showCreateProcess, setShowCreateProcess] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [allowExcelExport, setAllowExcelExport] = useState(true);
+
+  // Admin/CEO sempre podem exportar, independentemente da config
+  const canExportExcel = allowExcelExport || hasRole(user, 'admin') || hasRole(user, 'ceo');
 
   // Ler filtros da URL
   const consultorFilter = searchParams.get("consultor") || "all";
@@ -47,7 +51,22 @@ const KanbanPage = () => {
 
   useEffect(() => {
     fetchUsers();
+    checkExportPermission();
   }, []);
+
+  const checkExportPermission = async () => {
+    try {
+      const res = await fetch(`${API_URL}/system-config/public/export-permission`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAllowExcelExport(data.allow_excel_export !== false);
+      }
+    } catch {
+      // Em caso de erro, manter default (true)
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -185,19 +204,21 @@ const KanbanPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={handleExportExcel}
-              disabled={exporting}
-            >
-              {exporting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4" />
-              )}
-              Exportar Excel
-            </Button>
+            {canExportExcel && (
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={handleExportExcel}
+                disabled={exporting}
+              >
+                {exporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Exportar Excel
+              </Button>
+            )}
             <Button
               className="gap-2"
               onClick={() => setShowCreateProcess(true)}

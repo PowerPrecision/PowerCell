@@ -118,6 +118,10 @@ export default function ClientsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [allowExcelExport, setAllowExcelExport] = useState(true);
+  
+  // Admin/CEO sempre podem exportar
+  const canExportExcel = allowExcelExport || hasAnyRole(user, ['admin', 'ceo']);
   
   // Sync filters with URL search params
   const searchTerm = searchParams.get("search") || "";
@@ -220,6 +224,25 @@ export default function ClientsPage() {
   useEffect(() => {
     fetchClients();
   }, [fetchClients]);
+
+  // Verificar permissão de exportação para Excel
+  useEffect(() => {
+    const checkExportPermission = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${API_URL}/system-config/public/export-permission`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAllowExcelExport(data.allow_excel_export !== false);
+        }
+      } catch {
+        // Em caso de erro, manter default (true)
+      }
+    };
+    checkExportPermission();
+  }, []);
 
   // Aplicar filtros e ordenação (useMemo — reativo e sem render extra)
   const filteredClients = useMemo(() => {
@@ -463,16 +486,18 @@ export default function ClientsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportExcel}
-              className="gap-2"
-              disabled={filteredClients.length === 0}
-            >
-              <Download className="h-4 w-4" />
-              Exportar Excel
-            </Button>
+            {canExportExcel && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportExcel}
+                className="gap-2"
+                disabled={filteredClients.length === 0}
+              >
+                <Download className="h-4 w-4" />
+                Exportar Excel
+              </Button>
+            )}
             {canCreateClients && (
               <Button
                 onClick={() => setShowCreateDialog(true)}
