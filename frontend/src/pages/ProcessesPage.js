@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -21,7 +21,7 @@ import {
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
   User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
-  Flame, X
+  Flame, X, ClipboardCheck, CheckCircle2
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses } from "../services/api";
@@ -29,6 +29,7 @@ import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
 import { useAuth } from "../contexts/AuthContext";
 import { safeString } from "../utils/safeString";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 
 const roleLabels = {
   consultor: "Consultor",
@@ -44,7 +45,7 @@ const ProcessesPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, effectiveRole } = useAuth();
+  const { user, token, effectiveRole } = useAuth();
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
   
@@ -94,6 +95,52 @@ const ProcessesPage = () => {
   const [sortOrder, setSortOrder] = useState(searchParams.get("order") || "desc");
   const [sortedProcesses, setSortedProcesses] = useState([]);
   const [showCreateProcess, setShowCreateProcess] = useState(false);
+
+  // Filtro de estado de indexação — 'pending' por omissão para role indexacao
+  const [indexStatusFilter, setIndexStatusFilter] = useState(
+    user?.role?.toLowerCase() === 'indexacao' ? 'pending' : 'all'
+  );
+  // Estado para tracking de mark-indexed em cada processo
+  const [markingProcessIds, setMarkingProcessIds] = useState(new Set());
+
+  const canMarkIndexed = useMemo(() => {
+    const role = user?.role?.toLowerCase();
+    return role === 'indexacao' || role === 'admin' || role === 'ceo';
+  }, [user?.role]);
+
+  const handleMarkIndexed = useCallback(async (e, processId) => {
+    e.stopPropagation();
+    if (!processId || markingProcessIds.has(processId)) return;
+    setMarkingProcessIds(prev => new Set(prev).add(processId));
+    try {
+      const API_URL_BASE = typeof window !== 'undefined'
+        ? (window.__ENV__?.REACT_APP_BACKEND_URL || '')
+        : '';
+      const res = await fetch(`${API_URL_BASE}/api/processes/${processId}/mark-indexed`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          ...(user?.role ? { 'X-Active-Role': user.role.toLowerCase() } : {}),
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Erro ao marcar indexação.');
+      }
+      toast.success('Indexação concluída! A equipa foi notificada.');
+      // Atualizar localmente o processo
+      setProcesses(prev => prev.map(p => p.id === processId ? { ...p, is_indexed: true } : p));
+    } catch (error) {
+      toast.error(error.message || 'Erro ao marcar indexação.');
+    } finally {
+      setMarkingProcessIds(prev => {
+        const next = new Set(prev);
+        next.delete(processId);
+        return next;
+      });
+    }
+  }, [markingProcessIds, token, user?.role]);
 
   const toggleSort = (field) => {
     if (sortField === field) {
@@ -246,18 +293,24 @@ const ProcessesPage = () => {
     return 0;
   }, [hasUrgentTag]);
 
-  // Sorting: prioridade alta + tags urgentes SEMPRE no topo, depois pelo campo seleccionado
+  // Filtro de indexação + Sorting
   useEffect(() => {
-    const sorted = [...processes].sort((a, b) => {
-      // 1ª chave: prioridade (descendente — alta primeiro)
+    // Aplicar filtro de estado de indexação
+    let filtered = [...processes];
+    if (indexStatusFilter === 'completed') {
+      filtered = filtered.filter(p => p.is_indexed);
+    } else if (indexStatusFilter === 'pending') {
+      filtered = filtered.filter(p => !p.is_indexed);
+    }
+    // Sorting: prioridade alta + tags urgentes SEMPRE no topo, depois pelo campo seleccionado
+    const sorted = filtered.sort((a, b) => {
       const pa = getPriorityWeight(a);
       const pb = getPriorityWeight(b);
       if (pa !== pb) return pb - pa;
-      // 2ª chave: manter ordem original do backend (created_at desc)
       return 0;
     });
     setSortedProcesses(sorted);
-  }, [processes, getPriorityWeight]);
+  }, [processes, getPriorityWeight, indexStatusFilter]);
 
   // Re-fetch when filters, sort, view mode, role filter, or search term changes
   useEffect(() => {
@@ -458,6 +511,23 @@ const ProcessesPage = () => {
                 </div>
               </div>
 
+              {/* Filtro de Estado de Indexação */}
+              {canMarkIndexed && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+                  <ClipboardCheck className="h-4 w-4 text-emerald-600" />
+                  <Select value={indexStatusFilter} onValueChange={setIndexStatusFilter}>
+                    <SelectTrigger className="h-8 w-[180px] border-emerald-200 dark:border-emerald-800">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="pending">Pendentes (por indexar)</SelectItem>
+                      <SelectItem value="completed">Concluídos (indexados)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {/* Toggle de Context Isolation — filtrar por cargo ativo */}
               {hasMultipleRoles && !isGlobalView && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg">
@@ -647,16 +717,38 @@ const ProcessesPage = () => {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button 
-                              variant="ghost" 
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate(`/process/${process.id}`);
-                              }}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              {canMarkIndexed && !process.is_indexed && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                  onClick={(e) => handleMarkIndexed(e, process.id)}
+                                  disabled={markingProcessIds.has(process.id)}
+                                  title="Marcar indexação como concluída"
+                                >
+                                  {markingProcessIds.has(process.id)
+                                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                                    : <ClipboardCheck className="h-4 w-4" />
+                                  }
+                                </Button>
+                              )}
+                              {process.is_indexed && (
+                                <span className="text-[9px] bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 px-2 py-0.5 rounded-full font-medium whitespace-nowrap border border-emerald-200 dark:border-emerald-800 flex items-center gap-0.5" title="Indexação concluída">
+                                  <CheckCircle2 className="h-3 w-3" /> Indexado
+                                </span>
+                              )}
+                              <Button 
+                                variant="ghost" 
+                                size="icon"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/process/${process.id}`);
+                                }}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
