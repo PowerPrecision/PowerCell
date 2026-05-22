@@ -15,7 +15,7 @@ import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Loader2, LayoutGrid, Plus, Download } from "lucide-react";
-import { getUsers } from "../services/api";
+import { getUsers, getExportPermission } from "../services/api";
 import { toast } from "sonner";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { filterByAnyRole, filterByRole, hasRole } from "../utils/roleUtils";
@@ -56,13 +56,8 @@ const KanbanPage = () => {
 
   const checkExportPermission = async () => {
     try {
-      const res = await fetch(`${API_URL}/system-config/public/export-permission`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAllowExcelExport(data.allow_excel_export !== false);
-      }
+      const res = await getExportPermission();
+      setAllowExcelExport(res.data.allow_excel_export !== false);
     } catch {
       // Em caso de erro, manter default (true)
     }
