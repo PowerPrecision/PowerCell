@@ -1796,12 +1796,14 @@ async def get_kanban_board(
         "client_name": 1,
         "client_email": 1,
         "client_phone": 1,
+        "client_nif": 1,
         "status": 1,
         "priority": 1,
         "prioridade": 1,
         "under_35": 1,
         "process_type": 1,
         "property_value": 1,
+        "is_indexed": 1,
         "assigned_consultor_id": 1,
         "assigned_consultor_ids": 1,
         "assigned_mediador_id": 1,
@@ -1822,7 +1824,7 @@ async def get_kanban_board(
     # A projeção exclui personal_data, financial_data, etc. mas inclui client_phone
     processes = decrypt_processes_list(
         processes, 
-        fields_to_decrypt=["client_phone"]
+        fields_to_decrypt=["client_phone", "client_nif"]
     )
 
     # ====================================================================
@@ -1840,7 +1842,7 @@ async def get_kanban_board(
     if client_ids_to_fetch:
         client_docs = await db.clients.find(
             {"id": {"$in": list(client_ids_to_fetch)}},
-            {"_id": 0, "id": 1, "nome": 1, "contacto": 1}
+            {"_id": 0, "id": 1, "nome": 1, "contacto": 1, "dados_pessoais": 1}
         ).to_list(len(client_ids_to_fetch))
         # Desencriptar dados dos clientes
         try:
@@ -1850,10 +1852,12 @@ async def get_kanban_board(
             pass  # Se não houver encriptação, dados já estão legíveis
         for c in client_docs:
             contacto = c.get("contacto") or {}
+            dados_pessoais = c.get("dados_pessoais") or {}
             client_map[c["id"]] = {
                 "nome": c.get("nome", ""),
                 "email": contacto.get("email", ""),
                 "telefone": contacto.get("telefone", ""),
+                "nif": dados_pessoais.get("nif", c.get("nif", "")),
             }
 
     # Preencher campos em falta com setdefault (não sobrescreve valores existentes)
@@ -1864,6 +1868,7 @@ async def get_kanban_board(
             p.setdefault("client_name", cinfo["nome"])
             p.setdefault("client_email", cinfo["email"])
             p.setdefault("client_phone", cinfo["telefone"])
+            p.setdefault("client_nif", cinfo["nif"])
 
     # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
@@ -1906,17 +1911,34 @@ async def get_kanban_board(
         # Enrich with user names and assignment info
         enriched_processes = []
         for p in status_processes:
-            consultor = user_map.get(p.get("assigned_consultor_id"), {})
-            mediador = user_map.get(p.get("assigned_mediador_id"), {})
+            # === Múltiplos Consultores ===
+            consultor_ids = p.get("assigned_consultor_ids") or []
+            if p.get("assigned_consultor_id") and p["assigned_consultor_id"] not in consultor_ids:
+                consultor_ids.append(p["assigned_consultor_id"])
+            consultor_names = [user_map.get(cid, {}).get("name", "") for cid in consultor_ids if user_map.get(cid)]
+            
+            # === Múltiplos Mediadores ===
+            mediador_ids = p.get("assigned_mediador_ids") or []
+            if p.get("assigned_mediador_id") and p["assigned_mediador_id"] not in mediador_ids:
+                mediador_ids.append(p["assigned_mediador_id"])
+            mediador_names = [user_map.get(mid, {}).get("name", "") for mid in mediador_ids if user_map.get(mid)]
+            
+            # === Indexação ===
+            indexacao_name = user_map.get(p.get("assigned_indexacao_id"), {}).get("name", "")
+            
+            # === Parceiro ===
+            parceiro_name = user_map.get(p.get("assigned_parceiro_id"), {}).get("name", "")
             
             # Verificar se o utilizador actual está atribuído
-            is_my_consultor = p.get("assigned_consultor_id") == user_id
-            is_my_mediador = p.get("assigned_mediador_id") == user_id
+            is_my_consultor = p.get("assigned_consultor_id") == user_id or user_id in (p.get("assigned_consultor_ids") or [])
+            is_my_mediador = p.get("assigned_mediador_id") == user_id or user_id in (p.get("assigned_mediador_ids") or [])
             
             enriched_processes.append({
                 **p,
-                "consultor_name": consultor.get("name", ""),
-                "mediador_name": mediador.get("name", ""),
+                "consultor_name": ", ".join(consultor_names) if consultor_names else "",
+                "mediador_name": ", ".join(mediador_names) if mediador_names else "",
+                "indexacao_name": indexacao_name,
+                "parceiro_name": parceiro_name,
                 "is_assigned_to_me": is_my_consultor or is_my_mediador,
                 "my_role_in_process": "consultor" if is_my_consultor else ("intermediario" if is_my_mediador else None)
             })
