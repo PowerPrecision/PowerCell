@@ -13,7 +13,7 @@ import { Megaphone, Send, Loader2, MessageSquare, AlertCircle } from "lucide-rea
 import { isToday, isYesterday, format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { toast } from "sonner";
-import { safeDateStr } from "../../lib/utils";
+import { safeDateStr } from "../lib/utils";
 
 // ── Helper Functions ──────────────────────────────────────────────
 
