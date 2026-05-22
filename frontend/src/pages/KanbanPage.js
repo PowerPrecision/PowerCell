@@ -72,9 +72,12 @@ const KanbanPage = () => {
         (col.processes || col.items || []).map(p => ({
           'Processo': p.process_number || '',
           'Cliente': p.client_name || '',
+          'NIF': p.client_nif || p.personal_data?.nif || '',
+          'Telefone': p.client_phone || p.contacto?.telefone || '',
+          'Consultor Responsável': p.consultor_name || p.assigned_consultor_name || '',
           'Fase': (p.status || '').replace(/_/g, ' '),
           'Valor': p.real_estate_data?.valor_imovel || p.property_value || '',
-          'Consultor': p.consultor_name || p.assigned_consultor_name || '',
+          'Indexado': p.is_indexed ? 'Sim' : 'Não',
         }))
       );
       if (allProcesses.length === 0) {

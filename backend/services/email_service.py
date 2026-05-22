@@ -183,10 +183,16 @@ def get_email_body_with_embedded_images(msg) -> tuple:
     Extrair corpo do email (texto e HTML) com suporte a imagens embutidas (cid:).
     Converte referências cid: para data URLs base64.
     
+    Otimização de memória: imagens embutidas > 500KB NÃO são convertidas para
+    base64 — são substituídas por um placeholder no HTML. Isto previne que o
+    body_html injetado exceda limites da Base de Dados e da RAM (OOM).
+    
     Returns:
         tuple: (body_text, body_html, embedded_images_dict)
     """
     import base64
+    
+    MAX_EMBEDDED_IMAGE_SIZE = 512 * 1024  # 500 KB — limite para conversão base64
     
     body_text = ""
     body_html = ""
@@ -205,7 +211,23 @@ def get_email_body_with_embedded_images(msg) -> tuple:
                     if payload:
                         # Remover < > do Content-ID
                         cid = content_id.strip("<>")
-                        # Converter para base64
+                        
+                        # === GUARDA DE SEGURANÇA: Bloquear Base64 Gigante ===
+                        # Se o payload exceder 500KB, NÃO converter para base64.
+                        # Guardar apenas um placeholder para evitar OOM e limites de BD.
+                        if len(payload) > MAX_EMBEDDED_IMAGE_SIZE:
+                            logger.warning(
+                                f"Imagem embutida '{cid}' excede limite de "
+                                f"{MAX_EMBEDDED_IMAGE_SIZE // 1024}KB "
+                                f"({len(payload) // 1024}KB) — substituída por placeholder"
+                            )
+                            embedded_images[cid] = (
+                                f"[Imagem embutida demasiado grande: "
+                                f"{len(payload) // 1024}KB — removida para poupar memória]"
+                            )
+                            continue
+                        
+                        # Converter para base64 (tamanho seguro)
                         b64_data = base64.b64encode(payload).decode('utf-8')
                         embedded_images[cid] = f"data:{content_type};base64,{b64_data}"
                 except Exception as e:
@@ -284,7 +306,8 @@ def _fetch_and_parse_email(mail, num):
     Returns:
         tuple: (msg, msg_id) ou (None, None) se falhar
     """
-    fetch_result = mail.fetch(num, "(RFC822)")
+    # BODY.PEEK[]: lê o email SEM marcar como \Seen no servidor IMAP original
+    fetch_result = mail.fetch(num, "(BODY.PEEK[])")
     email_bytes = _extract_email_bytes_from_fetch(fetch_result)
     if not email_bytes:
         return None, None
@@ -878,9 +901,15 @@ def _fetch_all_from_folder_sync(
     Buscar TODOS os emails de uma pasta IMAP (sem filtro de processo).
     Versão síncrona para execução em thread.
     
+    Otimizações de memória:
+    - Pré-verificação RFC822.SIZE: emails > 15MB são saltados (previne OOM)
+    - BODY.PEEK[]: lê sem marcar como \Seen no servidor IMAP original
+    
     Returns:
         Dict with 'emails' (list) and 'connection_error' (str or None).
     """
+    MAX_EMAIL_SIZE = 15 * 1024 * 1024  # 15 MB — limite para prevenir OOM
+    
     emails_found = []
     connection_error = None
     mail = None
@@ -896,7 +925,6 @@ def _fetch_all_from_folder_sync(
         result, data = mail.select(folder)
         if result != 'OK':
             logger.debug(f"[Webmail Sync] Pasta não encontrada: {folder} ({result})")
-            # mail.logout() will be called in finally block
             return {"emails": emails_found, "connection_error": connection_error}
         
         message_numbers = _safe_search_result(mail.search(None, f'(SINCE {since_date})'))
@@ -907,11 +935,33 @@ def _fetch_all_from_folder_sync(
             nums = nums[-max_emails:]
         
         logger.info(f"[Webmail Sync] {len(nums)} emails para processar em {folder}")
-        logger.info(f"[Webmail Sync] Code version: 086c502-fixed")
         
         for num in nums:
             try:
-                fetch_result = mail.fetch(num, "(RFC822)")
+                # === OTIMIZAÇÃO: Pré-verificação de tamanho (RFC822.SIZE) ===
+                # Antes de fazer fetch completo, verificar o tamanho do email.
+                # Isto evita carregar emails gigantes (>15MB) para a RAM.
+                size_result = mail.fetch(num, "(RFC822.SIZE)")
+                if size_result and len(size_result) >= 2 and size_result[1]:
+                    size_data = size_result[1][0]
+                    size_str = size_data[0].decode("utf-8", errors="replace") if isinstance(size_data[0], bytes) else str(size_data[0])
+                    size_match = re.search(r'RFC822\.SIZE\s+(\d+)', size_str)
+                    if size_match:
+                        email_size = int(size_match.group(1))
+                        if email_size > MAX_EMAIL_SIZE:
+                            num_label = num.decode() if isinstance(num, bytes) else str(num)
+                            logger.warning(
+                                f"[Webmail Sync] Email #{num_label} excede limite de "
+                                f"{MAX_EMAIL_SIZE // (1024*1024)}MB "
+                                f"({email_size / (1024*1024):.1f}MB) — a saltar para prevenir OOM"
+                            )
+                            continue
+                
+                # === OTIMIZAÇÃO: BODY.PEEK[] em vez de RFC822 ===
+                # Usa BODY.PEEK[] para ler o email SEM marcar como \Seen
+                # no servidor IMAP original, preservando o estado de leitura
+                # da caixa de correio da conta original.
+                fetch_result = mail.fetch(num, "(BODY.PEEK[])")
                 email_bytes = _extract_email_bytes_from_fetch(fetch_result)
                 if not email_bytes:
                     continue

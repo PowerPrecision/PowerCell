@@ -85,6 +85,7 @@ const ProcessDetailsModal = memo(({
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [markingIndexed, setMarkingIndexed] = useState(false);
+  const [selectedVisit, setSelectedVisit] = useState(null);
 
   // ── Estado editável do Cliente ───────────────────────────────────
   const [editClient, setEditClient] = useState({
@@ -619,8 +620,8 @@ const ProcessDetailsModal = memo(({
                 )}
               </div>
 
-              {/* Botão Marcar Trabalho Concluído — apenas para role indexacao */}
-              {(effectiveRole?.toLowerCase() === 'indexacao' || user?.role?.toLowerCase() === 'indexacao') && !process.is_indexed && (
+              {/* Botão Marcar Trabalho Concluído — para role indexacao E admin */}
+              {(effectiveRole?.toLowerCase() === 'indexacao' || user?.role?.toLowerCase() === 'indexacao' || effectiveRole?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'admin') && !process.is_indexed && (
                 <div className="mt-2">
                   <Button
                     onClick={async () => {
@@ -941,7 +942,7 @@ const ProcessDetailsModal = memo(({
                   const sourceUrl = visit.scraped_url || scraped.url;
 
                   return (
-                    <div key={visit.id} className={`flex items-start gap-3 p-3 rounded-lg border ${st.color} transition-colors`}>
+                    <div key={visit.id} className={`flex items-start gap-3 p-3 rounded-lg border ${st.color} transition-colors cursor-pointer hover:opacity-80`} onClick={() => setSelectedVisit(visit)}>
                       {/* Foto miniatura */}
                       {propPhoto ? (
                         <img src={propPhoto} alt="" className="h-10 w-10 rounded-md object-cover shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
@@ -1045,6 +1046,123 @@ const ProcessDetailsModal = memo(({
           </DialogFooter>
         )}
       </DialogContent>
+
+      {/* ── VisitDetailsModal — Detalhes completos de uma visita ── */}
+      <Dialog open={!!selectedVisit} onOpenChange={(open) => { if (!open) setSelectedVisit(null); }}>
+        <DialogContent className="max-w-md" aria-describedby="visit-detail-description">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarClock className="h-5 w-5 text-violet-600" />
+              Detalhes da Visita
+            </DialogTitle>
+            <DialogDescription id="visit-detail-description" className="sr-only">
+              Detalhes completos da visita selecionada
+            </DialogDescription>
+          </DialogHeader>
+          {selectedVisit && (() => {
+            const sv = selectedVisit;
+            const scraped = sv.scraped_data || {};
+            const propPhoto = sv.property_photo || scraped.photo_url;
+            const propTitle = sv.property_title || scraped.title || 'Imóvel';
+            const propPrice = sv.scraped_price || scraped.price;
+            const propTypology = sv.scraped_typology || scraped.typology;
+            const propLocation = sv.property_address?.municipality || scraped.location || '';
+            const propAddress = sv.property_address?.street || sv.property_address?.address || scraped.address || '';
+            const sourceUrl = sv.scraped_url || scraped.url;
+            const statusConfig = {
+              solicitada: { label: 'Solicitada', color: 'bg-violet-100 text-violet-800' },
+              agendada: { label: 'Agendada', color: 'bg-amber-100 text-amber-800' },
+              concluida: { label: 'Concluída', color: 'bg-emerald-100 text-emerald-800' },
+              cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
+              recusada: { label: 'Recusada', color: 'bg-red-100 text-red-800' },
+            };
+            const st = statusConfig[sv.status] || statusConfig.agendada;
+
+            return (
+              <div className="space-y-4">
+                {/* Foto do Imóvel */}
+                {propPhoto && (
+                  <div className="rounded-lg overflow-hidden border">
+                    <img src={propPhoto} alt={propTitle} className="w-full h-40 object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                  </div>
+                )}
+
+                {/* Título e Status */}
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="font-semibold text-base">{propTitle}</h3>
+                  <Badge className={`text-[10px] px-2 py-0.5 ${st.color} shrink-0`}>{st.label}</Badge>
+                </div>
+
+                {/* Dados detalhados */}
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  {propPrice && (
+                    <div>
+                      <p className="text-muted-foreground text-xs">Preço</p>
+                      <p className="font-semibold text-amber-700 flex items-center gap-1">
+                        <Euro className="h-3.5 w-3.5" />
+                        {typeof propPrice === 'number' ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(propPrice) : String(propPrice)}
+                      </p>
+                    </div>
+                  )}
+                  {propTypology && (
+                    <div>
+                      <p className="text-muted-foreground text-xs">Tipologia</p>
+                      <p className="font-medium flex items-center gap-1"><Home className="h-3.5 w-3.5" />{propTypology}</p>
+                    </div>
+                  )}
+                  {propLocation && (
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground text-xs">Localização</p>
+                      <p className="font-medium flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{propLocation}</p>
+                    </div>
+                  )}
+                  {propAddress && (
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground text-xs">Morada</p>
+                      <p className="font-medium">{propAddress}</p>
+                    </div>
+                  )}
+                  {sourceUrl && (
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground text-xs">URL do Imóvel</p>
+                      <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:text-teal-800 hover:underline inline-flex items-center gap-1 text-sm break-all" onClick={(e) => e.stopPropagation()}>
+                        <ExternalLink className="h-3 w-3 shrink-0" />{sourceUrl.length > 60 ? sourceUrl.substring(0, 60) + '...' : sourceUrl}
+                      </a>
+                    </div>
+                  )}
+                  {sv.consultor_name && (
+                    <div>
+                      <p className="text-muted-foreground text-xs">Consultor</p>
+                      <p className="font-medium flex items-center gap-1"><Users className="h-3.5 w-3.5" />{sv.consultor_name}</p>
+                    </div>
+                  )}
+                  {sv.scheduled_date && (
+                    <div>
+                      <p className="text-muted-foreground text-xs">Data Agendada</p>
+                      <p className="font-medium flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{new Date(sv.scheduled_date).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                    </div>
+                  )}
+                  {sv.source === 'portal_client' && (
+                    <div className="col-span-2">
+                      <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">Pedido pelo Cliente via Portal</Badge>
+                    </div>
+                  )}
+                </div>
+
+                {/* Comentários / Notas */}
+                {sv.notes && (
+                  <div>
+                    <p className="text-muted-foreground text-xs mb-1">Comentários</p>
+                    <p className="text-sm bg-gray-50 dark:bg-gray-900/30 rounded-lg p-3 whitespace-pre-wrap">{sv.notes}</p>
+                  </div>
+                )}
+
+                <Button variant="outline" className="w-full" onClick={() => setSelectedVisit(null)}>Fechar</Button>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 });

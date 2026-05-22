@@ -540,3 +540,25 @@ Stage Summary:
   - a3f9287: fix WebSocket TypeError (join_room/leave_room são sync, não async)
   - 65d2d5f: fix OOM safety cap + status_label nos Meus Clientes
 - Render fará auto-deploy a partir do main branch
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Afinar infraestrutura, permissões e UI na branch dev — 4 bugs reportados
+
+Work Log:
+- Verificou endpoint POST /fetch-financas: JÁ implementado com BackgroundTasks (linhas 1165-1247 de portal.py)
+- Verificou endpoint POST /fetch-seguranca-social: JÁ implementado com BackgroundTasks (linhas 1250-1332 de portal.py)
+- Verificou CORS middleware: Cobertura global já existe (CORSMiddleware em server.py, auto-adds www/non-www variants)
+- Verificou ClientPortal.jsx: Refresh da lista de visitas já forçado após submissão (linhas 1864-1870)
+- Verificou ProcessDetailsModal.jsx: Visitas já são clicáveis (linha 945) + VisitDetailsModal já implementado (linhas 1050-1165)
+- Verificou botão "Marcar Trabalho Concluído": Já visível para indexacao E admin (linha 624)
+- Verificou KanbanPage.js Excel export: Já tem NIF, Telefone, Consultor Responsável, Indexado (linhas 72-81)
+- ALTERAÇÃO REALIZADA: Adicionado "Quadro Geral" (href="/kanban") ao menu da role indexacao no DashboardLayout.js (linha 398)
+- Atualizado CHANGELOG.md com entrada [2026-03-11]
+- Commit e push para origin/dev pendente
+
+Stage Summary:
+- Apenas 1 alteração de código necessária: "Quadro Geral" no menu do indexacao
+- Todos os outros bugs reportados já estavam resolvidos em sessões anteriores
+- Ficheiros alterados: frontend/src/layouts/DashboardLayout.js, CHANGELOG.md
