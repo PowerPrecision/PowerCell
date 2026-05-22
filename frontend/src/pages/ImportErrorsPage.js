@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../services/api";
+import { safeDateStr } from "../lib/utils";
 
 const ImportErrorsPage = () => {
   const [errors, setErrors] = useState([]);
@@ -141,7 +142,7 @@ const ImportErrorsPage = () => {
   const exportToCSV = useCallback(() => {
     const headers = ["Data", "Pasta", "Ficheiro", "Tipo Erro", "Mensagem", "Resolvido"];
     const rows = errors.map(e => [
-      new Date(e.created_at).toLocaleString("pt-PT"),
+      new Date(safeDateStr(e.created_at)).toLocaleString("pt-PT"),
       e.folder_name || "",
       e.filename || "",
       e.error_type || "",
@@ -336,7 +337,7 @@ const ImportErrorsPage = () => {
                   {filteredErrors.slice(0, 100).map((error, index) => (
                     <TableRow key={error.id || index} className={error.resolved ? "opacity-50" : ""}>
                       <TableCell className="text-sm text-muted-foreground">
-                        {new Date(error.created_at).toLocaleString("pt-PT", {
+                        {new Date(safeDateStr(error.created_at)).toLocaleString("pt-PT", {
                           day: "2-digit",
                           month: "2-digit",
                           hour: "2-digit",

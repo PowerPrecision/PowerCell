@@ -178,6 +178,7 @@ class SystemSettings(BaseModel):
     language: str = "pt-PT"
     currency: str = "EUR"
     date_format: str = "dd/MM/yyyy"
+    allow_excel_export: bool = True
 
 
 class DocumentRecipientsConfig(BaseModel):

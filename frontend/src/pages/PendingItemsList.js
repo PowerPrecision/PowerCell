@@ -18,6 +18,7 @@ import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
 import { getMyTasks, completeTask, getMyDeadlines } from "../services/api";
+import { safeDateStr } from "../lib/utils";
 
 const PendingItemsList = () => {
   const navigate = useNavigate();
@@ -78,7 +79,7 @@ const PendingItemsList = () => {
       let dueDate = null;
       
       if (task.due_date) {
-        dueDate = parseISO(task.due_date);
+        dueDate = parseISO(safeDateStr(task.due_date));
         const days = task.days_until_due;
         if (days < 0) urgency = 0; // Atrasada
         else if (days === 0) urgency = 1; // Hoje
@@ -112,7 +113,7 @@ const PendingItemsList = () => {
       let isOverdue = false;
       
       if (deadline.date) {
-        dueDate = parseISO(deadline.date);
+        dueDate = parseISO(safeDateStr(deadline.date));
         const now = new Date();
         daysUntilDue = differenceInDays(dueDate, now);
         isOverdue = daysUntilDue < 0;

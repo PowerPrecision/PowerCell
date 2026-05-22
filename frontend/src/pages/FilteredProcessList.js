@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../services/api";
+import { safeDateStr } from "../lib/utils";
 import { safeString } from "../utils/safeString";
 
 const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
@@ -90,7 +91,7 @@ const filterConfig = {
     bgColor: "bg-red-50",
     filter: (p) => {
       if (p.status !== "clientes_espera") return false;
-      const created = new Date(p.created_at);
+      const created = new Date(safeDateStr(p.created_at));
       const now = new Date();
       const days = Math.floor((now - created) / (1000 * 60 * 60 * 24));
       return days >= 15;
@@ -144,7 +145,7 @@ const FilteredProcessList = () => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const upcomingDeadlines = deadlines.filter(d => {
-        const deadlineDate = new Date(d.due_date);
+        const deadlineDate = new Date(safeDateStr(d.due_date));
         const daysUntil = Math.ceil((deadlineDate - today) / (1000 * 60 * 60 * 24));
         return daysUntil <= 7; // Próximos 7 dias ou vencidos
       });
@@ -202,7 +203,7 @@ const FilteredProcessList = () => {
     const upcoming = processDeadlines
       .map(d => ({
         ...d,
-        daysUntil: Math.ceil((new Date(d.due_date) - today) / (1000 * 60 * 60 * 24))
+        daysUntil: Math.ceil((new Date(safeDateStr(d.due_date)) - today) / (1000 * 60 * 60 * 24))
       }))
       .filter(d => d.daysUntil <= 7)
       .sort((a, b) => a.daysUntil - b.daysUntil);
@@ -349,7 +350,7 @@ const FilteredProcessList = () => {
                               {deadlineInfo.daysUntil <= 0 ? "Vencido" : `${deadlineInfo.daysUntil}d`}
                             </Badge>
                           )}
-                          <span>{process.created_at ? format(parseISO(process.created_at), "dd/MM/yy", { locale: pt }) : "-"}</span>
+                          <span>{process.created_at ? format(parseISO(safeDateStr(process.created_at)), "dd/MM/yy", { locale: pt }) : "-"}</span>
                         </div>
                       </div>
                     </div>
@@ -458,7 +459,7 @@ const FilteredProcessList = () => {
                           )}
                           <TableCell className="text-sm text-muted-foreground">
                             {process.created_at 
-                              ? format(parseISO(process.created_at), "dd/MM/yyyy", { locale: pt })
+                              ? format(parseISO(safeDateStr(process.created_at)), "dd/MM/yyyy", { locale: pt })
                               : "-"
                             }
                           </TableCell>

@@ -45,6 +45,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+import { safeDateStr } from '../lib/utils';
 
 // ====================================================================
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
@@ -749,7 +750,7 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
                   <p className="text-sm text-gray-700 truncate font-medium">{typeof doc.filename === 'string' ? doc.filename : String(doc.filename || '')}</p>
                   <p className="text-xs text-gray-400">
                     {typeof (doc.category_label || doc.category) === 'string' ? (doc.category_label || doc.category) : String(doc.category_label || doc.category || '')}
-                    {doc.uploaded_at && ` · ${new Date(doc.uploaded_at).toLocaleDateString('pt-PT')}`}
+                    {doc.uploaded_at && ` · ${new Date(safeDateStr(doc.uploaded_at)).toLocaleDateString('pt-PT')}`}
                   </p>
                 </div>
                 <Check className="w-4 h-4 text-emerald-500 flex-shrink-0" />
@@ -789,7 +790,7 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
                   <p className="text-sm text-gray-700 truncate font-medium">{typeof doc.filename === 'string' ? doc.filename : String(doc.filename || '')}</p>
                   <p className="text-xs text-gray-400">
                     {typeof (doc.category_label || doc.category) === 'string' ? (doc.category_label || doc.category) : String(doc.category_label || doc.category || '')}
-                    {doc.received_at && ` · ${new Date(doc.received_at).toLocaleDateString('pt-PT')}`}
+                    {doc.received_at && ` · ${new Date(safeDateStr(doc.received_at)).toLocaleDateString('pt-PT')}`}
                   </p>
                 </div>
                 <Check className="w-4 h-4 text-teal-500 flex-shrink-0" />
@@ -886,7 +887,7 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
   const formatRelativeTime = (isoDate) => {
     if (!isoDate) return '';
     const now = new Date();
-    const date = new Date(isoDate);
+    const date = new Date(safeDateStr(isoDate));
     const diffMs = now - date;
     const diffSec = Math.floor(diffMs / 1000);
     const diffMin = Math.floor(diffSec / 60);
@@ -1747,7 +1748,7 @@ export default function ClientPortal() {
                         <p className="text-xs text-emerald-600 mt-0.5">
                           O consentimento para tratamento de dados pessoais foi assinado
                           {rgpd.signed_at && (
-                            <> a <strong>{new Date(rgpd.signed_at).toLocaleDateString('pt-PT')}</strong></>
+                            <> a <strong>{new Date(safeDateStr(rgpd.signed_at)).toLocaleDateString('pt-PT')}</strong></>
                           )}.
                         </p>
                         {rgpd.signed_by && (
@@ -1772,7 +1773,7 @@ export default function ClientPortal() {
                         </p>
                         {rgpd.requested_at && (
                           <p className="text-xs text-amber-500 mt-1">
-                            Pedido enviado a <strong>{new Date(rgpd.requested_at).toLocaleDateString('pt-PT')}</strong>
+                            Pedido enviado a <strong>{new Date(safeDateStr(rgpd.requested_at)).toLocaleDateString('pt-PT')}</strong>
                           </p>
                         )}
                         {rgpd.requested_by_name && (
@@ -1935,8 +1936,8 @@ export default function ClientPortal() {
                           return { label: 'A aguardar contacto do consultor', color: 'bg-violet-100 text-violet-700 border-violet-200', icon: <Clock className="w-3.5 h-3.5" /> };
                         case 'agendada':
                           if (scheduledDate) {
-                            const dateStr = new Date(scheduledDate).toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' });
-                            const timeStr = new Date(scheduledDate).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+                            const dateStr = new Date(safeDateStr(scheduledDate)).toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' });
+                            const timeStr = new Date(safeDateStr(scheduledDate)).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
                             return { label: `Agendada para ${dateStr} às ${timeStr}`, color: 'bg-amber-100 text-amber-700 border-amber-200', icon: <CalendarClock className="w-3.5 h-3.5" /> };
                           }
                           return { label: 'Agendada', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: <CalendarClock className="w-3.5 h-3.5" /> };
@@ -2073,7 +2074,7 @@ export default function ClientPortal() {
                           <p className="text-[10px] text-gray-400">
                             Recomendado por <span className="font-medium text-purple-600">{rec.recommended_by_name || 'Consultor'}</span>
                             {rec.recommended_at && (
-                              <> · {new Date(rec.recommended_at).toLocaleDateString('pt-PT')}</>
+                              <> · {new Date(safeDateStr(rec.recommended_at)).toLocaleDateString('pt-PT')}</>
                             )}
                           </p>
                         </div>

@@ -67,6 +67,7 @@ import {
 import { TableSkeleton } from "../components/ui/skeletons";
 import { safeString } from "../utils/safeString";
 import CreateProcessModal from "../components/CreateProcessModal";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -203,7 +204,7 @@ const ClientRegistrationsPage = () => {
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
     try {
-      return new Date(dateStr).toLocaleString("pt-PT", {
+      return new Date(safeDateStr(dateStr)).toLocaleString("pt-PT", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
@@ -218,7 +219,7 @@ const ClientRegistrationsPage = () => {
   const formatDateOnly = (dateStr) => {
     if (!dateStr) return "-";
     try {
-      return new Date(dateStr).toLocaleDateString("pt-PT", {
+      return new Date(safeDateStr(dateStr)).toLocaleDateString("pt-PT", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric"

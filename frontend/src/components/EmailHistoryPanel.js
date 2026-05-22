@@ -60,6 +60,7 @@ import { format, parseISO, isAfter, isBefore, subDays, startOfDay, endOfDay } fr
 import { pt } from "date-fns/locale";
 import { getProcessEmails, getEmailStats, createEmail, deleteEmail, syncProcessEmails, getMonitoredEmails, addMonitoredEmail, removeMonitoredEmail } from "../services/api";
 import EmailViewerModal from "./EmailViewerModal";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -220,17 +221,17 @@ const EmailHistoryPanel = ({
     
     // Filtro por data
     if (advancedFilters.dateFrom) {
-      const fromDate = startOfDay(parseISO(advancedFilters.dateFrom));
+      const fromDate = startOfDay(parseISO(safeDateStr(advancedFilters.dateFrom)));
       filtered = filtered.filter(e => {
         if (!e.sent_at) return false;
-        return isAfter(parseISO(e.sent_at), fromDate);
+        return isAfter(parseISO(safeDateStr(e.sent_at)), fromDate);
       });
     }
     if (advancedFilters.dateTo) {
-      const toDate = endOfDay(parseISO(advancedFilters.dateTo));
+      const toDate = endOfDay(parseISO(safeDateStr(advancedFilters.dateTo)));
       filtered = filtered.filter(e => {
         if (!e.sent_at) return false;
-        return isBefore(parseISO(e.sent_at), toDate);
+        return isBefore(parseISO(safeDateStr(e.sent_at)), toDate);
       });
     }
     
@@ -1004,7 +1005,7 @@ const EmailHistoryPanel = ({
                     <div className="flex items-center gap-2 mb-2 sticky top-0 bg-background py-1">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium text-sm">
-                        {format(parseISO(day.date), "EEEE, dd 'de' MMMM", { locale: pt })}
+                        {format(parseISO(safeDateStr(day.date)), "EEEE, dd 'de' MMMM", { locale: pt })}
                       </span>
                       <Badge variant="outline" className="text-xs">
                         {day.stats.sent} env • {day.stats.received} rec
@@ -1117,7 +1118,7 @@ const EmailHistoryPanel = ({
                       {/* Data e ações */}
                       <div className="flex items-center gap-1 shrink-0">
                         <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                          {email.sent_at ? format(parseISO(email.sent_at), "dd/MM/yy") : "-"}
+                          {email.sent_at ? format(parseISO(safeDateStr(email.sent_at)), "dd/MM/yy") : "-"}
                         </span>
                         
                         {/* Dropdown de ações */}
@@ -1461,7 +1462,7 @@ const EmailHistoryPanel = ({
                           <p className="text-xs text-muted-foreground truncate">De: {email.from_email}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-xs text-muted-foreground">
-                              {email.sent_at && format(parseISO(email.sent_at), "dd/MM/yyyy")}
+                              {email.sent_at && format(parseISO(safeDateStr(email.sent_at)), "dd/MM/yyyy")}
                             </span>
                             {email.client_name && (
                               <Badge variant="outline" className="text-xs">

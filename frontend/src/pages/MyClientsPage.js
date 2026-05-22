@@ -27,12 +27,18 @@ import {
 import { getMyClients, getWorkflowStatuses } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText, 
-  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download
 } from "lucide-react";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { toast } from "sonner";
+import * as XLSX from 'xlsx';
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeDateStr } from "../lib/utils";
+import { useAuth } from "../contexts/AuthContext";
+import { hasAnyRole } from "../utils/roleUtils";
+
+const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -54,12 +60,17 @@ const getContrastColor = (bgColor) => {
 };
 
 const MyClientsPage = () => {
+  const { user } = useAuth();
   const [clients, setClients] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [allowExcelExport, setAllowExcelExport] = useState(true);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  
+  // Admin/CEO sempre podem exportar
+  const canExportExcel = allowExcelExport || hasAnyRole(user, ['admin', 'ceo']);
   
   // Sync filters with URL
   const searchTerm = searchParams.get("search") || "";
@@ -88,7 +99,23 @@ const MyClientsPage = () => {
 
   useEffect(() => {
     fetchData();
+    checkExportPermission();
   }, []);
+
+  const checkExportPermission = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_URL}/system-config/public/export-permission`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAllowExcelExport(data.allow_excel_export !== false);
+      }
+    } catch {
+      // Em caso de erro, manter default (true)
+    }
+  };
 
   const handleCreateSuccess = useCallback(() => {
     setShowCreateModal(false);
@@ -178,10 +205,69 @@ const MyClientsPage = () => {
     }
   };
 
+  const handleExportExcel = () => {
+    if (filteredClients.length === 0) {
+      toast.error('Nenhum cliente para exportar');
+      return;
+    }
+    try {
+      const rows = filteredClients.map(c => ({
+        'Processo': c.process_number || '',
+        'Nome': c.client_name || '',
+        'NIF': c.client_nif || c.dados_pessoais?.nif || '',
+        'Email': c.client_email || c.contacto?.email || '',
+        'Telefone': c.client_phone || c.contacto?.telefone || '',
+        'Estado Civil': c.dados_pessoais?.estado_civil || '',
+        'Profissão': c.dados_pessoais?.profissao || '',
+        'Nacionalidade': c.dados_pessoais?.nacionalidade || '',
+        'Morada Completa': c.dados_pessoais?.morada_fiscal || c.morada || '',
+        'Código Postal': c.dados_pessoais?.codigo_postal || c.cod_postal || '',
+        'Localidade': c.dados_pessoais?.localidade || c.localidade || '',
+        'Nome Titular 2': c.titular2_data?.name || c.titular2_name || '',
+        'NIF Titular 2': c.titular2_data?.nif || c.titular2_nif || '',
+        'Email Titular 2': c.titular2_data?.email || c.titular2_email || '',
+        'Telefone Titular 2': c.titular2_data?.phone || c.titular2_phone || '',
+        'Fonte': c.fonte || '',
+        'Fase': c.status_label || (c.status || '').replace(/_/g, ' '),
+        'Valor Imóvel': c.real_estate_data?.valor_imovel || c.property_value || '',
+        'Data de Registo': c.created_at || '',
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 10 }, // Processo
+        { wch: 30 }, // Nome
+        { wch: 12 }, // NIF
+        { wch: 30 }, // Email
+        { wch: 15 }, // Telefone
+        { wch: 14 }, // Estado Civil
+        { wch: 20 }, // Profissão
+        { wch: 16 }, // Nacionalidade
+        { wch: 35 }, // Morada Completa
+        { wch: 10 }, // Código Postal
+        { wch: 18 }, // Localidade
+        { wch: 30 }, // Nome Titular 2
+        { wch: 12 }, // NIF Titular 2
+        { wch: 30 }, // Email Titular 2
+        { wch: 15 }, // Telefone Titular 2
+        { wch: 14 }, // Fonte
+        { wch: 18 }, // Fase
+        { wch: 14 }, // Valor Imóvel
+        { wch: 18 }, // Data de Registo
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+      XLSX.writeFile(wb, 'meus_clientes_powercell_export.xlsx');
+      toast.success(`${rows.length} clientes exportados com sucesso!`);
+    } catch (err) {
+      console.error('Erro ao exportar Excel:', err);
+      toast.error('Erro ao exportar Excel');
+    }
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return "-";
     try {
-      return format(parseISO(dateString), "dd MMM yyyy", { locale: pt });
+      return format(parseISO(safeDateStr(dateString)), "dd MMM yyyy", { locale: pt });
     } catch {
       return dateString;
     }
@@ -219,14 +305,28 @@ const MyClientsPage = () => {
               Clientes atribuídos ao meu perfil
             </p>
           </div>
-          <Button
-            onClick={() => setShowCreateModal(true)}
-            className="gap-2"
-            data-testid="btn-novo-cliente"
-          >
-            <Plus className="h-4 w-4" />
-            Novo Cliente
-          </Button>
+          <div className="flex items-center gap-2">
+            {canExportExcel && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportExcel}
+                className="gap-2"
+                disabled={filteredClients.length === 0}
+              >
+                <Download className="h-4 w-4" />
+                Exportar Excel
+              </Button>
+            )}
+            <Button
+              onClick={() => setShowCreateModal(true)}
+              className="gap-2"
+              data-testid="btn-novo-cliente"
+            >
+              <Plus className="h-4 w-4" />
+              Novo Cliente
+            </Button>
+          </div>
         </div>
 
         {/* Estatísticas rápidas */}

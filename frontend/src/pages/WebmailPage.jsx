@@ -77,6 +77,7 @@ import { useNavigate } from "react-router-dom";
 import { sanitizeEmailHtml } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -93,7 +94,7 @@ const FOLDERS = [
 const formatEmailDate = (dateStr) => {
   if (!dateStr) return "";
   try {
-    const date = parseISO(dateStr);
+    const date = parseISO(safeDateStr(dateStr));
     if (isToday(date)) {
       return format(date, "HH:mm", { locale: pt });
     }
@@ -110,7 +111,7 @@ const formatEmailDate = (dateStr) => {
 const formatFullDate = (dateStr) => {
   if (!dateStr) return "-";
   try {
-    return format(parseISO(dateStr), "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt });
+    return format(parseISO(safeDateStr(dateStr)), "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt });
   } catch {
     return dateStr;
   }

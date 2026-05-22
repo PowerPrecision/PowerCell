@@ -20,6 +20,7 @@ import {
   AlertDialogTrigger,
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
+import { safeDateStr } from "../lib/utils";
 import {
   Database,
   Download,
@@ -194,7 +195,7 @@ const BackupsPage = ({ embedded = false }) => {
   const formatDate = (dateStr) => {
     if (!dateStr) return "N/D";
     try {
-      return new Date(dateStr).toLocaleString("pt-PT");
+      return new Date(safeDateStr(dateStr)).toLocaleString("pt-PT");
     } catch {
       return dateStr;
     }

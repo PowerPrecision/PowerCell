@@ -51,6 +51,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import { safeString } from "../utils/safeString";
+import { safeDateStr } from "../lib/utils";
 import { toast } from "sonner";
 import {
   Settings,
@@ -1067,10 +1068,10 @@ const SharedEmailConfigSection = () => {
                       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-green-700 dark:text-green-300">
                         <span>Email: <strong>{cfg.google_email || cfg.email_address || "—"}</strong></span>
                         {cfg.oauth_connected_at && (
-                          <span>Conectado: {new Date(cfg.oauth_connected_at).toLocaleDateString("pt-PT")}</span>
+                          <span>Conectado: {new Date(safeDateStr(cfg.oauth_connected_at)).toLocaleDateString("pt-PT")}</span>
                         )}
                         {cfg.last_sync_at && (
-                          <span>Último sync: {new Date(cfg.last_sync_at).toLocaleDateString("pt-PT")}</span>
+                          <span>Último sync: {new Date(safeDateStr(cfg.last_sync_at)).toLocaleDateString("pt-PT")}</span>
                         )}
                         {cfg.total_emails_synced > 0 && (
                           <span>Emails: {cfg.total_emails_synced}</span>
@@ -1722,7 +1723,7 @@ const PortalSettingsSection = ({ token }) => {
       {/* Last updated */}
       {settings?.updated_at && (
         <p className="text-xs text-muted-foreground text-right">
-          Última atualização: {new Date(settings.updated_at).toLocaleString("pt-PT")}
+          Última atualização: {new Date(safeDateStr(settings.updated_at)).toLocaleString("pt-PT")}
         </p>
       )}
     </div>
@@ -2840,7 +2841,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                     ? "A utilizar o template padrão. Edite para personalizar."
                     : `Versão ${safeString(templateMeta.version) || "1.0"} — Última atualização: ${
                         templateMeta.updated_at
-                          ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
+                          ? new Date(safeDateStr(templateMeta.updated_at)).toLocaleString("pt-PT")
                           : "N/A"
                       } ${templateMeta.updated_by ? `por ${safeString(templateMeta.updated_by)}` : ""}`}
                 </span>
@@ -3072,7 +3073,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {v.created_at
-                            ? new Date(v.created_at).toLocaleString("pt-PT")
+                            ? new Date(safeDateStr(v.created_at)).toLocaleString("pt-PT")
                             : "N/A"}
                           {v.created_by ? ` — ${safeString(v.created_by)}` : ""}
                         </p>

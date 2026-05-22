@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeDateStr, formatDate as formatDateUtil } from "../../lib/utils";
 import { getProcesses, getStats, getUpcomingExpiries, getWorkflowStatuses, createDocumentExpiry, getClientS3Files, analyzeOneDriveDocument } from "../../services/api";
 
 // ====================================================================
@@ -104,18 +105,24 @@ export const DOCUMENT_TYPES_MEDIADOR = [
  * Obtém a cor e label para urgência de expiração
  */
 export const getExpiryUrgency = (expiryDate) => {
-  const days = differenceInDays(parseISO(expiryDate), new Date());
-  if (days < 0) return { color: "text-red-600 bg-red-50", label: "Expirado" };
-  if (days <= 7) return { color: "text-red-600 bg-red-50", label: `${days} dias` };
-  if (days <= 30) return { color: "text-orange-600 bg-orange-50", label: `${days} dias` };
-  return { color: "text-green-600 bg-green-50", label: `${days} dias` };
+  try {
+    const safeStr = safeDateStr(expiryDate);
+    if (!safeStr) return { color: "text-gray-600 bg-gray-50", label: "N/D" };
+    const days = differenceInDays(parseISO(safeStr), new Date());
+    if (days < 0) return { color: "text-red-600 bg-red-50", label: "Expirado" };
+    if (days <= 7) return { color: "text-red-600 bg-red-50", label: `${days} dias` };
+    if (days <= 30) return { color: "text-orange-600 bg-orange-50", label: `${days} dias` };
+    return { color: "text-green-600 bg-green-50", label: `${days} dias` };
+  } catch {
+    return { color: "text-gray-600 bg-gray-50", label: "N/D" };
+  }
 };
 
 /**
- * Formata data para exibição
+ * Formata data para exibição — seguro em Safari/iOS
  */
 export const formatDate = (dateString) => {
-  return format(parseISO(dateString), "dd/MM/yyyy", { locale: pt });
+  return formatDateUtil(dateString);
 };
 
 // ====================================================================

@@ -50,6 +50,7 @@ import {
   ClipboardPaste,
 } from "lucide-react";
 import HtmlImportModal from "./HtmlImportModal";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -100,7 +101,7 @@ const LeadCard = ({ lead, onEdit, onStatusChange, onDelete, onRefreshPrice, onSh
   const formatRelativeDate = (dateStr) => {
     if (!dateStr) return null;
     try {
-      const date = new Date(dateStr);
+      const date = new Date(safeDateStr(dateStr));
       const now = new Date();
       const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
       if (diffDays === 0) return "Hoje";

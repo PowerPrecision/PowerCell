@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { FileText, Users, Eye } from "lucide-react";
+import { safeDateStr } from "../../lib/utils";
 
 const DocumentsTab = ({ upcomingExpiries }) => {
   const navigate = useNavigate();
@@ -29,7 +30,7 @@ const DocumentsTab = ({ upcomingExpiries }) => {
 
   // Ordenar documentos por data de expiração e agrupar por cliente
   const sortedDocs = [...upcomingExpiries].sort((a, b) => 
-    new Date(a.expiry_date) - new Date(b.expiry_date)
+    new Date(safeDateStr(a.expiry_date)) - new Date(safeDateStr(b.expiry_date))
   );
   
   // Agrupar por cliente mantendo a ordem
@@ -49,7 +50,7 @@ const DocumentsTab = ({ upcomingExpiries }) => {
   
   // Ordenar grupos pelo documento mais próximo a expirar
   const sortedGroups = Object.entries(grouped).sort((a, b) => 
-    new Date(a[1].earliestExpiry) - new Date(b[1].earliestExpiry)
+    new Date(safeDateStr(a[1].earliestExpiry)) - new Date(safeDateStr(b[1].earliestExpiry))
   );
 
   return (
@@ -90,7 +91,7 @@ const DocumentsTab = ({ upcomingExpiries }) => {
               <CardContent className="pt-2 pb-3">
                 <div className="space-y-2">
                   {clientData.documents.map((doc) => {
-                    const daysUntil = Math.ceil((new Date(doc.expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                    const daysUntil = Math.ceil((new Date(safeDateStr(doc.expiry_date)) - new Date()) / (1000 * 60 * 60 * 24));
                     const urgencyClass = daysUntil <= 7 ? 'bg-red-50 border-red-200 text-red-800' : 
                                          daysUntil <= 30 ? 'bg-amber-50 border-amber-200 text-amber-800' : 
                                          'bg-blue-50 border-blue-200 text-blue-800';
@@ -103,7 +104,7 @@ const DocumentsTab = ({ upcomingExpiries }) => {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm">
-                            {new Date(doc.expiry_date).toLocaleDateString('pt-PT')}
+                            {new Date(safeDateStr(doc.expiry_date)).toLocaleDateString('pt-PT')}
                           </span>
                           <Badge className={daysUntil <= 7 ? 'bg-red-500' : daysUntil <= 30 ? 'bg-amber-500' : 'bg-blue-500'}>
                             {daysUntil} dias

@@ -84,6 +84,7 @@ import {
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -100,7 +101,7 @@ const formatFileSize = (bytes) => {
 const formatDate = (dateStr) => {
   if (!dateStr) return "—";
   try {
-    return format(parseISO(dateStr), "dd/MM/yyyy HH:mm", { locale: pt });
+    return format(parseISO(safeDateStr(dateStr)), "dd/MM/yyyy HH:mm", { locale: pt });
   } catch {
     return dateStr;
   }

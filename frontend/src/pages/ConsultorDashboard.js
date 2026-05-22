@@ -42,6 +42,7 @@ import TasksPanel from "../components/TasksPanel";
 import TeamMural from "../components/TeamMural";
 import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed } from "../services/api";
 import { safeString } from "../utils/safeString";
+import { safeDateStr } from "../lib/utils";
 
 const roleLabels = {
   admin: "Administrador",
@@ -474,10 +475,10 @@ const ConsultorDashboard = () => {
                 ) : (
                   <div className="space-y-3 max-h-[520px] overflow-y-auto">
                     {[...deadlines]
-                      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+                      .sort((a, b) => new Date(safeDateStr(a.due_date)) - new Date(safeDateStr(b.due_date)))
                       .slice(0, 15)
                       .map((deadline) => {
-                        const dueDate = new Date(deadline.due_date);
+                        const dueDate = new Date(safeDateStr(deadline.due_date));
                         const now = new Date();
                         const daysLeft = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
                         const urgencyClass = daysLeft < 0 ? "border-red-300 bg-red-50 dark:bg-red-950/20" :

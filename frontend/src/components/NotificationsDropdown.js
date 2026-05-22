@@ -38,6 +38,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Bell, BellRing, UserPlus, Clock, FileText, Calendar, AlertTriangle, CheckCircle, Volume2, VolumeX, ArrowRight, Mail, Inbox, Send, MessageSquare } from "lucide-react";
 import { getNotifications, markNotificationRead } from "../services/api";
 import { toast } from "sonner";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -377,7 +378,7 @@ const NotificationsDropdown = () => {
   };
 
   const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
+    const date = new Date(safeDateStr(dateStr));
     const now = new Date();
     const diff = now - date;
     

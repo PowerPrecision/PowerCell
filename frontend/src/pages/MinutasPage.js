@@ -57,6 +57,7 @@ import {
   Upload,
   FolderUp,
 } from "lucide-react";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -233,7 +234,7 @@ const MinutasPage = () => {
   const formatDate = (dateStr) => {
     if (!dateStr) return "N/D";
     try {
-      return new Date(dateStr).toLocaleDateString("pt-PT");
+      return new Date(safeDateStr(dateStr)).toLocaleDateString("pt-PT");
     } catch {
       return dateStr;
     }

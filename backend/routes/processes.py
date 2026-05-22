@@ -2547,7 +2547,8 @@ async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_
 # MARCAÇÃO DE INDEXAÇÃO CONCLUÍDA — PATCH /processes/{id}/mark-indexed
 # ====================================================================
 
-@router.api_route("/{process_id}/mark-indexed", methods=["POST", "PATCH"])
+@router.post("/{process_id}/mark-indexed")
+@router.patch("/{process_id}/mark-indexed")
 async def mark_process_indexed(
     process_id: str,
     request: Request,

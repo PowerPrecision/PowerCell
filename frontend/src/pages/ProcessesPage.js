@@ -24,7 +24,7 @@ import {
   Flame, X, ClipboardCheck, CheckCircle2
 } from "lucide-react";
 import { toast } from "sonner";
-import { getProcesses } from "../services/api";
+import { getProcesses, markProcessIndexed } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
 import { useAuth } from "../contexts/AuthContext";
@@ -113,26 +113,13 @@ const ProcessesPage = () => {
     if (!processId || markingProcessIds.has(processId)) return;
     setMarkingProcessIds(prev => new Set(prev).add(processId));
     try {
-      const API_URL_BASE = typeof window !== 'undefined'
-        ? (window.__ENV__?.REACT_APP_BACKEND_URL || '')
-        : '';
-      const res = await fetch(`${API_URL_BASE}/api/processes/${processId}/mark-indexed`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          ...(user?.role ? { 'X-Active-Role': user.role.toLowerCase() } : {}),
-        },
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Erro ao marcar indexação.');
-      }
+      await markProcessIndexed(processId);
       toast.success('Indexação concluída! A equipa foi notificada.');
       // Atualizar localmente o processo
       setProcesses(prev => prev.map(p => p.id === processId ? { ...p, is_indexed: true } : p));
     } catch (error) {
-      toast.error(error.message || 'Erro ao marcar indexação.');
+      const detail = error.response?.data?.detail || error.message || 'Erro ao marcar indexação.';
+      toast.error(typeof detail === 'string' ? detail : 'Erro ao marcar indexação.');
     } finally {
       setMarkingProcessIds(prev => {
         const next = new Set(prev);
@@ -140,7 +127,7 @@ const ProcessesPage = () => {
         return next;
       });
     }
-  }, [markingProcessIds, token, user?.role]);
+  }, [markingProcessIds]);
 
   const toggleSort = (field) => {
     if (sortField === field) {

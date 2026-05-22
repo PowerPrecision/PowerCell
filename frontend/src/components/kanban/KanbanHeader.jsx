@@ -32,6 +32,7 @@ import {
   Download,
   Loader2
 } from 'lucide-react';
+import { safeDateStr } from '../../lib/utils';
 
 const KanbanHeader = memo(({
   totalProcesses,
@@ -75,7 +76,7 @@ const KanbanHeader = memo(({
           'Intermediário': p.mediador_name || p.assigned_intermediario_name || '—',
           'Prioridade': (p.prioridade || p.priority || '—').charAt(0).toUpperCase() + (p.prioridade || p.priority || '—').slice(1),
           'Indexado': p.is_indexed ? 'Sim' : 'Não',
-          'Atualizado': p.updated_at ? new Date(p.updated_at).toLocaleDateString('pt-PT') : '—',
+          'Atualizado': p.updated_at ? new Date(safeDateStr(p.updated_at)).toLocaleDateString('pt-PT') : '—',
         }))
       );
 

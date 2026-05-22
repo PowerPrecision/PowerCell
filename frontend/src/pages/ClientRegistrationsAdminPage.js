@@ -58,6 +58,7 @@ import {
   AdminSearchFilter,
   PageHeader
 } from "../components/admin/AdminPageShared";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -467,7 +468,7 @@ const ViewModal = ({ open, onClose, registration }) => {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "N/A";
-    try { return new Date(dateStr).toLocaleString("pt-PT"); } catch { return dateStr; }
+    try { return new Date(safeDateStr(dateStr)).toLocaleString("pt-PT"); } catch { return dateStr; }
   };
 
   return (
@@ -746,7 +747,7 @@ const ClientRegistrationsAdminPage = () => {
                     <div className="col-span-2 text-sm">{reg.personal_data?.nif || "-"}</div>
                     <div className="col-span-2"><SourceBadge source={reg.source} /></div>
                     <div className="col-span-2"><StatusBadge status={reg.status} /></div>
-                    <div className="col-span-1 text-sm text-muted-foreground">{reg.created_at ? new Date(reg.created_at).toLocaleDateString("pt-PT") : "-"}</div>
+                    <div className="col-span-1 text-sm text-muted-foreground">{reg.created_at ? new Date(safeDateStr(reg.created_at)).toLocaleDateString("pt-PT") : "-"}</div>
                     <div className="col-span-2 flex justify-end gap-1">
                       <Button variant="ghost" size="sm" onClick={() => handleView(reg)} title="Ver detalhes"><Eye className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="sm" onClick={() => handleEdit(reg)} title="Editar"><Edit className="h-4 w-4" /></Button>
@@ -776,7 +777,7 @@ const ClientRegistrationsAdminPage = () => {
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Data:</span>
-                        <span>{reg.created_at ? new Date(reg.created_at).toLocaleDateString("pt-PT") : "-"}</span>
+                        <span>{reg.created_at ? new Date(safeDateStr(reg.created_at)).toLocaleDateString("pt-PT") : "-"}</span>
                       </div>
                       <div className="flex justify-end gap-2 pt-2 border-t">
                         <Button variant="outline" size="sm" onClick={() => handleView(reg)}><Eye className="h-4 w-4 mr-1" />Ver</Button>

@@ -441,6 +441,11 @@ export const moveProcessKanban = (processId, newStatus) =>
     params: { new_status: newStatus }
   });
 export const getMyClients = (params = {}) => api.get("/processes/my-clients", { params });
+export const markProcessIndexed = (processId) =>
+  api.post(`/processes/${processId}/mark-indexed`);
+
+// Visits
+export const getVisits = (processId) => api.get("/visits", { params: { process_id: processId } });
 
 // Deadlines
 export const getDeadlines = (processId) => 

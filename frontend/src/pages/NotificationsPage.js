@@ -39,6 +39,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { getNotifications, markNotificationRead } from "../services/api";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -216,7 +217,7 @@ export default function NotificationsPage() {
 
   // Formatar data
   const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
+    const date = new Date(safeDateStr(dateStr));
     const now = new Date();
     const diff = now - date;
     

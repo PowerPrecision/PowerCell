@@ -467,6 +467,17 @@ CONFIG_FIELDS = {
                     {"value": "en-GB", "label": "English (UK)"},
                 ],
             ),
+            ConfigField(
+                key="_divider_security",
+                label="Segurança e Permissões",
+                type="divider",
+            ),
+            ConfigField(
+                key="allow_excel_export",
+                label="Permitir Exportação para Excel (Global)",
+                type="boolean",
+                help_text="Quando desativado, os botões de exportação para Excel ficam ocultos para todos os utilizadores excepto Admin e CEO",
+            ),
         ]
     },
     "document_recipients": {
@@ -679,6 +690,20 @@ async def get_config(
         "config": masked_config,
         "fields": CONFIG_FIELDS,
     }
+
+
+@router.get("/public/export-permission")
+async def get_excel_export_permission(
+    company_id: Optional[str] = Query("default", description="ID da empresa"),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Verificar se a exportação para Excel está permitida.
+    Endpoint público (qualquer utilizador autenticado) — usado pelo frontend
+    para mostrar/ocultar os botões de exportação.
+    """
+    config = await get_system_config(company_id)
+    return {"allow_excel_export": config.settings.allow_excel_export}
 
 
 @router.get("/fields")

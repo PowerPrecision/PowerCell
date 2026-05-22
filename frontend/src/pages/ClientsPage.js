@@ -40,6 +40,8 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { toast } from "sonner";
+import * as XLSX from 'xlsx';
+import { safeDateStr } from "../lib/utils";
 import {
   Users,
   Plus,
@@ -62,6 +64,7 @@ import {
   XCircle,
   Flame,
   AlertTriangle,
+  Download,
 } from "lucide-react";
 import {
   Select,
@@ -115,6 +118,10 @@ export default function ClientsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [allowExcelExport, setAllowExcelExport] = useState(true);
+  
+  // Admin/CEO sempre podem exportar
+  const canExportExcel = allowExcelExport || hasAnyRole(user, ['admin', 'ceo']);
   
   // Sync filters with URL search params
   const searchTerm = searchParams.get("search") || "";
@@ -218,6 +225,25 @@ export default function ClientsPage() {
     fetchClients();
   }, [fetchClients]);
 
+  // Verificar permissão de exportação para Excel
+  useEffect(() => {
+    const checkExportPermission = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${API_URL}/system-config/public/export-permission`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAllowExcelExport(data.allow_excel_export !== false);
+        }
+      } catch {
+        // Em caso de erro, manter default (true)
+      }
+    };
+    checkExportPermission();
+  }, []);
+
   // Aplicar filtros e ordenação (useMemo — reativo e sem render extra)
   const filteredClients = useMemo(() => {
     let result = [...clients];
@@ -251,7 +277,7 @@ export default function ClientsPage() {
       // Campo genérico (ex: created_at, updated_at)
       const val = c[sortField];
       if (sortField === "created_at" || sortField === "updated_at") {
-        return val ? new Date(val).getTime() : 0;
+        return val ? new Date(safeDateStr(val)).getTime() : 0;
       }
       return typeof val === "string" ? val.toLowerCase() : val;
     };
@@ -387,6 +413,59 @@ export default function ClientsPage() {
     setShowProcessDialog(true);
   };
 
+  const handleExportExcel = () => {
+    if (filteredClients.length === 0) {
+      toast.error('Nenhum cliente para exportar');
+      return;
+    }
+    try {
+      const rows = filteredClients.map(c => ({
+        'Nome': c.nome || '',
+        'NIF': c.dados_pessoais?.nif || '',
+        'Email': c.contacto?.email || '',
+        'Telefone': c.contacto?.telefone || '',
+        'Estado Civil': c.dados_pessoais?.estado_civil || '',
+        'Profissão': c.dados_pessoais?.profissao || '',
+        'Nacionalidade': c.dados_pessoais?.nacionalidade || '',
+        'Morada Completa': c.dados_pessoais?.morada_fiscal || c.morada || '',
+        'Código Postal': c.dados_pessoais?.codigo_postal || c.cod_postal || '',
+        'Localidade': c.dados_pessoais?.localidade || c.localidade || '',
+        'Nome Titular 2': c.titular2_data?.name || c.titular2_name || '',
+        'NIF Titular 2': c.titular2_data?.nif || c.titular2_nif || '',
+        'Email Titular 2': c.titular2_data?.email || c.titular2_email || '',
+        'Telefone Titular 2': c.titular2_data?.phone || c.titular2_phone || '',
+        'Fonte': c.fonte || '',
+        'Data de Registo': c.created_at || '',
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 30 }, // Nome
+        { wch: 12 }, // NIF
+        { wch: 30 }, // Email
+        { wch: 15 }, // Telefone
+        { wch: 14 }, // Estado Civil
+        { wch: 20 }, // Profissão
+        { wch: 16 }, // Nacionalidade
+        { wch: 35 }, // Morada Completa
+        { wch: 10 }, // Código Postal
+        { wch: 18 }, // Localidade
+        { wch: 30 }, // Nome Titular 2
+        { wch: 12 }, // NIF Titular 2
+        { wch: 30 }, // Email Titular 2
+        { wch: 15 }, // Telefone Titular 2
+        { wch: 14 }, // Fonte
+        { wch: 18 }, // Data de Registo
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+      XLSX.writeFile(wb, 'clientes_powercell_export.xlsx');
+      toast.success(`${rows.length} clientes exportados com sucesso!`);
+    } catch (err) {
+      console.error('Erro ao exportar Excel:', err);
+      toast.error('Erro ao exportar Excel');
+    }
+  };
+
   // Abrir dialog para criar novo cliente/processo
   const handleCreateNewProcess = () => {
     setShowCreateDialog(true);
@@ -406,16 +485,30 @@ export default function ClientsPage() {
               Gerir todos os clientes da empresa
             </p>
           </div>
-          {canCreateClients && (
-            <Button
-              onClick={() => setShowCreateDialog(true)}
-              className="gap-2"
-              data-testid="btn-novo-cliente"
-            >
-              <Plus className="h-4 w-4" />
-              Novo Cliente
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExportExcel && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportExcel}
+                className="gap-2"
+                disabled={filteredClients.length === 0}
+              >
+                <Download className="h-4 w-4" />
+                Exportar Excel
+              </Button>
+            )}
+            {canCreateClients && (
+              <Button
+                onClick={() => setShowCreateDialog(true)}
+                className="gap-2"
+                data-testid="btn-novo-cliente"
+              >
+                <Plus className="h-4 w-4" />
+                Novo Cliente
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Search, Filters & Stats */}
