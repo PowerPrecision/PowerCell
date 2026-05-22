@@ -49,6 +49,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { hasRole } from "../utils/roleUtils";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
+import { safeDateStr } from "../lib/utils";
 import DashboardLayout from "../layouts/DashboardLayout";
 import EmailConfigForm from "../components/EmailConfigForm";
 import RichTextEditor from "../components/ui/RichTextEditor";
@@ -345,7 +346,7 @@ const ProfilePage = () => {
   // Formatar data
   const formatDate = (dateString) => {
     if (!dateString) return "-";
-    return new Date(dateString).toLocaleString("pt-PT", {
+    return new Date(safeDateStr(dateString)).toLocaleString("pt-PT", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",

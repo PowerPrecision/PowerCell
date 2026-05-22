@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { toast } from "sonner";
+import { safeDateStr } from "../lib/utils";
 import {
   Brain,
   Plus,
@@ -331,7 +332,7 @@ const AITrainingPage = () => {
   const formatLastExecution = (dateStr) => {
     if (!dateStr) return "Nunca executado";
     try {
-      const date = new Date(dateStr);
+      const date = new Date(safeDateStr(dateStr));
       return date.toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
     } catch {
       return dateStr;

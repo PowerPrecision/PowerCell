@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import { getAuditTrail, getAuditStats, exportAuditTrail, cleanupAuditTrail } from "../services/api";
 import { toast } from "../hooks/use-toast";
+import { safeDateStr } from "../lib/utils";
 
 // Mapeamento de cores para badges de origem
 const sourceConfig = {
@@ -64,7 +65,7 @@ const sourceConfig = {
 function formatDateTime(isoString) {
   if (!isoString) return "-";
   try {
-    const d = new Date(isoString);
+    const d = new Date(safeDateStr(isoString));
     return d.toLocaleString("pt-PT", {
       day: "2-digit",
       month: "2-digit",

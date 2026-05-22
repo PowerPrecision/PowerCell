@@ -65,6 +65,7 @@ import { format, parseISO, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import EmojiPicker from "./EmojiPicker";
 import { hasRole } from "../utils/roleUtils";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -492,7 +493,7 @@ const ChatPanel = ({ open, onOpenChange }) => {
 
   // Formatar data da mensagem
   const formatMessageDate = (dateStr) => {
-    const date = parseISO(dateStr);
+    const date = parseISO(safeDateStr(dateStr));
     if (isToday(date)) {
       return format(date, "HH:mm", { locale: pt });
     }

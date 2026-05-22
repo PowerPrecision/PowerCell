@@ -38,6 +38,7 @@ import {
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -102,7 +103,7 @@ const AIInsightsPage = () => {
   // Formatar data
   const formatDate = (dateStr) => {
     try {
-      return format(new Date(dateStr), "d MMM yyyy, HH:mm", { locale: pt });
+      return format(new Date(safeDateStr(dateStr)), "d MMM yyyy, HH:mm", { locale: pt });
     } catch {
       return dateStr;
     }

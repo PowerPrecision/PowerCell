@@ -27,6 +27,7 @@ import { Button } from '../ui/button';
 import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { format } from 'date-fns';
+import { safeDateStr } from '../../lib/utils';
 
 // Comparador customizado para React.memo
 // Só re-renderiza se o processo ou estado de drag mudar
@@ -235,7 +236,7 @@ const KanbanCard = memo(({
             {/* Completion date badge for concluded processes */}
             {(columnName === 'concluidos' || columnName === 'desistencias') && process.updated_at && (
               <span className="text-[9px] bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 px-2 py-0.5 rounded-full font-medium whitespace-nowrap border border-emerald-200 dark:border-emerald-800">
-                ✓ {format(new Date(process.updated_at), "dd/MM/yyyy")}
+                ✓ {format(new Date(safeDateStr(process.updated_at)), "dd/MM/yyyy")}
               </span>
             )}
           </div>

@@ -10,6 +10,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { safeDateStr } from "../lib/utils";
 import DashboardLayout from "../layouts/DashboardLayout";
 import KanbanBoard from "../components/KanbanBoard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -659,7 +660,7 @@ const StaffDashboard = () => {
                 ) : (
                   <div className="space-y-3">
                     {[...deadlines]
-                      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+                      .sort((a, b) => new Date(safeDateStr(a.due_date)) - new Date(safeDateStr(b.due_date)))
                       .slice(0, 10)
                       .map((deadline) => (
                       <div key={deadline.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
@@ -668,7 +669,7 @@ const StaffDashboard = () => {
                           <p className="text-sm text-muted-foreground">{deadline.client_name}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-medium">{new Date(deadline.due_date).toLocaleDateString('pt-PT')}</p>
+                          <p className="text-sm font-medium">{new Date(safeDateStr(deadline.due_date)).toLocaleDateString('pt-PT')}</p>
                           <Badge variant={deadline.priority === "high" ? "destructive" : "outline"}>
                             {deadline.priority === "high" ? "Alta" : deadline.priority === "medium" ? "Média" : "Baixa"}
                           </Badge>
@@ -697,7 +698,7 @@ const StaffDashboard = () => {
                     {(() => {
                       // Ordenar todos os documentos por data de expiração (crescente)
                       const sortedDocs = [...expiries].sort((a, b) => 
-                        new Date(a.expiry_date) - new Date(b.expiry_date)
+                        new Date(safeDateStr(a.expiry_date)) - new Date(safeDateStr(b.expiry_date))
                       );
                       
                       // Agrupar por cliente mantendo a ordem
@@ -717,11 +718,11 @@ const StaffDashboard = () => {
                       
                       // Ordenar grupos pelo documento mais próximo a expirar
                       const sortedGroups = Object.entries(grouped).sort((a, b) => 
-                        new Date(a[1].earliestExpiry) - new Date(b[1].earliestExpiry)
+                        new Date(safeDateStr(a[1].earliestExpiry)) - new Date(safeDateStr(b[1].earliestExpiry))
                       );
                       
                       return sortedGroups.map(([clientName, clientData]) => {
-                        const earliestDays = Math.ceil((new Date(clientData.earliestExpiry) - new Date()) / (1000 * 60 * 60 * 24));
+                        const earliestDays = Math.ceil((new Date(safeDateStr(clientData.earliestExpiry)) - new Date()) / (1000 * 60 * 60 * 24));
                         const borderColor = earliestDays <= 7 ? 'border-l-red-500' : earliestDays <= 30 ? 'border-l-amber-500' : 'border-l-blue-500';
                         
                         return (
@@ -744,7 +745,7 @@ const StaffDashboard = () => {
                             </div>
                             <div className="p-3 space-y-2">
                               {clientData.documents.map((doc) => {
-                                const daysUntil = Math.ceil((new Date(doc.expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                                const daysUntil = Math.ceil((new Date(safeDateStr(doc.expiry_date)) - new Date()) / (1000 * 60 * 60 * 24));
                                 const urgencyClass = daysUntil <= 7 ? 'bg-red-50 border-red-200 text-red-800' : 
                                                      daysUntil <= 30 ? 'bg-amber-50 border-amber-200 text-amber-800' : 
                                                      'bg-blue-50 border-blue-200 text-blue-800';
@@ -756,7 +757,7 @@ const StaffDashboard = () => {
                                       <Badge variant="outline" className="text-xs">{doc.document_type}</Badge>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                      <span className="text-xs">{new Date(doc.expiry_date).toLocaleDateString('pt-PT')}</span>
+                                      <span className="text-xs">{new Date(safeDateStr(doc.expiry_date)).toLocaleDateString('pt-PT')}</span>
                                       <Badge className={daysUntil <= 7 ? 'bg-red-500' : daysUntil <= 30 ? 'bg-amber-500' : 'bg-blue-500'}>
                                         {daysUntil}d
                                       </Badge>

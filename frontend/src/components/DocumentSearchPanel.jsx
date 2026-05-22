@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { toast } from "sonner";
+import { safeDateStr } from "../lib/utils";
 import {
   Search,
   FileText,
@@ -460,7 +461,7 @@ const DocumentSearchPanel = ({ processId, clientName }) => {
                   let daysUntilExpiry = null;
                   if (doc.expiry_date) {
                     const today = new Date();
-                    const expiry = new Date(doc.expiry_date);
+                    const expiry = new Date(safeDateStr(doc.expiry_date));
                     daysUntilExpiry = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
                     
                     if (daysUntilExpiry < 0) {

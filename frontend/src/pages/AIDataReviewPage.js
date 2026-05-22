@@ -68,6 +68,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../services/api";
+import { safeDateStr } from "../lib/utils";
 import { safeString } from "../utils/safeString";
 
 // Mapeamento de nomes de campos para português
@@ -354,7 +355,7 @@ const AIDataReviewPage = () => {
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
     try {
-      return new Date(dateStr).toLocaleDateString("pt-PT", {
+      return new Date(safeDateStr(dateStr)).toLocaleDateString("pt-PT", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
@@ -689,7 +690,7 @@ const AIDataReviewPage = () => {
                     <CardContent>
                       <p className="text-sm font-medium">Últimos 7 dias</p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {new Date(weeklyReport.period.start).toLocaleDateString("pt-PT")} - {new Date(weeklyReport.period.end).toLocaleDateString("pt-PT")}
+                        {new Date(safeDateStr(weeklyReport.period.start)).toLocaleDateString("pt-PT")} - {new Date(safeDateStr(weeklyReport.period.end)).toLocaleDateString("pt-PT")}
                       </p>
                     </CardContent>
                   </Card>

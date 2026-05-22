@@ -61,6 +61,7 @@ import {
 import { toast } from "sonner";
 import { format, parseISO, isToday, isTomorrow, isPast } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeDateStr } from "../lib/utils";
 import { hasAnyRole, STAFF_ROLES } from "../utils/roleUtils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -101,7 +102,7 @@ const STATUS_CONFIG = {
 const formatVisitDate = (isoDate) => {
   if (!isoDate) return "—";
   try {
-    const date = parseISO(isoDate);
+    const date = parseISO(safeDateStr(isoDate));
     if (isToday(date)) return `Hoje, ${format(date, "HH:mm")}`;
     if (isTomorrow(date)) return `Amanhã, ${format(date, "HH:mm")}`;
     return format(date, "dd MMM yyyy, HH:mm", { locale: pt });
@@ -113,7 +114,7 @@ const formatVisitDate = (isoDate) => {
 const isVisitPast = (isoDate) => {
   if (!isoDate) return false;
   try {
-    return isPast(parseISO(isoDate));
+    return isPast(parseISO(safeDateStr(isoDate)));
   } catch {
     return false;
   }

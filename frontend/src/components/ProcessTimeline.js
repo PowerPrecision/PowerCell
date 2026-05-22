@@ -13,6 +13,7 @@ import { Loader2, CheckCircle, Clock, Circle, ArrowRight } from "lucide-react";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeLabel } from "./dashboard/DashboardShared";
+import { safeDateStr } from "../lib/utils";
 
 // Cores de fallback mapeadas a partir do nome da cor da BD
 const COLOR_MAP = {
@@ -82,7 +83,7 @@ const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, date, daysInPhase }) 
         </p>
         {date && (
           <p className="text-[9px] text-muted-foreground">
-            {format(parseISO(date), "dd/MM", { locale: pt })}
+            {format(parseISO(safeDateStr(date)), "dd/MM", { locale: pt })}
           </p>
         )}
         {daysInPhase !== undefined && daysInPhase > 0 && (
@@ -172,7 +173,7 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
 
     // Ordenar histórico por data
     const sortedHistory = [...history].sort((a, b) => 
-      new Date(a.timestamp || a.created_at) - new Date(b.timestamp || b.created_at)
+      new Date(safeDateStr(a.timestamp || a.created_at)) - new Date(safeDateStr(b.timestamp || b.created_at))
     );
 
     // Construir timeline a partir do histórico
@@ -189,7 +190,7 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
         const nextDate = nextEntry ? (nextEntry.timestamp || nextEntry.created_at) : new Date().toISOString();
         
         const daysInPhase = entryDate && nextDate 
-          ? differenceInDays(parseISO(nextDate), parseISO(entryDate))
+          ? differenceInDays(parseISO(safeDateStr(nextDate)), parseISO(safeDateStr(entryDate)))
           : 0;
 
         timeline.push({

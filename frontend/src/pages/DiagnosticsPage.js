@@ -35,6 +35,7 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import { getTTLStatus, migrateTTLFields } from "../services/api";
 import { toast } from "../hooks/use-toast";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -123,7 +124,7 @@ const ServiceCard = ({ serviceKey, service, onConfigure }) => {
         {service.last_activity && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground mt-2">
             <Clock className="h-3 w-3" />
-            Última actividade: {new Date(service.last_activity).toLocaleString("pt-PT")}
+            Última actividade: {new Date(safeDateStr(service.last_activity)).toLocaleString("pt-PT")}
           </div>
         )}
         
@@ -345,7 +346,7 @@ const DiagnosticsPage = ({ embedded = false }) => {
                       <div className="flex justify-between">
                         <span className="font-medium text-red-800">{error.component || "Sistema"}</span>
                         <span className="text-xs text-red-600">
-                          {error.timestamp ? new Date(error.timestamp).toLocaleString("pt-PT") : ""}
+                          {error.timestamp ? new Date(safeDateStr(error.timestamp)).toLocaleString("pt-PT") : ""}
                         </span>
                       </div>
                       <p className="text-red-700 mt-1">{error.message}</p>
@@ -481,7 +482,7 @@ const DiagnosticsPage = ({ embedded = false }) => {
 
           {/* Timestamp */}
           <div className="text-xs text-muted-foreground text-right">
-            Última verificação: {new Date(diagnostics.timestamp).toLocaleString("pt-PT")}
+            Última verificação: {new Date(safeDateStr(diagnostics.timestamp)).toLocaleString("pt-PT")}
           </div>
         </>
       )}

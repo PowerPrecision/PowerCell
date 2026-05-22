@@ -41,6 +41,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { toast } from 'sonner';
 import { hasAnyRole } from '../utils/roleUtils';
+import { safeDateStr } from '../lib/utils';
 
 // React Query hooks
 import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';
@@ -316,7 +317,7 @@ const KanbanBoard = ({
         // Date filter
         let matchesDate = true;
         if (dateFilter !== 'all' && process.created_at) {
-          const created = new Date(process.created_at);
+          const created = new Date(safeDateStr(process.created_at));
           const now = new Date();
           if (dateFilter === 'today') {
             matchesDate = created.toDateString() === now.toDateString();
@@ -334,7 +335,7 @@ const KanbanBoard = ({
         if (urgencyFilter !== 'all') {
           const lastUpdate = process.updated_at || process.created_at;
           if (lastUpdate) {
-            const daysSinceUpdate = Math.floor((Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24));
+            const daysSinceUpdate = Math.floor((Date.now() - new Date(safeDateStr(lastUpdate)).getTime()) / (1000 * 60 * 60 * 24));
             if (urgencyFilter === 'overdue') {
               matchesUrgency = daysSinceUpdate > 14;
             } else if (urgencyFilter === 'urgent') {

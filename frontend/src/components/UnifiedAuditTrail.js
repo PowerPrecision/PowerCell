@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeDateStr } from "../lib/utils";
 
 const EVENT_TYPES = {
   status_change: { label: "Alteração de Estado", icon: ArrowRight, color: "text-blue-500 bg-blue-50 dark:bg-blue-950" },
@@ -111,7 +112,7 @@ const EventItem = ({ event }) => {
           </div>
           {timestamp && (
             <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
-              {format(parseISO(timestamp), "dd/MM HH:mm", { locale: pt })}
+              {format(parseISO(safeDateStr(timestamp)), "dd/MM HH:mm", { locale: pt })}
             </span>
           )}
         </div>
@@ -149,7 +150,7 @@ const UnifiedAuditTrail = ({ history = [], activities = [], maxHeight = "400px" 
     });
     
     // Sort chronologically (newest first)
-    events.sort((a, b) => new Date(b._sortDate) - new Date(a._sortDate));
+    events.sort((a, b) => new Date(safeDateStr(b._sortDate)) - new Date(safeDateStr(a._sortDate)));
     return events;
   }, [history, activities]);
   

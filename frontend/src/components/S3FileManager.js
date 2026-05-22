@@ -118,6 +118,7 @@ import {
 import { Input } from "./ui/input";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -271,8 +272,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       let comparison = 0;
       
       if (sortBy === "date") {
-        const dateA = new Date(a.last_modified || 0);
-        const dateB = new Date(b.last_modified || 0);
+        const dateA = new Date(a.last_modified ? safeDateStr(a.last_modified) : 0);
+        const dateB = new Date(b.last_modified ? safeDateStr(b.last_modified) : 0);
         comparison = dateA - dateB;
       } else if (sortBy === "name") {
         comparison = (a.name || "").localeCompare(b.name || "");
@@ -966,7 +967,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Formatar data - dd/mm/AA hh:mm
   const formatDate = (dateStr) => {
     try {
-      return format(new Date(dateStr), "dd/MM/yy HH:mm", { locale: pt });
+      return format(new Date(safeDateStr(dateStr)), "dd/MM/yy HH:mm", { locale: pt });
     } catch {
       return dateStr;
     }

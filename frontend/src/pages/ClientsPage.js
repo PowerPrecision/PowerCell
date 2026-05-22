@@ -40,6 +40,7 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { safeDateStr } from "../lib/utils";
 import {
   Users,
   Plus,
@@ -251,7 +252,7 @@ export default function ClientsPage() {
       // Campo genérico (ex: created_at, updated_at)
       const val = c[sortField];
       if (sortField === "created_at" || sortField === "updated_at") {
-        return val ? new Date(val).getTime() : 0;
+        return val ? new Date(safeDateStr(val)).getTime() : 0;
       }
       return typeof val === "string" ? val.toLowerCase() : val;
     };

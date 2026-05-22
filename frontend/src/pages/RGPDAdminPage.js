@@ -32,6 +32,7 @@ import SmartRichEditor from "../components/ui/SmartRichEditor";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
 import { safeString } from "../utils/safeString";
+import { safeDateStr } from "../lib/utils";
 import { safeNumber } from "../components/dashboard/DashboardShared";
 import { getRGPDTemplate, updateRGPDTemplate, getMinutaTemplate, updateMinutaTemplate } from "../services/api";
 import {
@@ -369,7 +370,7 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Criado em</span>
-                <span>{new Date(rgpd.created_at).toLocaleString("pt-PT")}</span>
+                <span>{new Date(safeDateStr(rgpd.created_at)).toLocaleString("pt-PT")}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Criado por</span>
@@ -378,13 +379,13 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
               {rgpd.signed_at && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Assinado em</span>
-                  <span>{new Date(rgpd.signed_at).toLocaleString("pt-PT")}</span>
+                  <span>{new Date(safeDateStr(rgpd.signed_at)).toLocaleString("pt-PT")}</span>
                 </div>
               )}
               {rgpd.token_expires_at && rgpd.status === "pending" && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Expira em</span>
-                  <span>{new Date(rgpd.token_expires_at).toLocaleString("pt-PT")}</span>
+                  <span>{new Date(safeDateStr(rgpd.token_expires_at)).toLocaleString("pt-PT")}</span>
                 </div>
               )}
             </CardContent>
@@ -536,7 +537,7 @@ const RGPDTemplateTab = () => {
                   ? "A utilizar o template padrão. Edite para personalizar o texto legal do RGPD."
                   : `Última atualização: ${
                       templateMeta.updated_at
-                        ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
+                        ? new Date(safeDateStr(templateMeta.updated_at)).toLocaleString("pt-PT")
                         : "N/A"
                     } ${templateMeta.updated_by ? `por ${safeString(templateMeta.updated_by)}` : ""}`}
               </span>
@@ -903,8 +904,8 @@ const RGPDPedidosTab = () => {
                   </div>
                   <div className="col-span-2 text-sm text-muted-foreground">
                     {rgpd.signed_at
-                      ? new Date(rgpd.signed_at).toLocaleDateString("pt-PT")
-                      : new Date(rgpd.created_at).toLocaleDateString("pt-PT")}
+                      ? new Date(safeDateStr(rgpd.signed_at)).toLocaleDateString("pt-PT")
+                      : new Date(safeDateStr(rgpd.created_at)).toLocaleDateString("pt-PT")}
                   </div>
                   <div className="col-span-3 flex justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => handleView(rgpd)} title="Ver detalhes">
@@ -1095,7 +1096,7 @@ const MinutaTemplateTab = () => {
                   ? "A utilizar a minuta padrão. Edite para personalizar o texto legal da minuta de exclusividade."
                   : `Última atualização: ${
                       templateMeta.updated_at
-                        ? new Date(templateMeta.updated_at).toLocaleString("pt-PT")
+                        ? new Date(safeDateStr(templateMeta.updated_at)).toLocaleString("pt-PT")
                         : "N/A"
                     } ${templateMeta.updated_by ? `por ${safeString(templateMeta.updated_by)}` : ""}`}
               </span>

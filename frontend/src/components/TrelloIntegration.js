@@ -19,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { useToast } from "../hooks/use-toast";
+import { safeDateStr } from "../lib/utils";
 import {
   RefreshCw,
   CheckCircle2,
@@ -477,7 +478,7 @@ const TrelloIntegration = () => {
             </div>
             {status.sync_stats.last_sync && (
               <p className="text-xs text-muted-foreground mt-3 text-center">
-                Última sincronização: {new Date(status.sync_stats.last_sync).toLocaleString("pt-PT")}
+                Última sincronização: {new Date(safeDateStr(status.sync_stats.last_sync)).toLocaleString("pt-PT")}
               </p>
             )}
             {status.sync_stats.without_assignment > 0 && (

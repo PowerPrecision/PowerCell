@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Calendar } from "../ui/calendar";
 import { Plus, Trash2, Eye, CalendarDays, Users } from "lucide-react";
 import { hasAnyRole, excludeRoles } from "../../utils/roleUtils";
+import { safeDateStr } from "../../../lib/utils";
 
 const priorityOrder = { high: 1, medium: 2, low: 3 };
 const priorityLabels = { high: "Alta", medium: "Média", low: "Baixa" };
@@ -75,7 +76,7 @@ const CalendarTab = ({
     }
     
     return filtered.sort((a, b) => {
-      const dateCompare = new Date(a.due_date) - new Date(b.due_date);
+      const dateCompare = new Date(safeDateStr(a.due_date)) - new Date(safeDateStr(b.due_date));
       if (dateCompare !== 0) return dateCompare;
       return (priorityOrder[a.priority] || 3) - (priorityOrder[b.priority] || 3);
     });
@@ -87,7 +88,7 @@ const CalendarTab = ({
     today.setHours(0, 0, 0, 0);
     
     return sortedCalendarDeadlines
-      .filter(d => new Date(d.due_date) >= today)
+      .filter(d => new Date(safeDateStr(d.due_date)) >= today)
       .slice(0, 10);
   }, [sortedCalendarDeadlines]);
 
@@ -101,7 +102,7 @@ const CalendarTab = ({
 
   // Datas com prazos para highlight no calendário
   const datesWithDeadlines = useMemo(() => {
-    return calendarDeadlines.map(d => new Date(d.due_date));
+    return calendarDeadlines.map(d => new Date(safeDateStr(d.due_date)));
   }, [calendarDeadlines]);
 
   const getUserName = (userId) => {
@@ -237,7 +238,7 @@ const CalendarTab = ({
             <ScrollArea className="h-[300px] sm:h-[500px]">
               <div className="space-y-3 pr-4">
                 {upcomingDeadlines.map((deadline) => {
-                  const deadlineDate = new Date(deadline.due_date);
+                  const deadlineDate = new Date(safeDateStr(deadline.due_date));
                   const today = new Date();
                   today.setHours(0, 0, 0, 0);
                   const daysUntil = Math.ceil((deadlineDate - today) / (1000 * 60 * 60 * 24));

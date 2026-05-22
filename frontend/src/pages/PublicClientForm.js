@@ -50,7 +50,7 @@ import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home
 import { toast } from "sonner";
 import axios from "axios";
 import * as Sentry from "@sentry/react";
-import { cn } from "../lib/utils";
+import { cn, safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
@@ -381,7 +381,7 @@ export default function PublicClientForm({ previewMode = false }) {
       if (saved) {
         const parsed = JSON.parse(saved);
         setHasDraft(true);
-        return { data: parsed, timestamp: timestamp ? new Date(timestamp) : null };
+        return { data: parsed, timestamp: timestamp ? new Date(safeDateStr(timestamp)) : null };
       }
     } catch (e) {
       console.error("Erro ao carregar rascunho:", e);
@@ -2387,7 +2387,7 @@ export default function PublicClientForm({ previewMode = false }) {
           newFieldErrors.nif = nifCheck.message;
         }
         if (formData.birth_date) {
-          const birthDate = new Date(formData.birth_date);
+          const birthDate = new Date(safeDateStr(formData.birth_date));
           const today = new Date();
           let age = today.getFullYear() - birthDate.getFullYear();
           const monthDiff = today.getMonth() - birthDate.getMonth();
@@ -2461,7 +2461,7 @@ export default function PublicClientForm({ previewMode = false }) {
         }
       }
       if (formData.birth_date) {
-        const birthDate = new Date(formData.birth_date);
+        const birthDate = new Date(safeDateStr(formData.birth_date));
         const today = new Date();
         let age = today.getFullYear() - birthDate.getFullYear();
         const monthDiff = today.getMonth() - birthDate.getMonth();

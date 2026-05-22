@@ -33,6 +33,7 @@ import CreateClientModal from "../components/kanban/CreateClientModal";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeDateStr } from "../lib/utils";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -181,7 +182,7 @@ const MyClientsPage = () => {
   const formatDate = (dateString) => {
     if (!dateString) return "-";
     try {
-      return format(parseISO(dateString), "dd MMM yyyy", { locale: pt });
+      return format(parseISO(safeDateStr(dateString)), "dd MMM yyyy", { locale: pt });
     } catch {
       return dateString;
     }

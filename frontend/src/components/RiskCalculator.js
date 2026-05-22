@@ -44,6 +44,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
 } from "lucide-react";
+import { safeDateStr } from "../lib/utils";
 
 /**
  * Componente de medidor circular (Gauge) - versão avançada
@@ -213,7 +214,7 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
         if (clientData.idade) {
           setIdadeProponente(clientData.idade.toString());
         } else if (clientData.data_nascimento) {
-          const birthDate = new Date(clientData.data_nascimento);
+          const birthDate = new Date(safeDateStr(clientData.data_nascimento));
           const age = new Date().getFullYear() - birthDate.getFullYear();
           setIdadeProponente(age.toString());
         }

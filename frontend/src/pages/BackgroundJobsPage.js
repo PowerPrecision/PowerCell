@@ -40,6 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
+import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -71,7 +72,7 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
   
   const formatDate = (isoString) => {
     if (!isoString) return "-";
-    const date = new Date(isoString);
+    const date = new Date(safeDateStr(isoString));
     return date.toLocaleString("pt-PT", {
       day: "2-digit",
       month: "2-digit",
@@ -82,8 +83,8 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
 
   const getDuration = () => {
     if (!job.started_at) return "-";
-    const start = new Date(job.started_at);
-    const end = job.finished_at ? new Date(job.finished_at) : new Date();
+    const start = new Date(safeDateStr(job.started_at));
+    const end = job.finished_at ? new Date(safeDateStr(job.finished_at)) : new Date();
     const diffMs = end - start;
     const diffSecs = Math.floor(diffMs / 1000);
     
@@ -897,16 +898,16 @@ const BackgroundJobsPage = ({ embedded = false }) => {
                     <p className="text-xs text-muted-foreground mb-2">Timestamps</p>
                     <div className="space-y-1 text-sm">
                       {selectedJob.created_at && (
-                        <p><span className="text-muted-foreground">Criado:</span> {new Date(selectedJob.created_at).toLocaleString('pt-PT')}</p>
+                        <p><span className="text-muted-foreground">Criado:</span> {new Date(safeDateStr(selectedJob.created_at)).toLocaleString('pt-PT')}</p>
                       )}
                       {selectedJob.started_at && (
-                        <p><span className="text-muted-foreground">Iniciado:</span> {new Date(selectedJob.started_at).toLocaleString('pt-PT')}</p>
+                        <p><span className="text-muted-foreground">Iniciado:</span> {new Date(safeDateStr(selectedJob.started_at)).toLocaleString('pt-PT')}</p>
                       )}
                       {selectedJob.updated_at && (
-                        <p><span className="text-muted-foreground">Actualizado:</span> {new Date(selectedJob.updated_at).toLocaleString('pt-PT')}</p>
+                        <p><span className="text-muted-foreground">Actualizado:</span> {new Date(safeDateStr(selectedJob.updated_at)).toLocaleString('pt-PT')}</p>
                       )}
                       {selectedJob.finished_at && (
-                        <p><span className="text-muted-foreground">Terminado:</span> {new Date(selectedJob.finished_at).toLocaleString('pt-PT')}</p>
+                        <p><span className="text-muted-foreground">Terminado:</span> {new Date(safeDateStr(selectedJob.finished_at)).toLocaleString('pt-PT')}</p>
                       )}
                     </div>
                   </div>

@@ -32,6 +32,7 @@ import {
 import { hasAnyRole } from "../utils/roleUtils";
 import RichTextEditor from "../components/ui/RichTextEditor";
 import { toast } from "sonner";
+import { safeDateStr } from "../lib/utils";
 import {
   Mail,
   Globe,
@@ -649,10 +650,10 @@ const SharedEmailCard = () => {
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-green-700 dark:text-green-300">
                       <span>Email: <strong>{cfg.google_email || cfg.email_address || "—"}</strong></span>
                       {cfg.oauth_connected_at && (
-                        <span>Conectado: {new Date(cfg.oauth_connected_at).toLocaleDateString("pt-PT")}</span>
+                        <span>Conectado: {new Date(safeDateStr(cfg.oauth_connected_at)).toLocaleDateString("pt-PT")}</span>
                       )}
                       {cfg.last_sync_at && (
-                        <span>Último sync: {new Date(cfg.last_sync_at).toLocaleDateString("pt-PT")}</span>
+                        <span>Último sync: {new Date(safeDateStr(cfg.last_sync_at)).toLocaleDateString("pt-PT")}</span>
                       )}
                       {cfg.total_emails_synced > 0 && (
                         <span>Emails: {cfg.total_emails_synced}</span>

@@ -13,6 +13,7 @@ import { Megaphone, Send, Loader2, MessageSquare, AlertCircle } from "lucide-rea
 import { isToday, isYesterday, format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { toast } from "sonner";
+import { safeDateStr } from "../../lib/utils";
 
 // ── Helper Functions ──────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ const getAvatarColor = (name) => {
 };
 
 const formatDate = (dateStr) => {
-  const date = parseISO(dateStr);
+  const date = parseISO(safeDateStr(dateStr));
   if (isToday(date)) return `Hoje às ${format(date, "HH:mm")}`;
   if (isYesterday(date)) return `Ontem às ${format(date, "HH:mm")}`;
   return format(date, "d MMM, HH:mm", { locale: pt });
