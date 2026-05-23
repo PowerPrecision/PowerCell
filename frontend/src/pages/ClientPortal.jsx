@@ -428,19 +428,50 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
         return;
       }
 
+      // Mensagem comum a usar em todos os erros de scraping
+      // (sempre que falha, indicar ao cliente que pode fazer upload manual).
+      const MANUAL_UPLOAD_HINT =
+        ' Pode também descarregar os documentos directamente do ' +
+        sourceLabel +
+        ' e enviá-los através do botão "Carregar documentos" no portal.';
+
       if (res.ok && data.success) {
         setSuccess(data.message || 'Documentos obtidos com sucesso!');
         setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 2500);
+      } else if (res.ok && (data.status === 'processing' || data.scraper_job_id)) {
+        // Processamento assíncrono: o backend respondeu logo e o scraper corre em background.
+        // O cliente vai receber email + notificação WS quando terminar.
+        setSuccess(
+          data.message ||
+          'A obter os seus documentos em background. Será notificado por email quando estiverem prontos. ' +
+          'Se demorar ou não receber nada em alguns minutos, pode carregar os documentos manualmente.'
+        );
+        setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 4000);
       } else if (res.ok && data.success === false) {
         // App-level error returned as 200 + success:false (scraper unavailable, etc.)
-        setError(data.message || 'O serviço de obtenção automática não está disponível de momento. Por favor, faça download manualmente e envie os documentos através do botão de upload.');
+        setError(
+          (data.message ||
+            'Não foi possível obter os documentos automaticamente.') +
+          MANUAL_UPLOAD_HINT
+        );
       } else if (res.status === 503) {
         // Render cold start 503 (shouldn't reach here after fetchWithRetry, but handle gracefully)
-        setError(data.detail || 'O servidor está a iniciar. Por favor, aguarde uns segundos e tente novamente.');
+        setError(
+          (data.detail ||
+            'O servidor está a iniciar. Por favor, aguarde uns segundos e tente novamente.') +
+          MANUAL_UPLOAD_HINT
+        );
       } else if (res.status === 401 && data.detail) {
-        setError(data.detail);
+        // Credenciais incorretas: NÃO sugerir upload manual (o cliente pode só ter falhado o password)
+        setError(typeof data.detail === 'string' ? data.detail : 'Credenciais inválidas. Verifique o seu ' + idLabel + ' e a password.');
+      } else if (res.status === 400 && data.detail) {
+        // Validação simples (NIF/NISS mal formado, password vazia)
+        setError(typeof data.detail === 'string' ? data.detail : 'Dados inválidos.');
       } else {
-        setError(data.detail || 'Erro ao obter documentos. Tente novamente.');
+        setError(
+          (typeof data.detail === 'string' ? data.detail : 'Erro ao obter documentos. Tente novamente.') +
+          MANUAL_UPLOAD_HINT
+        );
       }
     } catch (err) {
       setError(err.message || 'Erro de ligação. Tente novamente.');
