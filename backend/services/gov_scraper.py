@@ -211,7 +211,13 @@ DEFAULT_TIMEOUT = 90000  # 90 segundos
 NAVIGATION_TIMEOUT = 90000  # 90 segundos
 
 # Tempo máximo total do scraper (segundos) — prevenir execuções infinitas
-MAX_SCRAPER_DURATION = 180  # 3 minutos
+MAX_SCRAPER_DURATION = 300  # 5 minutos (login + 2 docs com fallbacks)
+
+# Tempo máximo para descarregar um documento individual (segundos).
+# Mantemos um budget próprio por documento para que, se um deles falhar
+# por ausência de link/timeout interno, ainda haja orçamento para tentar
+# os restantes — em vez de o retry global perder tudo.
+PER_DOC_TIMEOUT = 90  # 1m30 por documento
 
 # Retry config
 MAX_RETRIES = 2
@@ -786,25 +792,37 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         # S3FileManager). O tipo específico do documento ("Declaração de IRS")
         # fica em `custom_label` no registo da BD para distinguir do resto.
         step = "download_irs"
-        doc_irs = await _download_financas_document(
-            page, "Declaração de IRS", "Financeiros"
-        )
-        if doc_irs:
-            documents.append(doc_irs)
-            logger.info(f"[GOV_SCRAPER] IRS descarregado: {doc_irs.filename} ({len(doc_irs.content_bytes)} bytes)")
-        else:
-            logger.warning("[GOV_SCRAPER] Não foi possível descarregar a Declaração de IRS")
+        try:
+            doc_irs = await asyncio.wait_for(
+                _download_financas_document(page, "Declaração de IRS", "Financeiros"),
+                timeout=PER_DOC_TIMEOUT,
+            )
+            if doc_irs:
+                documents.append(doc_irs)
+                logger.info(f"[GOV_SCRAPER] IRS descarregado: {doc_irs.filename} ({len(doc_irs.content_bytes)} bytes)")
+            else:
+                logger.warning("[GOV_SCRAPER] Não foi possível descarregar a Declaração de IRS")
+        except asyncio.TimeoutError:
+            logger.warning(f"[GOV_SCRAPER] Timeout ({PER_DOC_TIMEOUT}s) ao descarregar IRS — continuar com restantes")
 
         # ── 8. Descarregar Nota de Liquidação ──
+        # Envolvido em try/except para que, se falhar/expirar, ainda retornemos
+        # os documentos já obtidos (ex: o IRS descarregado no passo anterior).
         step = "download_nota"
-        doc_nota = await _download_financas_document(
-            page, "Nota de Liquidação IRS", "Financeiros"
-        )
-        if doc_nota:
-            documents.append(doc_nota)
-            logger.info(f"[GOV_SCRAPER] Nota de Liquidação descarregada: {doc_nota.filename} ({len(doc_nota.content_bytes)} bytes)")
-        else:
-            logger.warning("[GOV_SCRAPER] Não foi possível descarregar a Nota de Liquidação")
+        try:
+            doc_nota = await asyncio.wait_for(
+                _download_financas_document(page, "Nota de Liquidação IRS", "Financeiros"),
+                timeout=PER_DOC_TIMEOUT,
+            )
+            if doc_nota:
+                documents.append(doc_nota)
+                logger.info(f"[GOV_SCRAPER] Nota de Liquidação descarregada: {doc_nota.filename} ({len(doc_nota.content_bytes)} bytes)")
+            else:
+                logger.warning("[GOV_SCRAPER] Não foi possível descarregar a Nota de Liquidação")
+        except asyncio.TimeoutError:
+            logger.warning(f"[GOV_SCRAPER] Timeout ({PER_DOC_TIMEOUT}s) ao descarregar Nota de Liquidação — devolver documentos parciais")
+        except Exception as e:
+            logger.warning(f"[GOV_SCRAPER] Erro ao descarregar Nota de Liquidação: {type(e).__name__}: {e} — devolver documentos parciais")
 
         # ── 9. Retornar resultados ──
         if not documents:
@@ -1281,21 +1299,33 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
         # ── 7. Descarregar Situação Contributiva ──
         # Categoria S3 = "Financeiros" (visível no S3FileManager do CRM)
         step = "download_situacao"
-        doc_sit = await _download_seg_social_document(
-            page, "Situação Contributiva", "Financeiros"
-        )
-        if doc_sit:
-            documents.append(doc_sit)
-            logger.info(f"[GOV_SCRAPER] Situação Contributiva descarregada: {doc_sit.filename}")
+        try:
+            doc_sit = await asyncio.wait_for(
+                _download_seg_social_document(page, "Situação Contributiva", "Financeiros"),
+                timeout=PER_DOC_TIMEOUT,
+            )
+            if doc_sit:
+                documents.append(doc_sit)
+                logger.info(f"[GOV_SCRAPER] Situação Contributiva descarregada: {doc_sit.filename}")
+        except asyncio.TimeoutError:
+            logger.warning(f"[GOV_SCRAPER] Timeout ({PER_DOC_TIMEOUT}s) ao descarregar Situação Contributiva")
+        except Exception as e:
+            logger.warning(f"[GOV_SCRAPER] Erro Situação Contributiva: {type(e).__name__}: {e}")
 
         # ── 8. Descarregar Extrato de Remunerações ──
         step = "download_extrato"
-        doc_ext = await _download_seg_social_document(
-            page, "Extrato de Remunerações", "Financeiros"
-        )
-        if doc_ext:
-            documents.append(doc_ext)
-            logger.info(f"[GOV_SCRAPER] Extrato de Remunerações descarregado: {doc_ext.filename}")
+        try:
+            doc_ext = await asyncio.wait_for(
+                _download_seg_social_document(page, "Extrato de Remunerações", "Financeiros"),
+                timeout=PER_DOC_TIMEOUT,
+            )
+            if doc_ext:
+                documents.append(doc_ext)
+                logger.info(f"[GOV_SCRAPER] Extrato de Remunerações descarregado: {doc_ext.filename}")
+        except asyncio.TimeoutError:
+            logger.warning(f"[GOV_SCRAPER] Timeout ({PER_DOC_TIMEOUT}s) ao descarregar Extrato de Remunerações")
+        except Exception as e:
+            logger.warning(f"[GOV_SCRAPER] Erro Extrato: {type(e).__name__}: {e}")
 
         # ── 9. Retornar resultados ──
         if not documents:
