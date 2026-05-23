@@ -37,7 +37,7 @@ export default defineConfig({
   /* Configuração global */
   use: {
     /* URL base da aplicação */
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'https://form-template-fix-1.preview.emergentagent.com',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'https://auto-doc-fetch.preview.emergentagent.com',
     
     /* Recolher trace em caso de falha */
     trace: 'on-first-retry',
