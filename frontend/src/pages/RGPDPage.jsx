@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
-import { ScrollArea } from '../components/ui/scroll-area';
+// import { ScrollArea } from '../components/ui/scroll-area'; // substituído por div overflow-y-auto (mais fiável em mobile)
 import {
   Loader2,
   CheckCircle,
@@ -198,6 +198,34 @@ const formatDate = (value) => {
   if (cleaned.length <= 2) return cleaned;
   if (cleaned.length <= 4) return `${cleaned.slice(0, 2)}-${cleaned.slice(2)}`;
   return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4, 8)}`;
+};
+
+// Converte qualquer formato de data para DD-MM-AAAA.
+// Aceita: ISO (AAAA-MM-DD), DD-MM-AAAA, DD/MM/AAAA, AAAA/MM/DD, Date object.
+const toDisplayDate = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    const s = value.trim();
+    // Já está em DD-MM-AAAA
+    if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
+    // ISO AAAA-MM-DD (com ou sem hora)
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+    // DD/MM/AAAA
+    const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (slash) return `${slash[1]}-${slash[2]}-${slash[3]}`;
+    // AAAA/MM/DD
+    const slashIso = s.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+    if (slashIso) return `${slashIso[3]}-${slashIso[2]}-${slashIso[1]}`;
+    return s;
+  }
+  if (value instanceof Date && !isNaN(value)) {
+    const dd = String(value.getDate()).padStart(2, '0');
+    const mm = String(value.getMonth() + 1).padStart(2, '0');
+    const yyyy = value.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
+  }
+  return '';
 };
 
 // ====================================================================
@@ -431,7 +459,7 @@ export default function RGPDPage() {
             contribuinte: prefilled.nif || prev.contribuinte,
             tipo_documento: prefilled.tipo_documento || prev.tipo_documento,
             numero_documento: prefilled.numero_documento || prev.numero_documento,
-            validade_documento: prefilled.validade_documento || prev.validade_documento,
+            validade_documento: toDisplayDate(prefilled.validade_documento) || prev.validade_documento,
             morada: prefilled.morada || prev.morada,
             localidade: prefilled.localidade || prev.localidade,
             codigo_postal: prefilled.codigo_postal || prev.codigo_postal,
@@ -999,18 +1027,27 @@ export default function RGPDPage() {
                     (Ao abrigo do Regulamento Geral sobre a Proteção de Dados
                     Pessoais)
                   </p>
-                  <ScrollArea className="h-52 sm:h-64">
+                  {/*
+                    Usamos uma div com overflow-y:auto em vez de Radix ScrollArea
+                    para garantir scroll fiável em mobile e evitar que o conteúdo
+                    apareça truncado. min-h garante que mesmo em ecrãs muito
+                    pequenos há sempre uma janela usável de leitura.
+                  */}
+                  <div
+                    className="max-h-[60vh] min-h-[16rem] overflow-y-auto overscroll-contain rounded border border-border/40 bg-background/60 p-3 pr-4"
+                    data-testid="rgpd-policy-scroll"
+                  >
                     {formData?.rgpd_text ? (
                       <div
-                        className="pr-3 space-y-3 text-xs text-muted-foreground prose prose-xs dark:prose-invert max-w-none"
+                        className="space-y-3 text-xs sm:text-sm text-foreground/90 leading-relaxed prose prose-sm dark:prose-invert max-w-none break-words"
                         dangerouslySetInnerHTML={{ __html: formData.rgpd_text }}
                       />
                     ) : (
-                      <div className="pr-3 space-y-3 text-xs text-muted-foreground">
+                      <div className="space-y-3 text-xs text-muted-foreground">
                         <p className="italic">Texto da política de privacidade indisponível. O documento será gerado com o texto padrão após a assinatura.</p>
                       </div>
                     )}
-                  </ScrollArea>
+                  </div>
                 </div>
 
                 {/* ============================================================ */}
@@ -1110,14 +1147,17 @@ export default function RGPDPage() {
               </CardHeader>
               <CardContent className="pt-4">
                 {formData?.minuta_text ? (
-                  <ScrollArea className="h-64 sm:h-80">
+                  <div
+                    className="max-h-[60vh] min-h-[16rem] overflow-y-auto overscroll-contain rounded border border-border/40 bg-background/60 p-3 pr-4"
+                    data-testid="rgpd-minuta-scroll"
+                  >
                     <div
-                      className="pr-3 text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap"
+                      className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap break-words"
                       dangerouslySetInnerHTML={{
                         __html: formData.minuta_text,
                       }}
                     />
-                  </ScrollArea>
+                  </div>
                 ) : (
                   <div className="text-sm text-muted-foreground text-center py-8">
                     <p className="italic">Texto da minuta indisponível. O documento será gerado com o texto padrão após a assinatura.</p>

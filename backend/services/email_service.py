@@ -903,7 +903,7 @@ def _fetch_all_from_folder_sync(
     
     Otimizações de memória:
     - Pré-verificação RFC822.SIZE: emails > 15MB são saltados (previne OOM)
-    - BODY.PEEK[]: lê sem marcar como \Seen no servidor IMAP original
+    - BODY.PEEK[]: lê sem marcar como ``\\Seen`` no servidor IMAP original
     
     Returns:
         Dict with 'emails' (list) and 'connection_error' (str or None).

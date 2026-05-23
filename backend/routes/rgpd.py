@@ -10,7 +10,7 @@ Endpoints para gestão de consentimentos RGPD:
 import logging
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -78,6 +78,7 @@ async def _get_rgpd_or_404(request_id: str):
 @router.post("/request", response_model=RGPDResponse)
 async def request_rgpd(
     data: RGPDCreate,
+    request: Request,
     user: dict = Depends(require_staff())
 ):
     """
@@ -146,6 +147,19 @@ async def request_rgpd(
                     created_by_name=user.get("name", "")
                 )
         
+        # Determinar URL base do frontend a partir do Referer/Origin do staff
+        # (igual ao que `_get_frontend_url` faz em processes.py)
+        frontend_base_url = None
+        try:
+            referer = request.headers.get("referer") or request.headers.get("origin")
+            if referer:
+                from urllib.parse import urlparse
+                parsed = urlparse(referer)
+                if parsed.scheme and parsed.netloc:
+                    frontend_base_url = f"{parsed.scheme}://{parsed.netloc}"
+        except Exception as _err:
+            logger.warning(f"[RGPD] Não foi possível determinar base_url do Referer: {_err}")
+
         # Enviar email com o link
         email_sent = await send_rgpd_email(
             client_email=data.client_email,
@@ -153,7 +167,8 @@ async def request_rgpd(
             token=result["token"],
             request_id=result["request_id"],
             user_email=user["email"],
-            custom_message=data.custom_message
+            custom_message=data.custom_message,
+            base_url=frontend_base_url,
         )
         
         if not email_sent:
@@ -943,6 +958,7 @@ async def delete_rgpd(
 @router.post("/admin/{request_id}/resend")
 async def resend_rgpd_email(
     request_id: str,
+    request: Request,
     user: dict = Depends(require_staff())
 ):
     """
@@ -976,13 +992,26 @@ async def resend_rgpd_email(
         }
     )
 
+    # Determinar URL base do frontend a partir do Referer/Origin do staff
+    frontend_base_url = None
+    try:
+        referer = request.headers.get("referer") or request.headers.get("origin")
+        if referer:
+            from urllib.parse import urlparse
+            parsed = urlparse(referer)
+            if parsed.scheme and parsed.netloc:
+                frontend_base_url = f"{parsed.scheme}://{parsed.netloc}"
+    except Exception as _err:
+        logger.warning(f"[RGPD-RESEND] Não foi possível determinar base_url do Referer: {_err}")
+
     # Enviar email
     email_sent = await send_rgpd_email(
         client_email=rgpd["client_email"],
         client_name=rgpd["client_name"],
         token=new_token,
         request_id=request_id,
-        user_email=user["email"]
+        user_email=user["email"],
+        base_url=frontend_base_url,
     )
 
     if not email_sent:
