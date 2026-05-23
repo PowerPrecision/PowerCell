@@ -212,4 +212,4 @@ zope.event==6.1
 zope.interface==8.2
 reportlab==4.2.5
 playwright==1.52.0
-playwright-stealth==1.0.6
+playwright-stealth==2.0.3

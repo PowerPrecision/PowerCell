@@ -46,42 +46,53 @@ logger = logging.getLogger(__name__)
 # CONFIGURAÇÃO — URLs e Selectors (v2 — atualizados 2025)
 # ================================================================
 
-# Portal das Finanças (via acesso.gov.pt)
-FINANCAS_AUTH_URL = "https://www.acesso.gov.pt/unauthlogin?pathpart=&target="
+# Portal das Finanças (via acesso.gov.pt v2 — Maio 2025)
+# A página antiga (/unauthlogin) já não funciona. Usar a nova URL v2 com
+# selectedAuthMethod=N para abrir directamente o separador NIF.
+FINANCAS_AUTH_URL = (
+    "https://www.acesso.gov.pt/v2/loginForm"
+    "?partID=PFIN&path=/geral/dashboard&selectedAuthMethod=N"
+)
 
-# Selectors do portal acesso.gov.pt (autenticação) — v2
-# Cada selector tem múltiplos fallbacks para robustez
+# Selectors do portal acesso.gov.pt (autenticação) — v3 (Maio 2025)
+# A nova UI usa Radix UI tabs + classes auto-geradas. Selectors estáveis:
+#   - input[name="username"] / input[name="password"]
+#   - button[type="submit"] (texto "Autenticar")
+#   - button[role="tab"] com texto "NIF" / "CC / CMD"
 FINANCAS_SEL = {
-    # Página de login — tab NIF
+    # Página de login — tab NIF (Radix UI)
     "login_tab_nif": [
-        "#tabNif",
-        "button[onclick*='tabNif']",
-        "a[data-toggle='tab'][href='#tabNif']",
-        "li:has-text('NIF') a",
+        "#login-form button[role='tab']:has-text('NIF')",
+        "button[role='tab']:has-text('NIF')",
+        "[id$='-trigger-N']",
+        "#tabNif",  # legado, mantido por segurança
     ],
-    # Campo NIF
+    # Campo NIF (Número de Contribuinte)
     "nif_input": [
-        "#NIF",
+        "#login-form input[name='username']",
         "input[name='username']",
-        "input[id='username']",
-        "input[placeholder*='NIF']",
+        "input[placeholder*='Contribuinte']",
+        "input[aria-label*='Contribuinte']",
         "input[autocomplete='username']",
+        "#NIF",  # legado
     ],
     # Campo Password
     "password_input": [
-        "#password",
+        "#login-form input[name='password']",
         "input[name='password']",
         "input[type='password']",
+        "input[placeholder*='Senha']",
         "input[autocomplete='current-password']",
+        "#password",
     ],
-    # Botão de login
+    # Botão de login ("Autenticar")
     "login_button": [
+        "#login-form button[type='submit']",
+        "form[name='loginForm'] button[type='submit']",
+        "button[type='submit']:has-text('Autenticar')",
+        "button:has-text('Autenticar')",
         "button[type='submit']",
         "input[type='submit']",
-        "button.btn-primary",
-        "#loginForm button",
-        "button:has-text('Entrar')",
-        "button:has-text('Autenticar')",
     ],
     # Erro de login
     "login_error": [
@@ -125,16 +136,27 @@ FINANCAS_SEL = {
     ],
 }
 
-# Segurança Social Direta
-SEG_SOCIAL_URL = "https://app.seg-social.pt/ptss/"
+# Segurança Social Direta (SSD) — Maio 2025
+# A URL antiga /ptss/ redireciona para a homepage pública (não pede login).
+# A URL correta para o formulário de autenticação é /sso/login (CAS/SSO).
+SEG_SOCIAL_URL = "https://app.seg-social.pt/sso/login"
 
-# Selectors da Segurança Social — v2
+# Selectors da Segurança Social — v3 (Maio 2025)
+# A SSD usa CAS (SSO Java) com #username / #password / #submitBtn
 SEG_SOCIAL_SEL = {
+    # Toggle para expandir o formulário "Autenticar com utilizador da SS"
+    # (na nova SSD, o formulário aparece colapsado por defeito)
+    "auth_toggle": [
+        "#toogleAuth",
+        "a[onclick*='abrirSlideAutenticacao']",
+        "a:has-text('Autenticar com utilizador da Segurança Social')",
+    ],
     "niss_input": [
-        "#niss",
-        "input[name='niss']",
+        "#username",
         "input[name='username']",
         "input[id='username']",
+        "#niss",
+        "input[name='niss']",
         "input[placeholder*='NISS']",
     ],
     "password_input": [
@@ -144,6 +166,8 @@ SEG_SOCIAL_SEL = {
         "input[autocomplete='current-password']",
     ],
     "login_button": [
+        "#submitBtn",
+        "input[name='submitBtn']",
         "button[type='submit']",
         "input[type='submit']",
         "button.btn-primary",
@@ -345,9 +369,13 @@ async def _take_screenshot(page, label: str = "failure") -> Optional[str]:
         return None
 
 
-async def _apply_stealth(page):
+async def _apply_stealth(page_or_context):
     """
-    Aplica playwright-stealth à página para disfarçar o headless browser.
+    Aplica playwright-stealth ao context (ou page) para disfarçar o
+    headless browser.
+
+    Suporta tanto a API antiga (v1.x — `stealth_async(page)`) como a
+    nova API (v2.x — `Stealth().apply_stealth_async(context)`).
 
     Isto evita que os portais governamentais detectem que é um bot
     e bloqueiem o acesso. Inclui:
@@ -358,14 +386,29 @@ async def _apply_stealth(page):
     - WebGL vendor mock
     - etc.
     """
+    # Tentar API v2.x primeiro (Stealth class)
     try:
-        from playwright_stealth import stealth_async
-        await stealth_async(page)
-        logger.info("[GOV_SCRAPER] Stealth aplicado com sucesso")
+        from playwright_stealth import Stealth
+        stealth = Stealth()
+        # apply_stealth_async aceita BrowserContext ou Page (v2.x)
+        await stealth.apply_stealth_async(page_or_context)
+        logger.info("[GOV_SCRAPER] Stealth v2 aplicado com sucesso")
+        return
     except ImportError:
-        logger.warning("[GOV_SCRAPER] playwright-stealth não instalado — a correr sem stealth")
+        # Fallback para API v1.x (stealth_async)
+        try:
+            from playwright_stealth import stealth_async
+            await stealth_async(page_or_context)
+            logger.info("[GOV_SCRAPER] Stealth v1 aplicado com sucesso")
+            return
+        except ImportError:
+            logger.warning("[GOV_SCRAPER] playwright-stealth não instalado — a correr sem stealth")
+            return
+        except Exception as e:
+            logger.warning(f"[GOV_SCRAPER] Erro ao aplicar stealth v1: {type(e).__name__}: {e}")
+            return
     except Exception as e:
-        logger.warning(f"[GOV_SCRAPER] Erro ao aplicar stealth: {type(e).__name__}")
+        logger.warning(f"[GOV_SCRAPER] Erro ao aplicar stealth v2: {type(e).__name__}: {e}")
 
 
 # ================================================================
@@ -466,8 +509,8 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         )
         page = await context.new_page()
 
-        # Aplicar stealth
-        await _apply_stealth(page)
+        # Aplicar stealth ao context (cobre esta página e futuras)
+        await _apply_stealth(context)
 
         # ── Configurar timeouts globais da página ──
         # Aumentado para 90s para mitigar cold-start do headless browser no Render
@@ -484,6 +527,8 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         await page.goto(FINANCAS_AUTH_URL, wait_until="domcontentloaded")
         # Esperar pelo formulário em vez de networkidle
         await page.wait_for_load_state("domcontentloaded", timeout=90000)
+        # Pequena pausa para a UI React/Radix renderizar
+        await asyncio.sleep(2)
 
         # ── 2–5. Login (NIF + Password + Submit + Verificação) ──
         # Bloco protegido com try/except para distinguir timeout no login
@@ -491,15 +536,28 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         login_success = False
         try:
             # ── 2. Selecionar autenticação por NIF ──
+            # A nova UI (acesso.gov.pt v2) usa Radix Tabs. O tab activo
+            # por defeito é "CC / CMD" (mesmo com selectedAuthMethod=N na URL).
+            # Temos de clicar manualmente no tab "NIF" e esperar que o
+            # painel correspondente seja renderizado.
             step = "select_nif_tab"
+            try:
+                # Esperar pela tablist (página totalmente renderizada)
+                await page.wait_for_selector("[role='tablist']", timeout=20000)
+            except Exception:
+                pass
+
             tab_el, tab_sel = await _try_selectors(page, FINANCAS_SEL["login_tab_nif"], timeout=10000)
             if tab_el:
                 try:
                     await tab_el.click()
-                    await page.wait_for_load_state("domcontentloaded", timeout=90000)
-                    logger.info(f"[GOV_SCRAPER] Tab NIF selecionada (selector: {tab_sel})")
-                except Exception:
-                    logger.info("[GOV_SCRAPER] Tab NIF — clique falhou, pode já estar ativa")
+                    logger.info(f"[GOV_SCRAPER] Tab NIF clicada (selector: {tab_sel})")
+                    # Esperar que o input username apareça (Radix renderiza on-demand)
+                    await page.wait_for_selector(
+                        "input[name='username']", state="visible", timeout=15000
+                    )
+                except Exception as e:
+                    logger.info(f"[GOV_SCRAPER] Tab NIF — clique/render falhou: {type(e).__name__}")
             else:
                 logger.info("[GOV_SCRAPER] Tab NIF não encontrada — pode já estar ativa")
 
@@ -569,7 +627,15 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                 )
 
             # 5b. Verificar se ainda estamos na página de login
-            if "acesso.gov.pt" in page.url and "unauthlogin" in page.url:
+            current_url_lower = page.url.lower()
+            still_on_login = (
+                "acesso.gov.pt" in current_url_lower and (
+                    "loginform" in current_url_lower
+                    or "unauthlogin" in current_url_lower
+                    or "login" in current_url_lower
+                )
+            )
+            if still_on_login:
                 logger.warning(f"[GOV_SCRAPER] Ainda na página de login (NIF {masked_nif})")
                 screenshot_b64 = await _take_screenshot(page, "still_on_login")
 
@@ -940,8 +1006,8 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
         )
         page = await context.new_page()
 
-        # Aplicar stealth
-        await _apply_stealth(page)
+        # Aplicar stealth ao context
+        await _apply_stealth(context)
 
         # ── Configurar timeouts globais da página ──
         # Aumentado para 90s para mitigar cold-start do headless browser no Render
@@ -968,8 +1034,35 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
             current_url = page.url.lower()
             if "acesso.gov.pt" in current_url:
                 logger.info("[GOV_SCRAPER] Redirecionado para acesso.gov.pt — usar fluxo de autenticação genérico")
+                # Garantir que o tab NIF está activo
+                try:
+                    tab_el, _ = await _try_selectors(page, FINANCAS_SEL["login_tab_nif"], timeout=8000)
+                    if tab_el:
+                        await tab_el.click()
+                        await page.wait_for_selector("input[name='username']", state="visible", timeout=15000)
+                except Exception:
+                    pass
                 niss_el, niss_sel = await _try_selectors(page, FINANCAS_SEL["nif_input"], timeout=15000)
             else:
+                # SSD nativo — clicar no toggle "Autenticar com utilizador da SS"
+                # para expandir o formulário (vem colapsado por defeito)
+                try:
+                    toggle_el, toggle_sel = await _try_selectors(
+                        page, SEG_SOCIAL_SEL["auth_toggle"], timeout=8000
+                    )
+                    if toggle_el:
+                        await toggle_el.click()
+                        logger.info(f"[GOV_SCRAPER] Formulário SSD expandido via {toggle_sel}")
+                        # Esperar pela animação do slide
+                        try:
+                            await page.wait_for_selector(
+                                "#username", state="visible", timeout=10000
+                            )
+                        except Exception:
+                            await asyncio.sleep(2)
+                except Exception as toggle_err:
+                    logger.warning(f"[GOV_SCRAPER] Toggle SSD falhou: {type(toggle_err).__name__}")
+
                 niss_el, niss_sel = await _try_selectors(page, SEG_SOCIAL_SEL["niss_input"], timeout=15000)
 
             # ── 3. Inserir credenciais ──

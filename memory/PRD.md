@@ -97,3 +97,21 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 | `/automation` | AutomationPage | Motor de automação No-Code |
 
 **Nota**: `/configuracoes` e `/definicoes` são rotas DIFERENTES. A primeira é para admin configurar o sistema (SMTP, storage, RGPD, etc.), a segunda é para o utilizador gerir as suas definições pessoais.
+
+## Correções 2026-01
+
+### Portal das Finanças & Segurança Social Direta — Scrapers (Bug `selector_desatualizado`)
+- **`backend/requirements.txt`**: `playwright-stealth` 1.0.6 → **2.0.3** (a versão antiga falhava no Render por causa de `pkg_resources` em Python ≥ 3.12, daí o warning "não instalado")
+- **`backend/services/gov_scraper.py`**:
+  - `FINANCAS_AUTH_URL` actualizado para `https://www.acesso.gov.pt/v2/loginForm?partID=PFIN&path=/geral/dashboard&selectedAuthMethod=N` (a URL `/unauthlogin` foi descontinuada)
+  - Novos seletores Radix-UI para o portal acesso.gov.pt v2 (`button[role='tab']:has-text('NIF')`, `input[name='username']`, `button[type='submit']`)
+  - `SEG_SOCIAL_URL` actualizado para `https://app.seg-social.pt/sso/login` (`/ptss/` redirecionava para a homepage pública)
+  - Adicionado clique automático no `#toogleAuth` da SSD para expandir o formulário (que vem colapsado)
+  - `_apply_stealth()` migrado para a API `Stealth().apply_stealth_async(context)` da v2.x, com fallback automático para a API v1.x
+- Selectors validados localmente contra os portais reais ✅
+
+### Cartão "Contactos" do Processo não guardava
+- **`frontend/src/pages/ProcessDetails.js`**:
+  - Ao carregar o processo, contactos do Cliente (`cData.contacto.email/telefone`) são agora sincronizados para `process.client_email/client_phone` quando o processo ainda não os tem
+  - No save, deixou de enviar `contacto: { email: "", telefone: "" }` para o `/clients/{id}` — antes apagava os contactos válidos do Cliente (merge `{**existing, **incoming}`)
+  - Corrigido bug onde `prev.phone || prev.telefone` (referência ao process) era usado em vez de `pd.phone || pd.telefone` (personal_data)

@@ -1101,13 +1101,29 @@ const ProcessDetails = () => {
           delete clientPersonal.telefone_hash;
           // Adicionar nome e contacto do cliente
           clientPersonal.nome_completo = cData.nome || processData.client_name || '';
-          clientPersonal.email = cData.contacto?.email || processData.client_email || '';
-          clientPersonal.telefone = cData.contacto?.telefone || processData.client_phone || '';
+          const resolvedEmail = cData.contacto?.email || processData.client_email || '';
+          const resolvedPhone = cData.contacto?.telefone || processData.client_phone || '';
+          clientPersonal.email = resolvedEmail;
+          clientPersonal.telefone = resolvedPhone;
           // Manover NIF do cliente se existir
           if (cData.dados_pessoais?.nif) {
             clientPersonal.nif = cData.dados_pessoais.nif;
           }
           setPersonalData(clientPersonal);
+
+          // ── Sincronizar contactos do Cliente para o estado do Processo ──
+          // O cartão "Contactos" no separador "Dados do Processo" está ligado a
+          // process.client_email / process.client_phone. Se o processo ainda não
+          // tem esses campos populados mas o cliente já os tem (cenário comum em
+          // processos antigos ou recém-criados), copiamos do cliente para o
+          // estado local — garantindo que o utilizador vê os dados existentes.
+          if (resolvedEmail || resolvedPhone) {
+            setProcess(prev => ({
+              ...(prev || processData),
+              client_email: prev?.client_email || resolvedEmail || '',
+              client_phone: prev?.client_phone || resolvedPhone || '',
+            }));
+          }
         } catch (clientErr) {
           console.warn('Não foi possível carregar dados do cliente via client_id:', clientErr);
           // Fallback: usar dados antigos do processo (personal_data no documento do processo)
@@ -1215,7 +1231,7 @@ const ProcessDetails = () => {
         setProcess(prev => ({ ...prev, client_email: pd.email }));
       }
       if ((pd.phone || pd.telefone) && !processData.client_phone) {
-        setProcess(prev => ({ ...prev, client_phone: prev.phone || prev.telefone }));
+        setProcess(prev => ({ ...prev, client_phone: pd.phone || pd.telefone }));
       }
       
       // TAREFA 2: Carregar estado de conflitos e confirmação de dados
@@ -1471,12 +1487,19 @@ const ProcessDetails = () => {
       if (cleanedPersonalData.nome_completo) clientUpdateData.nome = cleanedPersonalData.nome_completo;
       
       // Mapear email e telefone para o objecto aninhado 'contacto'
+      // IMPORTANTE: Só incluímos os campos quando têm valor não-vazio.
+      // Enviar strings vazias faria com que o backend sobrescrevesse os
+      // contactos existentes do Cliente (merge {**existing, **incoming}),
+      // apagando dados válidos quando o utilizador apenas alterou outros
+      // campos do formulário.
       const contactoData = {};
-      if (process?.client_email !== undefined && process?.client_email !== null) {
-        contactoData.email = String(process.client_email || '');
+      const emailVal = (process?.client_email || '').trim();
+      const phoneVal = (process?.client_phone || '').trim();
+      if (emailVal) {
+        contactoData.email = emailVal;
       }
-      if (process?.client_phone !== undefined && process?.client_phone !== null) {
-        contactoData.telefone = String(process.client_phone || '');
+      if (phoneVal) {
+        contactoData.telefone = phoneVal;
       }
       if (Object.keys(contactoData).length > 0) {
         clientUpdateData.contacto = contactoData;
@@ -1521,8 +1544,10 @@ const ProcessDetails = () => {
       
       // Update do Processo — incluir client_email/client_phone no body
       // (o backend lê do raw_body para sincronizar com o cliente)
-      if (process.client_email !== undefined) processUpdateData.client_email = process.client_email;
-      if (process.client_phone !== undefined) processUpdateData.client_phone = process.client_phone;
+      // Só incluímos se tiverem valor: evita sobrescrever campos válidos
+      // do processo com strings vazias.
+      if (emailVal) processUpdateData.client_email = emailVal;
+      if (phoneVal) processUpdateData.client_phone = phoneVal;
       promises.push(updateProcess(id, processUpdateData));
       
       // Update do Cliente (apenas se houver client_id e não for role de indexação)
