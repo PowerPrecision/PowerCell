@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeParseISO } from "../lib/utils";
 
 const EVENT_TYPES = {
   status_change: { label: "Alteração de Estado", icon: ArrowRight, color: "text-blue-500 bg-blue-50 dark:bg-blue-950" },
@@ -112,7 +112,7 @@ const EventItem = ({ event }) => {
           </div>
           {timestamp && (
             <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
-              {format(parseISO(safeDateStr(timestamp)), "dd/MM HH:mm", { locale: pt })}
+              {format(safeParseISO(timestamp), "dd/MM HH:mm", { locale: pt })}
             </span>
           )}
         </div>

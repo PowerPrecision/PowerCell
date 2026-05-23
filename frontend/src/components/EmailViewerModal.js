@@ -34,7 +34,7 @@ import {
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { sanitizeEmailHtml } from "../utils/sanitize";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeParseISO } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -282,7 +282,7 @@ const EmailViewerModal = ({
                         </p>
                         <div className="flex items-center gap-1 mt-0.5">
                           <span className="text-[10px] text-muted-foreground">
-                            {email.sent_at && format(parseISO(safeDateStr(email.sent_at)), "dd/MM/yy HH:mm")}
+                            {email.sent_at && format(safeParseISO(email.sent_at), "dd/MM/yy HH:mm")}
                           </span>
                           {email.attachments?.length > 0 && (
                             <Paperclip className="h-3 w-3 text-muted-foreground" />
@@ -461,7 +461,7 @@ const EmailViewerModal = ({
                       <span className="text-muted-foreground w-8">Data:</span>
                       <span>
                         {currentEmail.sent_at 
-                          ? format(parseISO(safeDateStr(currentEmail.sent_at)), "EEEE, dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })
+                          ? format(safeParseISO(currentEmail.sent_at), "EEEE, dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })
                           : "-"
                         }
                       </span>

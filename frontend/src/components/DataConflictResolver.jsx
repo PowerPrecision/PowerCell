@@ -24,7 +24,7 @@ import {
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeParseISO } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -234,7 +234,7 @@ const DataConflictResolver = ({
                   </div>
                   {suggestion.detected_at && (
                     <span className="text-xs text-muted-foreground">
-                      {format(parseISO(safeDateStr(suggestion.detected_at)), "dd/MM HH:mm", { locale: pt })}
+                      {format(safeParseISO(suggestion.detected_at), "dd/MM HH:mm", { locale: pt })}
                     </span>
                   )}
                 </div>

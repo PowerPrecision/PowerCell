@@ -34,7 +34,7 @@ import { toast } from "sonner";
 import * as XLSX from 'xlsx';
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeParseISO } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
 import { getExportPermission } from "../services/api";
 import { hasAnyRole } from "../utils/roleUtils";
@@ -260,7 +260,7 @@ const MyClientsPage = () => {
   const formatDate = (dateString) => {
     if (!dateString) return "-";
     try {
-      return format(parseISO(safeDateStr(dateString)), "dd MMM yyyy", { locale: pt });
+      return format(safeParseISO(dateString), "dd MMM yyyy", { locale: pt });
     } catch {
       return dateString;
     }
