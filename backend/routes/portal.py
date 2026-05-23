@@ -1409,11 +1409,13 @@ async def _run_financas_background(
                 }}
             )
 
-            # Email de sucesso
+            # Email de sucesso com documentos anexados
             try:
+                docs_to_attach = result.get("documents", [])
                 await _send_portal_fetch_email(
                     client_email, client_name, "financas", "success",
-                    docs_count=docs_count
+                    docs_count=docs_count,
+                    attachments=docs_to_attach if docs_to_attach else None,
                 )
             except Exception as e:
                 logger.warning(f"[PORTAL-BG] Erro ao enviar email de sucesso (Finanças): {e}")
@@ -1542,11 +1544,13 @@ async def _run_seguranca_social_background(
                 }}
             )
 
-            # Email de sucesso
+            # Email de sucesso com documentos anexados
             try:
+                docs_to_attach = result.get("documents", [])
                 await _send_portal_fetch_email(
                     client_email, client_name, "seguranca_social", "success",
-                    docs_count=docs_count
+                    docs_count=docs_count,
+                    attachments=docs_to_attach if docs_to_attach else None,
                 )
             except Exception as e:
                 logger.warning(f"[PORTAL-BG] Erro ao enviar email de sucesso (Seg. Social): {e}")
@@ -1681,6 +1685,7 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
 
     # ── Upload dos documentos para o S3 e registo na BD ──
     docs_registered = 0
+    docs_for_attachment = []  # Documentos para anexar ao email de sucesso
 
     for doc in result.documents:
         try:
@@ -1729,6 +1734,13 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
             await db.documents.insert_one(doc_record)
             docs_registered += 1
 
+            # Guardar dados do documento para anexar ao email de sucesso
+            docs_for_attachment.append({
+                "filename": doc.filename,
+                "content_bytes": doc.content_bytes,
+                "content_type": doc.content_type,
+            })
+
             logger.info(
                 f"[PORTAL] Documento Finanças registado: {doc.filename} "
                 f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'}, "
@@ -1738,7 +1750,7 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
         except Exception as e:
             logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}: {e}")
 
-    return {"success": True, "documents_count": docs_registered}
+    return {"success": True, "documents_count": docs_registered, "documents": docs_for_attachment}
 
 
 async def _run_seguranca_social_scraper(niss: str, password: str, process_id: str) -> dict:
@@ -1787,6 +1799,7 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
 
     # ── Upload dos documentos para o S3 e registo na BD ──
     docs_registered = 0
+    docs_for_attachment = []  # Documentos para anexar ao email de sucesso
 
     for doc in result.documents:
         try:
@@ -1835,6 +1848,13 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
             await db.documents.insert_one(doc_record)
             docs_registered += 1
 
+            # Guardar dados do documento para anexar ao email de sucesso
+            docs_for_attachment.append({
+                "filename": doc.filename,
+                "content_bytes": doc.content_bytes,
+                "content_type": doc.content_type,
+            })
+
             logger.info(
                 f"[PORTAL] Documento Seg. Social registado: {doc.filename} "
                 f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'}, "
@@ -1844,7 +1864,7 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
         except Exception as e:
             logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}: {e}")
 
-    return {"success": True, "documents_count": docs_registered}
+    return {"success": True, "documents_count": docs_registered, "documents": docs_for_attachment}
 
 
 async def _send_portal_fetch_email(
@@ -1852,7 +1872,8 @@ async def _send_portal_fetch_email(
     client_name: str,
     source: str,
     status: str,
-    docs_count: int = 0
+    docs_count: int = 0,
+    attachments: list = None,
 ):
     """
     Envia email de estado ao cliente sobre a obtenção automática de documentos.
@@ -1860,6 +1881,18 @@ async def _send_portal_fetch_email(
     Utiliza o serviço de email principal (send_email) em vez de SMTP directo,
     para suportar tanto Resend API como SMTP, e garantir que os emails são
     registados no histórico do processo.
+
+    Args:
+        to_email: Email do destinatário (cliente).
+        client_name: Nome do cliente.
+        source: Origem dos documentos ("financas" ou "seguranca_social").
+        status: Estado do processo ("started", "error" ou "success").
+        docs_count: Número de documentos obtidos (apenas para status="success").
+        attachments: Lista de anexos a incluir no email (apenas para status="success").
+            Cada anexo é um dict com:
+            - filename (str): Nome do ficheiro.
+            - content_bytes (bytes): Conteúdo binário do documento.
+            - content_type (str): Tipo MIME (ex: "application/pdf").
 
     Status:
     - started:  "O nosso sistema automático começou a reunir os seus documentos..."
@@ -1921,6 +1954,7 @@ async def _send_portal_fetch_email(
     """
 
     # ── Enviar via serviço de email principal (Resend API ou SMTP) ──
+    # Incluir anexos apenas no email de sucesso (quando há documentos para enviar)
     try:
         from services.email_service import send_email
         await send_email(
@@ -1930,8 +1964,10 @@ async def _send_portal_fetch_email(
             body=body_text,
             body_html=html_content,
             force_system=True,
+            attachments=attachments if status == "success" and attachments else None,
         )
-        logger.info(f"[PORTAL] Email de estado '{status}' enviado para {to_email} ({source_label})")
+        att_info = f" com {len(attachments)} anexo(s)" if attachments and status == "success" else ""
+        logger.info(f"[PORTAL] Email de estado '{status}' enviado para {to_email} ({source_label}{att_info})")
     except Exception as e:
         # Fallback para SMTP directo se o serviço principal falhar
         logger.warning(f"[PORTAL] Serviço de email principal falhou, a tentar SMTP directo: {type(e).__name__}")
@@ -1939,6 +1975,7 @@ async def _send_portal_fetch_email(
             import smtplib
             from email.mime.text import MIMEText
             from email.mime.multipart import MIMEMultipart
+            from email.mime.application import MIMEApplication
 
             smtp_server = os.environ.get('SMTP_SERVER')
             smtp_port = int(os.environ.get('SMTP_PORT', 465))
@@ -1949,11 +1986,36 @@ async def _send_portal_fetch_email(
                 logger.warning("[PORTAL] SMTP também não configurado — email de estado não enviado")
                 return
 
-            msg = MIMEMultipart('alternative')
+            # Construir mensagem com suporte a anexos
+            if attachments and status == "success":
+                msg = MIMEMultipart("mixed")
+                body_part = MIMEMultipart("alternative")
+                body_part.attach(MIMEText(body_text, "plain", "utf-8"))
+                body_part.attach(MIMEText(html_content, "html", "utf-8"))
+                msg.attach(body_part)
+
+                # Anexar documentos PDF
+                for att in attachments:
+                    att_bytes = att.get("content_bytes")
+                    att_filename = att.get("filename", "documento.pdf")
+                    if att_bytes:
+                        pdf_part = MIMEApplication(att_bytes, _subtype="pdf")
+                        pdf_part.add_header(
+                            "Content-Disposition", "attachment",
+                            filename=att_filename,
+                        )
+                        msg.attach(pdf_part)
+                        logger.info(
+                            f"[PORTAL] Anexo adicionado ao SMTP fallback: "
+                            f"{att_filename} ({len(att_bytes)} bytes)"
+                        )
+            else:
+                msg = MIMEMultipart('alternative')
+                msg.attach(MIMEText(html_content, 'html'))
+
             msg['Subject'] = subject
             msg['From'] = smtp_email
             msg['To'] = to_email
-            msg.attach(MIMEText(html_content, 'html'))
 
             import ssl
             context = ssl.create_default_context()
@@ -1961,7 +2023,8 @@ async def _send_portal_fetch_email(
                 server.login(smtp_email, smtp_password_env)
                 server.sendmail(smtp_email, to_email, msg.as_string())
 
-            logger.info(f"[PORTAL] Email de estado '{status}' enviado via SMTP fallback para {to_email}")
+            att_info = f" com {len(attachments)} anexo(s)" if attachments and status == "success" else ""
+            logger.info(f"[PORTAL] Email de estado '{status}' enviado via SMTP fallback para {to_email}{att_info}")
         except Exception as fallback_err:
             logger.warning(f"[PORTAL] SMTP fallback também falhou: {type(fallback_err).__name__}")
 
