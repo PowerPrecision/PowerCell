@@ -432,7 +432,15 @@ const ProcessDetails = () => {
 
   // Solicitar RGPD - abre o dialog
   const handleRequestRgpd = () => {
-    if (!process?.client_email) {
+    // Verifica também o nome e o email vindo do cliente (caso ainda não tenha
+    // sido sincronizado com o processo) — evita 422 ao submeter.
+    const clientName = (process?.client_name || clientData?.nome || "").trim();
+    const clientEmail = (process?.client_email || clientData?.contacto?.email || "").trim();
+    if (!clientName) {
+      toast.error("O cliente não tem nome definido — atualize a ficha do cliente.");
+      return;
+    }
+    if (!clientEmail) {
       toast.error("O cliente não tem email definido");
       return;
     }
@@ -440,11 +448,50 @@ const ProcessDetails = () => {
     setRgpdDialogOpen(true);
   };
 
+  // Helper: formata erros Pydantic (FastAPI 422) num único texto legível
+  // O backend pode devolver `detail` como string OU como lista
+  // [{type, loc, msg, input}, ...] (Pydantic ValidationError). Sem isto,
+  // passar o array directamente ao toast/JSX provoca o erro React #31.
+  const formatApiError = (data, fallback = "Erro inesperado") => {
+    if (!data) return fallback;
+    const detail = data.detail ?? data.message ?? data.error;
+    if (!detail) return fallback;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map((d) => {
+          if (typeof d === "string") return d;
+          if (d && typeof d === "object") {
+            const field = Array.isArray(d.loc) ? d.loc.filter((p) => p !== "body").join(".") : "";
+            const msg = d.msg || d.message || JSON.stringify(d);
+            return field ? `${field}: ${msg}` : msg;
+          }
+          return String(d);
+        })
+        .join(" • ");
+    }
+    if (typeof detail === "object") return detail.msg || JSON.stringify(detail);
+    return String(detail);
+  };
+
   // Confirmar envio de RGPD com mensagem customizada
   const handleConfirmRgpd = async () => {
     setRgpdDialogOpen(false);
     setRgpdSending(true);
     try {
+      // Garantir que os campos obrigatórios estão presentes antes de enviar
+      // (evita 422 silenciosos quando o processo ainda não tem client_name)
+      const clientName = (process?.client_name || clientData?.nome || "").trim();
+      const clientEmail = (process?.client_email || clientData?.contacto?.email || "").trim();
+      if (!clientName) {
+        toast.error("O cliente não tem nome definido — não é possível enviar o pedido RGPD.");
+        return;
+      }
+      if (!clientEmail) {
+        toast.error("O cliente não tem email definido.");
+        return;
+      }
+
       const response = await fetch(`${API_URL}/api/rgpd/request`, {
         method: 'POST',
         headers: {
@@ -453,8 +500,8 @@ const ProcessDetails = () => {
         },
         body: JSON.stringify({
           process_id: id,
-          client_name: process.client_name,
-          client_email: process.client_email,
+          client_name: clientName,
+          client_email: clientEmail,
           custom_message: rgpdCustomMessage || undefined,
         }),
       });
@@ -471,9 +518,10 @@ const ProcessDetails = () => {
         }
         fetchRgpdStatus();
       } else {
-        toast.error(data.detail || "Erro ao enviar RGPD");
+        toast.error(formatApiError(data, "Erro ao enviar RGPD"));
       }
     } catch (error) {
+      console.error("Erro ao enviar RGPD:", error);
       toast.error("Erro ao enviar RGPD");
     } finally {
       setRgpdSending(false);
