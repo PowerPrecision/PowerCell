@@ -743,37 +743,113 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
             )
 
         # ── 6. Navegar para a secção de IRS (pós-login) ──
+        # v3: Navegação directa para a página de comprovativos de IRS,
+        # evitando timeouts ao percorrer menus intermédios.
         step = "navigate_irs"
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=90000)
 
-            irs_el, irs_sel = await _try_selectors(page, FINANCAS_SEL["irs_menu"], timeout=15000)
-            if irs_el:
-                await irs_el.click()
-                await page.wait_for_load_state("domcontentloaded", timeout=90000)
-                logger.info(f"[GOV_SCRAPER] Secção de IRS acedida via {irs_sel}")
-            else:
-                logger.warning("[GOV_SCRAPER] Link IRS não encontrado — a tentar navegação directa")
-                # URL actual do portal IRS (sub-domínio dedicado, Maio 2025).
-                # A antiga `/pt/irs.action` está descontinuada e devolve
-                # "A funcionalidade pode ter mudado de endereço".
-                for irs_url in (
-                    "https://irs.portaldasfinancas.gov.pt/home.action",
-                    "https://www.portaldasfinancas.gov.pt/at/html/index.html#irs",
+            # Estratégia 1: Navegação directa para a página de comprovativos
+            # Esta URL permite obter diretamente o comprovativo de IRS
+            # sem necessidade de navegar por menus, reduzindo o tempo
+            # e evitando timeouts em elementos de navegação.
+            comprovativo_url = (
+                "https://irs.portaldasfinancas.gov.pt"
+                "/comprovativo/obterComprovativo.action"
+            )
+            try:
+                logger.info(
+                    f"[GOV_SCRAPER] Navegação directa para comprovativos IRS: {comprovativo_url}"
+                )
+                await page.goto(
+                    comprovativo_url,
+                    wait_until="domcontentloaded",
+                    timeout=90000,
+                )
+                await asyncio.sleep(2)
+                # Verificar se a página carregou corretamente
+                body_text = (await page.locator("body").text_content() or "").lower()
+                if (
+                    "mudado de endere" not in body_text
+                    and "página não encontrada" not in body_text
+                    and "error" not in body_text[:200].lower()
                 ):
-                    try:
-                        await page.goto(irs_url, wait_until="domcontentloaded", timeout=60000)
-                        await asyncio.sleep(2)
-                        # Se a página tem conteúdo IRS real (e não a página de erro),
-                        # consideramos sucesso
-                        body_text = (await page.locator("body").text_content() or "").lower()
-                        if "mudado de endere" not in body_text and "página não encontrada" not in body_text:
-                            logger.info(f"[GOV_SCRAPER] IRS acedido via navegação directa: {irs_url}")
-                            break
-                        logger.info(f"[GOV_SCRAPER] {irs_url} devolveu página de erro, a tentar próxima...")
-                    except Exception as nav_err:
-                        logger.info(f"[GOV_SCRAPER] Falha em {irs_url}: {type(nav_err).__name__}")
-                        continue
+                    logger.info(
+                        "[GOV_SCRAPER] Página de comprovativos IRS carregada com sucesso"
+                    )
+                else:
+                    logger.warning(
+                        "[GOV_SCRAPER] Página de comprovativos retornou erro — "
+                        "a tentar navegação por menu"
+                    )
+                    # Fallback: tentar navegação por menu
+                    irs_el, irs_sel = await _try_selectors(
+                        page, FINANCAS_SEL["irs_menu"], timeout=15000
+                    )
+                    if irs_el:
+                        await irs_el.click()
+                        await page.wait_for_load_state(
+                            "domcontentloaded", timeout=90000
+                        )
+                        logger.info(
+                            f"[GOV_SCRAPER] Secção de IRS acedida via menu ({irs_sel})"
+                        )
+            except Exception as direct_nav_err:
+                logger.warning(
+                    f"[GOV_SCRAPER] Navegação directa falhou "
+                    f"({type(direct_nav_err).__name__}) — a tentar menu"
+                )
+                # Fallback: tentar navegação por menu (comportamento anterior)
+                irs_el, irs_sel = await _try_selectors(
+                    page, FINANCAS_SEL["irs_menu"], timeout=15000
+                )
+                if irs_el:
+                    await irs_el.click()
+                    await page.wait_for_load_state(
+                        "domcontentloaded", timeout=90000
+                    )
+                    logger.info(
+                        f"[GOV_SCRAPER] Secção de IRS acedida via menu ({irs_sel})"
+                    )
+                else:
+                    # Último fallback: URL direta do portal IRS
+                    logger.warning(
+                        "[GOV_SCRAPER] Link IRS não encontrado — "
+                        "a tentar URL direta do portal IRS"
+                    )
+                    for irs_url in (
+                        "https://irs.portaldasfinancas.gov.pt/home.action",
+                        "https://www.portaldasfinancas.gov.pt"
+                        "/at/html/index.html#irs",
+                    ):
+                        try:
+                            await page.goto(
+                                irs_url,
+                                wait_until="domcontentloaded",
+                                timeout=60000,
+                            )
+                            await asyncio.sleep(2)
+                            body_text = (
+                                await page.locator("body").text_content() or ""
+                            ).lower()
+                            if (
+                                "mudado de endere" not in body_text
+                                and "página não encontrada" not in body_text
+                            ):
+                                logger.info(
+                                    f"[GOV_SCRAPER] IRS acedido via URL: {irs_url}"
+                                )
+                                break
+                            logger.info(
+                                f"[GOV_SCRAPER] {irs_url} — página de erro, "
+                                "a tentar próxima..."
+                            )
+                        except Exception as nav_err:
+                            logger.info(
+                                f"[GOV_SCRAPER] Falha em {irs_url}: "
+                                f"{type(nav_err).__name__}"
+                            )
+                            continue
         except asyncio.TimeoutError:
             logger.error(
                 f"Timeout na navegação interna (pós-login). "
@@ -884,12 +960,73 @@ async def _download_financas_document(
     """
     Tenta descarregar um documento específico do Portal das Finanças.
 
-    v2: Usa _try_selectors com fallbacks múltiplos.
+    v3: Navegação directa para comprovativos + selector "Obter Comprovativo"
+    + fallback de emergência com page.pdf() protegido por try/catch.
     """
     now = datetime.now(timezone.utc)
     safe_filename = f"{doc_name.replace(' ', '_')}_{now.strftime('%Y%m%d')}.pdf"
 
-    # Estratégia 1: Procurar links/botões de download direto
+    # ── Estratégia 0: Botão "Obter Comprovativo" na tabela de comprovativos ──
+    # Na página de comprovativos de IRS, procurar pelo ano mais recente e
+    # clicar no botão "Obter Comprovativo" ou no ícone de PDF.
+    try:
+        comprovativo_selectors = [
+            'button:has-text("Obter Comprovativo")',
+            'a:has-text("Obter Comprovativo")',
+            'input[value="Obter Comprovativo"]',
+            'a:has([class*="pdf"])',
+            'button:has([class*="pdf"])',
+            'img[alt*="pdf"]',
+            'a[href*="obterComprovativo"]',
+            'a[href*="comprovativo"]',
+        ]
+        for selector in comprovativo_selectors:
+            try:
+                el = page.locator(selector).first
+                if await el.is_visible(timeout=3000):
+                    logger.info(
+                        f"[GOV_SCRAPER] Botão 'Obter Comprovativo' encontrado "
+                        f"via selector: {selector}"
+                    )
+                    try:
+                        async with page.expect_download(timeout=90000) as download_info:
+                            await el.click()
+                        download = await download_info.value
+
+                        tmp_path = await download.path()
+                        if tmp_path and os.path.exists(tmp_path):
+                            with open(tmp_path, "rb") as f:
+                                content_bytes = f.read()
+
+                            if content_bytes and len(content_bytes) > 100:
+                                try:
+                                    os.unlink(tmp_path)
+                                except Exception:
+                                    pass
+
+                                return ScraperDocument(
+                                    filename=download.suggested_filename or safe_filename,
+                                    content_bytes=content_bytes,
+                                    content_type="application/pdf",
+                                    category=category,
+                                    label=doc_name,
+                                )
+                    except Exception as dl_err:
+                        logger.warning(
+                            f"[GOV_SCRAPER] expect_download falhou para "
+                            f"'Obter Comprovativo' ({selector}): "
+                            f"{type(dl_err).__name__}: {dl_err}"
+                        )
+                        continue
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning(
+            f"[GOV_SCRAPER] Estratégia 0 (comprovativo) falhou: "
+            f"{type(e).__name__}"
+        )
+
+    # ── Estratégia 1: Procurar links/botões de download direto ──
     try:
         all_download_selectors = [
             f"a:has-text('{doc_name}')",
@@ -932,7 +1069,7 @@ async def _download_financas_document(
     except Exception:
         pass
 
-    # Estratégia 2: Navegar para sub-página
+    # ── Estratégia 2: Navegar para sub-página ──
     try:
         all_nav_selectors = [
             f"a:has-text('{doc_name}')",
@@ -980,9 +1117,15 @@ async def _download_financas_document(
     except Exception:
         pass
 
-    # Estratégia 3: Gerar PDF da página actual (fallback — captura de ecrã)
+    # ── Estratégia 3: Fallback de emergência — gerar PDF da página actual ──
+    # Se o botão nativo de download falhar, tiramos um print da página em PDF.
+    # Protegido por try/catch para não crashar o scraper se page.pdf() falhar
+    # (ex: página com conteúdo restrito ou browser sem permissão).
     try:
-        logger.info(f"[GOV_SCRAPER] Gerando PDF da página para {doc_name} (fallback)")
+        logger.info(
+            f"[GOV_SCRAPER] Fallback de emergência: a gerar PDF da página "
+            f"para {doc_name}"
+        )
         pdf_bytes = await page.pdf(
             format="A4",
             print_background=True,
@@ -990,6 +1133,10 @@ async def _download_financas_document(
         )
 
         if pdf_bytes and len(pdf_bytes) > 500:
+            logger.info(
+                f"[GOV_SCRAPER] PDF de emergência gerado para {doc_name} "
+                f"({len(pdf_bytes)} bytes)"
+            )
             return ScraperDocument(
                 filename=safe_filename,
                 content_bytes=pdf_bytes,
@@ -997,8 +1144,16 @@ async def _download_financas_document(
                 category=category,
                 label=f"{doc_name} (captura de ecrã)",
             )
-    except Exception:
-        pass
+        else:
+            logger.warning(
+                f"[GOV_SCRAPER] PDF de emergência vazio ou demasiado pequeno "
+                f"para {doc_name} ({len(pdf_bytes) if pdf_bytes else 0} bytes)"
+            )
+    except Exception as pdf_err:
+        logger.warning(
+            f"[GOV_SCRAPER] Fallback page.pdf() falhou para {doc_name}: "
+            f"{type(pdf_err).__name__}: {pdf_err}"
+        )
 
     return None
 

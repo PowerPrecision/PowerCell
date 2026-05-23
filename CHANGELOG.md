@@ -3,6 +3,31 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-05-24] — Correções: Timeout IRS e Anexos no Email de Sucesso
+
+### Corrigido
+- **Timeout ao descarregar Declaração de IRS do Portal das Finanças** (`fix` — **CRÍTICO**): O scraper falhava com timeout ao navegar pelos menus do Portal das Finanças para aceder à página de IRS. A navegação por menus intermédios era lenta e sujeita a timeouts, especialmente em ambientes com latência (Render). Corrigido com navegação directa para a página de comprovativos:
+  - `gov_scraper.py` passo 6: Em vez de procurar o link "IRS" no menu, navega directamente para `https://irs.portaldasfinancas.gov.pt/comprovativo/obterComprovativo.action` com timeout de 90s
+  - Fallback encadeado: navegação directa → menu → URL legada, garantindo resiliência
+  - `_download_financas_document()` v3: Nova "Estratégia 0" que procura o botão "Obter Comprovativo" e ícones PDF na tabela de comprovativos antes das estratégias anteriores
+  - `expect_download()` protegido com try/catch explícito em cada estratégia — erro de download já não crasha o scraper
+  - Fallback de emergência com `page.pdf(format='A4')` protegido por try/catch com logging detalhado do erro
+
+- **Email de sucesso enviado sem documentos anexados** (`fix` — **CRÍTICO**): Após o scraper obter com sucesso os documentos das Finanças e Seg. Social, o email de confirmação enviado ao cliente não incluía os PDFs como anexos. O cliente recebia um email a dizer "documentos obtidos com sucesso" mas sem acesso direto aos ficheiros. Corrigido em 3 camadas:
+  - `_send_portal_fetch_email()` (portal.py): Adicionado parâmetro `attachments: list = None` — os documentos são anexados apenas no email de status "success"
+  - Chamada a `send_email()` do `email_service.py` agora passa `attachments` — suporta tanto Resend API como SMTP directo (MIMEMultipart + MIMEApplication)
+  - SMTP fallback (portal.py): Construção da mensagem MIME atualizada para suportar anexos PDF com `MIMEMultipart("mixed")` + iteração sobre os attachments
+  - `_run_financas_scraper()` e `_run_seguranca_social_scraper()`: Agora retornam `{"documents": [...]}` com os bytes de cada documento, além do `documents_count`
+  - Background tasks (`_run_financas_background`, `_run_seguranca_social_background`): Mapeiam `docs_to_attach = result.get("documents", [])` e passam-nos ao email de sucesso
+
+### Alterado
+- **`_download_financas_document()` promovido a v3** (`refactor`): Reorganização das estratégias de download com prioridade explícita:
+  - Estratégia 0 (NOVA): Botão "Obter Comprovativo" na página de comprovativos
+  - Estratégia 1: Links/botões de download direto (mantida)
+  - Estratégia 2: Navegação para sub-página (mantida)
+  - Estratégia 3: Fallback page.pdf() com try/catch e logging detalhado
+- **Timeout do `expect_download` aumentado para 90s** na Estratégia 0 (comprovativo) — o botão nativo pode demorar a iniciar o download em conexões lentas
+
 ## [2026-03-11] — Afinamento de Permissões: Quadro Geral para Indexação
 
 ### Alterado
