@@ -776,7 +776,7 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         )
         if doc_irs:
             documents.append(doc_irs)
-            logger.info(f"[GOV_SCRAPER] IRS descarregado: {doc_irs.filename} ({doc_irs.size} bytes)")
+            logger.info(f"[GOV_SCRAPER] IRS descarregado: {doc_irs.filename} ({len(doc_irs.content_bytes)} bytes)")
         else:
             logger.warning("[GOV_SCRAPER] Não foi possível descarregar a Declaração de IRS")
 
@@ -787,7 +787,7 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         )
         if doc_nota:
             documents.append(doc_nota)
-            logger.info(f"[GOV_SCRAPER] Nota de Liquidação descarregada: {doc_nota.filename} ({doc_nota.size} bytes)")
+            logger.info(f"[GOV_SCRAPER] Nota de Liquidação descarregada: {doc_nota.filename} ({len(doc_nota.content_bytes)} bytes)")
         else:
             logger.warning("[GOV_SCRAPER] Não foi possível descarregar a Nota de Liquidação")
 
