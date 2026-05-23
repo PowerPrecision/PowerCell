@@ -5,8 +5,14 @@
 # chegue a produção (Vercel/Render).
 #
 # TRIGGERS:
-# - Push para main
-# - Pull Requests para main
+# - Push para main/dev
+# - Pull Requests para main/dev
+#
+# AUTENTICAÇÃO:
+# - Por defeito usa GITHUB_TOKEN (automático).
+# - Para forks de repositórios privados, criar um PAT com 'contents:read'
+#   e guardar como secret CHECKOUT_TOKEN nas Settings do repo.
+#   O workflow usa CHECKOUT_TOKEN se disponível, senão usa GITHUB_TOKEN.
 #
 # JOBS:
 # 1. Frontend CI (React + Vite)
@@ -28,8 +34,12 @@ concurrency:
   cancel-in-progress: true
 
 # Permissões necessárias para actions/checkout@v4
+# NOTA: Para repositórios privados, é obrigatório que o GITHUB_TOKEN
+# tenha permissão 'contents: read'. Se o PR vier de um fork, o token
+# do fork pode não ter acesso — usar PAT como fallback (ver checkout steps).
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   # ==================================================================
@@ -50,7 +60,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      
+          token: ${{ secrets.CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -115,6 +126,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          token: ${{ secrets.CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
       
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -178,6 +190,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          token: ${{ secrets.CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
       
       - name: Setup Python
         uses: actions/setup-python@v4
