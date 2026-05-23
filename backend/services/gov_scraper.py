@@ -386,29 +386,45 @@ async def _apply_stealth(page_or_context):
     - WebGL vendor mock
     - etc.
     """
-    # Tentar API v2.x primeiro (Stealth class)
+    # Tentar API v2.x primeiro (Stealth class — playwright-stealth >= 2.0)
     try:
         from playwright_stealth import Stealth
-        stealth = Stealth()
-        # apply_stealth_async aceita BrowserContext ou Page (v2.x)
-        await stealth.apply_stealth_async(page_or_context)
-        logger.info("[GOV_SCRAPER] Stealth v2 aplicado com sucesso")
-        return
-    except ImportError:
-        # Fallback para API v1.x (stealth_async)
+    except ImportError as e:
+        logger.warning(
+            f"[GOV_SCRAPER] playwright-stealth (v2) ImportError: {e}. "
+            "Vai tentar API v1.x..."
+        )
+        Stealth = None
+    except Exception as e:
+        logger.warning(
+            f"[GOV_SCRAPER] playwright-stealth (v2) erro inesperado no import: "
+            f"{type(e).__name__}: {e}"
+        )
+        Stealth = None
+
+    if Stealth is not None:
         try:
-            from playwright_stealth import stealth_async
-            await stealth_async(page_or_context)
-            logger.info("[GOV_SCRAPER] Stealth v1 aplicado com sucesso")
-            return
-        except ImportError:
-            logger.warning("[GOV_SCRAPER] playwright-stealth não instalado — a correr sem stealth")
+            stealth = Stealth()
+            # apply_stealth_async aceita BrowserContext ou Page (v2.x)
+            await stealth.apply_stealth_async(page_or_context)
+            logger.info("[GOV_SCRAPER] Stealth v2 aplicado com sucesso")
             return
         except Exception as e:
-            logger.warning(f"[GOV_SCRAPER] Erro ao aplicar stealth v1: {type(e).__name__}: {e}")
+            logger.warning(f"[GOV_SCRAPER] Erro ao aplicar stealth v2: {type(e).__name__}: {e}")
             return
+
+    # Fallback para API v1.x (stealth_async)
+    try:
+        from playwright_stealth import stealth_async
+        await stealth_async(page_or_context)
+        logger.info("[GOV_SCRAPER] Stealth v1 aplicado com sucesso")
+    except ImportError as e:
+        logger.warning(
+            f"[GOV_SCRAPER] playwright-stealth não instalado (ou import falhou): {e} "
+            "— a correr SEM stealth (risco de bloqueio por anti-bot)"
+        )
     except Exception as e:
-        logger.warning(f"[GOV_SCRAPER] Erro ao aplicar stealth v2: {type(e).__name__}: {e}")
+        logger.warning(f"[GOV_SCRAPER] Erro ao aplicar stealth v1: {type(e).__name__}: {e}")
 
 
 # ================================================================
@@ -523,12 +539,20 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
 
         # ── 1. Navegar para a página de login ──
         step = "navigate_login"
-        logger.info(f"[GOV_SCRAPER] Navegando para acesso.gov.pt (NIF {masked_nif})")
+        logger.info(f"[GOV_SCRAPER] Navegando para {FINANCAS_AUTH_URL[:80]}... (NIF {masked_nif})")
         await page.goto(FINANCAS_AUTH_URL, wait_until="domcontentloaded")
         # Esperar pelo formulário em vez de networkidle
         await page.wait_for_load_state("domcontentloaded", timeout=90000)
         # Pequena pausa para a UI React/Radix renderizar
         await asyncio.sleep(2)
+        try:
+            _page_title = await page.title()
+            logger.info(
+                f"[GOV_SCRAPER] Página carregada — URL: {page.url[:160]} "
+                f"| Title: {_page_title[:80]}"
+            )
+        except Exception:
+            pass
 
         # ── 2–5. Login (NIF + Password + Submit + Verificação) ──
         # Bloco protegido com try/except para distinguir timeout no login
@@ -565,6 +589,34 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
             step = "fill_nif"
             nif_el, nif_sel = await _try_selectors(page, FINANCAS_SEL["nif_input"], timeout=15000)
             if not nif_el:
+                # ── Diagnóstico detalhado para debug em produção ──
+                try:
+                    diag_url = page.url
+                    diag_title = await page.title()
+                    diag_inputs = await page.locator("input").count()
+                    diag_tabs = await page.locator("[role='tab']").count()
+                    diag_tabs_text = []
+                    for i in range(min(diag_tabs, 5)):
+                        try:
+                            t = (await page.locator("[role='tab']").nth(i).text_content() or "").strip()
+                            diag_tabs_text.append(t[:30])
+                        except Exception:
+                            pass
+                    diag_body_text = ""
+                    try:
+                        diag_body_text = (await page.locator("body").text_content() or "")[:300]
+                    except Exception:
+                        pass
+                    logger.error(
+                        f"[GOV_SCRAPER] DIAGNÓSTICO NIF não encontrado:\n"
+                        f"  URL: {diag_url[:200]}\n"
+                        f"  Title: {diag_title[:120]}\n"
+                        f"  Total inputs: {diag_inputs}\n"
+                        f"  Tabs visíveis ({diag_tabs}): {diag_tabs_text}\n"
+                        f"  Body preview: {diag_body_text[:200].replace(chr(10), ' ')}"
+                    )
+                except Exception as diag_err:
+                    logger.warning(f"[GOV_SCRAPER] Falha no diagnóstico: {type(diag_err).__name__}")
                 screenshot_b64 = await _take_screenshot(page, "nif_input_not_found")
                 return ScraperResult(
                     success=False,
@@ -724,7 +776,7 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         )
         if doc_irs:
             documents.append(doc_irs)
-            logger.info(f"[GOV_SCRAPER] IRS descarregado: {doc_irs.filename} ({doc_irs.size} bytes)")
+            logger.info(f"[GOV_SCRAPER] IRS descarregado: {doc_irs.filename} ({len(doc_irs.content_bytes)} bytes)")
         else:
             logger.warning("[GOV_SCRAPER] Não foi possível descarregar a Declaração de IRS")
 
@@ -735,7 +787,7 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         )
         if doc_nota:
             documents.append(doc_nota)
-            logger.info(f"[GOV_SCRAPER] Nota de Liquidação descarregada: {doc_nota.filename} ({doc_nota.size} bytes)")
+            logger.info(f"[GOV_SCRAPER] Nota de Liquidação descarregada: {doc_nota.filename} ({len(doc_nota.content_bytes)} bytes)")
         else:
             logger.warning("[GOV_SCRAPER] Não foi possível descarregar a Nota de Liquidação")
 
