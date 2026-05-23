@@ -116,19 +116,32 @@ const ProcessesPage = () => {
     setExporting(true);
     try {
       const XLSX = await import('xlsx');
-      // Buscar TODOS os processos (sem paginação) com os filtros atuais
-      const response = await getProcesses({
-        page: 1,
-        size: 9999,
+      // Buscar TODOS os processos com paginação (backend limita size a 100)
+      const baseParams = {
         search: searchTerm || undefined,
         view_mode: showCompleted ? 'all' : 'active_only',
         sort_field: sortField,
         sort_order: sortOrder,
         ...(isGlobalView ? { show_all: true } : {}),
-      });
+      };
 
-      const procs = response.data.items || response.data;
-      let exportData = procs.map(p => ({
+      let allProcs = [];
+      let page = 1;
+      let totalPages = 1;
+
+      while (page <= totalPages) {
+        const response = await getProcesses({ ...baseParams, page, size: 100 });
+        const items = response.data.items || response.data;
+        allProcs = allProcs.concat(items);
+        if (response.data.pages) {
+          totalPages = response.data.pages;
+        } else {
+          break; // formato antigo (array) — não paginar
+        }
+        page++;
+      }
+
+      let exportData = allProcs.map(p => ({
         'Processo': p.process_number || '',
         'Cliente': p.client_name || '',
         'NIF': p.client_nif || '',
