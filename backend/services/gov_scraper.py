@@ -748,14 +748,26 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                 logger.info(f"[GOV_SCRAPER] Secção de IRS acedida via {irs_sel}")
             else:
                 logger.warning("[GOV_SCRAPER] Link IRS não encontrado — a tentar navegação directa")
-                try:
-                    await page.goto(
-                        "https://www.portaldasfinancas.gov.pt/pt/irs.action",
-                        wait_until="domcontentloaded",
-                        timeout=90000,
-                    )
-                except Exception:
-                    pass
+                # URL actual do portal IRS (sub-domínio dedicado, Maio 2025).
+                # A antiga `/pt/irs.action` está descontinuada e devolve
+                # "A funcionalidade pode ter mudado de endereço".
+                for irs_url in (
+                    "https://irs.portaldasfinancas.gov.pt/home.action",
+                    "https://www.portaldasfinancas.gov.pt/at/html/index.html#irs",
+                ):
+                    try:
+                        await page.goto(irs_url, wait_until="domcontentloaded", timeout=60000)
+                        await asyncio.sleep(2)
+                        # Se a página tem conteúdo IRS real (e não a página de erro),
+                        # consideramos sucesso
+                        body_text = (await page.locator("body").text_content() or "").lower()
+                        if "mudado de endere" not in body_text and "página não encontrada" not in body_text:
+                            logger.info(f"[GOV_SCRAPER] IRS acedido via navegação directa: {irs_url}")
+                            break
+                        logger.info(f"[GOV_SCRAPER] {irs_url} devolveu página de erro, a tentar próxima...")
+                    except Exception as nav_err:
+                        logger.info(f"[GOV_SCRAPER] Falha em {irs_url}: {type(nav_err).__name__}")
+                        continue
         except asyncio.TimeoutError:
             logger.error(
                 f"Timeout na navegação interna (pós-login). "
@@ -770,9 +782,12 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
             screenshot_b64 = await _take_screenshot(page, "irs_navigation_failed")
 
         # ── 7. Descarregar Declaração de IRS ──
+        # Categoria S3 = "Financeiros" (corresponde à pasta visível no CRM via
+        # S3FileManager). O tipo específico do documento ("Declaração de IRS")
+        # fica em `custom_label` no registo da BD para distinguir do resto.
         step = "download_irs"
         doc_irs = await _download_financas_document(
-            page, "Declaração de IRS", "IRS"
+            page, "Declaração de IRS", "Financeiros"
         )
         if doc_irs:
             documents.append(doc_irs)
@@ -783,7 +798,7 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         # ── 8. Descarregar Nota de Liquidação ──
         step = "download_nota"
         doc_nota = await _download_financas_document(
-            page, "Nota de Liquidação", "Declaracao_Imposto_Renda"
+            page, "Nota de Liquidação IRS", "Financeiros"
         )
         if doc_nota:
             documents.append(doc_nota)
@@ -1264,9 +1279,10 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
             pass
 
         # ── 7. Descarregar Situação Contributiva ──
+        # Categoria S3 = "Financeiros" (visível no S3FileManager do CRM)
         step = "download_situacao"
         doc_sit = await _download_seg_social_document(
-            page, "Declaração de Situação Contributiva", "Recibo_Vencimento"
+            page, "Situação Contributiva", "Financeiros"
         )
         if doc_sit:
             documents.append(doc_sit)
@@ -1275,7 +1291,7 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
         # ── 8. Descarregar Extrato de Remunerações ──
         step = "download_extrato"
         doc_ext = await _download_seg_social_document(
-            page, "Extrato de Remunerações", "Mapa_Creditos"
+            page, "Extrato de Remunerações", "Financeiros"
         )
         if doc_ext:
             documents.append(doc_ext)
