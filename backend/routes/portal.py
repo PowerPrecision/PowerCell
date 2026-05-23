@@ -1380,8 +1380,6 @@ async def _run_financas_background(
     Executa o scraper pesado em background, atualiza o job na BD,
     envia emails e notifica a equipa quando termina.
     """
-    now = datetime.now(timezone.utc).isoformat()
-
     # ── 1. Enviar email de início de processo ──
     try:
         await _send_portal_fetch_email(
@@ -1682,7 +1680,6 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
         return response
 
     # ── Upload dos documentos para o S3 e registo na BD ──
-    now = datetime.now(timezone.utc).isoformat()
     docs_registered = 0
 
     for doc in result.documents:
@@ -1703,6 +1700,10 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
             if not s3_path:
                 logger.warning(f"[PORTAL] Falha no upload S3 para {doc.filename} — a criar registo sem S3 path")
 
+            # Timestamp único por documento (evita que vários docs do mesmo
+            # batch fiquem com a mesma data/hora exacta no CRM)
+            doc_now = datetime.now(timezone.utc).isoformat()
+
             # Criar registo na BD
             doc_id = str(uuid.uuid4())
             doc_record = {
@@ -1711,30 +1712,31 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
                 "filename": doc.filename,
                 "original_filename": doc.filename,
                 "category": doc.category,
-                "custom_label": doc.label if "captura" in doc.label else None,
+                # Mantemos sempre o label legível ("Declaração de IRS",
+                # "Nota de Liquidação IRS", etc.) para o utilizador identificar
+                # o tipo específico dentro da categoria "Financeiros".
+                "custom_label": doc.label,
                 "status": "RECEIVED",
                 "source": "auto_financas",
-                "uploaded_at": now,
+                "uploaded_at": doc_now,
                 "uploaded_by": "system_financas_scraper",
                 "content_type": doc.content_type,
                 "file_size": len(doc.content_bytes),
                 "s3_path": s3_path,
                 "auto_fetched": True,
             }
-            # Remover custom_label se for None
-            if not doc_record["custom_label"]:
-                del doc_record["custom_label"]
 
             await db.documents.insert_one(doc_record)
             docs_registered += 1
 
             logger.info(
                 f"[PORTAL] Documento Finanças registado: {doc.filename} "
-                f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'})"
+                f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'}, "
+                f"categoria: {doc.category}, label: {doc.label})"
             )
 
         except Exception as e:
-            logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}")
+            logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}: {e}")
 
     return {"success": True, "documents_count": docs_registered}
 
@@ -1784,7 +1786,6 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
         return response
 
     # ── Upload dos documentos para o S3 e registo na BD ──
-    now = datetime.now(timezone.utc).isoformat()
     docs_registered = 0
 
     for doc in result.documents:
@@ -1805,6 +1806,10 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
             if not s3_path:
                 logger.warning(f"[PORTAL] Falha no upload S3 para {doc.filename} — a criar registo sem S3 path")
 
+            # Timestamp único por documento (evita que vários docs do mesmo
+            # batch fiquem com a mesma data/hora exacta no CRM)
+            doc_now = datetime.now(timezone.utc).isoformat()
+
             # Criar registo na BD
             doc_id = str(uuid.uuid4())
             doc_record = {
@@ -1813,30 +1818,31 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
                 "filename": doc.filename,
                 "original_filename": doc.filename,
                 "category": doc.category,
-                "custom_label": doc.label if "captura" in doc.label else None,
+                # Mantemos sempre o label legível ("Situação Contributiva",
+                # "Extrato de Remunerações") para o utilizador identificar
+                # o tipo específico dentro da categoria genérica.
+                "custom_label": doc.label,
                 "status": "RECEIVED",
                 "source": "auto_seguranca_social",
-                "uploaded_at": now,
+                "uploaded_at": doc_now,
                 "uploaded_by": "system_seguranca_social_scraper",
                 "content_type": doc.content_type,
                 "file_size": len(doc.content_bytes),
                 "s3_path": s3_path,
                 "auto_fetched": True,
             }
-            # Remover custom_label se for None
-            if not doc_record["custom_label"]:
-                del doc_record["custom_label"]
 
             await db.documents.insert_one(doc_record)
             docs_registered += 1
 
             logger.info(
                 f"[PORTAL] Documento Seg. Social registado: {doc.filename} "
-                f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'})"
+                f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'}, "
+                f"categoria: {doc.category}, label: {doc.label})"
             )
 
         except Exception as e:
-            logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}")
+            logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}: {e}")
 
     return {"success": True, "documents_count": docs_registered}
 
