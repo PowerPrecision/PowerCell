@@ -180,95 +180,67 @@ def extract_email_address(header: str) -> str:
 
 def get_email_body_with_embedded_images(msg) -> tuple:
     """
-    Extrair corpo do email (texto e HTML) com suporte a imagens embutidas (cid:).
-    Converte referências cid: para data URLs base64.
-    
-    Otimização de memória: imagens embutidas > 500KB NÃO são convertidas para
-    base64 — são substituídas por um placeholder no HTML. Isto previne que o
-    body_html injetado exceda limites da Base de Dados e da RAM (OOM).
-    
+    Extrair corpo do email (texto e HTML) — VERSÃO LEAN (sem Base64).
+
+    ANTES (v1): Extraía payloads de imagens embutidas e convertia para
+    data URLs base64, substituindo cid: no HTML. Causava OOM no Render
+    porque cada imagem duplicava a memória (payload + base64 string).
+
+    AGORA (v2 Lean): Não extrai payloads de imagem nem faz conversões
+    base64. Apenas extrai o texto HTML puro e mantém as referências
+    cid: nativas. O frontend / email client trata de resolver os CIDs
+    quando necessário (ex: exibição no Webmail).
+
+    Isto elimina completamente os picos de RAM durante o Auto-Sync.
+
     Returns:
-        tuple: (body_text, body_html, embedded_images_dict)
+        tuple: (body_text, body_html, embedded_images)
+            - body_text (str): Corpo em texto simples.
+            - body_html (str): Corpo em HTML com CIDs originais.
+            - embedded_images (dict): Vazio — mantido para compatibilidade
+              com callers que esperam 3 valores no tuplo.
     """
-    import base64
-    
-    MAX_EMBEDDED_IMAGE_SIZE = 512 * 1024  # 500 KB — limite para conversão base64
-    
     body_text = ""
     body_html = ""
-    embedded_images = {}  # cid -> base64 data URL
-    
-    if msg.is_multipart():
-        # Primeiro pass: extrair imagens embutidas
-        for part in msg.walk():
-            content_type = part.get_content_type()
-            content_id = part.get("Content-ID")
-            
-            # Verificar se é uma imagem embutida
-            if content_type.startswith("image/") and content_id:
-                try:
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        # Remover < > do Content-ID
-                        cid = content_id.strip("<>")
-                        
-                        # === GUARDA DE SEGURANÇA: Bloquear Base64 Gigante ===
-                        # Se o payload exceder 500KB, NÃO converter para base64.
-                        # Guardar apenas um placeholder para evitar OOM e limites de BD.
-                        if len(payload) > MAX_EMBEDDED_IMAGE_SIZE:
-                            logger.warning(
-                                f"Imagem embutida '{cid}' excede limite de "
-                                f"{MAX_EMBEDDED_IMAGE_SIZE // 1024}KB "
-                                f"({len(payload) // 1024}KB) — substituída por placeholder"
-                            )
-                            embedded_images[cid] = (
-                                f"[Imagem embutida demasiado grande: "
-                                f"{len(payload) // 1024}KB — removida para poupar memória]"
-                            )
-                            continue
-                        
-                        # Converter para base64 (tamanho seguro)
-                        b64_data = base64.b64encode(payload).decode('utf-8')
-                        embedded_images[cid] = f"data:{content_type};base64,{b64_data}"
-                except Exception as e:
-                    logger.warning(f"Erro ao extrair imagem embutida: {e}")
-        
-        # Segundo pass: extrair corpo do email
-        for part in msg.walk():
-            content_type = part.get_content_type()
-            content_disposition = str(part.get("Content-Disposition"))
-            
-            if "attachment" not in content_disposition:
-                try:
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        charset = part.get_content_charset() or 'utf-8'
-                        text = payload.decode(charset, errors='replace')
-                        if content_type == "text/plain":
-                            body_text = text
-                        elif content_type == "text/html":
-                            body_html = text
-                except Exception as e:
-                    logger.warning(f"Erro ao extrair corpo: {e}")
-    else:
+
+    # Extrair apenas o texto puro (HTML + plain) — SEM conversões Base64
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        content_disposition = str(part.get("Content-Disposition", ""))
+
+        # Ignorar anexos — só queremos o corpo
+        if "attachment" in content_disposition:
+            continue
+
         try:
-            payload = msg.get_payload(decode=True)
-            if payload:
-                charset = msg.get_content_charset() or 'utf-8'
-                body_text = payload.decode(charset, errors='replace')
-        except Exception as e:
-            logger.warning(f"Erro ao extrair corpo simples: {e}")
-    
-    # Substituir referências cid: no HTML por data URLs
-    if body_html and embedded_images:
-        for cid, data_url in embedded_images.items():
-            # Substituir várias formas de referência cid:
-            body_html = body_html.replace(f'cid:{cid}', data_url)
-            body_html = body_html.replace(f'CID:{cid}', data_url)
-            body_html = body_html.replace(f'"cid:{cid}"', f'"{data_url}"')
-            body_html = body_html.replace(f"'cid:{cid}'", f"'{data_url}'")
-    
-    return body_text, body_html, embedded_images
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            charset = part.get_content_charset() or 'utf-8'
+            decoded = payload.decode(charset, errors='replace')
+
+            if content_type == "text/plain" and not body_text:
+                body_text = decoded
+            elif content_type == "text/html" and not body_html:
+                body_html = decoded
+        except Exception:
+            # Fallback: usar get_payload() como string (sem decode)
+            try:
+                raw = part.get_payload()
+                if isinstance(raw, str):
+                    if content_type == "text/html" and not body_html:
+                        body_html = raw
+                    elif content_type == "text/plain" and not body_text:
+                        body_text = raw
+            except Exception:
+                pass
+
+    # NOTA: NÃO fazemos conversão base64 de imagens embutidas!
+    # Os CIDs permanecem no HTML original (ex: <img src="cid:logo123">).
+    # O frontend/email client resolve os CIDs quando necessário.
+    # Isto elimina os picos de RAM que causavam OOM no Render.
+
+    return body_text, body_html, {}
 
 
 def _extract_email_bytes_from_fetch(fetch_result) -> Optional[bytes]:
