@@ -213,3 +213,6 @@ zope.interface==8.2
 reportlab==4.2.5
 playwright==1.52.0
 playwright-stealth==2.0.3
+# setuptools: garante que `pkg_resources` está disponível em Python ≥3.12
+# (necessário para algumas bibliotecas terceiras que ainda dependem do legado).
+setuptools>=68.0.0
