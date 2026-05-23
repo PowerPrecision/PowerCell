@@ -157,7 +157,7 @@ import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeParseISO, safeFormat } from "../lib/utils";
 
 // eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -1820,7 +1820,7 @@ const ProcessDetails = () => {
     );
   }
 
-  const deadlineDates = deadlines.map((d) => parseISO(safeDateStr(d.due_date)));
+  const deadlineDates = deadlines.map((d) => safeParseISO(d.due_date)).filter(Boolean);
   const currentStatusInfo = getStatusInfo(process.status);
 
   const propertyStatusColors = {
@@ -4831,7 +4831,7 @@ const ProcessDetails = () => {
                             <div className="flex items-center gap-2">
                               {aiAnalysisDate && (
                                 <span className="text-xs text-muted-foreground hidden sm:inline">
-                                  {new Date(safeDateStr(aiAnalysisDate)).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                  {safeFormat(aiAnalysisDate, "dd/MM/yyyy HH:mm", { locale: pt })}
                                 </span>
                               )}
                               {aiSummary && !aiAnalysisLoading ? (
@@ -5015,7 +5015,7 @@ const ProcessDetails = () => {
                                     )}
                                     <p className="text-sm whitespace-pre-wrap break-words">{safeString(msg.content)}</p>
                                     <p className="text-[10px] text-muted-foreground mt-1 text-right">
-                                      {msg.created_at ? format(parseISO(safeDateStr(msg.created_at)), "dd/MM/yyyy HH:mm", { locale: pt }) : ''}
+                                      {msg.created_at ? safeFormat(msg.created_at, "dd/MM/yyyy HH:mm", { locale: pt }) : ''}
                                     </p>
                                   </div>
                                 </div>
@@ -5232,7 +5232,7 @@ const ProcessDetails = () => {
                                 <span className="font-medium">{activity.user_name}</span>
                                 {activity.source === 'trello' && <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0">trello</Badge>}
                                 <p className="text-[11px] mt-0.5 text-muted-foreground line-clamp-2">{activity.comment}</p>
-                                <p className="text-[10px] text-muted-foreground">{format(parseISO(safeDateStr(activity.created_at)), "dd/MM HH:mm", { locale: pt })}</p>
+                                <p className="text-[10px] text-muted-foreground">{safeFormat(activity.created_at, "dd/MM HH:mm", { locale: pt })}</p>
                               </div>
                               {(activity.user_id === user.id || hasRole(user, "admin")) && (
                                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleDeleteComment(activity.id)}>
@@ -5415,7 +5415,7 @@ const ProcessDetails = () => {
                                     {deadline.title}
                                   </p>
                                   <p className="text-xs text-muted-foreground font-mono">
-                                    {format(parseISO(safeDateStr(deadline.due_date)), "dd/MM/yyyy")}
+                                    {safeFormat(deadline.due_date, "dd/MM/yyyy")}
                                   </p>
                                 </div>
                               </div>

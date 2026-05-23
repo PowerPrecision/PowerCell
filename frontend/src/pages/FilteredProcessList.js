@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../services/api";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeParseISO } from "../lib/utils";
 import { safeString } from "../utils/safeString";
 
 const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
@@ -350,7 +350,7 @@ const FilteredProcessList = () => {
                               {deadlineInfo.daysUntil <= 0 ? "Vencido" : `${deadlineInfo.daysUntil}d`}
                             </Badge>
                           )}
-                          <span>{process.created_at ? format(parseISO(safeDateStr(process.created_at)), "dd/MM/yy", { locale: pt }) : "-"}</span>
+                          <span>{process.created_at ? format(safeParseISO(process.created_at), "dd/MM/yy", { locale: pt }) : "-"}</span>
                         </div>
                       </div>
                     </div>
@@ -459,7 +459,7 @@ const FilteredProcessList = () => {
                           )}
                           <TableCell className="text-sm text-muted-foreground">
                             {process.created_at 
-                              ? format(parseISO(safeDateStr(process.created_at)), "dd/MM/yyyy", { locale: pt })
+                              ? format(safeParseISO(process.created_at), "dd/MM/yyyy", { locale: pt })
                               : "-"
                             }
                           </TableCell>

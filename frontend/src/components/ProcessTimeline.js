@@ -13,7 +13,7 @@ import { Loader2, CheckCircle, Clock, Circle, ArrowRight } from "lucide-react";
 import { format, parseISO, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeLabel } from "./dashboard/DashboardShared";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeParseISO } from "../lib/utils";
 
 // Cores de fallback mapeadas a partir do nome da cor da BD
 const COLOR_MAP = {
@@ -83,7 +83,7 @@ const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, date, daysInPhase }) 
         </p>
         {date && (
           <p className="text-[9px] text-muted-foreground">
-            {format(parseISO(safeDateStr(date)), "dd/MM", { locale: pt })}
+            {format(safeParseISO(date), "dd/MM", { locale: pt })}
           </p>
         )}
         {daysInPhase !== undefined && daysInPhase > 0 && (
@@ -190,7 +190,7 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
         const nextDate = nextEntry ? (nextEntry.timestamp || nextEntry.created_at) : new Date().toISOString();
         
         const daysInPhase = entryDate && nextDate 
-          ? differenceInDays(parseISO(safeDateStr(nextDate)), parseISO(safeDateStr(entryDate)))
+          ? differenceInDays(safeParseISO(nextDate), safeParseISO(entryDate))
           : 0;
 
         timeline.push({

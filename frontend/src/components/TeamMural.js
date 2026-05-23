@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import { hasRole } from "../utils/roleUtils";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeParseISO } from "../lib/utils";
 
 // ============== HOOK: useIntersectionObserver (Auto-Read) ==============
 /**
@@ -142,7 +142,7 @@ const AnnouncementItem = React.memo(({ announcement, currentUser, onLike, onDele
 
   const formattedDate = (() => {
     try {
-      return formatDistanceToNow(parseISO(safeDateStr(announcement.created_at)), {
+      return formatDistanceToNow(safeParseISO(announcement.created_at), {
         addSuffix: true,
         locale: pt,
       });
