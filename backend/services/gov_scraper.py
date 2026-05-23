@@ -1,6 +1,6 @@
 """
 ====================================================================
-GOV SCRAPER v2 — Automação de Portais Governamentais Portugueses
+GOV SCRAPER v4 — Automação de Portais Governamentais Portugueses
 ====================================================================
 Serviço de RPA (Robotic Process Automation) que utiliza Playwright
 em modo headless para extrair documentos dos portais:
@@ -13,7 +13,13 @@ em modo headless para extrair documentos dos portais:
    - Declaração de Situação Contributiva
    - Extrato de Remunerações
 
-v2 MELHORIAS:
+v4 MELHORIAS (sobre v2):
+- Interceção de href + expect_response em vez de expect_download:
+  O Portal das Finanças abre PDFs inline ou via streams HTTP que NÃO
+  disparam o evento tradicional de download do Playwright. A nova lógica
+  extrai o href do botão/link e navega directamente ao PDF, obtendo os
+  bytes da resposta HTTP. Se não houver href, intercepta a resposta HTTP
+  via expect_response. Fallback final: page.pdf() (captura de ecrã).
 - playwright-stealth: disfarça o headless browser (evita anti-bot)
 - User-Agent atualizado (Chrome 131)
 - Selectors robustos com fallbacks múltiplos
@@ -22,6 +28,8 @@ v2 MELHORIAS:
 - Espera por elementos específicos em vez de networkidle genérico
 - Melhor categorização de erros (login_falhado, mfa_requerido,
   selector_desatualizado, timeout, sem_documentos)
+- Documentos extraídos são anexados ao email de sucesso enviado ao
+  cliente (via send_email com attachments)
 
 SEGURANÇA (CRÍTICO):
 - As credenciais (NIF/NISS + password) NUNCA são guardadas na BD.
@@ -952,6 +960,109 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
         logger.info("[GOV_SCRAPER] Credenciais Finanças limpas da memória")
 
 
+async def _intercept_pdf_from_element(page, btn_locator, safe_filename: str) -> Optional[bytes]:
+    """
+    Intercepa o PDF a partir de um botão/link sem usar expect_download.
+
+    O Portal das Finanças abre PDFs inline ou via streams HTTP que NÃO
+    disparam o evento tradicional de download do Playwright. Esta função
+    resolve o problema em 3 camadas:
+
+    1. Extrai o atributo href do elemento e navega directamente,
+       obtendo os bytes da resposta HTTP (ignora a UI completamente).
+    2. Se não houver href, intercepta a resposta HTTP (expect_response)
+       cujo Content-Type seja PDF ou octet-stream.
+    3. Se tudo falhar, retorna None (o chamador faz fallback para page.pdf).
+
+    Args:
+        page: Instância da página Playwright.
+        btn_locator: Locator do botão/link que originaria o download.
+        safe_filename: Nome de ficheiro para logging.
+
+    Returns:
+        bytes do PDF ou None se falhar.
+    """
+    pdf_bytes = None
+
+    # ── Camada 1: Href directo ──
+    href = await btn_locator.get_attribute("href")
+    if href:
+        try:
+            # A AT usa frequentemente links relativos
+            full_url = href if href.startswith("http") else f"https://irs.portaldasfinancas.gov.pt{href}"
+            logger.info(
+                f"[GOV_SCRAPER] Href interceptado para {safe_filename}: "
+                f"{full_url[:120]}"
+            )
+            response = await page.goto(full_url, timeout=30000)
+            if response:
+                pdf_bytes = await response.body()
+                if pdf_bytes and len(pdf_bytes) > 100:
+                    logger.info(
+                        f"[GOV_SCRAPER] PDF obtido via href directo para "
+                        f"{safe_filename} ({len(pdf_bytes)} bytes)"
+                    )
+                    return pdf_bytes
+                else:
+                    logger.warning(
+                        f"[GOV_SCRAPER] Resposta href vazia/pequena para "
+                        f"{safe_filename} ({len(pdf_bytes) if pdf_bytes else 0} bytes)"
+                    )
+                    # Voltar à página anterior para continuar o fluxo
+                    try:
+                        await page.go_back(timeout=15000)
+                        await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    except Exception:
+                        pass
+        except Exception as href_err:
+            logger.warning(
+                f"[GOV_SCRAPER] href directo falhou para {safe_filename}: "
+                f"{type(href_err).__name__}: {href_err}"
+            )
+            # Voltar à página anterior se a navegação falhou a meio
+            try:
+                await page.go_back(timeout=15000)
+                await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+
+    # ── Camada 2: expect_response (botões JavaScript sem href) ──
+    if not pdf_bytes:
+        try:
+            logger.info(
+                f"[GOV_SCRAPER] A tentar expect_response para {safe_filename} "
+                f"(sem href ou href falhou)"
+            )
+            async with page.expect_response(
+                lambda r: (
+                    "pdf" in r.headers.get("content-type", "").lower()
+                    or "octet-stream" in r.headers.get("content-type", "").lower()
+                ),
+                timeout=30000,
+            ) as response_info:
+                await btn_locator.click()
+            response = await response_info.value
+            pdf_bytes = await response.body()
+            if pdf_bytes and len(pdf_bytes) > 100:
+                logger.info(
+                    f"[GOV_SCRAPER] PDF obtido via expect_response para "
+                    f"{safe_filename} ({len(pdf_bytes)} bytes)"
+                )
+                return pdf_bytes
+            else:
+                logger.warning(
+                    f"[GOV_SCRAPER] expect_response retornou vazio para "
+                    f"{safe_filename}"
+                )
+        except Exception as resp_err:
+            logger.warning(
+                f"[GOV_SCRAPER] expect_response falhou para {safe_filename}: "
+                f"{type(resp_err).__name__}: {resp_err}"
+            )
+
+    return None
+
+
 async def _download_financas_document(
     page,
     doc_name: str,
@@ -960,8 +1071,12 @@ async def _download_financas_document(
     """
     Tenta descarregar um documento específico do Portal das Finanças.
 
-    v3: Navegação directa para comprovativos + selector "Obter Comprovativo"
-    + fallback de emergência com page.pdf() protegido por try/catch.
+    v4: Interceção de href + expect_response em vez de expect_download.
+    O Portal das Finanças abre PDFs inline ou via streams HTTP que não
+    disparam o evento tradicional de download do Playwright. A nova lógica:
+    1. Extrai href e navega directamente ao PDF (ignora UI).
+    2. Se sem href, intercepta a resposta HTTP (expect_response).
+    3. Fallback de emergência com page.pdf().
     """
     now = datetime.now(timezone.utc)
     safe_filename = f"{doc_name.replace(' ', '_')}_{now.strftime('%Y%m%d')}.pdf"
@@ -971,54 +1086,47 @@ async def _download_financas_document(
     # clicar no botão "Obter Comprovativo" ou no ícone de PDF.
     try:
         comprovativo_selectors = [
-            'button:has-text("Obter Comprovativo")',
             'a:has-text("Obter Comprovativo")',
+            'button:has-text("Obter Comprovativo")',
             'input[value="Obter Comprovativo"]',
             'a:has([class*="pdf"])',
-            'button:has([class*="pdf"])',
-            'img[alt*="pdf"]',
             'a[href*="obterComprovativo"]',
             'a[href*="comprovativo"]',
+            'button:has([class*="pdf"])',
+            'img[alt*="pdf"]',
         ]
         for selector in comprovativo_selectors:
             try:
-                el = page.locator(selector).first
-                if await el.is_visible(timeout=3000):
+                btn_locator = page.locator(selector).first
+                if await btn_locator.is_visible(timeout=3000):
                     logger.info(
-                        f"[GOV_SCRAPER] Botão 'Obter Comprovativo' encontrado "
-                        f"via selector: {selector}"
+                        f"[GOV_SCRAPER] Botão/link encontrado para "
+                        f"'{doc_name}' via selector: {selector}"
                     )
-                    try:
-                        async with page.expect_download(timeout=90000) as download_info:
-                            await el.click()
-                        download = await download_info.value
+                    # Aguardar que o elemento esteja clicável
+                    await btn_locator.wait_for(state="visible", timeout=15000)
 
-                        tmp_path = await download.path()
-                        if tmp_path and os.path.exists(tmp_path):
-                            with open(tmp_path, "rb") as f:
-                                content_bytes = f.read()
-
-                            if content_bytes and len(content_bytes) > 100:
-                                try:
-                                    os.unlink(tmp_path)
-                                except Exception:
-                                    pass
-
-                                return ScraperDocument(
-                                    filename=download.suggested_filename or safe_filename,
-                                    content_bytes=content_bytes,
-                                    content_type="application/pdf",
-                                    category=category,
-                                    label=doc_name,
-                                )
-                    except Exception as dl_err:
-                        logger.warning(
-                            f"[GOV_SCRAPER] expect_download falhou para "
-                            f"'Obter Comprovativo' ({selector}): "
-                            f"{type(dl_err).__name__}: {dl_err}"
+                    # Interceptar PDF via href ou expect_response
+                    pdf_bytes = await _intercept_pdf_from_element(
+                        page, btn_locator, safe_filename
+                    )
+                    if pdf_bytes and len(pdf_bytes) > 100:
+                        return ScraperDocument(
+                            filename=safe_filename,
+                            content_bytes=pdf_bytes,
+                            content_type="application/pdf",
+                            category=category,
+                            label=doc_name,
                         )
-                        continue
-            except Exception:
+                    logger.warning(
+                        f"[GOV_SCRAPER] _intercept_pdf_from_element falhou "
+                        f"para selector {selector} — a tentar próximo"
+                    )
+            except Exception as el_err:
+                logger.warning(
+                    f"[GOV_SCRAPER] Selector {selector} falhou: "
+                    f"{type(el_err).__name__}"
+                )
                 continue
     except Exception as e:
         logger.warning(
@@ -1037,33 +1145,21 @@ async def _download_financas_document(
 
         for selector in all_download_selectors:
             try:
-                el = page.locator(selector).first
-                if await el.is_visible(timeout=3000):
-                    try:
-                        async with page.expect_download(timeout=60000) as download_info:
-                            await el.click()
-                        download = await download_info.value
+                btn_locator = page.locator(selector).first
+                if await btn_locator.is_visible(timeout=3000):
+                    await btn_locator.wait_for(state="visible", timeout=15000)
 
-                        tmp_path = await download.path()
-                        if tmp_path and os.path.exists(tmp_path):
-                            with open(tmp_path, "rb") as f:
-                                content_bytes = f.read()
-
-                            if content_bytes and len(content_bytes) > 100:
-                                try:
-                                    os.unlink(tmp_path)
-                                except Exception:
-                                    pass
-
-                                return ScraperDocument(
-                                    filename=download.suggested_filename or safe_filename,
-                                    content_bytes=content_bytes,
-                                    content_type="application/pdf",
-                                    category=category,
-                                    label=doc_name,
-                                )
-                    except Exception:
-                        continue
+                    pdf_bytes = await _intercept_pdf_from_element(
+                        page, btn_locator, safe_filename
+                    )
+                    if pdf_bytes and len(pdf_bytes) > 100:
+                        return ScraperDocument(
+                            filename=safe_filename,
+                            content_bytes=pdf_bytes,
+                            content_type="application/pdf",
+                            category=category,
+                            label=doc_name,
+                        )
             except Exception:
                 continue
     except Exception:
@@ -1079,48 +1175,37 @@ async def _download_financas_document(
 
         for selector in all_nav_selectors:
             try:
-                el = page.locator(selector).first
-                if await el.is_visible(timeout=3000):
-                    await el.click()
+                nav_el = page.locator(selector).first
+                if await nav_el.is_visible(timeout=3000):
+                    await nav_el.click()
                     await page.wait_for_load_state("domcontentloaded", timeout=90000)
 
-                    # Tentar download na nova página
-                    dl_el, _ = await _try_selectors(page, FINANCAS_SEL["download_button"], timeout=10000)
+                    # Tentar intercepção de PDF na nova página
+                    dl_el, _ = await _try_selectors(
+                        page, FINANCAS_SEL["download_button"], timeout=10000
+                    )
                     if dl_el:
-                        try:
-                            async with page.expect_download(timeout=60000) as download_info:
-                                await dl_el.click()
-                            download = await download_info.value
+                        await dl_el.wait_for(state="visible", timeout=15000)
 
-                            tmp_path = await download.path()
-                            if tmp_path and os.path.exists(tmp_path):
-                                with open(tmp_path, "rb") as f:
-                                    content_bytes = f.read()
-
-                                if content_bytes and len(content_bytes) > 100:
-                                    try:
-                                        os.unlink(tmp_path)
-                                    except Exception:
-                                        pass
-
-                                    return ScraperDocument(
-                                        filename=download.suggested_filename or safe_filename,
-                                        content_bytes=content_bytes,
-                                        content_type="application/pdf",
-                                        category=category,
-                                        label=doc_name,
-                                    )
-                        except Exception:
-                            continue
+                        pdf_bytes = await _intercept_pdf_from_element(
+                            page, dl_el, safe_filename
+                        )
+                        if pdf_bytes and len(pdf_bytes) > 100:
+                            return ScraperDocument(
+                                filename=safe_filename,
+                                content_bytes=pdf_bytes,
+                                content_type="application/pdf",
+                                category=category,
+                                label=doc_name,
+                            )
             except Exception:
                 continue
     except Exception:
         pass
 
     # ── Estratégia 3: Fallback de emergência — gerar PDF da página actual ──
-    # Se o botão nativo de download falhar, tiramos um print da página em PDF.
-    # Protegido por try/catch para não crashar o scraper se page.pdf() falhar
-    # (ex: página com conteúdo restrito ou browser sem permissão).
+    # Se a interceção de href e expect_response falharem, tiramos um print
+    # da página em PDF. Protegido por try/catch para não crashar o scraper.
     try:
         logger.info(
             f"[GOV_SCRAPER] Fallback de emergência: a gerar PDF da página "
@@ -1531,16 +1616,109 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
         logger.info("[GOV_SCRAPER] Credenciais Seg. Social limpas da memória")
 
 
+async def _intercept_pdf_from_element_seg_social(page, btn_locator, safe_filename: str) -> Optional[bytes]:
+    """
+    Intercepa o PDF a partir de um botão/link da Segurança Social sem usar
+    expect_download. Variante de _intercept_pdf_from_element para o domínio
+    da Segurança Social (app.seg-social.pt).
+
+    1. Extrai o href e navega directamente (obtém bytes da resposta HTTP).
+    2. Se sem href, intercepta a resposta HTTP (expect_response) com
+       Content-Type PDF ou octet-stream.
+    3. Se tudo falhar, retorna None (o chamador faz fallback para page.pdf).
+    """
+    pdf_bytes = None
+
+    # ── Camada 1: Href directo ──
+    href = await btn_locator.get_attribute("href")
+    if href:
+        try:
+            full_url = href if href.startswith("http") else f"https://app.seg-social.pt{href}"
+            logger.info(
+                f"[GOV_SCRAPER] Href interceptado (SS) para {safe_filename}: "
+                f"{full_url[:120]}"
+            )
+            response = await page.goto(full_url, timeout=30000)
+            if response:
+                pdf_bytes = await response.body()
+                if pdf_bytes and len(pdf_bytes) > 100:
+                    logger.info(
+                        f"[GOV_SCRAPER] PDF obtido via href directo (SS) para "
+                        f"{safe_filename} ({len(pdf_bytes)} bytes)"
+                    )
+                    return pdf_bytes
+                else:
+                    logger.warning(
+                        f"[GOV_SCRAPER] Resposta href (SS) vazia/pequena para "
+                        f"{safe_filename}"
+                    )
+                    try:
+                        await page.go_back(timeout=15000)
+                        await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    except Exception:
+                        pass
+        except Exception as href_err:
+            logger.warning(
+                f"[GOV_SCRAPER] href directo (SS) falhou para {safe_filename}: "
+                f"{type(href_err).__name__}: {href_err}"
+            )
+            try:
+                await page.go_back(timeout=15000)
+                await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+
+    # ── Camada 2: expect_response (botões JavaScript sem href) ──
+    if not pdf_bytes:
+        try:
+            logger.info(
+                f"[GOV_SCRAPER] A tentar expect_response (SS) para {safe_filename}"
+            )
+            async with page.expect_response(
+                lambda r: (
+                    "pdf" in r.headers.get("content-type", "").lower()
+                    or "octet-stream" in r.headers.get("content-type", "").lower()
+                ),
+                timeout=30000,
+            ) as response_info:
+                await btn_locator.click()
+            response = await response_info.value
+            pdf_bytes = await response.body()
+            if pdf_bytes and len(pdf_bytes) > 100:
+                logger.info(
+                    f"[GOV_SCRAPER] PDF obtido via expect_response (SS) para "
+                    f"{safe_filename} ({len(pdf_bytes)} bytes)"
+                )
+                return pdf_bytes
+            else:
+                logger.warning(
+                    f"[GOV_SCRAPER] expect_response (SS) retornou vazio para "
+                    f"{safe_filename}"
+                )
+        except Exception as resp_err:
+            logger.warning(
+                f"[GOV_SCRAPER] expect_response (SS) falhou para {safe_filename}: "
+                f"{type(resp_err).__name__}: {resp_err}"
+            )
+
+    return None
+
+
 async def _download_seg_social_document(
     page,
     doc_name: str,
     category: str,
 ) -> Optional[ScraperDocument]:
-    """Tenta descarregar um documento específico da Segurança Social. v2."""
+    """
+    Tenta descarregar um documento específico da Segurança Social.
+
+    v3: Interceção de href + expect_response em vez de expect_download.
+    Aplica o mesmo padrão blindado do Portal das Finanças.
+    """
     now = datetime.now(timezone.utc)
     safe_filename = f"{doc_name.replace(' ', '_')}_{now.strftime('%Y%m%d')}.pdf"
 
-    # Estratégia 1: Download direto
+    # Estratégia 1: Download direto via intercepção de href/response
     try:
         doc_specific_sels = (
             SEG_SOCIAL_SEL["situacao_contributiva"]
@@ -1555,33 +1733,21 @@ async def _download_seg_social_document(
 
         for selector in all_download_selectors:
             try:
-                el = page.locator(selector).first
-                if await el.is_visible(timeout=3000):
-                    try:
-                        async with page.expect_download(timeout=60000) as download_info:
-                            await el.click()
-                        download = await download_info.value
+                btn_locator = page.locator(selector).first
+                if await btn_locator.is_visible(timeout=3000):
+                    await btn_locator.wait_for(state="visible", timeout=15000)
 
-                        tmp_path = await download.path()
-                        if tmp_path and os.path.exists(tmp_path):
-                            with open(tmp_path, "rb") as f:
-                                content_bytes = f.read()
-
-                            if content_bytes and len(content_bytes) > 100:
-                                try:
-                                    os.unlink(tmp_path)
-                                except Exception:
-                                    pass
-
-                                return ScraperDocument(
-                                    filename=download.suggested_filename or safe_filename,
-                                    content_bytes=content_bytes,
-                                    content_type="application/pdf",
-                                    category=category,
-                                    label=doc_name,
-                                )
-                    except Exception:
-                        continue
+                    pdf_bytes = await _intercept_pdf_from_element_seg_social(
+                        page, btn_locator, safe_filename
+                    )
+                    if pdf_bytes and len(pdf_bytes) > 100:
+                        return ScraperDocument(
+                            filename=safe_filename,
+                            content_bytes=pdf_bytes,
+                            content_type="application/pdf",
+                            category=category,
+                            label=doc_name,
+                        )
             except Exception:
                 continue
     except Exception:
@@ -1596,46 +1762,39 @@ async def _download_seg_social_document(
 
         for selector in nav_selectors:
             try:
-                el = page.locator(selector).first
-                if await el.is_visible(timeout=3000):
-                    await el.click()
+                nav_el = page.locator(selector).first
+                if await nav_el.is_visible(timeout=3000):
+                    await nav_el.click()
                     await page.wait_for_load_state("domcontentloaded", timeout=90000)
 
-                    dl_el, _ = await _try_selectors(page, SEG_SOCIAL_SEL["download_button"], timeout=10000)
+                    dl_el, _ = await _try_selectors(
+                        page, SEG_SOCIAL_SEL["download_button"], timeout=10000
+                    )
                     if dl_el:
-                        try:
-                            async with page.expect_download(timeout=60000) as download_info:
-                                await dl_el.click()
-                            download = await download_info.value
+                        await dl_el.wait_for(state="visible", timeout=15000)
 
-                            tmp_path = await download.path()
-                            if tmp_path and os.path.exists(tmp_path):
-                                with open(tmp_path, "rb") as f:
-                                    content_bytes = f.read()
-
-                                if content_bytes and len(content_bytes) > 100:
-                                    try:
-                                        os.unlink(tmp_path)
-                                    except Exception:
-                                        pass
-
-                                    return ScraperDocument(
-                                        filename=download.suggested_filename or safe_filename,
-                                        content_bytes=content_bytes,
-                                        content_type="application/pdf",
-                                        category=category,
-                                        label=doc_name,
-                                    )
-                        except Exception:
-                            continue
+                        pdf_bytes = await _intercept_pdf_from_element_seg_social(
+                            page, dl_el, safe_filename
+                        )
+                        if pdf_bytes and len(pdf_bytes) > 100:
+                            return ScraperDocument(
+                                filename=safe_filename,
+                                content_bytes=pdf_bytes,
+                                content_type="application/pdf",
+                                category=category,
+                                label=doc_name,
+                            )
             except Exception:
                 continue
     except Exception:
         pass
 
-    # Estratégia 3: PDF da página actual (fallback)
+    # Estratégia 3: PDF da página actual (fallback de emergência)
     try:
-        logger.info(f"[GOV_SCRAPER] Gerando PDF da página para {doc_name} (fallback)")
+        logger.info(
+            f"[GOV_SCRAPER] Fallback de emergência (SS): a gerar PDF da "
+            f"página para {doc_name}"
+        )
         pdf_bytes = await page.pdf(
             format="A4",
             print_background=True,
