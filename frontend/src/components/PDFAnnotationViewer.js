@@ -55,10 +55,9 @@ import {
   CircleDot,
   Maximize2,
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { hasAnyRole } from "../utils/roleUtils";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 
 // Configurar worker do pdfjs
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
@@ -910,7 +909,7 @@ const PDFAnnotationViewer = ({
                   <span>•</span>
                   <span>
                     {ann.created_at
-                      ? format(safeParseISO(ann.created_at), "dd/MM/yyyy HH:mm", {
+                      ? safeFormat(ann.created_at, "dd/MM/yyyy HH:mm", {
                           locale: pt,
                         })
                       : ""}
@@ -1269,7 +1268,7 @@ const PDFAnnotationViewer = ({
                               <>
                                 <span className="text-[10px] text-gray-700">•</span>
                                 <span className="text-[10px] text-gray-600">
-                                  {format(safeParseISO(ann.created_at), "dd/MM/yy", {
+                                  {safeFormat(ann.created_at, "dd/MM/yy", {
                                     locale: pt,
                                   })}
                                 </span>

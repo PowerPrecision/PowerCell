@@ -56,11 +56,10 @@ import {
   Copy,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { sanitizeEmailHtml } from "../utils/sanitize";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -137,11 +136,7 @@ const EmailSearchPage = () => {
   // Formatar data
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
-    try {
-      return format(safeParseISO(dateStr), "dd/MM/yyyy HH:mm", { locale: pt });
-    } catch {
-      return dateStr;
-    }
+    return safeFormat(dateStr, "dd/MM/yyyy HH:mm", { locale: pt });
   };
 
   // Índice do email selecionado nos resultados

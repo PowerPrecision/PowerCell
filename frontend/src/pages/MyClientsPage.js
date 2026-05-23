@@ -32,9 +32,8 @@ import {
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { toast } from "sonner";
 import * as XLSX from 'xlsx';
-import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
 import { getExportPermission } from "../services/api";
 import { hasAnyRole } from "../utils/roleUtils";
@@ -259,11 +258,7 @@ const MyClientsPage = () => {
 
   const formatDate = (dateString) => {
     if (!dateString) return "-";
-    try {
-      return format(safeParseISO(dateString), "dd MMM yyyy", { locale: pt });
-    } catch {
-      return dateString;
-    }
+    return safeFormat(dateString, "dd MMM yyyy", { locale: pt });
   };
 
   // Estatísticas rápidas

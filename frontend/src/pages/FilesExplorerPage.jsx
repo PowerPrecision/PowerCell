@@ -82,9 +82,8 @@ import {
   CloudOff,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -100,11 +99,7 @@ const formatFileSize = (bytes) => {
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "—";
-  try {
-    return format(safeParseISO(dateStr), "dd/MM/yyyy HH:mm", { locale: pt });
-  } catch {
-    return dateStr;
-  }
+  return safeFormat(dateStr, "dd/MM/yyyy HH:mm", { locale: pt });
 };
 
 const FileIcon = ({ filename, isFolder }) => {

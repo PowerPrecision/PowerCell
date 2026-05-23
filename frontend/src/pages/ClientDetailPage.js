@@ -45,10 +45,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getClient, getClientFiles, updateClient } from "../services/api";
-import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -111,11 +110,7 @@ const getStatusBadgeClasses = (statusColor) => {
 
 const formatDate = (dateString) => {
   if (!dateString || typeof dateString !== 'string') return "-";
-  try {
-    return format(safeParseISO(dateString), "dd MMM yyyy", { locale: pt });
-  } catch {
-    return "-";
-  }
+  return safeFormat(dateString, "dd MMM yyyy", { locale: pt });
 };
 
 /**

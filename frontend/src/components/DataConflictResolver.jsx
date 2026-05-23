@@ -22,9 +22,8 @@ import {
   Sparkles, Shield, Loader2, ChevronDown, ChevronUp
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -234,7 +233,7 @@ const DataConflictResolver = ({
                   </div>
                   {suggestion.detected_at && (
                     <span className="text-xs text-muted-foreground">
-                      {format(safeParseISO(suggestion.detected_at), "dd/MM HH:mm", { locale: pt })}
+                      {safeFormat(suggestion.detected_at, "dd/MM HH:mm", { locale: pt })}
                     </span>
                   )}
                 </div>

@@ -71,13 +71,13 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isToday, isYesterday } from "date-fns";
+import { format, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { sanitizeEmailHtml } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -94,7 +94,8 @@ const FOLDERS = [
 const formatEmailDate = (dateStr) => {
   if (!dateStr) return "";
   try {
-    const date = safeParseISO(dateStr);
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return "";
     if (isToday(date)) {
       return format(date, "HH:mm", { locale: pt });
     }
@@ -103,18 +104,14 @@ const formatEmailDate = (dateStr) => {
     }
     return format(date, "dd/MM/yyyy", { locale: pt });
   } catch {
-    return dateStr;
+    return "";
   }
 };
 
 // Formatar data completa
 const formatFullDate = (dateStr) => {
   if (!dateStr) return "-";
-  try {
-    return format(safeParseISO(dateStr), "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt });
-  } catch {
-    return dateStr;
-  }
+  return safeFormat(dateStr, "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt });
 };
 
 // Formatar tamanho de ficheiro

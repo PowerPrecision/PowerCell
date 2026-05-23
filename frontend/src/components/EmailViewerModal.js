@@ -31,10 +31,9 @@ import {
   Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet,
   Sparkles, Copy, ExternalLink, Tag
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
 import { sanitizeEmailHtml } from "../utils/sanitize";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -282,7 +281,7 @@ const EmailViewerModal = ({
                         </p>
                         <div className="flex items-center gap-1 mt-0.5">
                           <span className="text-[10px] text-muted-foreground">
-                            {email.sent_at && format(safeParseISO(email.sent_at), "dd/MM/yy HH:mm")}
+                            {email.sent_at && safeFormat(email.sent_at, "dd/MM/yy HH:mm")}
                           </span>
                           {email.attachments?.length > 0 && (
                             <Paperclip className="h-3 w-3 text-muted-foreground" />
@@ -461,7 +460,7 @@ const EmailViewerModal = ({
                       <span className="text-muted-foreground w-8">Data:</span>
                       <span>
                         {currentEmail.sent_at 
-                          ? format(safeParseISO(currentEmail.sent_at), "EEEE, dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })
+                          ? safeFormat(currentEmail.sent_at, "EEEE, dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })
                           : "-"
                         }
                       </span>
