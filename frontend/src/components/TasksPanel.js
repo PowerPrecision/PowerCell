@@ -38,12 +38,12 @@ import {
   ExternalLink, Send, MessageSquare, XCircle, Activity, CheckCheck
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, differenceInDays } from "date-fns";
+import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { hasRole, excludeRoles } from "../utils/roleUtils";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
 
 
 
@@ -397,7 +397,7 @@ const TasksPanel = ({
       return (
         <Badge variant="outline" className="text-xs text-muted-foreground">
           <Calendar className="h-3 w-3 mr-1" />
-          {format(safeParseISO(task.due_date), "dd/MM", { locale: pt })}
+          {safeFormat(task.due_date, "dd/MM", { locale: pt })}
         </Badge>
       );
     }
@@ -667,7 +667,7 @@ const TasksPanel = ({
                           {/* Data de criação - hidden on very small screens */}
                           <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground">
                             <Clock className="h-3 w-3" />
-                            {format(safeParseISO(task.created_at), "dd/MM/yyyy", { locale: pt })}
+                            {safeFormat(task.created_at, "dd/MM/yyyy", { locale: pt })}
                           </div>
                         </div>
                       </div>
@@ -877,7 +877,7 @@ const TasksPanel = ({
                 <Label className="text-xs text-muted-foreground">Data de Criação</Label>
                 <p className="mt-1 text-sm flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  {selectedTask?.created_at && format(safeParseISO(selectedTask.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: pt })}
+                  {selectedTask?.created_at && safeFormat(selectedTask.created_at, "dd/MM/yyyy 'às' HH:mm", { locale: pt })}
                 </p>
               </div>
               <div>

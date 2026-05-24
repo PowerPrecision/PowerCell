@@ -966,10 +966,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
   // Formatar data - dd/mm/AA hh:mm
   const formatDate = (dateStr) => {
+    if (!dateStr) return "-";
     try {
-      return format(new Date(safeDateStr(dateStr)), "dd/MM/yy HH:mm", { locale: pt });
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return "-";
+      return format(date, "dd/MM/yy HH:mm", { locale: pt });
     } catch {
-      return dateStr;
+      return "-";
     }
   };
 

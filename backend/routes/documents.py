@@ -4047,45 +4047,57 @@ async def get_portal_document_requests(
     Lista todos os pedidos de documentos do portal para um processo.
     Inclui docs com status REQUESTED, PENDING, UPLOADED, RECEIVED.
     """
-    docs = []
-    cursor = db.documents.find(
-        {
-            "process_id": process_id,
-            "status": {"$in": ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED", "requested", "pending", "uploaded", "submitted", "received"]},
-            "source": {"$in": ["client_portal", "admin_request", "auto_default", None]}
-        },
-        {"_id": 0}
-    ).sort("created_at", 1)
+    try:
+        docs = []
+        cursor = db.documents.find(
+            {
+                "process_id": process_id,
+                "status": {"$in": ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED", "requested", "pending", "uploaded", "submitted", "received"]},
+                "$or": [
+                    {"source": {"$in": ["client_portal", "admin_request", "auto_default"]}},
+                    {"source": {"$exists": False}},
+                ]
+            },
+            {"_id": 0}
+        )
 
-    async for doc in cursor:
-        cat = doc.get("category", "Outros")
-        # Ensure cat is a string (backend may have stored objects)
-        if isinstance(cat, dict):
-            cat = cat.get("value", cat.get("label", "Outros"))
-        cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
-        docs.append({
-            "id": doc.get("id"),
-            "process_id": doc.get("process_id"),
-            "category": cat,
-            "category_label": cat_info["label"],
-            "category_icon": cat_info["icon"],
-            "custom_label": doc.get("custom_label"),
-            "status": doc.get("status", "REQUESTED"),
-            "notes": doc.get("notes", ""),
-            "filename": doc.get("filename"),
-            "original_filename": doc.get("original_filename"),
-            "file_size": doc.get("file_size"),
-            "content_type": doc.get("content_type"),
-            "source": doc.get("source"),
-            "requested_by": doc.get("requested_by"),
-            "requested_by_name": doc.get("requested_by_name"),
-            "created_at": doc.get("created_at"),
-            "updated_at": doc.get("updated_at"),
-            "uploaded_at": doc.get("uploaded_at"),
-            "reviewed_at": doc.get("reviewed_at"),
-        })
+        async for doc in cursor:
+            cat = doc.get("category") or "Outros"
+            # Ensure cat is a string (backend may have stored objects)
+            if isinstance(cat, dict):
+                cat = cat.get("value", cat.get("label", "Outros"))
+            if not isinstance(cat, str):
+                cat = str(cat) if cat else "Outros"
+            cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
+            docs.append({
+                "id": doc.get("id"),
+                "process_id": doc.get("process_id"),
+                "category": cat,
+                "category_label": cat_info.get("label", cat) if isinstance(cat_info, dict) else cat,
+                "category_icon": cat_info.get("icon", "📎") if isinstance(cat_info, dict) else "📎",
+                "custom_label": doc.get("custom_label"),
+                "status": doc.get("status", "REQUESTED"),
+                "notes": doc.get("notes", ""),
+                "filename": doc.get("filename"),
+                "original_filename": doc.get("original_filename"),
+                "file_size": doc.get("file_size"),
+                "content_type": doc.get("content_type"),
+                "source": doc.get("source"),
+                "requested_by": doc.get("requested_by"),
+                "requested_by_name": doc.get("requested_by_name"),
+                "created_at": doc.get("created_at"),
+                "updated_at": doc.get("updated_at"),
+                "uploaded_at": doc.get("uploaded_at"),
+                "reviewed_at": doc.get("reviewed_at"),
+            })
 
-    return {"success": True, "documents": docs}
+        # Sort in Python (avoid MongoDB sort errors on missing/invalid created_at)
+        docs.sort(key=lambda d: d.get("created_at") or "")
+
+        return {"success": True, "documents": docs}
+    except Exception as e:
+        logger.error(f"[DOCUMENTS] Erro em portal-requests GET para {process_id}: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao obter pedidos do portal: {type(e).__name__}")
 
 
 class DocumentRequestCreate(BaseModel):

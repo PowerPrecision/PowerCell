@@ -10,10 +10,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { ScrollArea, ScrollBar } from "./ui/scroll-area";
 import { Loader2, CheckCircle, Clock, Circle, ArrowRight } from "lucide-react";
-import { format, parseISO, differenceInDays } from "date-fns";
+import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeLabel } from "./dashboard/DashboardShared";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeDateStr, safeFormat } from "../lib/utils";
 
 // Cores de fallback mapeadas a partir do nome da cor da BD
 const COLOR_MAP = {
@@ -83,7 +83,7 @@ const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, date, daysInPhase }) 
         </p>
         {date && (
           <p className="text-[9px] text-muted-foreground">
-            {format(safeParseISO(date), "dd/MM", { locale: pt })}
+            {safeFormat(date, "dd/MM", { locale: pt })}
           </p>
         )}
         {daysInPhase !== undefined && daysInPhase > 0 && (
