@@ -1657,8 +1657,16 @@ async def _download_financas_document(
 async def fetch_seg_social_documents(
     niss: str,
     password: str,
+    process_id: Optional[str] = None,
 ) -> ScraperResult:
-    """Obtém documentos da Segurança Social Direta. v2: com retry e stealth."""
+    """Obtém documentos da Segurança Social Direta. v2: com retry e stealth.
+
+    Args:
+        niss: NISS do cliente
+        password: Password da Segurança Social
+        process_id: ID do processo (necessário para fluxo MFA —
+            permite ao scraper atualizar o job e pollar o Redis)
+    """
     # DEV MODE
     if os.environ.get('ENVIRONMENT', 'dev') != 'production':
         logger.info("[GOV_SCRAPER] BLOCKED: ENVIRONMENT != production — browser will NOT launch")
@@ -1674,7 +1682,7 @@ async def fetch_seg_social_documents(
     for attempt in range(MAX_RETRIES + 1):
         try:
             result = await asyncio.wait_for(
-                _seg_social_scraper_inner(niss, password),
+                _seg_social_scraper_inner(niss, password, process_id=process_id),
                 timeout=MAX_SCRAPER_DURATION,
             )
             if result.success:
@@ -1712,8 +1720,14 @@ async def fetch_seg_social_documents(
     return last_result or ScraperResult(success=False, error="unknown", step_failed="all_retries_exhausted")
 
 
-async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
-    """Lógica interna do scraper da Segurança Social com stealth e screenshot."""
+async def _seg_social_scraper_inner(niss: str, password: str, process_id: Optional[str] = None) -> ScraperResult:
+    """Lógica interna do scraper da Segurança Social com stealth e screenshot.
+
+    Args:
+        niss: NISS do cliente
+        password: Password da Segurança Social
+        process_id: ID do processo (para fluxo MFA)
+    """
     from playwright.async_api import async_playwright
 
     masked_niss = _mask_identifier(niss)
@@ -1870,34 +1884,239 @@ async def _seg_social_scraper_inner(niss: str, password: str) -> ScraperResult:
                 await asyncio.sleep(3)
                 current_url = page.url.lower()
                 if "login" in current_url or "autenticacao" in current_url:
-                    # Verificar MFA
+                    # Verificar MFA — se detetado, entrar em modo de espera
                     mfa_selectors = [
                         "text=Chave Móvel Digital",
                         "text=código de segurança",
                         "text=autenticação multi-fator",
                         "input[placeholder*='código']",
+                        "input[placeholder*='Código']",
+                        "input[name*='code']",
+                        "input[name*='otp']",
+                        "input[type='tel'][maxlength]",
                     ]
+                    mfa_detected = False
                     for sel in mfa_selectors:
                         try:
                             mfa_el = page.locator(sel).first
                             if await mfa_el.is_visible(timeout=2000):
-                                screenshot_b64 = await _take_screenshot(page, "mfa_required")
-                                return ScraperResult(
-                                    success=False,
-                                    error="mfa_requerido",
-                                    step_failed="check_login",
-                                    screenshot_b64=screenshot_b64,
+                                mfa_detected = True
+                                logger.info(
+                                    f"[GOV_SCRAPER] MFA detetado na Seg. Social "
+                                    f"via selector: {sel}"
                                 )
+                                break
                         except Exception:
                             continue
 
-                    screenshot_b64 = await _take_screenshot(page, "still_on_login")
-                    return ScraperResult(
-                        success=False,
-                        error="credenciais_invalidas",
-                        step_failed="check_login",
-                        screenshot_b64=screenshot_b64,
-                    )
+                    if mfa_detected and process_id:
+                        # ── MFA DETETADO: Entrar em modo de espera ──
+                        # Atualizar job para "awaiting_mfa" (frontend vai mostrar input)
+                        from services.mfa_cache import set_mfa_status, get_mfa_code, delete_mfa_code
+
+                        logger.info(
+                            f"[GOV_SCRAPER] MFA Seg. Social: a sinalizar "
+                            f"awaiting_mfa para processo {process_id}"
+                        )
+                        await set_mfa_status(process_id, "awaiting_mfa")
+
+                        # Loop de espera: pollar Redis a cada 2s, máximo 120s (60 iterações)
+                        mfa_code = None
+                        for poll_attempt in range(60):
+                            await asyncio.sleep(2)
+                            mfa_code = await get_mfa_code(process_id)
+                            if mfa_code:
+                                logger.info(
+                                    f"[GOV_SCRAPER] Código MFA recebido para "
+                                    f"processo {process_id} após {poll_attempt * 2}s"
+                                )
+                                break
+
+                        if not mfa_code:
+                            # Timeout: cliente não submeteu código a tempo
+                            logger.warning(
+                                f"[GOV_SCRAPER] Timeout MFA: código não recebido "
+                                f"para processo {process_id} após 120s"
+                            )
+                            screenshot_b64 = await _take_screenshot(page, "mfa_timeout")
+                            return ScraperResult(
+                                success=False,
+                                error="mfa_timeout",
+                                step_failed="mfa_waiting",
+                                screenshot_b64=screenshot_b64,
+                            )
+
+                        # ── Código MFA recebido: preencher no browser ──
+                        logger.info(
+                            f"[GOV_SCRAPER] A preencher código MFA ({len(mfa_code)} "
+                            f"dígitos) na Seg. Social para processo {process_id}"
+                        )
+                        try:
+                            # Procurar o input do código MFA
+                            mfa_input_selectors = [
+                                "input[placeholder*='código']",
+                                "input[placeholder*='Código']",
+                                "input[name*='code']",
+                                "input[name*='otp']",
+                                "input[type='tel'][maxlength]",
+                                "input[type='text'][maxlength]",
+                                "input[type='number']",
+                            ]
+                            mfa_input = None
+                            for inp_sel in mfa_input_selectors:
+                                try:
+                                    inp_el = page.locator(inp_sel).first
+                                    if await inp_el.is_visible(timeout=2000):
+                                        mfa_input = inp_el
+                                        logger.info(
+                                            f"[GOV_SCRAPER] Input MFA encontrado "
+                                            f"via: {inp_sel}"
+                                        )
+                                        break
+                                except Exception:
+                                    continue
+
+                            if not mfa_input:
+                                # Fallback: tentar qualquer input visível na página
+                                logger.warning(
+                                    "[GOV_SCRAPER] Input MFA específico não encontrado "
+                                    "— a tentar input genérico"
+                                )
+                                all_inputs = page.locator("input[type='text'], input[type='tel'], input[type='number']").all()
+                                for inp in all_inputs:
+                                    try:
+                                        if await inp.is_visible(timeout=1000):
+                                            mfa_input = inp
+                                            break
+                                    except Exception:
+                                        continue
+
+                            if mfa_input:
+                                # Limpar campo e preencher código
+                                await mfa_input.click()
+                                await mfa_input.fill("")
+                                await mfa_input.type(mfa_code, delay=80)
+                                logger.info(
+                                    f"[GOV_SCRAPER] Código MFA preenchido "
+                                    f"({len(mfa_code)} dígitos)"
+                                )
+
+                                # Aguardar um momento antes de submeter
+                                await asyncio.sleep(0.5)
+
+                                # Procurar botão de submissão do MFA
+                                mfa_submit_selectors = [
+                                    "button:has-text('Verificar')",
+                                    "button:has-text('Validar')",
+                                    "button:has-text('Confirmar')",
+                                    "button:has-text('Submeter')",
+                                    "button[type='submit']",
+                                    "#submitBtn",
+                                    "input[type='submit']",
+                                ]
+                                submitted = False
+                                for btn_sel in mfa_submit_selectors:
+                                    try:
+                                        btn_el = page.locator(btn_sel).first
+                                        if await btn_el.is_visible(timeout=2000):
+                                            await btn_el.click()
+                                            submitted = True
+                                            logger.info(
+                                                f"[GOV_SCRAPER] Botão MFA clicado: {btn_sel}"
+                                            )
+                                            break
+                                    except Exception:
+                                        continue
+
+                                if not submitted:
+                                    # Último recurso: pressionar Enter
+                                    await mfa_input.press("Enter")
+                                    logger.info(
+                                        "[GOV_SCRAPER] MFA submetido via Enter"
+                                    )
+
+                                # Aguardar navegação após submissão MFA
+                                try:
+                                    await page.wait_for_load_state(
+                                        "domcontentloaded", timeout=15000
+                                    )
+                                except Exception:
+                                    pass
+
+                                # Limpar código MFA do Redis (segurança)
+                                await delete_mfa_code(process_id)
+
+                                # Verificar se login foi bem-sucedido após MFA
+                                await asyncio.sleep(3)
+                                current_url = page.url.lower()
+                                if "login" in current_url or "autenticacao" in current_url:
+                                    # MFA incorreto ou falhou
+                                    logger.warning(
+                                        f"[GOV_SCRAPER] Após MFA, ainda na página "
+                                        f"de login — código pode estar incorreto"
+                                    )
+                                    screenshot_b64 = await _take_screenshot(page, "mfa_incorrect")
+                                    return ScraperResult(
+                                        success=False,
+                                        error="mfa_codigo_incorreto",
+                                        step_failed="mfa_submit",
+                                        screenshot_b64=screenshot_b64,
+                                    )
+
+                                logger.info(
+                                    f"[GOV_SCRAPER] MFA aceito com sucesso para "
+                                    f"processo {process_id}!"
+                                )
+                                # Login OK após MFA — continuar extração
+
+                            else:
+                                logger.error(
+                                    "[GOV_SCRAPER] Nenhum input MFA encontrado na página"
+                                )
+                                screenshot_b64 = await _take_screenshot(page, "mfa_no_input")
+                                return ScraperResult(
+                                    success=False,
+                                    error="mfa_no_input",
+                                    step_failed="mfa_input",
+                                    screenshot_b64=screenshot_b64,
+                                )
+
+                        except Exception as mfa_err:
+                            logger.error(
+                                f"[GOV_SCRAPER] Erro ao preencher MFA: "
+                                f"{type(mfa_err).__name__}: {mfa_err}"
+                            )
+                            screenshot_b64 = await _take_screenshot(page, "mfa_fill_error")
+                            return ScraperResult(
+                                success=False,
+                                error="mfa_error",
+                                step_failed="mfa_fill",
+                                screenshot_b64=screenshot_b64,
+                            )
+
+                    elif mfa_detected and not process_id:
+                        # MFA detetado mas sem process_id — não podemos esperar
+                        logger.warning(
+                            "[GOV_SCRAPER] MFA detetado mas sem process_id — "
+                            "não é possível aguardar código"
+                        )
+                        screenshot_b64 = await _take_screenshot(page, "mfa_no_process_id")
+                        return ScraperResult(
+                            success=False,
+                            error="mfa_requerido",
+                            step_failed="check_login",
+                            screenshot_b64=screenshot_b64,
+                        )
+
+                    # Se não foi MFA, é credenciais inválidas
+                    if not mfa_detected:
+                        screenshot_b64 = await _take_screenshot(page, "still_on_login")
+                        return ScraperResult(
+                            success=False,
+                            error="credenciais_invalidas",
+                            step_failed="check_login",
+                            screenshot_b64=screenshot_b64,
+                        )
 
             login_success = True
             logger.info(f"[GOV_SCRAPER] Login Seg. Social bem-sucedido para NISS {masked_niss}!")

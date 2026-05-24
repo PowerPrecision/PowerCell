@@ -370,6 +370,13 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
+  // MFA state
+  const [awaitingMfa, setAwaitingMfa] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaSubmitting, setMfaSubmitting] = useState(false);
+  const [scraperJobId, setScraperJobId] = useState(null);
+  const [mfaPollCount, setMfaPollCount] = useState(0);
+
   const isFinancas = source === 'financas';
   const idLabel = isFinancas ? 'NIF' : 'NISS';
   const idLength = isFinancas ? 9 : 11;
@@ -380,10 +387,99 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
   const prevOpenRef = useRef(false);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
-      setIdField(''); setPassword(''); setShowPassword(false); setLoading(false); setError(null); setSuccess(null);
+      setIdField(''); setPassword(''); setShowPassword(false); setLoading(false);
+      setError(null); setSuccess(null); setAwaitingMfa(false); setMfaCode('');
+      setMfaSubmitting(false); setScraperJobId(null); setMfaPollCount(0);
     }
     prevOpenRef.current = open;
   }, [open]);
+
+  // ── Poll scraper job status after credentials submitted ──
+  useEffect(() => {
+    if (!scraperJobId || !open || success) return;
+
+    let cancelled = false;
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/portal/scraper-job/${scraperJobId}`);
+        if (!res.ok || cancelled) return;
+        const job = await res.json();
+
+        if (job.status === 'awaiting_mfa' && !awaitingMfa) {
+          setAwaitingMfa(true);
+          setLoading(false);
+          setMfaPollCount(prev => prev + 1);
+        } else if (job.status === 'success') {
+          setAwaitingMfa(false);
+          setLoading(false);
+          setSuccess(
+            job.message || `${job.documents_count || ''} documento(s) obtido(s) com sucesso!`
+          );
+          clearInterval(pollInterval);
+          setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 2500);
+        } else if (job.status === 'error') {
+          setAwaitingMfa(false);
+          setLoading(false);
+          const MANUAL_UPLOAD_HINT =
+            ' Pode também descarregar os documentos directamente do ' +
+            sourceLabel + ' e enviá-los através do botão "Carregar documentos".';
+
+          if (job.error_type === 'mfa_timeout') {
+            setError('O código de verificação não foi submetido a tempo. Tente novamente.');
+          } else if (job.error_type === 'mfa_codigo_incorreto') {
+            setError('O código SMS introduzido parece incorreto. Tente novamente.');
+          } else if (job.error_type === 'credenciais_invalidas') {
+            setError('As credenciais que introduziu estão incorretas. Verifique o seu ' + idLabel + ' e a password.');
+          } else {
+            setError((job.message || 'Erro ao obter documentos.') + MANUAL_UPLOAD_HINT);
+          }
+          clearInterval(pollInterval);
+        }
+      } catch {
+        // Network error during polling — don't fail, just retry
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => { cancelled = true; clearInterval(pollInterval); };
+  }, [scraperJobId, open, success, awaitingMfa, sourceLabel, idLabel, onOpenChange, onSuccess]);
+
+  // ── Submit MFA code ──
+  const handleMfaSubmit = async (e) => {
+    e?.preventDefault();
+    if (!mfaCode || mfaCode.length < 4) return;
+
+    setMfaSubmitting(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('portal_token');
+      if (!token) throw new Error('Sessão expirada.');
+
+      const res = await fetchWithRetry(`${BACKEND_URL}/portal/submit-mfa`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ process_id: scraperJobId, mfa_code: mfaCode }),
+      });
+
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Erro de ligação.'); }
+
+      if (!res.ok) {
+        setError(typeof data.detail === 'string' ? data.detail : 'Erro ao submeter código.');
+        setMfaSubmitting(false);
+        return;
+      }
+
+      // Código aceite — voltar ao estado de loading (scraper continua)
+      setAwaitingMfa(false);
+      setLoading(true);
+      setMfaCode('');
+      // O polling continua automaticamente via useEffect
+    } catch (err) {
+      setError(err.message || 'Erro de ligação. Tente novamente.');
+    } finally {
+      setMfaSubmitting(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e?.preventDefault();
@@ -435,18 +531,23 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
         sourceLabel +
         ' e enviá-los através do botão "Carregar documentos" no portal.';
 
-      if (res.ok && data.success) {
+      if (res.ok && data.success && !data.scraper_job_id) {
+        // Sucesso síncrono (dev mode, etc.)
         setSuccess(data.message || 'Documentos obtidos com sucesso!');
         setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 2500);
       } else if (res.ok && (data.status === 'processing' || data.scraper_job_id)) {
-        // Processamento assíncrono: o backend respondeu logo e o scraper corre em background.
-        // O cliente vai receber email + notificação WS quando terminar.
-        setSuccess(
-          data.message ||
-          'A obter os seus documentos em background. Será notificado por email quando estiverem prontos. ' +
-          'Se demorar ou não receber nada em alguns minutos, pode carregar os documentos manualmente.'
-        );
-        setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 4000);
+        // Processamento assíncrono: guardar job_id e iniciar polling.
+        // O diálogo NÃO fecha — fica em estado de loading/polling
+        // até o scraper terminar ou pedir MFA.
+        if (data.scraper_job_id) {
+          setScraperJobId(data.scraper_job_id);
+        }
+        if (data.process_id && !data.scraper_job_id) {
+          // Fallback: usar process_id como job_id
+          setScraperJobId(data.process_id);
+        }
+        setLoading(true);
+        // O useEffect de polling vai verificar o estado automaticamente
       } else if (res.ok && data.success === false) {
         // App-level error returned as 200 + success:false (scraper unavailable, etc.)
         setError(
@@ -509,6 +610,83 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
                 <p className="text-sm font-medium text-emerald-800">Sucesso!</p>
                 <p className="text-xs text-emerald-600 mt-0.5">{success}</p>
               </div>
+            </div>
+          ) : awaitingMfa ? (
+            /* ── MFA Input UI ── */
+            <form onSubmit={handleMfaSubmit} className="space-y-3">
+              <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <Shield className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-blue-800">Verificação em 2 passos</p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    A {sourceLabel} enviou um código de verificação para o seu telemóvel.
+                    Introduza o código abaixo para continuar.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-700 mb-1 block">
+                  Código de verificação SMS
+                </label>
+                <input
+                  type="text"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                  placeholder="123456"
+                  className="w-full px-3 py-3 text-center text-2xl tracking-[0.5em] font-mono border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                  inputMode="numeric"
+                  disabled={mfaSubmitting}
+                  autoFocus
+                  maxLength={8}
+                />
+                <p className="text-[10px] text-gray-400 mt-1 text-center">
+                  4 a 8 dígitos · O código expira em 5 minutos
+                </p>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <DialogFooter>
+                <button type="button" onClick={() => onOpenChange(false)}
+                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={mfaSubmitting || mfaCode.length < 4}
+                  className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                  {mfaSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" /> A verificar...</> : <><Shield className="w-4 h-4" /> Verificar Código</>}
+                </button>
+              </DialogFooter>
+            </form>
+          ) : loading && scraperJobId ? (
+            /* ── Loading/Polling UI ── */
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 py-4">
+                <Loader2 className="w-6 h-6 text-emerald-600 animate-spin flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-gray-800">A obter documentos...</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    O robô está a aceder ao {sourceLabel}. Se for pedido um código SMS, aparecerá aqui automaticamente.
+                  </p>
+                </div>
+              </div>
+              {error && (
+                <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+              <DialogFooter>
+                <button type="button" onClick={() => onOpenChange(false)}
+                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+                  Cancelar
+                </button>
+              </DialogFooter>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-3">

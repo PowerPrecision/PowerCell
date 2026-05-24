@@ -1333,6 +1333,100 @@ async def fetch_seguranca_social_documents(
 
 
 # ====================================================================
+# MFA CODE SUBMISSION — Cliente submete código SMS em tempo real
+# ====================================================================
+
+@router.post("/submit-mfa")
+async def submit_mfa_code(data: dict, client_data: dict = Depends(get_current_client)):
+    """
+    Submete o código MFA recebido por SMS para retomar o scraper.
+
+    Quando a Segurança Social pede verificação em 2 passos (código SMS),
+    o scraper pausa e coloca o job em estado "awaiting_mfa". O frontend
+    mostra um input ao cliente, e ao submeter, este endpoint guarda o
+    código no Redis (TTL 300s) para o scraper o consumir.
+
+    Body:
+    - process_id: ID do processo (obrigatório)
+    - mfa_code: Código de verificação SMS (obrigatório, 4-8 dígitos)
+
+    Fluxo:
+    1. Scraper detecta MFA → job status = "awaiting_mfa"
+    2. Frontend faz polling → vê "awaiting_mfa" → mostra input
+    3. Cliente submete código → POST /submit-mfa
+    4. Código guardado no Redis (mfa_code:{process_id}, TTL 300s)
+    5. Scraper lê código do Redis → preenche no browser → continua
+    """
+    process = client_data["process"]
+    process_id = process["id"]
+
+    # Validar que o process_id no body corresponde ao do token JWT
+    body_process_id = data.get("process_id", "").strip()
+    if body_process_id and body_process_id != process_id:
+        raise HTTPException(status_code=403, detail="process_id não corresponde ao token.")
+
+    mfa_code = data.get("mfa_code", "").strip()
+    if not mfa_code:
+        raise HTTPException(status_code=400, detail="Código MFA é obrigatório.")
+
+    # Validar formato: 4 a 8 dígitos (códigos SMS tipicamente têm este tamanho)
+    if not mfa_code.isdigit() or len(mfa_code) < 4 or len(mfa_code) > 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Código MFA inválido. Deve conter entre 4 e 8 dígitos."
+        )
+
+    # Verificar que existe um job em estado "awaiting_mfa" para este processo
+    job = await db.portal_scraper_jobs.find_one(
+        {"process_id": process_id, "status": "awaiting_mfa"},
+        {"_id": 0}
+    )
+    if not job:
+        # Pode ter expirado ou o scraper ainda não pediu MFA
+        existing = await db.portal_scraper_jobs.find_one(
+            {"process_id": process_id},
+            {"_id": 0, "status": 1}
+        )
+        if existing:
+            if existing.get("status") in ("success", "error"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"O processo já terminou com estado '{existing['status']}'. Não é necessário código MFA."
+                )
+            elif existing.get("status") == "processing":
+                raise HTTPException(
+                    status_code=409,
+                    detail="O scraper ainda está a processar o login. Aguarde que o pedido de MFA apareça."
+                )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Nenhum job de scraper encontrado para este processo."
+            )
+
+    # Guardar código MFA no Redis (TTL 300s = 5 minutos)
+    from services.mfa_cache import set_mfa_code
+    success = await set_mfa_code(process_id, mfa_code, ttl=300)
+
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao guardar o código MFA. Tente novamente."
+        )
+
+    logger.info(
+        f"[PORTAL] Código MFA submetido para processo {process_id} "
+        f"({len(mfa_code)} dígitos)"
+    )
+
+    return JSONResponse(content={
+        "success": True,
+        "message": "Código submetido com sucesso. O scraper vai utilizá-lo automaticamente.",
+        "process_id": process_id,
+    })
+
+
+# ====================================================================
 # SCRAPER JOB STATUS — Polling endpoint para o frontend
 # ====================================================================
 
@@ -1576,6 +1670,12 @@ async def _run_seguranca_social_background(
             if error_detail == "credenciais_invalidas":
                 error_message = "As credenciais que introduziu estão incorretas. Verifique o seu NISS e password da Segurança Social."
                 error_type = "credenciais_invalidas"
+            elif error_detail == "mfa_timeout":
+                error_message = "O código de verificação não foi submetido a tempo. O scraper expirou após 2 minutos à espera do código SMS."
+                error_type = "mfa_timeout"
+            elif error_detail == "mfa_codigo_incorreto":
+                error_message = "O código de verificação SMS introduzido parece estar incorreto. O login não foi concluído."
+                error_type = "mfa_codigo_incorreto"
             else:
                 error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
                 error_type = "scraper_unavailable"
@@ -1775,7 +1875,7 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
     s3_folder = process.get("s3_folder") if process else None
 
     # ── Invocar o scraper real ──
-    result = await fetch_seg_social_documents(niss, password)
+    result = await fetch_seg_social_documents(niss, password, process_id=process_id)
 
     # Neste ponto, o scraper já limpou as credenciais da memória
 
@@ -1783,6 +1883,10 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
         error_map = {
             "credenciais_invalidas": "credenciais_invalidas",
             "mfa_requerido": "mfa_requerido",
+            "mfa_timeout": "mfa_timeout",
+            "mfa_codigo_incorreto": "mfa_codigo_incorreto",
+            "mfa_no_input": "mfa_requerido",
+            "mfa_error": "mfa_requerido",
             "timeout": "timeout_scraper",
             "sem_documentos": "sem_documentos",
             "selector_desatualizado": "selector_desatualizado",
