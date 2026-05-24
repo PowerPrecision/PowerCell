@@ -1105,160 +1105,197 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                     f"{type(irs_err).__name__}: {irs_err}"
                 )
 
-            # ── 8. Extrair Nota de Liquidação ──
-            # A Nota de Liquidação geralmente requer clicar no botão de
-            # 'Detalhes' ou é o segundo botão de PDF na mesma linha/tabela.
-            # Aplica-se a mesma mecânica: expect_download → fallback href.
+            # ── 8. Extrair Nota de Liquidação (página de Consulta) ──
+            # A Nota de Liquidação (Demonstração de Liquidação) NÃO está na
+            # página de comprovativos (/comprovativo/obterComprovativo.action).
+            # Fica na página de Consulta do IRS, onde é preciso navegar,
+            # carregar a tabela do ano e expandir o detalhe.
             step = "download_nota"
             try:
-                nota_locators = [
-                    # Locator específico: tabela DataTables, link de Liquidação
-                    'table#documentos a[title*="Liquida"]',
-                    'table#documentos a[title*="liquida"]',
-                    'table#documentos a:has-text("Liquida")',
-                    'table#documentos a:has-text("liquida")',
-                    # Segundo botão de PDF na tabela (se houver)
-                    'table#documentos tbody tr:nth-child(2) a[title*="Comprovativo"]',
-                    'table#documentos tbody tr:nth-child(2) a:has(.fa-file-pdf-o)',
-                    'table#documentos tbody tr:nth-child(2) a:has(.fa-file-pdf)',
-                    # Qualquer link na 2ª linha da tabela
-                    'table#documentos tbody tr:nth-child(2) a',
-                    # Variante sem ID fixo
-                    'table.dataTable a[title*="Liquida"]',
-                    'table a[title*="Liquida"]',
-                    # Botão 'Detalhes' que expande a linha da Nota de Liquidação
+                # 8a. Navegar para a página de Consulta onde residem as
+                # Notas de Liquidação
+                consulta_url = (
+                    "https://irs.portaldasfinancas.gov.pt"
+                    "/consulta/index.action"
+                )
+                logger.info(
+                    f"[GOV_SCRAPER] A navegar para página de Consulta IRS: "
+                    f"{consulta_url}"
+                )
+                await page.goto(consulta_url, timeout=40000)
+                await asyncio.sleep(2)
+
+                # 8b. Em alguns casos é preciso clicar em "Pesquisar" para
+                # carregar a tabela do ano selecionado
+                try:
+                    btn_pesquisar = page.locator(
+                        'button:has-text("Pesquisar"), '
+                        'a:has-text("Pesquisar")'
+                    ).first
+                    if await btn_pesquisar.count() > 0:
+                        logger.info(
+                            "[GOV_SCRAPER] Botão 'Pesquisar' encontrado "
+                            "na página de Consulta — a clicar"
+                        )
+                        await btn_pesquisar.click()
+                        await page.wait_for_timeout(2000)
+                except Exception:
+                    pass
+
+                # 8c. Expandir a linha para mostrar a Demonstração de Liquidação
+                try:
+                    btn_detalhe = page.locator(
+                        'a:has-text("Ver Detalhe"), '
+                        'button:has-text("Ver Detalhe")'
+                    ).first
+                    if await btn_detalhe.count() > 0:
+                        logger.info(
+                            "[GOV_SCRAPER] Botão 'Ver Detalhe' encontrado "
+                            "— a expandir linha da Liquidação"
+                        )
+                        await btn_detalhe.click()
+                        await page.wait_for_timeout(2000)
+                except Exception:
+                    pass
+
+                # 8d. Localizar e descarregar o PDF da Liquidação
+                # Procurar o link/botão de Demonstração de Liquidação
+                liq_selectors = [
+                    'a:has-text("Demonstração de Liquidação")',
+                    'a:has-text("Nota de Liquidação")',
+                    'a:has-text("Demonstracao de Liquidacao")',
+                    'a:has-text("Nota de Liquidacao")',
                     'a[title*="Liquida"]',
-                    'a:has-text("Nota de Liquida")',
                     'a[href*="liquidacao"]',
                     'a[href*="notaLiquidacao"]',
-                    # Genéricos
-                    'a:has-text("Liquidação")',
                     'button:has-text("Liquidação")',
+                    'button:has-text("Liquidacao")',
                 ]
 
-                for selector in nota_locators:
+                liq_btn = None
+                for liq_sel in liq_selectors:
                     try:
-                        nota_btn = page.locator(selector).first
-                        if await nota_btn.count() > 0 and await nota_btn.is_visible(timeout=3000):
+                        candidate = page.locator(liq_sel).first
+                        if await candidate.count() > 0:
+                            liq_btn = candidate
                             logger.info(
-                                f"[GOV_SCRAPER] Botão Nota de Liquidação encontrado "
-                                f"via selector: {selector}"
+                                f"[GOV_SCRAPER] Botão Nota de Liquidação "
+                                f"encontrado via selector: {liq_sel}"
+                            )
+                            break
+                    except Exception:
+                        continue
+
+                if liq_btn and await liq_btn.count() > 0:
+                    pdf_bytes = None
+
+                    # ── Tentativa 1: Download nativo do browser ──
+                    try:
+                        async with page.expect_download(timeout=30000) as download_info:
+                            await liq_btn.click(force=True)
+
+                        download = await download_info.value
+                        tmp_path = await download.path()
+
+                        if tmp_path and tmp_path.exists():
+                            with open(tmp_path, "rb") as f:
+                                pdf_bytes = f.read()
+                            logger.info(
+                                f"[GOV_SCRAPER] Download nativo Nota Liquidação "
+                                f"obtido: {len(pdf_bytes)} bytes de "
+                                f"{download.suggested_filename}"
+                            )
+                        else:
+                            logger.warning(
+                                "[GOV_SCRAPER] Download nativo Nota Liquidação: "
+                                "ficheiro temporário não encontrado"
+                            )
+                    except Exception as dl_err:
+                        logger.warning(
+                            f"[GOV_SCRAPER] expect_download falhou para "
+                            f"Nota Liquidação: {type(dl_err).__name__}: {dl_err}"
+                        )
+
+                    # ── Tentativa 2: Fallback href + expect_response ──
+                    if not pdf_bytes or not pdf_bytes.startswith(b"%PDF-"):
+                        logger.info(
+                            "[GOV_SCRAPER] Download nativo Nota Liquidação "
+                            "falhou ou não é PDF — a tentar "
+                            "_intercept_pdf_from_element"
+                        )
+                        try:
+                            pdf_bytes = await _intercept_pdf_from_element(
+                                page, liq_btn, "Nota_Liquidacao_IRS"
+                            )
+                        except Exception as fallback_err:
+                            logger.warning(
+                                f"[GOV_SCRAPER] _intercept_pdf_from_element "
+                                f"falhou para Nota Liquidação: "
+                                f"{type(fallback_err).__name__}"
                             )
 
-                            pdf_bytes = None
-
-                            # ── Tentativa 1: Download nativo do browser ──
-                            try:
-                                async with page.expect_download(timeout=30000) as download_info:
-                                    await nota_btn.click(force=True)
-
-                                download = await download_info.value
-                                tmp_path = await download.path()
-
-                                if tmp_path and tmp_path.exists():
-                                    with open(tmp_path, "rb") as f:
-                                        pdf_bytes = f.read()
-                                    logger.info(
-                                        f"[GOV_SCRAPER] Download nativo Nota Liquidação "
-                                        f"obtido: {len(pdf_bytes)} bytes de "
-                                        f"{download.suggested_filename}"
-                                    )
-                                else:
-                                    logger.warning(
-                                        "[GOV_SCRAPER] Download nativo Nota Liquidação: "
-                                        "ficheiro temporário não encontrado"
-                                    )
-                            except Exception as dl_err:
-                                logger.warning(
-                                    f"[GOV_SCRAPER] expect_download falhou para "
-                                    f"Nota Liquidação ({selector}): "
-                                    f"{type(dl_err).__name__}: {dl_err}"
-                                )
-
-                            # ── Tentativa 2: Fallback href + expect_response ──
-                            if not pdf_bytes or not pdf_bytes.startswith(b"%PDF-"):
-                                logger.info(
-                                    "[GOV_SCRAPER] Download nativo Nota Liquidação "
-                                    "falhou ou não é PDF — a tentar "
-                                    "_intercept_pdf_from_element"
-                                )
-                                try:
-                                    pdf_bytes = await _intercept_pdf_from_element(
-                                        page, nota_btn, "Nota_Liquidacao_IRS"
-                                    )
-                                except Exception as fallback_err:
-                                    logger.warning(
-                                        f"[GOV_SCRAPER] _intercept_pdf_from_element "
-                                        f"falhou para Nota Liquidação: "
-                                        f"{type(fallback_err).__name__}"
-                                    )
-
-                            # ── Validação final ──
-                            if pdf_bytes and pdf_bytes.startswith(b"%PDF-"):
-                                now = datetime.now(timezone.utc)
-                                doc_nota = ScraperDocument(
-                                    filename=f"Nota_Liquidacao_IRS_{now.strftime('%Y%m%d')}.pdf",
-                                    content_bytes=pdf_bytes,
-                                    content_type="application/pdf",
-                                    category="Financeiros",
-                                    label="Nota de Liquidação IRS",
-                                )
-                                documents.append(doc_nota)
-                                nota_downloaded = True
-                                logger.info(
-                                    f"[GOV_SCRAPER] Nota de Liquidação descarregada: "
-                                    f"{doc_nota.filename} ({len(pdf_bytes)} bytes)"
-                                )
-                                break
-                            elif pdf_bytes and len(pdf_bytes) > 5000:
-                                is_html = (
-                                    b"<html" in pdf_bytes[:500].lower()
-                                    or b"<!doctype" in pdf_bytes[:500].lower()
-                                )
-                                if is_html:
-                                    logger.warning(
-                                        f"[GOV_SCRAPER] Resposta Nota Liquidação "
-                                        f"é HTML, não PDF — a tentar próximo locator"
-                                    )
-                                    continue
-                                else:
-                                    now = datetime.now(timezone.utc)
-                                    doc_nota = ScraperDocument(
-                                        filename=f"Nota_Liquidacao_IRS_{now.strftime('%Y%m%d')}.pdf",
-                                        content_bytes=pdf_bytes,
-                                        content_type="application/pdf",
-                                        category="Financeiros",
-                                        label="Nota de Liquidação IRS",
-                                    )
-                                    documents.append(doc_nota)
-                                    nota_downloaded = True
-                                    logger.info(
-                                        f"[GOV_SCRAPER] Nota de Liquidação descarregada "
-                                        f"(sem header %PDF-): {doc_nota.filename} "
-                                        f"({len(pdf_bytes)} bytes)"
-                                    )
-                                    break
-                            else:
-                                logger.warning(
-                                    f"[GOV_SCRAPER] Resposta Nota Liquidação pequena "
-                                    f"ou vazia ({len(pdf_bytes) if pdf_bytes else 0} bytes)"
-                                )
-                    except Exception as el_err:
-                        logger.warning(
-                            f"[GOV_SCRAPER] Locator Nota Liquidação '{selector}' "
-                            f"falhou: {type(el_err).__name__}"
+                    # ── Validação final ──
+                    if pdf_bytes and pdf_bytes.startswith(b"%PDF-"):
+                        now = datetime.now(timezone.utc)
+                        doc_nota = ScraperDocument(
+                            filename=f"Nota_Liquidacao_IRS_{now.strftime('%Y%m%d')}.pdf",
+                            content_bytes=pdf_bytes,
+                            content_type="application/pdf",
+                            category="Financeiros",
+                            label="Nota de Liquidação IRS",
                         )
-                        continue
+                        documents.append(doc_nota)
+                        nota_downloaded = True
+                        logger.info(
+                            f"[GOV_SCRAPER] Nota de Liquidação descarregada: "
+                            f"{doc_nota.filename} ({len(pdf_bytes)} bytes)"
+                        )
+                    elif pdf_bytes and len(pdf_bytes) > 5000:
+                        is_html = (
+                            b"<html" in pdf_bytes[:500].lower()
+                            or b"<!doctype" in pdf_bytes[:500].lower()
+                        )
+                        if is_html:
+                            logger.warning(
+                                "[GOV_SCRAPER] Resposta Nota Liquidação "
+                                "é HTML, não PDF — a ignorar"
+                            )
+                        else:
+                            now = datetime.now(timezone.utc)
+                            doc_nota = ScraperDocument(
+                                filename=f"Nota_Liquidacao_IRS_{now.strftime('%Y%m%d')}.pdf",
+                                content_bytes=pdf_bytes,
+                                content_type="application/pdf",
+                                category="Financeiros",
+                                label="Nota de Liquidação IRS",
+                            )
+                            documents.append(doc_nota)
+                            nota_downloaded = True
+                            logger.info(
+                                f"[GOV_SCRAPER] Nota de Liquidação descarregada "
+                                f"(sem header %PDF-): {doc_nota.filename} "
+                                f"({len(pdf_bytes)} bytes)"
+                            )
+                    else:
+                        logger.warning(
+                            f"[GOV_SCRAPER] Resposta Nota Liquidação pequena "
+                            f"ou vazia ({len(pdf_bytes) if pdf_bytes else 0} bytes)"
+                        )
+                else:
+                    logger.warning(
+                        "[GOV_SCRAPER] Botão Nota de Liquidação não encontrado "
+                        "na página de Consulta"
+                    )
 
                 if not nota_downloaded:
                     logger.warning(
-                        "[GOV_SCRAPER] Nenhum locator Nota Liquidação funcionou — "
-                        "a tentar extração genérica"
+                        "[GOV_SCRAPER] Nota de Liquidação não extraída da "
+                        "página de Consulta — a tentar extração genérica"
                     )
             except Exception as nota_err:
                 logger.warning(
-                    f"[GOV_SCRAPER] Erro na extração da Nota Liquidação via tabela: "
-                    f"{type(nota_err).__name__}: {nota_err}"
+                    f"[GOV_SCRAPER] Erro na extração da Nota Liquidação "
+                    f"(página de Consulta): {type(nota_err).__name__}: {nota_err}"
                 )
 
             # ── Fallback genérico: se a extração via DataTables falhou,
