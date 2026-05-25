@@ -4136,12 +4136,22 @@ async def create_portal_document_request(
     Cria um registo com status REQUESTED que aparece no portal do cliente.
     """
     try:
-        # Verify process exists
-        process = await db.processes.find_one({"id": process_id})
+        # ── 1. Verify process exists (wrapped in own try/except) ──
+        try:
+            process = await db.processes.find_one({"id": process_id})
+        except Exception as db_err:
+            logger.error(
+                f"[PORTAL-REQUESTS] MongoDB find process failed for {process_id}: "
+                f"{type(db_err).__name__}: {db_err}", exc_info=True
+            )
+            raise HTTPException(
+                status_code=503,
+                detail=f"Erro ao aceder à base de dados: {type(db_err).__name__}"
+            )
         if not process:
             raise HTTPException(status_code=404, detail="Processo não encontrado")
 
-        # Ensure category is a string (defensive: handle object values from client)
+        # ── 2. Ensure category is a string (defensive) ──
         category = data.category
         if isinstance(category, dict):
             category = category.get("value", category.get("label", "Outros"))
@@ -4150,35 +4160,51 @@ async def create_portal_document_request(
         if category not in DOCUMENT_CATEGORY_MAP:
             category = "Outros"
 
-        # ── Duplicate check: prevent requesting same category twice ──
-        # Include source filter to avoid confusion with auto_default docs
-        # Also check for object-valued categories that may match
-        # Include all active statuses (REQUESTED, PENDING, UPLOADED, SUBMITTED, RECEIVED)
-        # — if a doc was already received, no need to request it again
+        # ── 3. Duplicate check (wrapped in own try/except) ──
+        # Include source filter to avoid confusion with auto_default docs.
+        # Also check for object-valued categories that may match.
+        # Include all active statuses — if a doc was already received,
+        # no need to request it again.
         try:
             existing = await db.documents.find_one(
                 {
                     "process_id": process_id,
-                    "$or": [
-                        {"category": category},
-                        {"category.value": category},
-                        {"category.label": category},
+                    "$and": [
+                        {
+                            "$or": [
+                                {"category": category},
+                                {"category.value": category},
+                                {"category.label": category},
+                            ]
+                        },
+                        {
+                            "$or": [
+                                {"source": {"$in": ["admin_request", "client_portal"]}},
+                                {"source": {"$exists": False}},
+                            ]
+                        },
                     ],
-                    "status": {"$in": ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED", "requested", "pending", "uploaded", "submitted", "received"]},
-                    "source": {"$in": ["admin_request", "client_portal"]},
+                    "status": {"$in": [
+                        "REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED",
+                        "requested", "pending", "uploaded", "submitted", "received",
+                    ]},
                 }
             )
         except Exception as db_err:
-            logger.warning(f"[PORTAL-REQUESTS] Duplicate check query failed, proceeding without check: {db_err}")
+            logger.warning(
+                f"[PORTAL-REQUESTS] Duplicate check query failed, "
+                f"proceeding without check: {type(db_err).__name__}: {db_err}"
+            )
             existing = None
 
         if existing:
             cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
             raise HTTPException(
                 status_code=409,
-                detail=f"Já existe um pedido de '{cat_info['label']}' pendente para este processo."
+                detail=f"Já existe um pedido de '{cat_info.get('label', category)}' pendente para este processo."
             )
 
+        # ── 4. Build document record ──
         doc_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
@@ -4215,15 +4241,25 @@ async def create_portal_document_request(
             "updated_at": now,
         }
 
+        # ── 5. Insert document (wrapped in own try/except) ──
         try:
             insert_result = await db.documents.insert_one(doc)
         except Exception as insert_err:
-            logger.error(f"[PORTAL-REQUESTS] MongoDB insert failed for process {process_id}: {type(insert_err).__name__}: {insert_err}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Erro ao inserir documento: {type(insert_err).__name__}")
+            logger.error(
+                f"[PORTAL-REQUESTS] MongoDB insert failed for process {process_id}: "
+                f"{type(insert_err).__name__}: {insert_err}", exc_info=True
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erro ao inserir documento: {type(insert_err).__name__}"
+            )
         if not insert_result.inserted_id:
-            raise HTTPException(status_code=500, detail="Erro ao inserir documento na base de dados")
+            raise HTTPException(
+                status_code=500,
+                detail="Erro ao inserir documento na base de dados"
+            )
 
-        # Audit log (fire-and-forget — don't fail the request if history insert fails)
+        # ── 6. Audit log (fire-and-forget) ──
         try:
             await db.history.insert_one({
                 "id": str(uuid.uuid4()),
@@ -4245,15 +4281,21 @@ async def create_portal_document_request(
             "success": True,
             "document": {
                 **doc,
-                "category_label": cat_info["label"],
-                "category_icon": cat_info["icon"],
+                "category_label": cat_info.get("label", category),
+                "category_icon": cat_info.get("icon", "📎"),
             }
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[PORTAL-REQUESTS] Error creating portal request for process {process_id}: {type(e).__name__}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro interno do servidor")
+        logger.error(
+            f"[PORTAL-REQUESTS] Error creating portal request for process "
+            f"{process_id}: {type(e).__name__}: {e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno do servidor [{type(e).__name__}]"
+        )
 
 
 class DocumentStatusUpdate(BaseModel):

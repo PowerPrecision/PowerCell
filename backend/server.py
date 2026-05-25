@@ -263,6 +263,9 @@ async def user_rate_limit_middleware(request, call_next):
         except jwt.InvalidTokenError:
             # Token inválido - usar IP como fallback
             pass
+        except jwt.PyJWTError:
+            # Outros erros JWT (InvalidKeyError, etc.) — usar IP como fallback
+            pass
     
     # Se não há user_id, usar IP como identificador
     if not user_id:
@@ -354,8 +357,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 user_id=user_id,
                 request_path=str(request.url.path)
             )
-        except (IOError, OSError) as log_error:
-            logger.warning(f"Erro ao registar log: {log_error}")
+        except Exception as log_error:
+            logger.warning(f"Erro ao registar log: {type(log_error).__name__}: {log_error}")
     
     # Obter origin do request para CORS
     origin = request.headers.get("origin", "*")
@@ -451,9 +454,9 @@ async def general_exception_handler(request: Request, exc: Exception):
             severity="critical",
             request_path=str(request.url.path)
         )
-    except (IOError, OSError) as log_error:
-        logger.error(f"Erro ao registar excepção: {log_error}")
-    
+    except Exception as log_error:
+        logger.error(f"Erro ao registar excepção: {type(log_error).__name__}: {log_error}")
+
     logger.exception(f"Unhandled exception: {exc}")
     
     # Obter origin do request para CORS
