@@ -1125,38 +1125,91 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                 await page.goto(consulta_url, timeout=40000)
                 await asyncio.sleep(2)
 
-                # 8b. Em alguns casos é preciso clicar em "Pesquisar" para
-                # carregar a tabela do ano selecionado
+                # 8b. Esperar que a tabela de consultas carregue e
+                # clicar em "Pesquisar" se necessário
                 try:
-                    btn_pesquisar = page.locator(
-                        'button:has-text("Pesquisar"), '
-                        'a:has-text("Pesquisar")'
-                    ).first
-                    if await btn_pesquisar.count() > 0:
-                        logger.info(
-                            "[GOV_SCRAPER] Botão 'Pesquisar' encontrado "
-                            "na página de Consulta — a clicar"
-                        )
-                        await btn_pesquisar.click()
-                        await page.wait_for_timeout(2000)
-                except Exception:
-                    pass
+                    await page.wait_for_selector(
+                        'table tbody tr',
+                        state='visible',
+                        timeout=20000,
+                    )
+                    logger.info(
+                        "[GOV_SCRAPER] Tabela de consultas carregada na "
+                        "página de Consulta"
+                    )
+                except Exception as tbl_wait_err:
+                    # Se a tabela não carregou, tentar clicar em Pesquisar
+                    logger.warning(
+                        f"[GOV_SCRAPER] Tabela não encontrada automaticamente "
+                        f"({type(tbl_wait_err).__name__}) — a tentar Pesquisar"
+                    )
+                    try:
+                        btn_pesquisar = page.locator(
+                            'button:has-text("Pesquisar"), '
+                            'a:has-text("Pesquisar")'
+                        ).first
+                        if await btn_pesquisar.count() > 0:
+                            logger.info(
+                                "[GOV_SCRAPER] Botão 'Pesquisar' encontrado "
+                                "na página de Consulta — a clicar"
+                            )
+                            await btn_pesquisar.click()
+                            await page.wait_for_timeout(3000)
+                            # Esperar pela tabela após Pesquisar
+                            try:
+                                await page.wait_for_selector(
+                                    'table tbody tr',
+                                    state='visible',
+                                    timeout=15000,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "[GOV_SCRAPER] Tabela ainda não encontrada "
+                                    "após Pesquisar — a continuar mesmo assim"
+                                )
+                    except Exception:
+                        pass
 
-                # 8c. Expandir a linha para mostrar a Demonstração de Liquidação
-                try:
-                    btn_detalhe = page.locator(
-                        'a:has-text("Ver Detalhe"), '
-                        'button:has-text("Ver Detalhe")'
-                    ).first
-                    if await btn_detalhe.count() > 0:
-                        logger.info(
-                            "[GOV_SCRAPER] Botão 'Ver Detalhe' encontrado "
-                            "— a expandir linha da Liquidação"
-                        )
-                        await btn_detalhe.click()
-                        await page.wait_for_timeout(2000)
-                except Exception:
-                    pass
+                # 8c. Expandir os Detalhes (Obrigatório para revelar a Liquidação)
+                detalhe_btn = page.locator(
+                    'a:has-text("Ver Detalhe"), '
+                    'button:has-text("Ver Detalhe")'
+                ).first
+                if await detalhe_btn.count() > 0:
+                    logger.info(
+                        "[GOV_SCRAPER] Botão 'Ver Detalhe' encontrado "
+                        "— a expandir linha da Liquidação"
+                    )
+                    await detalhe_btn.click(force=True)
+                    await page.wait_for_timeout(3000)  # Esperar que o painel expanda
+                else:
+                    # Fallback: tentar selectors alternativos de expansão
+                    logger.warning(
+                        "[GOV_SCRAPER] Botão 'Ver Detalhe' não encontrado — "
+                        "a tentar selectors alternativos"
+                    )
+                    alt_detalhe_selectors = [
+                        'a:has-text("Detalhe")',
+                        'button:has-text("Detalhe")',
+                        'a[title*="Detalhe"]',
+                        'a[title*="detalhe"]',
+                        '.btn-detalhe',
+                        'a.expand-row',
+                        'td a:first-child',  # Primeiro link na célula da tabela
+                    ]
+                    for d_sel in alt_detalhe_selectors:
+                        try:
+                            alt_btn = page.locator(d_sel).first
+                            if await alt_btn.count() > 0:
+                                await alt_btn.click(force=True)
+                                logger.info(
+                                    f"[GOV_SCRAPER] Botão de detalhe clicado "
+                                    f"via selector alternativo: {d_sel}"
+                                )
+                                await page.wait_for_timeout(3000)
+                                break
+                        except Exception:
+                            continue
 
                 # 8d. Localizar e descarregar o PDF da Liquidação
                 # Procurar o link/botão de Demonstração de Liquidação
@@ -1915,36 +1968,64 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                     screenshot_b64=screenshot_b64,
                 )
 
-            # Verificar URL
+            # Verificar URL — deteção genérica de página de login/MFA/OTP
             current_url = page.url.lower()
-            if "login" in current_url or "autenticacao" in current_url:
+            if (
+                "login" in current_url
+                or "autenticacao" in current_url
+                or "mfa" in current_url
+                or "otp" in current_url
+            ):
                 await asyncio.sleep(3)
                 current_url = page.url.lower()
-                if "login" in current_url or "autenticacao" in current_url:
-                    # Verificar MFA — se detetado, entrar em modo de espera
-                    mfa_selectors = [
-                        "text=Chave Móvel Digital",
-                        "text=código de segurança",
-                        "text=autenticação multi-fator",
-                        "input[placeholder*='código']",
-                        "input[placeholder*='Código']",
-                        "input[name*='code']",
-                        "input[name*='otp']",
-                        "input[type='tel'][maxlength]",
-                    ]
+                if (
+                    "login" in current_url
+                    or "autenticacao" in current_url
+                    or "mfa" in current_url
+                    or "otp" in current_url
+                ):
+                    # ── Deteção genérica de MFA ──
+                    # Passo 1: Procurar input genérico de código MFA
+                    # (SMS/Email). Este é o locator mais fiável — se existe
+                    # um input de texto/number na página de autenticação,
+                    # é quase certamente para código MFA.
+                    mfa_input_generic = page.locator(
+                        'input[type="text"], input[type="number"], '
+                        'input[name*="code"], input[name*="otp"], '
+                        'input[placeholder*="código"], input[placeholder*="Código"]'
+                    ).first
                     mfa_detected = False
-                    for sel in mfa_selectors:
-                        try:
-                            mfa_el = page.locator(sel).first
-                            if await mfa_el.is_visible(timeout=2000):
-                                mfa_detected = True
-                                logger.info(
-                                    f"[GOV_SCRAPER] MFA detetado na Seg. Social "
-                                    f"via selector: {sel}"
-                                )
-                                break
-                        except Exception:
-                            continue
+
+                    if await mfa_input_generic.count() > 0:
+                        mfa_detected = True
+                        logger.info(
+                            "[GOV_SCRAPER] MFA detetado via input genérico "
+                            "(input[type=text/number/name*=code])"
+                        )
+                    else:
+                        # Passo 2: Fallback para selectors específicos de texto
+                        mfa_selectors = [
+                            "text=Chave Móvel Digital",
+                            "text=código de segurança",
+                            "text=autenticação multi-fator",
+                            "input[placeholder*='código']",
+                            "input[placeholder*='Código']",
+                            "input[name*='code']",
+                            "input[name*='otp']",
+                            "input[type='tel'][maxlength]",
+                        ]
+                        for sel in mfa_selectors:
+                            try:
+                                mfa_el = page.locator(sel).first
+                                if await mfa_el.is_visible(timeout=2000):
+                                    mfa_detected = True
+                                    logger.info(
+                                        f"[GOV_SCRAPER] MFA detetado na Seg. Social "
+                                        f"via selector: {sel}"
+                                    )
+                                    break
+                            except Exception:
+                                continue
 
                     if mfa_detected and process_id:
                         # ── MFA DETETADO: Entrar em modo de espera ──
@@ -2086,7 +2167,12 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                                 # Verificar se login foi bem-sucedido após MFA
                                 await asyncio.sleep(3)
                                 current_url = page.url.lower()
-                                if "login" in current_url or "autenticacao" in current_url:
+                                if (
+                                    "login" in current_url
+                                    or "autenticacao" in current_url
+                                    or "mfa" in current_url
+                                    or "otp" in current_url
+                                ):
                                     # MFA incorreto ou falhou
                                     logger.warning(
                                         f"[GOV_SCRAPER] Após MFA, ainda na página "
