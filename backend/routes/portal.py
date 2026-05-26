@@ -92,11 +92,20 @@ async def verify_portal_login(client_id: str, data: dict):
         raise HTTPException(status_code=400, detail="Número de processo é obrigatório.")
 
     # Verificar credenciais (NIF + process_number)
-    result = await verify_client_credentials(
-        client_id=client_id,
-        nif=nif,
-        process_number=process_number,
-    )
+    try:
+        result = await verify_client_credentials(
+            client_id=client_id,
+            nif=nif,
+            process_number=process_number,
+        )
+    except HTTPException as e:
+        # Log detalhado do motivo da falha (para diagnóstico no Render)
+        # Mas a mensagem para o cliente continua genérica (segurança)
+        logger.info(
+            f"[PORTAL VERIFY] Falha na verificação para client_id={client_id}: "
+            f"status={e.status_code}, detail={e.detail}"
+        )
+        raise
 
     # Gerar token de sessão verificada
     session_token = create_verified_session_token(

@@ -385,6 +385,16 @@ async def get_current_client(
             status_code=401,
             detail="Link de acesso inválido."
         )
+    except jwt.PyJWTError as jwt_err:
+        # Outros erros JWT (InvalidKeyError, etc.)
+        logger.warning(
+            f"[PORTAL_AUTH] PyJWTError ao decodificar token portal: "
+            f"{type(jwt_err).__name__}: {jwt_err}"
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Link de acesso inválido."
+        )
 
     # Verificar role — bloquear tokens de staff que tentem aceder ao portal
     if payload.get("role") != PORTAL_ROLE:
