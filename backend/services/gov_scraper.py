@@ -1128,7 +1128,6 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                 # 8b. Esperar que a tabela de consultas carregue e
                 # clicar em "Pesquisar" se necessário
                 try:
-                try:
                     await page.wait_for_selector(
                         'table tbody tr',
                         state='visible',
@@ -1210,7 +1209,7 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                                 await page.wait_for_timeout(3000)
                                 break
                         except Exception:
-                            continue 08a06cb (fix(scraper+portal): MFA detection agressiva SS, validação PDF real, feedback modal)
+                            continue
 
                 # 8d. Localizar e descarregar o PDF da Liquidação
                 # Procurar o link/botão de Demonstração de Liquidação
@@ -2013,7 +2012,6 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                         "input[type='number']",
                         "input[type='tel'][maxlength]",
                     ]
- 08a06cb (fix(scraper+portal): MFA detection agressiva SS, validação PDF real, feedback modal)
                     mfa_detected = False
 
                     if await mfa_input_generic.count() > 0:
@@ -2230,7 +2228,6 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                                 await asyncio.sleep(3)
                                 current_url = page.url.lower()
                                 if any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp")):
- 08a06cb (fix(scraper+portal): MFA detection agressiva SS, validação PDF real, feedback modal)
                                     # MFA incorreto ou falhou
                                     logger.warning(
                                         f"[GOV_SCRAPER] Após MFA, ainda na página "
