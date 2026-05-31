@@ -1997,6 +1997,8 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                 if any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp")):
                     # Verificar MFA — se detetado, entrar em modo de espera
                     # v5: Selectors expandidos + fallback genérico de input
+
+                    # Passo 1: Selectors específicos de texto/input MFA
                     mfa_selectors = [
                         "text=Chave Móvel Digital",
                         "text=código de segurança",
@@ -2013,37 +2015,18 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                         "input[type='tel'][maxlength]",
                     ]
                     mfa_detected = False
-
-                    if await mfa_input_generic.count() > 0:
-                        mfa_detected = True
-                        logger.info(
-                            "[GOV_SCRAPER] MFA detetado via input genérico "
-                            "(input[type=text/number/name*=code])"
-                        )
-                    else:
-                        # Passo 2: Fallback para selectors específicos de texto
-                        mfa_selectors = [
-                            "text=Chave Móvel Digital",
-                            "text=código de segurança",
-                            "text=autenticação multi-fator",
-                            "input[placeholder*='código']",
-                            "input[placeholder*='Código']",
-                            "input[name*='code']",
-                            "input[name*='otp']",
-                            "input[type='tel'][maxlength]",
-                        ]
-                        for sel in mfa_selectors:
-                            try:
-                                mfa_el = page.locator(sel).first
-                                if await mfa_el.is_visible(timeout=2000):
-                                    mfa_detected = True
-                                    logger.info(
-                                        f"[GOV_SCRAPER] MFA detetado na Seg. Social "
-                                        f"via selector: {sel}"
-                                    )
-                                    break
-                            except Exception:
-                                continue
+                    for sel in mfa_selectors:
+                        try:
+                            mfa_el = page.locator(sel).first
+                            if await mfa_el.is_visible(timeout=2000):
+                                mfa_detected = True
+                                logger.info(
+                                    f"[GOV_SCRAPER] MFA detetado na Seg. Social "
+                                    f"via selector: {sel}"
+                                )
+                                break
+                        except Exception:
+                            continue
 
                     # Fallback agressivo: se NENHUM selector MFA foi encontrado,
                     # mas existe um input de texto visível que NÃO seja a password,
