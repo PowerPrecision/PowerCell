@@ -31,6 +31,15 @@ _redis_client = None
 _redis_available = None
 
 
+def _get_db():
+    """Obtém a instância da BD (lazy import para evitar import circular)."""
+    try:
+        from database import db
+        return db
+    except Exception:
+        return None
+
+
 async def _get_redis():
     """
     Obtém o cliente Redis (lazy initialization).
@@ -50,33 +59,17 @@ async def _get_redis():
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         redis_db = int(os.environ.get("REDIS_DB", "0"))
 
-        # Se é localhost e não estamos em produção, pode não haver Redis
-        if "localhost" in redis_url and os.environ.get("ENVIRONMENT") != "production":
-            # Tentar conectar, mas não falhar se não houver
-            _redis_client = aioredis.from_url(
-                redis_url,
-                db=redis_db,
-                decode_responses=True,
-                socket_timeout=5,
-                socket_connect_timeout=5,
-            )
-            # Testar a conexão
-            await _redis_client.ping()
-            _redis_available = True
-            logger.info("[MFA_CACHE] Redis conectado para cache MFA")
-            return _redis_client
-        else:
-            _redis_client = aioredis.from_url(
-                redis_url,
-                db=redis_db,
-                decode_responses=True,
-                socket_timeout=5,
-                socket_connect_timeout=5,
-            )
-            await _redis_client.ping()
-            _redis_available = True
-            logger.info("[MFA_CACHE] Redis conectado para cache MFA")
-            return _redis_client
+        _redis_client = aioredis.from_url(
+            redis_url,
+            db=redis_db,
+            decode_responses=True,
+            socket_timeout=5,
+            socket_connect_timeout=5,
+        )
+        await _redis_client.ping()
+        _redis_available = True
+        logger.info("[MFA_CACHE] Redis conectado para cache MFA")
+        return _redis_client
 
     except Exception as e:
         logger.warning(f"[MFA_CACHE] Redis não disponível: {e}")
@@ -114,10 +107,8 @@ async def set_mfa_code(process_id: str, mfa_code: str, ttl: int = 300) -> bool:
 
     # Fallback: guardar no MongoDB (portal_scraper_jobs)
     try:
-        from config import db as get_db
-        db = get_db() if callable(get_db) else get_db
+        db = _get_db()
         if db is not None:
-            from datetime import datetime, timezone
             await db.portal_scraper_jobs.update_one(
                 {"process_id": process_id, "status": "awaiting_mfa"},
                 {"$set": {
@@ -166,8 +157,7 @@ async def get_mfa_code(process_id: str) -> Optional[str]:
 
     # Fallback: ler do MongoDB
     try:
-        from config import db as get_db
-        db = get_db() if callable(get_db) else get_db
+        db = _get_db()
         if db is not None:
             job = await db.portal_scraper_jobs.find_one(
                 {"process_id": process_id, "status": "awaiting_mfa"},
@@ -204,8 +194,7 @@ async def delete_mfa_code(process_id: str) -> None:
 
     # Remover do MongoDB
     try:
-        from config import db as get_db
-        db = get_db() if callable(get_db) else get_db
+        db = _get_db()
         if db is not None:
             await db.portal_scraper_jobs.update_one(
                 {"process_id": process_id},
@@ -226,8 +215,7 @@ async def set_mfa_status(process_id: str, status: str, db=None) -> None:
     """
     try:
         if db is None:
-            from config import db as get_db
-            db = get_db() if callable(get_db) else get_db
+            db = _get_db()
 
         if db is not None:
             update_data = {
@@ -236,7 +224,7 @@ async def set_mfa_status(process_id: str, status: str, db=None) -> None:
             }
             if status == "awaiting_mfa":
                 update_data["message"] = (
-                    "A Segurança Social pediu um código de verificação por SMS. "
+                    "O portal pediu um código de verificação. "
                     "Introduza o código que recebeu no seu telemóvel."
                 )
 
