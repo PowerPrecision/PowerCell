@@ -1466,10 +1466,12 @@ const ProcessDetails = () => {
     if (cleaned.bank_approval_date) {
       cleaned.bank_approval_date = convertPortugueseDateToISO(cleaned.bank_approval_date);
     }
-    // Remover campos undefined ou vazios
+    // Remover campos undefined; strings vazias → null (para permitir limpar campos)
     Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined || cleaned[key] === '') {
+      if (cleaned[key] === undefined) {
         delete cleaned[key];
+      } else if (cleaned[key] === '') {
+        cleaned[key] = null;
       }
     });
     return cleaned;
@@ -1567,11 +1569,11 @@ const ProcessDetails = () => {
         processUpdateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
       }
 
-      if (hasAnyRole(user, ["intermediario", "admin"])) {
-        const allowedStatuses = workflowStatuses.filter(s => s.order >= 3).map(s => s.name);
-        if (allowedStatuses.includes(process.status) || process.status === "ch_aprovado" || process.status === "fase_bancaria") {
-          processUpdateData.credit_data = cleanCreditDataForSubmit(creditData);
-        }
+      // Credit data: alinhado com can_act_as_intermediario do backend
+      // (INTERMEDIARIO, DIRETOR, CEO, ADMIN, ADMINISTRATIVO)
+      // Removida restrição de status — o backend já valida o role
+      if (hasAnyRole(user, ["intermediario", "admin", "diretor", "ceo", "administrativo"])) {
+        processUpdateData.credit_data = cleanCreditDataForSubmit(creditData);
       }
 
       if (!hasRole(user, "cliente") && statusToSave !== process.status) {

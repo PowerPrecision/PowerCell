@@ -409,14 +409,17 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
           setAwaitingMfa(true);
           setLoading(false);
           setMfaPollCount(prev => prev + 1);
-        } else if (job.status === 'success') {
+        } else if (job.status === 'success' || job.status === 'completed') {
+          // Scraper terminou com sucesso — fechar modal, toast, refetch
           setAwaitingMfa(false);
           setLoading(false);
-          setSuccess(
-            job.message || `${job.documents_count || ''} documento(s) obtido(s) com sucesso!`
-          );
+          const successMsg = job.message || `${job.documents_count || ''} documento(s) obtido(s) com sucesso!`;
+          setSuccess(successMsg);
+          toast.success('Documentos extraídos com sucesso!');
           clearInterval(pollInterval);
-          setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 2500);
+          // Refetch da lista de documentos via onSuccess callback
+          if (onSuccess) onSuccess();
+          setTimeout(() => { onOpenChange(false); }, 2500);
         } else if (job.status === 'error') {
           setAwaitingMfa(false);
           setLoading(false);
@@ -424,7 +427,12 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
             ' Pode também descarregar os documentos directamente do ' +
             sourceLabel + ' e enviá-los através do botão "Carregar documentos".';
 
-          if (job.error_type === 'mfa_timeout') {
+          if (job.error_type === 'mfa_requerido') {
+            // MFA requerido mas sem processo para esperar — mostrar input MFA
+            setAwaitingMfa(true);
+            setLoading(false);
+            setError('O portal requere verificação em 2 passos (Chave Móvel Digital). Introduza o código enviado para o seu telemóvel.');
+          } else if (job.error_type === 'mfa_timeout') {
             setError('O código de verificação não foi submetido a tempo. Tente novamente.');
           } else if (job.error_type === 'mfa_codigo_incorreto') {
             setError('O código SMS introduzido parece incorreto. Tente novamente.');
@@ -433,7 +441,10 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
           } else {
             setError((job.message || 'Erro ao obter documentos.') + MANUAL_UPLOAD_HINT);
           }
-          clearInterval(pollInterval);
+          // Se não for mfa_requerido, parar o polling; se for, continuar para aguardar código
+          if (job.error_type !== 'mfa_requerido') {
+            clearInterval(pollInterval);
+          }
         }
       } catch {
         // Network error during polling — don't fail, just retry
@@ -534,7 +545,9 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
       if (res.ok && data.success && !data.scraper_job_id) {
         // Sucesso síncrono (dev mode, etc.)
         setSuccess(data.message || 'Documentos obtidos com sucesso!');
-        setTimeout(() => { onOpenChange(false); if (onSuccess) onSuccess(); }, 2500);
+        toast.success('Documentos extraídos com sucesso!');
+        if (onSuccess) onSuccess();
+        setTimeout(() => { onOpenChange(false); }, 2500);
       } else if (res.ok && (data.status === 'processing' || data.scraper_job_id)) {
         // Processamento assíncrono: guardar job_id e iniciar polling.
         // O diálogo NÃO fecha — fica em estado de loading/polling

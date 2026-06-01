@@ -2992,10 +2992,12 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 }
         
         if data.credit_data and can_update_credit:
-            incoming_credit = data.credit_data.model_dump(exclude_unset=True, exclude_none=True)
+            incoming_credit = data.credit_data.model_dump(exclude_unset=True)
             _cd = process.get("credit_data")
             existing_credit = _cd if isinstance(_cd, dict) else {}
             merged_credit = {**existing_credit, **incoming_credit}
+            # Remover campos com valor None (utilizador limpou o campo)
+            merged_credit = {k: v for k, v in merged_credit.items() if v is not None}
             await log_data_changes(process_id, user, existing_credit, incoming_credit, "dados de crédito")
             await log_audit_event(process_id, user, "Alterou dados de crédito", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["credit_data"] = merged_credit

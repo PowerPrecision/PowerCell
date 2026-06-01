@@ -1146,14 +1146,14 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                     try:
                         btn_pesquisar = page.locator(
                             'button:has-text("Pesquisar"), '
-                            'a:has-text("Pesquisar")'
+                            'input[value="Pesquisar"]'
                         ).first
                         if await btn_pesquisar.count() > 0:
                             logger.info(
                                 "[GOV_SCRAPER] Botão 'Pesquisar' encontrado "
-                                "na página de Consulta — a clicar"
+                                "na página de Consulta — a clicar com force"
                             )
-                            await btn_pesquisar.click()
+                            await btn_pesquisar.click(force=True)
                             await page.wait_for_timeout(3000)
                             # Esperar pela tabela após Pesquisar
                             try:
@@ -1494,16 +1494,18 @@ async def _intercept_pdf_from_element(page, btn_locator, safe_filename: str) -> 
             response = await page.goto(full_url, timeout=30000)
             if response:
                 pdf_bytes = await response.body()
-                if pdf_bytes and len(pdf_bytes) > 100:
+                if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                     logger.info(
                         f"[GOV_SCRAPER] PDF obtido via href directo para "
                         f"{safe_filename} ({len(pdf_bytes)} bytes)"
                     )
                     return pdf_bytes
                 else:
+                    is_html = pdf_bytes and (b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower())
                     logger.warning(
-                        f"[GOV_SCRAPER] Resposta href vazia/pequena para "
-                        f"{safe_filename} ({len(pdf_bytes) if pdf_bytes else 0} bytes)"
+                        f"[GOV_SCRAPER] Resposta href para "
+                        f"{safe_filename}: {len(pdf_bytes) if pdf_bytes else 0} bytes "
+                        f"{'(HTML, não PDF)' if is_html else '(sem header %PDF-)'}"
                     )
                     # Voltar à página anterior para continuar o fluxo
                     try:
@@ -1540,16 +1542,18 @@ async def _intercept_pdf_from_element(page, btn_locator, safe_filename: str) -> 
                 await btn_locator.click()
             response = await response_info.value
             pdf_bytes = await response.body()
-            if pdf_bytes and len(pdf_bytes) > 100:
+            if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                 logger.info(
                     f"[GOV_SCRAPER] PDF obtido via expect_response para "
                     f"{safe_filename} ({len(pdf_bytes)} bytes)"
                 )
                 return pdf_bytes
             else:
+                is_html = pdf_bytes and (b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower())
                 logger.warning(
-                    f"[GOV_SCRAPER] expect_response retornou vazio para "
-                    f"{safe_filename}"
+                    f"[GOV_SCRAPER] expect_response para "
+                    f"{safe_filename}: {len(pdf_bytes) if pdf_bytes else 0} bytes "
+                    f"{'(HTML, não PDF)' if is_html else '(vazia/sem %PDF-)'}"
                 )
         except Exception as resp_err:
             logger.warning(
@@ -1607,7 +1611,7 @@ async def _download_financas_document(
                     pdf_bytes = await _intercept_pdf_from_element(
                         page, btn_locator, safe_filename
                     )
-                    if pdf_bytes and len(pdf_bytes) > 100:
+                    if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                         return ScraperDocument(
                             filename=safe_filename,
                             content_bytes=pdf_bytes,
@@ -1615,10 +1619,13 @@ async def _download_financas_document(
                             category=category,
                             label=doc_name,
                         )
-                    logger.warning(
-                        f"[GOV_SCRAPER] _intercept_pdf_from_element falhou "
-                        f"para selector {selector} — a tentar próximo"
-                    )
+                    if pdf_bytes:
+                        is_html = b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower()
+                        logger.warning(
+                            f"[GOV_SCRAPER] _intercept_pdf_from_element para "
+                            f"selector {selector} retornou {len(pdf_bytes)} bytes "
+                            f"{'(HTML, não PDF)' if is_html else '(sem header %PDF-)'}  — a tentar próximo"
+                        )
             except Exception as el_err:
                 logger.warning(
                     f"[GOV_SCRAPER] Selector {selector} falhou: "
@@ -1649,13 +1656,20 @@ async def _download_financas_document(
                     pdf_bytes = await _intercept_pdf_from_element(
                         page, btn_locator, safe_filename
                     )
-                    if pdf_bytes and len(pdf_bytes) > 100:
+                    if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                         return ScraperDocument(
                             filename=safe_filename,
                             content_bytes=pdf_bytes,
                             content_type="application/pdf",
                             category=category,
                             label=doc_name,
+                        )
+                    if pdf_bytes:
+                        is_html = b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower()
+                        logger.warning(
+                            f"[GOV_SCRAPER] Estratégia 1 selector {selector}: "
+                            f"{len(pdf_bytes)} bytes "
+                            f"{'(HTML)' if is_html else '(não-PDF)'} — a ignorar"
                         )
             except Exception:
                 continue
@@ -1687,13 +1701,20 @@ async def _download_financas_document(
                         pdf_bytes = await _intercept_pdf_from_element(
                             page, dl_el, safe_filename
                         )
-                        if pdf_bytes and len(pdf_bytes) > 100:
+                        if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                             return ScraperDocument(
                                 filename=safe_filename,
                                 content_bytes=pdf_bytes,
                                 content_type="application/pdf",
                                 category=category,
                                 label=doc_name,
+                            )
+                        if pdf_bytes:
+                            is_html = b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower()
+                            logger.warning(
+                                f"[GOV_SCRAPER] Estratégia 2 selector {selector}: "
+                                f"{len(pdf_bytes)} bytes "
+                                f"{'(HTML)' if is_html else '(não-PDF)'} — a ignorar"
                             )
             except Exception:
                 continue
@@ -1970,62 +1991,84 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
 
             # Verificar URL — deteção genérica de página de login/MFA/OTP
             current_url = page.url.lower()
-            if (
-                "login" in current_url
-                or "autenticacao" in current_url
-                or "mfa" in current_url
-                or "otp" in current_url
-            ):
+            if any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp")):
                 await asyncio.sleep(3)
                 current_url = page.url.lower()
-                if (
-                    "login" in current_url
-                    or "autenticacao" in current_url
-                    or "mfa" in current_url
-                    or "otp" in current_url
-                ):
-                    # ── Deteção genérica de MFA ──
-                    # Passo 1: Procurar input genérico de código MFA
-                    # (SMS/Email). Este é o locator mais fiável — se existe
-                    # um input de texto/number na página de autenticação,
-                    # é quase certamente para código MFA.
-                    mfa_input_generic = page.locator(
-                        'input[type="text"], input[type="number"], '
-                        'input[name*="code"], input[name*="otp"], '
-                        'input[placeholder*="código"], input[placeholder*="Código"]'
-                    ).first
-                    mfa_detected = False
+                if any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp")):
+                    # Verificar MFA — se detetado, entrar em modo de espera
+                    # v5: Selectors expandidos + fallback genérico de input
 
-                    if await mfa_input_generic.count() > 0:
-                        mfa_detected = True
-                        logger.info(
-                            "[GOV_SCRAPER] MFA detetado via input genérico "
-                            "(input[type=text/number/name*=code])"
-                        )
-                    else:
-                        # Passo 2: Fallback para selectors específicos de texto
-                        mfa_selectors = [
-                            "text=Chave Móvel Digital",
-                            "text=código de segurança",
-                            "text=autenticação multi-fator",
-                            "input[placeholder*='código']",
-                            "input[placeholder*='Código']",
-                            "input[name*='code']",
-                            "input[name*='otp']",
-                            "input[type='tel'][maxlength]",
-                        ]
-                        for sel in mfa_selectors:
-                            try:
-                                mfa_el = page.locator(sel).first
-                                if await mfa_el.is_visible(timeout=2000):
+                    # Passo 1: Selectors específicos de texto/input MFA
+                    mfa_selectors = [
+                        "text=Chave Móvel Digital",
+                        "text=código de segurança",
+                        "text=autenticação multi-fator",
+                        "text=código",
+                        "text=email",
+                        "text=SMS",
+                        "input[placeholder*='código']",
+                        "input[placeholder*='Código']",
+                        "input[name*='code']",
+                        "input[name*='token']",
+                        "input[name*='otp']",
+                        "input[type='number']",
+                        "input[type='tel'][maxlength]",
+                    ]
+                    mfa_detected = False
+                    for sel in mfa_selectors:
+                        try:
+                            mfa_el = page.locator(sel).first
+                            if await mfa_el.is_visible(timeout=2000):
+                                mfa_detected = True
+                                logger.info(
+                                    f"[GOV_SCRAPER] MFA detetado na Seg. Social "
+                                    f"via selector: {sel}"
+                                )
+                                break
+                        except Exception:
+                            continue
+
+                    # Fallback agressivo: se NENHUM selector MFA foi encontrado,
+                    # mas existe um input de texto visível que NÃO seja a password,
+                    # assumir que é um campo de código MFA
+                    if not mfa_detected:
+                        try:
+                            all_text_inputs = page.locator(
+                                "input[type='text'], "
+                                "input[type='number'], "
+                                "input[type='tel'], "
+                                "input:not([type])"
+                            )
+                            input_count = await all_text_inputs.count()
+                            for i in range(input_count):
+                                try:
+                                    inp = all_text_inputs.nth(i)
+                                    if not await inp.is_visible(timeout=1000):
+                                        continue
+                                    # Ignorar campos de password e username/NISS
+                                    inp_type = (await inp.get_attribute("type") or "").lower()
+                                    inp_name = (await inp.get_attribute("name") or "").lower()
+                                    inp_id = (await inp.get_attribute("id") or "").lower()
+                                    if inp_type == "password":
+                                        continue
+                                    if any(skip in inp_name for skip in ("username", "user", "niss", "nif", "email")):
+                                        continue
+                                    if any(skip in inp_id for skip in ("username", "user", "niss", "nif", "email")):
+                                        continue
+                                    # Input de texto visível que não é password nem username → MFA
                                     mfa_detected = True
                                     logger.info(
-                                        f"[GOV_SCRAPER] MFA detetado na Seg. Social "
-                                        f"via selector: {sel}"
+                                        f"[GOV_SCRAPER] MFA detetado via fallback genérico: "
+                                        f"input #{i} type={inp_type} name={inp_name} id={inp_id}"
                                     )
                                     break
-                            except Exception:
-                                continue
+                                except Exception:
+                                    continue
+                        except Exception as fallback_err:
+                            logger.warning(
+                                f"[GOV_SCRAPER] Fallback genérico MFA falhou: "
+                                f"{type(fallback_err).__name__}"
+                            )
 
                     if mfa_detected and process_id:
                         # ── MFA DETETADO: Entrar em modo de espera ──
@@ -2167,12 +2210,7 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                                 # Verificar se login foi bem-sucedido após MFA
                                 await asyncio.sleep(3)
                                 current_url = page.url.lower()
-                                if (
-                                    "login" in current_url
-                                    or "autenticacao" in current_url
-                                    or "mfa" in current_url
-                                    or "otp" in current_url
-                                ):
+                                if any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp")):
                                     # MFA incorreto ou falhou
                                     logger.warning(
                                         f"[GOV_SCRAPER] Após MFA, ainda na página "
@@ -2390,16 +2428,18 @@ async def _intercept_pdf_from_element_seg_social(page, btn_locator, safe_filenam
             response = await page.goto(full_url, timeout=30000)
             if response:
                 pdf_bytes = await response.body()
-                if pdf_bytes and len(pdf_bytes) > 100:
+                if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                     logger.info(
                         f"[GOV_SCRAPER] PDF obtido via href directo (SS) para "
                         f"{safe_filename} ({len(pdf_bytes)} bytes)"
                     )
                     return pdf_bytes
                 else:
+                    is_html = pdf_bytes and (b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower())
                     logger.warning(
-                        f"[GOV_SCRAPER] Resposta href (SS) vazia/pequena para "
-                        f"{safe_filename}"
+                        f"[GOV_SCRAPER] Resposta href (SS) para "
+                        f"{safe_filename}: {len(pdf_bytes) if pdf_bytes else 0} bytes "
+                        f"{'(HTML, não PDF)' if is_html else '(vazia/pequena sem %PDF-)'}"
                     )
                     try:
                         await page.go_back(timeout=15000)
@@ -2433,16 +2473,19 @@ async def _intercept_pdf_from_element_seg_social(page, btn_locator, safe_filenam
                 await btn_locator.click()
             response = await response_info.value
             pdf_bytes = await response.body()
-            if pdf_bytes and len(pdf_bytes) > 100:
+            if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                 logger.info(
                     f"[GOV_SCRAPER] PDF obtido via expect_response (SS) para "
                     f"{safe_filename} ({len(pdf_bytes)} bytes)"
                 )
                 return pdf_bytes
             else:
+                is_html = pdf_bytes and (b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower())
                 logger.warning(
-                    f"[GOV_SCRAPER] expect_response (SS) retornou vazio para "
-                    f"{safe_filename}"
+                    f"[GOV_SCRAPER] expect_response (SS) retornou "
+                    f"{len(pdf_bytes) if pdf_bytes else 0} bytes para "
+                    f"{safe_filename} "
+                    f"{'(HTML, não PDF)' if is_html else '(vazia/sem %PDF-)'}"
                 )
         except Exception as resp_err:
             logger.warning(
@@ -2489,7 +2532,7 @@ async def _download_seg_social_document(
                     pdf_bytes = await _intercept_pdf_from_element_seg_social(
                         page, btn_locator, safe_filename
                     )
-                    if pdf_bytes and len(pdf_bytes) > 100:
+                    if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                         return ScraperDocument(
                             filename=safe_filename,
                             content_bytes=pdf_bytes,
@@ -2525,7 +2568,7 @@ async def _download_seg_social_document(
                         pdf_bytes = await _intercept_pdf_from_element_seg_social(
                             page, dl_el, safe_filename
                         )
-                        if pdf_bytes and len(pdf_bytes) > 100:
+                        if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
                             return ScraperDocument(
                                 filename=safe_filename,
                                 content_bytes=pdf_bytes,
