@@ -863,13 +863,15 @@ class S3Service:
             return (False, None)
 
 
-    def get_file_content(self, object_name: str) -> Optional[bytes]:
+    def get_file_content(self, object_name: str, max_size_mb: int = 20) -> Optional[bytes]:
         """
         Obtém o conteúdo de um ficheiro do S3.
         Tenta variações do path (underscore <-> espaço) se o original falhar.
         
         Args:
             object_name: Caminho S3 do ficheiro
+            max_size_mb: Tamanho máximo em MB (default 20MB). Ficheiros maiores
+                         são rejeitados para evitar OOM em instâncias com pouca RAM.
             
         Returns:
             Bytes do ficheiro ou None se falhar
@@ -897,6 +899,18 @@ class S3Service:
         
         for path in variations:
             try:
+                # Verificar tamanho ANTES de carregar para evitar OOM
+                try:
+                    head = self.s3_client.head_object(Bucket=self.bucket_name, Key=path)
+                    size_mb = head.get('ContentLength', 0) / (1024 * 1024)
+                    if size_mb > max_size_mb:
+                        logger.warning(
+                            f"Ficheiro S3 demasiado grande ({size_mb:.1f}MB > {max_size_mb}MB): {path}"
+                        )
+                        return None
+                except ClientError:
+                    pass  # Se head_object falhar, tentar get_object na mesma
+                
                 response = self.s3_client.get_object(
                     Bucket=self.bucket_name, 
                     Key=path

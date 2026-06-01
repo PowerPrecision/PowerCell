@@ -25,6 +25,7 @@ ENDPOINTS:
 - GET  /portal/messages/unread     → Conta mensagens não lidas do staff
 """
 import uuid
+import gc as _gc
 import logging
 import os
 from datetime import datetime, timezone
@@ -1245,6 +1246,19 @@ async def fetch_financas_documents(
         "updated_at": now,
     })
 
+    # ── Passar apenas campos necessários do processo (evitar reter dados grandes em memória) ──
+    process_minimal = {
+        "id": process.get("id"),
+        "client_name": process.get("client_name", ""),
+        "process_number": process.get("process_number", ""),
+        "assigned_consultor_ids": process.get("assigned_consultor_ids"),
+        "assigned_consultor_id": process.get("assigned_consultor_id"),
+        "assigned_mediador_ids": process.get("assigned_mediador_ids"),
+        "assigned_mediador_id": process.get("assigned_mediador_id"),
+        "assigned_indexacao_id": process.get("assigned_indexacao_id"),
+        "assigned_parceiro_id": process.get("assigned_parceiro_id"),
+    }
+
     # ── Agendar execução pesada em BackgroundTask ──
     background_tasks.add_task(
         _run_financas_background,
@@ -1253,7 +1267,7 @@ async def fetch_financas_documents(
         process_id=process_id,
         client_name=client_name,
         client_email=client_email,
-        process=process,
+        process=process_minimal,
         scraper_job_id=scraper_job_id,
     )
 
@@ -1330,6 +1344,19 @@ async def fetch_seguranca_social_documents(
         "updated_at": now,
     })
 
+    # ── Passar apenas campos necessários do processo (evitar reter dados grandes em memória) ──
+    process_minimal = {
+        "id": process.get("id"),
+        "client_name": process.get("client_name", ""),
+        "process_number": process.get("process_number", ""),
+        "assigned_consultor_ids": process.get("assigned_consultor_ids"),
+        "assigned_consultor_id": process.get("assigned_consultor_id"),
+        "assigned_mediador_ids": process.get("assigned_mediador_ids"),
+        "assigned_mediador_id": process.get("assigned_mediador_id"),
+        "assigned_indexacao_id": process.get("assigned_indexacao_id"),
+        "assigned_parceiro_id": process.get("assigned_parceiro_id"),
+    }
+
     # ── Agendar execução pesada em BackgroundTask ──
     background_tasks.add_task(
         _run_seguranca_social_background,
@@ -1338,7 +1365,7 @@ async def fetch_seguranca_social_documents(
         process_id=process_id,
         client_name=client_name,
         client_email=client_email,
-        process=process,
+        process=process_minimal,
         scraper_job_id=scraper_job_id,
     )
 
@@ -1548,6 +1575,11 @@ async def _run_financas_background(
             except Exception as ws_err:
                 logger.warning(f"[PORTAL-BG] Erro ao notificar via WebSocket: {ws_err}")
 
+            # Libertar memória: limpar screenshot e documentos do result
+            result.pop("screenshot_b64", None)
+            result.pop("documents", None)
+            _gc.collect()
+
         else:
             error_detail = result.get("error", "erro_desconhecido")
             logger.error(f"[PORTAL-BG] Erro do scraper Finanças: {error_detail}")
@@ -1694,6 +1726,11 @@ async def _run_seguranca_social_background(
                 )
             except Exception as ws_err:
                 logger.warning(f"[PORTAL-BG] Erro ao notificar via WebSocket: {ws_err}")
+
+            # Libertar memória: limpar screenshot e documentos do result
+            result.pop("screenshot_b64", None)
+            result.pop("documents", None)
+            _gc.collect()
 
         else:
             error_detail = result.get("error", "erro_desconhecido")

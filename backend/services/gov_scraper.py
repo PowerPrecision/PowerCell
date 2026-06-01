@@ -1767,17 +1767,26 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
 
     finally:
         # CRÍTICO: Garantir que TODOS os recursos são SEMPRE libertados
+        # Usar timeouts para evitar hangs no cleanup (zombie processes)
         try:
             if context:
-                await context.close()
+                await asyncio.wait_for(context.close(), timeout=10)
         except Exception:
             pass
         try:
-            await browser.close()
+            await asyncio.wait_for(browser.close(), timeout=10)
         except Exception:
             pass
         try:
-            await pw.stop()
+            await asyncio.wait_for(pw.stop(), timeout=10)
+        except Exception:
+            pass
+
+        # NUCLEAR FALLBACK: matar processos chromium órfãos que possam ter ficado
+        try:
+            import subprocess as _sp
+            _sp.run(["pkill", "-f", "chromium"], timeout=5,
+                    capture_output=True, check=False)
         except Exception:
             pass
 
@@ -2748,17 +2757,27 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
         )
 
     finally:
+        # CRÍTICO: Garantir que TODOS os recursos são SEMPRE libertados
+        # Usar timeouts para evitar hangs no cleanup (zombie processes)
         try:
             if context:
-                await context.close()
+                await asyncio.wait_for(context.close(), timeout=10)
         except Exception:
             pass
         try:
-            await browser.close()
+            await asyncio.wait_for(browser.close(), timeout=10)
         except Exception:
             pass
         try:
-            await pw.stop()
+            await asyncio.wait_for(pw.stop(), timeout=10)
+        except Exception:
+            pass
+
+        # NUCLEAR FALLBACK: matar processos chromium órfãos que possam ter ficado
+        try:
+            import subprocess as _sp
+            _sp.run(["pkill", "-f", "chromium"], timeout=5,
+                    capture_output=True, check=False)
         except Exception:
             pass
 
@@ -3035,7 +3054,10 @@ async def check_playwright_available() -> Dict[str, Any]:
                     await browser.close()
             except Exception:
                 pass
-            await pw.stop()
+            try:
+                await pw.stop()
+            except Exception:
+                pass
 
     except ImportError:
         result["error"] = "Playwright não instalado"

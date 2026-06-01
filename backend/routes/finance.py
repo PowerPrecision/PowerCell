@@ -156,7 +156,7 @@ async def _get_processes(year: Optional[int] = None) -> list:
             "mediador_names": 1,
             "process_type": 1,
         }
-    ).to_list(10000)
+    ).to_list(2000)
 
 
 def _calc_area_metrics(processes: list, area: str, config: dict) -> dict:
@@ -442,7 +442,7 @@ async def get_finance_monthly(
             "process_type": 1,
             "updated_at": 1,
         }
-    ).to_list(10000)
+    ).to_list(2000)
 
     # Inicializar dados mensais
     monthly_data = {}
