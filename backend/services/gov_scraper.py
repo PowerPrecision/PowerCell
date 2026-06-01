@@ -1343,11 +1343,113 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
                 await page.goto(consulta_url, timeout=40000)
                 await asyncio.sleep(4)
 
+                # 8a2. Selecionar o ano anterior (ex: 2024) na dropdown
+                # A página de Consulta tem uma dropdown de ano que por defeito
+                # mostra o ano atual (2025). A Nota de Liquidação do IRS mais
+                # relevante é a do ano anterior (último IRS entregue).
+                ano_alvo = str(datetime.now().year - 1)  # ex: "2024"
+                logger.info(
+                    f"[GOV_SCRAPER] A tentar selecionar ano {ano_alvo} "
+                    f"na página de Consulta IRS"
+                )
+                ano_selecionado = False
+                ano_selectors = [
+                    'select[name="anoExercicio"]',
+                    'select[name="ano"]',
+                    'select#anoExercicio',
+                    'select#ano',
+                    'select[name*="ano"]',
+                    'select[name*="exercicio"]',
+                    'select[id*="ano"]',
+                    'select[id*="exercicio"]',
+                    'select.form-control',  # dropdown genérica Bootstrap
+                ]
+                for sel in ano_selectors:
+                    try:
+                        dropdown = page.locator(sel).first
+                        if await dropdown.count() > 0 and await dropdown.is_visible(timeout=2000):
+                            # Verificar se o ano alvo existe como opção
+                            opcao_existe = await dropdown.locator(
+                                f'option:has-text("{ano_alvo}")'
+                            ).count()
+                            if opcao_existe > 0:
+                                await dropdown.select_option(value=ano_alvo)
+                                ano_selecionado = True
+                                logger.info(
+                                    f"[GOV_SCRAPER] Ano {ano_alvo} selecionado "
+                                    f"via dropdown: {sel}"
+                                )
+                                await asyncio.sleep(1)
+                                break
+                            else:
+                                logger.info(
+                                    f"[GOV_SCRAPER] Ano {ano_alvo} não encontrado "
+                                    f"como opção na dropdown {sel}"
+                                )
+                    except Exception:
+                        continue
+
+                if not ano_selecionado:
+                    # Fallback: tentar clicar num botão/tab do ano
+                    ano_text_selectors = [
+                        f'a:has-text("{ano_alvo}")',
+                        f'button:has-text("{ano_alvo}")',
+                        f'tab:has-text("{ano_alvo}")',
+                        f'span:has-text("{ano_alvo}")',
+                        f'li:has-text("{ano_alvo}")',
+                    ]
+                    for sel in ano_text_selectors:
+                        try:
+                            el = page.locator(sel).first
+                            if await el.count() > 0 and await el.is_visible(timeout=2000):
+                                await el.click(force=True)
+                                ano_selecionado = True
+                                logger.info(
+                                    f"[GOV_SCRAPER] Ano {ano_alvo} selecionado "
+                                    f"via click: {sel}"
+                                )
+                                await asyncio.sleep(1)
+                                break
+                        except Exception:
+                            continue
+
+                if not ano_selecionado:
+                    logger.warning(
+                        f"[GOV_SCRAPER] Não foi possível selecionar o ano "
+                        f"{ano_alvo} — a tabela pode mostrar o ano atual"
+                    )
+
                 # 8b. Esperar que a tabela de consultas carregue e
                 # clicar em "Pesquisar" se necessário
                 # Na página de Consulta, o DataTables carrega via AJAX —
                 # pode demorar mais se a sessão expirou ou o servidor lento.
                 try:
+                    # Se selecionámos o ano, precisamos de clicar em "Pesquisar"
+                    # para recarregar a tabela com os dados do ano correto.
+                    # Mesmo que a tabela já esteja visível, o conteúdo pode ser
+                    # do ano anterior (2025 por defeito).
+                    if ano_selecionado:
+                        # Dar tempo para a dropdown atualizar o formulário
+                        await asyncio.sleep(1)
+                        btn_pesquisar = page.locator(
+                            'button:has-text("Pesquisar"), '
+                            'input[value="Pesquisar"]'
+                        ).first
+                        if await btn_pesquisar.count() > 0:
+                            logger.info(
+                                "[GOV_SCRAPER] A clicar 'Pesquisar' após "
+                                f"selecionar ano {ano_alvo}"
+                            )
+                            await btn_pesquisar.click(force=True)
+                            # Esperar mais tempo após Pesquisar — o AJAX
+                            # precisa de carregar os dados do servidor
+                            await page.wait_for_timeout(5000)
+                        else:
+                            logger.info(
+                                "[GOV_SCRAPER] Botão 'Pesquisar' não encontrado "
+                                "— a aguardar pela tabela"
+                            )
+
                     # Primeiro tentar esperar pelo wrapper da tabela
                     await page.wait_for_selector(
                         'table, .dataTables_wrapper, #consultaDeclaracoes',
