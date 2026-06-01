@@ -129,6 +129,7 @@ async def verify_portal_login(client_id: str, data: dict):
 DOCUMENT_CATEGORY_MAP = {
     "Cartao_Cidadao": {"label": "Cartão de Cidadão", "icon": "🪪"},
     "IRS": {"label": "Declaração de IRS", "icon": "📋"},
+    "Financeiros": {"label": "Documentos Financeiros", "icon": "📄"},
     "Recibo_Vencimento": {"label": "Recibo de Vencimento", "icon": "💰"},
     "Comprovativo_IBAN": {"label": "Comprovativo de IBAN", "icon": "🏦"},
     "Certidao_Nascimento": {"label": "Certidão de Nascimento", "icon": "📄"},
@@ -431,6 +432,11 @@ async def get_portal_status(
         async for doc in all_docs_cursor:
             if doc.get("category"):
                 submitted_categories.add(doc["category"])
+
+        # Cross-category mapping: se "Financeiros" foi submetido pelo scraper,
+        # considerar "IRS" como satisfeita (o scraper Finanças guarda como "Financeiros")
+        if "Financeiros" in submitted_categories:
+            submitted_categories.add("IRS")
 
         for cat_key in DEFAULT_PENDING_CATEGORIES:
             if cat_key not in submitted_categories:
@@ -1859,6 +1865,40 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
         except Exception as e:
             logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}: {e}")
 
+    # ── Marcar documentos pendentes como UPLOADED ──
+    # Quando o scraper Finanças obtém docs com sucesso, marcar qualquer
+    # documento REQUESTED/PENDING das categorias IRS/Financeiros como UPLOADED
+    # para que o cliente veja o item como "entregue" na checklist do portal.
+    if docs_registered > 0:
+        try:
+            financas_categories = ["IRS", "Financeiros", "irs", "financeiros"]
+            update_result = await db.documents.update_many(
+                {
+                    "process_id": process_id,
+                    "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
+                    "category": {"$in": financas_categories},
+                },
+                {
+                    "$set": {
+                        "status": "UPLOADED",
+                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                        "uploaded_by": "system_financas_scraper",
+                        "auto_fetched": True,
+                        "source": "auto_financas",
+                    }
+                }
+            )
+            if update_result.modified_count > 0:
+                logger.info(
+                    f"[PORTAL] {update_result.modified_count} documento(s) pendente(s) "
+                    f"IRS/Financeiros marcado(s) como UPLOADED para processo {process_id}"
+                )
+        except Exception as mark_err:
+            logger.warning(
+                f"[PORTAL] Erro ao marcar docs pendentes como UPLOADED: "
+                f"{type(mark_err).__name__}: {mark_err}"
+            )
+
     return {"success": True, "documents_count": docs_registered, "documents": docs_for_attachment}
 
 
@@ -1976,6 +2016,40 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
 
         except Exception as e:
             logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}: {e}")
+
+    # ── Marcar documentos pendentes como UPLOADED ──
+    # Quando o scraper Segurança Social obtém docs com sucesso, marcar qualquer
+    # documento REQUESTED/PENDING das categorias Financeiros/Segurança Social
+    # como UPLOADED para que o cliente veja o item como "entregue" na checklist.
+    if docs_registered > 0:
+        try:
+            ss_categories = ["Financeiros", "financeiros", "Seguranca_Social", "Segurança_Social"]
+            update_result = await db.documents.update_many(
+                {
+                    "process_id": process_id,
+                    "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
+                    "category": {"$in": ss_categories},
+                },
+                {
+                    "$set": {
+                        "status": "UPLOADED",
+                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                        "uploaded_by": "system_seguranca_social_scraper",
+                        "auto_fetched": True,
+                        "source": "auto_seguranca_social",
+                    }
+                }
+            )
+            if update_result.modified_count > 0:
+                logger.info(
+                    f"[PORTAL] {update_result.modified_count} documento(s) pendente(s) "
+                    f"Seg. Social marcado(s) como UPLOADED para processo {process_id}"
+                )
+        except Exception as mark_err:
+            logger.warning(
+                f"[PORTAL] Erro ao marcar docs pendentes como UPLOADED: "
+                f"{type(mark_err).__name__}: {mark_err}"
+            )
 
     return {"success": True, "documents_count": docs_registered, "documents": docs_for_attachment}
 
