@@ -1757,7 +1757,7 @@ const ProcessDetails = () => {
   const canEditRealEstate = hasEditProcess && 
     (userActions.length > 0 ? true : ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canEditCredit = hasEditProcess && 
-    (userActions.length > 0 ? true : ["intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+    (userActions.length > 0 ? true : ["intermediario", "admin", "ceo", "administrativo", "diretor", "consultor"].includes(userRole));
   const canChangeStatus = hasEditProcess && 
     (userActions.length > 0 ? true : ["consultor", "intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canManageDeadlines = hasEditProcess && 
