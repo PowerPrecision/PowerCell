@@ -443,6 +443,8 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
             setError('O código de verificação não foi submetido a tempo. Tente novamente.');
           } else if (job.error_type === 'mfa_codigo_incorreto') {
             setError('O código SMS introduzido parece incorreto. Tente novamente.');
+          } else if (job.error_type === 'mfa_error') {
+            setError('Erro ao processar o código de verificação. Tente novamente.');
           } else if (job.error_type === 'credenciais_invalidas') {
             setError('As credenciais que introduziu estão incorretas. Verifique o seu ' + idLabel + ' e a password.');
           } else {
@@ -475,7 +477,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
       const res = await fetchWithRetry(`${BACKEND_URL}/portal/submit-mfa`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ process_id: scraperJobId, mfa_code: mfaCode }),
+        body: JSON.stringify({ process_id: localStorage.getItem('portal_process_id') || '', mfa_code: mfaCode }),
       });
 
       let data;

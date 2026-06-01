@@ -1551,6 +1551,18 @@ async def _run_financas_background(
             if error_detail == "credenciais_invalidas":
                 error_message = "As credenciais que introduziu estão incorretas. Verifique o seu NIF e password do Portal das Finanças."
                 error_type = "credenciais_invalidas"
+            elif error_detail == "mfa_requerido":
+                error_message = "O portal requere verificação em 2 passos (Chave Móvel Digital). Introduza o código enviado para o seu telemóvel."
+                error_type = "mfa_requerido"
+            elif error_detail == "mfa_timeout":
+                error_message = "O código de verificação não foi submetido a tempo. O scraper expirou após 2 minutos à espera do código SMS."
+                error_type = "mfa_timeout"
+            elif error_detail == "mfa_codigo_incorreto":
+                error_message = "O código de verificação SMS introduzido parece estar incorreto. O login não foi concluído."
+                error_type = "mfa_codigo_incorreto"
+            elif error_detail == "mfa_error":
+                error_message = "Erro ao processar o código de verificação. Tente novamente."
+                error_type = "mfa_error"
             else:
                 error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente do Portal das Finanças e envie os documentos através do botão de upload."
                 error_type = "scraper_unavailable"
@@ -1685,12 +1697,18 @@ async def _run_seguranca_social_background(
             if error_detail == "credenciais_invalidas":
                 error_message = "As credenciais que introduziu estão incorretas. Verifique o seu NISS e password da Segurança Social."
                 error_type = "credenciais_invalidas"
+            elif error_detail == "mfa_requerido":
+                error_message = "O portal requere verificação em 2 passos (Chave Móvel Digital). Introduza o código enviado para o seu telemóvel."
+                error_type = "mfa_requerido"
             elif error_detail == "mfa_timeout":
                 error_message = "O código de verificação não foi submetido a tempo. O scraper expirou após 2 minutos à espera do código SMS."
                 error_type = "mfa_timeout"
             elif error_detail == "mfa_codigo_incorreto":
                 error_message = "O código de verificação SMS introduzido parece estar incorreto. O login não foi concluído."
                 error_type = "mfa_codigo_incorreto"
+            elif error_detail == "mfa_error" or error_detail == "mfa_no_input":
+                error_message = "Erro ao processar o código de verificação. Tente novamente."
+                error_type = "mfa_error"
             else:
                 error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
                 error_type = "scraper_unavailable"
@@ -1773,7 +1791,7 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
     s3_folder = process.get("s3_folder") if process else None
 
     # ── Invocar o scraper real ──
-    result = await fetch_financas_documents(nif, password)
+    result = await fetch_financas_documents(nif, password, process_id=process_id)
 
     # Neste ponto, o scraper já limpou as credenciais da memória
     # (garantido pelo `finally` em fetch_financas_documents)
@@ -1782,6 +1800,10 @@ async def _run_financas_scraper(nif: str, password: str, process_id: str) -> dic
         error_map = {
             "credenciais_invalidas": "credenciais_invalidas",
             "mfa_requerido": "mfa_requerido",
+            "mfa_timeout": "mfa_timeout",
+            "mfa_codigo_incorreto": "mfa_codigo_incorreto",
+            "mfa_no_input": "mfa_error",
+            "mfa_error": "mfa_error",
             "timeout": "timeout_scraper",
             "sem_documentos": "sem_documentos",
             "selector_desatualizado": "selector_desatualizado",
@@ -1934,8 +1956,8 @@ async def _run_seguranca_social_scraper(niss: str, password: str, process_id: st
             "mfa_requerido": "mfa_requerido",
             "mfa_timeout": "mfa_timeout",
             "mfa_codigo_incorreto": "mfa_codigo_incorreto",
-            "mfa_no_input": "mfa_requerido",
-            "mfa_error": "mfa_requerido",
+            "mfa_no_input": "mfa_error",
+            "mfa_error": "mfa_error",
             "timeout": "timeout_scraper",
             "sem_documentos": "sem_documentos",
             "selector_desatualizado": "selector_desatualizado",
