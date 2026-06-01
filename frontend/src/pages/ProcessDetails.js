@@ -5290,18 +5290,18 @@ const ProcessDetails = () => {
                       {sendingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     </Button>
                   </div>
-                  <ScrollArea className="h-[120px]">
+                  <ScrollArea className="h-[300px]">
                     <div className="space-y-1.5 pr-2">
                       {activities.length === 0 ? (
                         <p className="text-center text-muted-foreground py-2 text-xs">Sem comentários</p>
                       ) : (
-                        activities.slice(0, 5).map((activity) => (
+                        activities.map((activity) => (
                           <div key={activity.id} className="p-1.5 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
                             <div className="flex items-start justify-between gap-1">
                               <div className="flex-1 min-w-0">
                                 <span className="font-medium">{activity.user_name}</span>
                                 {activity.source === 'trello' && <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0">trello</Badge>}
-                                <p className="text-[11px] mt-0.5 text-muted-foreground line-clamp-2">{activity.comment}</p>
+                                <p className="text-xs mt-0.5 text-muted-foreground whitespace-pre-wrap">{activity.comment}</p>
                                 <p className="text-[10px] text-muted-foreground">{safeFormat(activity.created_at, "dd/MM HH:mm", { locale: pt })}</p>
                               </div>
                               {(activity.user_id === user.id || hasRole(user, "admin")) && (
