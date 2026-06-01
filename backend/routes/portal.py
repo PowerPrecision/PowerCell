@@ -264,7 +264,7 @@ async def get_portal_status(
     - Informações do processo (sem dados sensíveis)
     - Stepper dinâmico baseado no workflow (vindo da BD)
     - Documentos solicitados (status REQUESTED/PENDING)
-    - Documentos já submetidos (status UPLOADED)
+    - Documentos já submetidos (status RECEIVED via upload ou scraper)
     - Contactos do consultor
 
     Documentos pendentes:
@@ -714,7 +714,8 @@ async def confirm_portal_upload(
     """
     Confirma upload para S3 e regista na base de dados.
 
-    O documento fica com status=UPLOADED para aparecer no CRM do admin.
+    O documento fica com status=RECEIVED — ao carregar pelo portal, o documento
+    é automaticamente marcado como Recebido tanto no portal como no CRM.
     Se for fornecido document_id (de um doc REQUESTED), esse registo é atualizado
     em vez de criar um novo.
 
@@ -804,7 +805,7 @@ async def confirm_portal_upload(
             {"id": document_id, "process_id": process_id},
             {
                 "$set": {
-                    "status": "UPLOADED",
+                    "status": "RECEIVED",
                     "filename": original_filename,
                     "original_filename": original_filename,
                     "file_size": file_size,
@@ -813,6 +814,8 @@ async def confirm_portal_upload(
                     "uploaded_at": now,
                     "uploaded_by": "portal_client",
                     "source": "client_portal",
+                    "reviewed_by": "portal_client",
+                    "reviewed_at": now,
                     "updated_at": now,
                 }
             }
@@ -820,7 +823,7 @@ async def confirm_portal_upload(
 
         if update_result.matched_count > 0:
             doc_id = document_id
-            logger.info(f"[PORTAL] Doc REQUESTED atualizado para UPLOADED: {document_id}")
+            logger.info(f"[PORTAL] Doc REQUESTED atualizado para RECEIVED: {document_id}")
         else:
             # document_id não encontrado — criar novo
             doc_id = str(uuid.uuid4())
@@ -886,7 +889,7 @@ async def _create_document_record(
     file_size: int, content_type: str, now: str,
     custom_label: str = None
 ):
-    """Cria um registo de documento na BD com status UPLOADED."""
+    """Cria um registo de documento na BD com status RECEIVED."""
     document = {
         "id": doc_id,
         "process_id": process_id,
@@ -896,10 +899,12 @@ async def _create_document_record(
         "file_size": file_size,
         "content_type": content_type,
         "s3_path": file_key,
-        "status": "UPLOADED",
+        "status": "RECEIVED",
         "uploaded_at": now,
         "uploaded_by": "portal_client",
         "source": "client_portal",
+        "reviewed_by": "portal_client",
+        "reviewed_at": now,
     }
     if custom_label:
         document["custom_label"] = custom_label
