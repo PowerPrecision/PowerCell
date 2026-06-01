@@ -226,6 +226,12 @@ NAVIGATION_TIMEOUT = 90000  # 90 segundos
 # Tempo máximo total do scraper (segundos) — prevenir execuções infinitas
 MAX_SCRAPER_DURATION = 300  # 5 minutos (login + 2 docs com fallbacks)
 
+# Tempo máximo para lançar o browser (segundos) — prevenir hangs no Render
+BROWSER_LAUNCH_TIMEOUT = 120  # 2 minutos para cold start
+
+# Semaphore para garantir que SÓ UM scraper corre de cada vez (poupar RAM)
+_scraper_semaphore = asyncio.Semaphore(1)
+
 # Tempo máximo para descarregar um documento individual (segundos).
 # Mantemos um budget próprio por documento para que, se um deles falhar
 # por ausência de link/timeout interno, ainda haja orçamento para tentar
@@ -311,6 +317,80 @@ class ScraperResult:
 def _force_gc() -> None:
     """Força o garbage collector para limpar referências não utilizadas."""
     gc.collect()
+
+
+def _check_available_memory_mb() -> float:
+    """Retorna a memória disponível em MB. Retorna 9999 se não conseguir verificar."""
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if line.startswith('MemAvailable:'):
+                    return int(line.split()[1]) / 1024  # kB → MB
+    except Exception:
+        pass
+    return 9999  # Se não conseguir verificar, assumir que há memória
+
+
+async def _launch_browser_with_logging(scraper_name: str):
+    """
+    Lança o Playwright + Chromium com logging detalhado e timeouts.
+    
+    Retorna (pw, browser) ou faz raise de exceção com erro claro.
+    Inclui verificação de memória e semaphore para evitar múltiplos browsers.
+    """
+    from playwright.async_api import async_playwright
+    
+    # Verificar memória disponível antes de lançar
+    avail_mb = _check_available_memory_mb()
+    if avail_mb < 300:
+        logger.error(
+            f"[GOV_SCRAPER] MEMÓRIA INSUFICIENTE para lançar {scraper_name}: "
+            f"{avail_mb:.0f}MB disponíveis (mínimo 300MB). "
+            f"A cancelar o scraper."
+        )
+        raise MemoryError(f"RAM insuficiente: {avail_mb:.0f}MB disponíveis")
+    
+    logger.info(f"[GOV_SCRAPER] {scraper_name}: Memória disponível {avail_mb:.0f}MB — a iniciar Playwright...")
+    
+    # Iniciar Playwright com timeout
+    try:
+        pw = await asyncio.wait_for(async_playwright().start(), timeout=30)
+    except asyncio.TimeoutError:
+        logger.error(f"[GOV_SCRAPER] {scraper_name}: Timeout ao iniciar Playwright (30s)")
+        raise
+    except Exception as e:
+        logger.error(f"[GOV_SCRAPER] {scraper_name}: Erro ao iniciar Playwright: {type(e).__name__}: {e}")
+        raise
+    
+    logger.info(f"[GOV_SCRAPER] {scraper_name}: Playwright iniciado — a lançar Chromium...")
+    
+    # Lançar Chromium com timeout
+    try:
+        browser = await asyncio.wait_for(
+            pw.chromium.launch(**_get_browser_launch_args()),
+            timeout=BROWSER_LAUNCH_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            f"[GOV_SCRAPER] {scraper_name}: Timeout ao lançar Chromium "
+            f"({BROWSER_LAUNCH_TIMEOUT}s). Possível falta de RAM ou Chromium corrompido."
+        )
+        # Tentar limpar
+        try:
+            await asyncio.wait_for(pw.stop(), timeout=5)
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        logger.error(f"[GOV_SCRAPER] {scraper_name}: Erro ao lançar Chromium: {type(e).__name__}: {e}")
+        try:
+            await asyncio.wait_for(pw.stop(), timeout=5)
+        except Exception:
+            pass
+        raise
+    
+    logger.info(f"[GOV_SCRAPER] {scraper_name}: Chromium lançado com sucesso")
+    return pw, browser
 
 
 def _get_browser_launch_args() -> Dict[str, Any]:
@@ -478,43 +558,54 @@ async def fetch_financas_documents(
     masked_nif = _mask_identifier(nif)
     last_result = None
 
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            result = await asyncio.wait_for(
-                _financas_scraper_inner(nif, password, process_id=process_id),
-                timeout=MAX_SCRAPER_DURATION,
-            )
-            if result.success:
-                return result
+    # Semaphore: garantir que SÓ UM scraper corre de cada vez (poupar RAM)
+    if _scraper_semaphore.locked():
+        logger.warning("[GOV_SCRAPER] Finanças: Semaphore ocupado — outro scraper está a correr. A aguardar...")
 
-            last_result = result
+    async with _scraper_semaphore:
+        logger.info("[GOV_SCRAPER] Finanças: Semaphore adquirido")
 
-            # Se erro de credenciais, não faz sentido retry
-            if result.error in ("credenciais_invalidas", "mfa_requerido"):
-                return result
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                result = await asyncio.wait_for(
+                    _financas_scraper_inner(nif, password, process_id=process_id),
+                    timeout=MAX_SCRAPER_DURATION,
+                )
+                if result.success:
+                    return result
 
-            # Retry com backoff
+                last_result = result
+
+                # Se erro de credenciais, não faz sentido retry
+                if result.error in ("credenciais_invalidas", "mfa_requerido"):
+                    return result
+
+                # Retry com backoff
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_DELAYS[attempt]
+                    logger.info(
+                        f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} "
+                        f"para NIF {masked_nif} em {delay}s (erro: {result.error})"
+                    )
+                    await asyncio.sleep(delay)
+
+            except asyncio.TimeoutError:
+                logger.error(f"[GOV_SCRAPER] Timeout ({MAX_SCRAPER_DURATION}s) para NIF {masked_nif}")
+                last_result = ScraperResult(success=False, error="timeout", step_failed="global_timeout")
+
+            except MemoryError as e:
+                logger.error(f"[GOV_SCRAPER] Memória insuficiente para NIF {masked_nif}: {e}")
+                return ScraperResult(success=False, error="scraper_unavailable", step_failed="memory_error")
+
+            except Exception as e:
+                logger.error(f"[GOV_SCRAPER] Erro para NIF {masked_nif}: {type(e).__name__}")
+                last_result = ScraperResult(success=False, error=type(e).__name__, step_failed="unexpected_error")
+
+            # Retry com backoff para timeouts/erros
             if attempt < MAX_RETRIES:
                 delay = RETRY_DELAYS[attempt]
-                logger.info(
-                    f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} "
-                    f"para NIF {masked_nif} em {delay}s (erro: {result.error})"
-                )
+                logger.info(f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} em {delay}s")
                 await asyncio.sleep(delay)
-
-        except asyncio.TimeoutError:
-            logger.error(f"[GOV_SCRAPER] Timeout ({MAX_SCRAPER_DURATION}s) para NIF {masked_nif}")
-            last_result = ScraperResult(success=False, error="timeout", step_failed="global_timeout")
-
-        except Exception as e:
-            logger.error(f"[GOV_SCRAPER] Erro para NIF {masked_nif}: {type(e).__name__}")
-            last_result = ScraperResult(success=False, error=type(e).__name__, step_failed="unexpected_error")
-
-        # Retry com backoff para timeouts/erros
-        if attempt < MAX_RETRIES:
-            delay = RETRY_DELAYS[attempt]
-            logger.info(f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} em {delay}s")
-            await asyncio.sleep(delay)
 
     # Limpeza final
     del password
@@ -526,15 +617,12 @@ async def fetch_financas_documents(
 
 async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[str] = None) -> ScraperResult:
     """Lógica interna do scraper das Finanças com stealth e screenshot-on-failure."""
-    from playwright.async_api import async_playwright
-
     masked_nif = _mask_identifier(nif)
     documents: List[ScraperDocument] = []
     screenshot_b64 = None
     step = "init"
 
-    pw = await async_playwright().start()
-    browser = await pw.chromium.launch(**_get_browser_launch_args())
+    pw, browser = await _launch_browser_with_logging("Finanças")
     context = None
 
     try:
@@ -2133,39 +2221,50 @@ async def fetch_seg_social_documents(
     masked_niss = _mask_identifier(niss)
     last_result = None
 
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            result = await asyncio.wait_for(
-                _seg_social_scraper_inner(niss, password, process_id=process_id),
-                timeout=MAX_SCRAPER_DURATION,
-            )
-            if result.success:
-                return result
+    # Semaphore: garantir que SÓ UM scraper corre de cada vez (poupar RAM)
+    if _scraper_semaphore.locked():
+        logger.warning("[GOV_SCRAPER] Seg. Social: Semaphore ocupado — outro scraper está a correr. A aguardar...")
 
-            last_result = result
+    async with _scraper_semaphore:
+        logger.info("[GOV_SCRAPER] Seg. Social: Semaphore adquirido")
 
-            if result.error in ("credenciais_invalidas", "mfa_requerido"):
-                return result
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                result = await asyncio.wait_for(
+                    _seg_social_scraper_inner(niss, password, process_id=process_id),
+                    timeout=MAX_SCRAPER_DURATION,
+                )
+                if result.success:
+                    return result
+
+                last_result = result
+
+                if result.error in ("credenciais_invalidas", "mfa_requerido"):
+                    return result
+
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_DELAYS[attempt]
+                    logger.info(
+                        f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} "
+                        f"Seg. Social para NISS {masked_niss} em {delay}s (erro: {result.error})"
+                    )
+                    await asyncio.sleep(delay)
+
+            except asyncio.TimeoutError:
+                logger.error(f"[GOV_SCRAPER] Timeout ({MAX_SCRAPER_DURATION}s) Seg. Social NISS {masked_niss}")
+                last_result = ScraperResult(success=False, error="timeout", step_failed="global_timeout")
+
+            except MemoryError as e:
+                logger.error(f"[GOV_SCRAPER] Memória insuficiente Seg. Social NISS {masked_niss}: {e}")
+                return ScraperResult(success=False, error="scraper_unavailable", step_failed="memory_error")
+
+            except Exception as e:
+                logger.error(f"[GOV_SCRAPER] Erro Seg. Social NISS {masked_niss}: {type(e).__name__}")
+                last_result = ScraperResult(success=False, error=type(e).__name__, step_failed="unexpected_error")
 
             if attempt < MAX_RETRIES:
                 delay = RETRY_DELAYS[attempt]
-                logger.info(
-                    f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} "
-                    f"Seg. Social para NISS {masked_niss} em {delay}s (erro: {result.error})"
-                )
                 await asyncio.sleep(delay)
-
-        except asyncio.TimeoutError:
-            logger.error(f"[GOV_SCRAPER] Timeout ({MAX_SCRAPER_DURATION}s) Seg. Social NISS {masked_niss}")
-            last_result = ScraperResult(success=False, error="timeout", step_failed="global_timeout")
-
-        except Exception as e:
-            logger.error(f"[GOV_SCRAPER] Erro Seg. Social NISS {masked_niss}: {type(e).__name__}")
-            last_result = ScraperResult(success=False, error=type(e).__name__, step_failed="unexpected_error")
-
-        if attempt < MAX_RETRIES:
-            delay = RETRY_DELAYS[attempt]
-            await asyncio.sleep(delay)
 
     del password
     del niss
@@ -2182,15 +2281,12 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
         password: Password da Segurança Social
         process_id: ID do processo (para fluxo MFA)
     """
-    from playwright.async_api import async_playwright
-
     masked_niss = _mask_identifier(niss)
     documents: List[ScraperDocument] = []
     screenshot_b64 = None
     step = "init"
 
-    pw = await async_playwright().start()
-    browser = await pw.chromium.launch(**_get_browser_launch_args())
+    pw, browser = await _launch_browser_with_logging("Seg. Social")
     context = None
 
     try:

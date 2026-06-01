@@ -1600,6 +1600,9 @@ async def _run_financas_background(
             elif error_detail == "mfa_error":
                 error_message = "Erro ao processar o código de verificação. Tente novamente."
                 error_type = "mfa_error"
+            elif error_detail == "memory_error" or error_detail == "MemoryError":
+                error_message = "O servidor não tem memória suficiente para executar a obtenção automática neste momento. Por favor, tente novamente mais tarde ou faça download manualmente."
+                error_type = "scraper_unavailable"
             else:
                 error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente do Portal das Finanças e envie os documentos através do botão de upload."
                 error_type = "scraper_unavailable"
@@ -1751,6 +1754,9 @@ async def _run_seguranca_social_background(
             elif error_detail == "mfa_error" or error_detail == "mfa_no_input":
                 error_message = "Erro ao processar o código de verificação. Tente novamente."
                 error_type = "mfa_error"
+            elif error_detail == "memory_error" or error_detail == "MemoryError":
+                error_message = "O servidor não tem memória suficiente para executar a obtenção automática neste momento. Por favor, tente novamente mais tarde ou faça download manualmente."
+                error_type = "scraper_unavailable"
             else:
                 error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
                 error_type = "scraper_unavailable"
