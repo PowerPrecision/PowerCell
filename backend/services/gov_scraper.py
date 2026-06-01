@@ -1123,15 +1123,24 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                     f"{consulta_url}"
                 )
                 await page.goto(consulta_url, timeout=40000)
-                await asyncio.sleep(2)
+                await asyncio.sleep(4)
 
                 # 8b. Esperar que a tabela de consultas carregue e
                 # clicar em "Pesquisar" se necessário
+                # Na página de Consulta, o DataTables carrega via AJAX —
+                # pode demorar mais se a sessão expirou ou o servidor lento.
                 try:
+                    # Primeiro tentar esperar pelo wrapper da tabela
+                    await page.wait_for_selector(
+                        'table, .dataTables_wrapper, #consultaDeclaracoes',
+                        state='visible',
+                        timeout=25000,
+                    )
+                    # Depois esperar que as linhas apareçam
                     await page.wait_for_selector(
                         'table tbody tr',
                         state='visible',
-                        timeout=20000,
+                        timeout=15000,
                     )
                     logger.info(
                         "[GOV_SCRAPER] Tabela de consultas carregada na "
@@ -1154,13 +1163,15 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                                 "na página de Consulta — a clicar com force"
                             )
                             await btn_pesquisar.click(force=True)
-                            await page.wait_for_timeout(3000)
+                            # Esperar mais tempo após Pesquisar — o AJAX
+                            # precisa de carregar os dados do servidor
+                            await page.wait_for_timeout(5000)
                             # Esperar pela tabela após Pesquisar
                             try:
                                 await page.wait_for_selector(
                                     'table tbody tr',
                                     state='visible',
-                                    timeout=15000,
+                                    timeout=20000,
                                 )
                             except Exception:
                                 logger.warning(
@@ -1585,58 +1596,61 @@ async def _download_financas_document(
     # ── Estratégia 0: Botão "Obter Comprovativo" na tabela de comprovativos ──
     # Na página de comprovativos de IRS, procurar pelo ano mais recente e
     # clicar no botão "Obter Comprovativo" ou no ícone de PDF.
-    try:
-        comprovativo_selectors = [
-            'a:has-text("Obter Comprovativo")',
-            'button:has-text("Obter Comprovativo")',
-            'input[value="Obter Comprovativo"]',
-            'a:has([class*="pdf"])',
-            'a[href*="obterComprovativo"]',
-            'a[href*="comprovativo"]',
-            'button:has([class*="pdf"])',
-            'img[alt*="pdf"]',
-        ]
-        for selector in comprovativo_selectors:
-            try:
-                btn_locator = page.locator(selector).first
-                if await btn_locator.is_visible(timeout=3000):
-                    logger.info(
-                        f"[GOV_SCRAPER] Botão/link encontrado para "
-                        f"'{doc_name}' via selector: {selector}"
-                    )
-                    # Aguardar que o elemento esteja clicável
-                    await btn_locator.wait_for(state="visible", timeout=15000)
+    # NOTA: Esta estratégia SÓ se aplica à Declaração de IRS — a Nota de
+    # Liquidação fica na página de Consulta, não na de comprovativos.
+    if "IRS" in doc_name and "Liquida" not in doc_name:
+        try:
+            comprovativo_selectors = [
+                'a:has-text("Obter Comprovativo")',
+                'button:has-text("Obter Comprovativo")',
+                'input[value="Obter Comprovativo"]',
+                'a:has([class*="pdf"])',
+                'a[href*="obterComprovativo"]',
+                'a[href*="comprovativo"]',
+                'button:has([class*="pdf"])',
+                'img[alt*="pdf"]',
+            ]
+            for selector in comprovativo_selectors:
+                try:
+                    btn_locator = page.locator(selector).first
+                    if await btn_locator.is_visible(timeout=3000):
+                        logger.info(
+                            f"[GOV_SCRAPER] Botão/link encontrado para "
+                            f"'{doc_name}' via selector: {selector}"
+                        )
+                        # Aguardar que o elemento esteja clicável
+                        await btn_locator.wait_for(state="visible", timeout=15000)
 
-                    # Interceptar PDF via href ou expect_response
-                    pdf_bytes = await _intercept_pdf_from_element(
-                        page, btn_locator, safe_filename
+                        # Interceptar PDF via href ou expect_response
+                        pdf_bytes = await _intercept_pdf_from_element(
+                            page, btn_locator, safe_filename
+                        )
+                        if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+                            return ScraperDocument(
+                                filename=safe_filename,
+                                content_bytes=pdf_bytes,
+                                content_type="application/pdf",
+                                category=category,
+                                label=doc_name,
+                            )
+                        if pdf_bytes:
+                            is_html = b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower()
+                            logger.warning(
+                                f"[GOV_SCRAPER] _intercept_pdf_from_element para "
+                                f"selector {selector} retornou {len(pdf_bytes)} bytes "
+                                f"{'(HTML, não PDF)' if is_html else '(sem header %PDF-)'}  — a tentar próximo"
+                            )
+                except Exception as el_err:
+                    logger.warning(
+                        f"[GOV_SCRAPER] Selector {selector} falhou: "
+                        f"{type(el_err).__name__}"
                     )
-                    if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
-                        return ScraperDocument(
-                            filename=safe_filename,
-                            content_bytes=pdf_bytes,
-                            content_type="application/pdf",
-                            category=category,
-                            label=doc_name,
-                        )
-                    if pdf_bytes:
-                        is_html = b'<html' in pdf_bytes[:500].lower() or b'<!doctype' in pdf_bytes[:500].lower()
-                        logger.warning(
-                            f"[GOV_SCRAPER] _intercept_pdf_from_element para "
-                            f"selector {selector} retornou {len(pdf_bytes)} bytes "
-                            f"{'(HTML, não PDF)' if is_html else '(sem header %PDF-)'}  — a tentar próximo"
-                        )
-            except Exception as el_err:
-                logger.warning(
-                    f"[GOV_SCRAPER] Selector {selector} falhou: "
-                    f"{type(el_err).__name__}"
-                )
-                continue
-    except Exception as e:
-        logger.warning(
-            f"[GOV_SCRAPER] Estratégia 0 (comprovativo) falhou: "
-            f"{type(e).__name__}"
-        )
+                    continue
+        except Exception as e:
+            logger.warning(
+                f"[GOV_SCRAPER] Estratégia 0 (comprovativo) falhou: "
+                f"{type(e).__name__}"
+            )
 
     # ── Estratégia 1: Procurar links/botões de download direto ──
     try:
