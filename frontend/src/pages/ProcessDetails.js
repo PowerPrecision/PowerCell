@@ -1569,12 +1569,7 @@ const ProcessDetails = () => {
         processUpdateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
       }
 
-      // Credit data: alinhado com can_act_as_intermediario do backend
-      // (INTERMEDIARIO, DIRETOR, CEO, ADMIN, ADMINISTRATIVO)
-      // Removida restrição de status — o backend já valida o role
-      if (hasAnyRole(user, ["intermediario", "admin", "diretor", "ceo", "administrativo"])) {
-        processUpdateData.credit_data = cleanCreditDataForSubmit(creditData);
-      }
+      processUpdateData.credit_data = cleanCreditDataForSubmit(creditData);
 
       if (!hasRole(user, "cliente") && statusToSave !== process.status) {
         processUpdateData.status = statusToSave;
