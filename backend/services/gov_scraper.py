@@ -453,11 +453,18 @@ async def _apply_stealth(page_or_context):
 async def fetch_financas_documents(
     nif: str,
     password: str,
+    process_id: Optional[str] = None,
 ) -> ScraperResult:
     """
     Obtém documentos do Portal das Finanças (IRS + Nota de Liquidação).
 
     v2: Inclui retry com backoff e stealth.
+
+    Args:
+        nif: NIF do cliente
+        password: Password do Portal das Finanças
+        process_id: ID do processo (necessário para fluxo MFA —
+            permite ao scraper atualizar o job e pollar o Redis)
     """
     # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
     if os.environ.get('ENVIRONMENT', 'dev') != 'production':
@@ -474,7 +481,7 @@ async def fetch_financas_documents(
     for attempt in range(MAX_RETRIES + 1):
         try:
             result = await asyncio.wait_for(
-                _financas_scraper_inner(nif, password),
+                _financas_scraper_inner(nif, password, process_id=process_id),
                 timeout=MAX_SCRAPER_DURATION,
             )
             if result.success:
@@ -517,7 +524,7 @@ async def fetch_financas_documents(
     return last_result or ScraperResult(success=False, error="unknown", step_failed="all_retries_exhausted")
 
 
-async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
+async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[str] = None) -> ScraperResult:
     """Lógica interna do scraper das Finanças com stealth e screenshot-on-failure."""
     from playwright.async_api import async_playwright
 
@@ -704,8 +711,13 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                     "loginform" in current_url_lower
                     or "unauthlogin" in current_url_lower
                     or "login" in current_url_lower
+                    or "cmdchallenge" in current_url_lower
                 )
             )
+            # Também verificar se estamos noutra página de autenticação/MFA
+            if not still_on_login:
+                still_on_login = any(kw in current_url_lower for kw in ("mfa", "otp", "autenticacao"))
+
             if still_on_login:
                 logger.warning(f"[GOV_SCRAPER] Ainda na página de login (NIF {masked_nif})")
                 screenshot_b64 = await _take_screenshot(page, "still_on_login")
@@ -715,29 +727,235 @@ async def _financas_scraper_inner(nif: str, password: str) -> ScraperResult:
                     "text=Chave Móvel Digital",
                     "text=código de segurança",
                     "text=autenticação multi-fator",
+                    "text=código",
+                    "text=Introduza o código",
+                    "text=Verificação de segurança",
+                    "text=código de verificação",
                     "input[placeholder*='código']",
                     "input[placeholder*='digito']",
+                    "input[name*='code']",
+                    "input[name*='otp']",
+                    "input[name*='cmdPin']",
+                    "input[type='number']",
+                    "input[type='tel'][maxlength]",
+                    "#cmdPin",
                 ]
+                mfa_detected = False
                 for sel in mfa_selectors:
                     try:
                         mfa_el = page.locator(sel).first
                         if await mfa_el.is_visible(timeout=2000):
-                            logger.warning(f"[GOV_SCRAPER] MFA/Chave Móvel Digital detectada")
-                            return ScraperResult(
-                                success=False,
-                                error="mfa_requerido",
-                                step_failed="check_login",
-                                screenshot_b64=screenshot_b64,
-                            )
+                            mfa_detected = True
+                            logger.warning(f"[GOV_SCRAPER] MFA/Chave Móvel Digital detectada via {sel}")
+                            break
                     except Exception:
                         continue
 
-                return ScraperResult(
-                    success=False,
-                    error="credenciais_invalidas",
-                    step_failed="check_login",
-                    screenshot_b64=screenshot_b64,
-                )
+                # Fallback genérico: input de texto visível que não é password
+                if not mfa_detected:
+                    try:
+                        all_text_inputs = page.locator(
+                            "input[type='text'], input[type='number'], "
+                            "input[type='tel'], input:not([type])"
+                        )
+                        input_count = await all_text_inputs.count()
+                        for i in range(input_count):
+                            try:
+                                inp = all_text_inputs.nth(i)
+                                if not await inp.is_visible(timeout=1000):
+                                    continue
+                                inp_type = (await inp.get_attribute("type") or "").lower()
+                                inp_name = (await inp.get_attribute("name") or "").lower()
+                                if inp_type == "password":
+                                    continue
+                                if any(skip in inp_name for skip in ("username", "user", "nif", "email")):
+                                    continue
+                                mfa_detected = True
+                                logger.info(f"[GOV_SCRAPER] MFA detetado via fallback: input #{i}")
+                                break
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+
+                if mfa_detected and process_id:
+                    # ── MFA DETETADO: Entrar em modo de espera ──
+                    from services.mfa_cache import set_mfa_status, get_mfa_code, delete_mfa_code
+
+                    logger.info(
+                        f"[GOV_SCRAPER] MFA Finanças: a sinalizar "
+                        f"awaiting_mfa para processo {process_id}"
+                    )
+                    await set_mfa_status(process_id, "awaiting_mfa")
+
+                    # Loop de espera: pollar Redis a cada 2s, máximo 120s
+                    mfa_code = None
+                    for poll_attempt in range(60):
+                        await asyncio.sleep(2)
+                        mfa_code = await get_mfa_code(process_id)
+                        if mfa_code:
+                            logger.info(
+                                f"[GOV_SCRAPER] Código MFA recebido para "
+                                f"processo {process_id} após {poll_attempt * 2}s"
+                            )
+                            break
+
+                    if not mfa_code:
+                        logger.warning(
+                            f"[GOV_SCRAPER] Timeout MFA: código não recebido "
+                            f"para processo {process_id} após 120s"
+                        )
+                        screenshot_b64 = await _take_screenshot(page, "mfa_timeout")
+                        return ScraperResult(
+                            success=False,
+                            error="mfa_timeout",
+                            step_failed="mfa_waiting",
+                            screenshot_b64=screenshot_b64,
+                        )
+
+                    # ── Código MFA recebido: preencher no browser ──
+                    logger.info(
+                        f"[GOV_SCRAPER] A preencher código MFA ({len(mfa_code)} "
+                        f"dígitos) nas Finanças para processo {process_id}"
+                    )
+                    try:
+                        mfa_input_selectors = [
+                            "#cmdPin",
+                            "input[name*='cmdPin']",
+                            "input[placeholder*='código']",
+                            "input[placeholder*='Código']",
+                            "input[placeholder*='digito']",
+                            "input[name*='code']",
+                            "input[name*='otp']",
+                            "input[type='tel'][maxlength]",
+                            "input[type='text'][maxlength]",
+                            "input[type='number']",
+                        ]
+                        mfa_input = None
+                        for inp_sel in mfa_input_selectors:
+                            try:
+                                inp_el = page.locator(inp_sel).first
+                                if await inp_el.is_visible(timeout=2000):
+                                    mfa_input = inp_el
+                                    logger.info(f"[GOV_SCRAPER] Input MFA encontrado via: {inp_sel}")
+                                    break
+                            except Exception:
+                                continue
+
+                        if not mfa_input:
+                            # Fallback: qualquer input visível
+                            all_inputs = page.locator("input[type='text'], input[type='tel'], input[type='number']").all()
+                            for inp in all_inputs:
+                                try:
+                                    if await inp.is_visible(timeout=1000):
+                                        mfa_input = inp
+                                        break
+                                except Exception:
+                                    continue
+
+                        if mfa_input:
+                            await mfa_input.click()
+                            await mfa_input.fill("")
+                            await mfa_input.type(mfa_code, delay=80)
+                            logger.info(f"[GOV_SCRAPER] Código MFA preenchido ({len(mfa_code)} dígitos)")
+                            await asyncio.sleep(0.5)
+
+                            # Submeter MFA
+                            mfa_submit_selectors = [
+                                "button:has-text('Autenticar')",
+                                "button:has-text('Verificar')",
+                                "button:has-text('Validar')",
+                                "button:has-text('Confirmar')",
+                                "button:has-text('Submeter')",
+                                "button[type='submit']",
+                                "#submitBtn",
+                                "#btnAutenticar",
+                                "input[type='submit']",
+                            ]
+                            submitted = False
+                            for btn_sel in mfa_submit_selectors:
+                                try:
+                                    btn_el = page.locator(btn_sel).first
+                                    if await btn_el.is_visible(timeout=2000):
+                                        await btn_el.click()
+                                        submitted = True
+                                        logger.info(f"[GOV_SCRAPER] Botão MFA clicado: {btn_sel}")
+                                        break
+                                except Exception:
+                                    continue
+
+                            if not submitted:
+                                await mfa_input.press("Enter")
+                                logger.info("[GOV_SCRAPER] MFA submetido via Enter")
+
+                            # Aguardar navegação
+                            try:
+                                await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            except Exception:
+                                pass
+
+                            # Limpar código MFA do Redis
+                            await delete_mfa_code(process_id)
+
+                            # Verificar se login foi bem-sucedido após MFA
+                            await asyncio.sleep(3)
+                            current_url_lower = page.url.lower()
+                            still_on_mfa = (
+                                any(kw in current_url_lower for kw in ("login", "autenticacao", "mfa", "otp"))
+                                or ("acesso.gov.pt" in current_url_lower and "dashboard" not in current_url_lower and "financas" not in current_url_lower)
+                            )
+                            if still_on_mfa:
+                                logger.warning("[GOV_SCRAPER] Após MFA, ainda na página de login — código pode estar incorreto")
+                                screenshot_b64 = await _take_screenshot(page, "mfa_incorrect")
+                                return ScraperResult(
+                                    success=False,
+                                    error="mfa_codigo_incorreto",
+                                    step_failed="mfa_submit",
+                                    screenshot_b64=screenshot_b64,
+                                )
+
+                            logger.info(f"[GOV_SCRAPER] MFA aceito com sucesso para processo {process_id}!")
+                            # Login OK após MFA — continuar extração
+
+                        else:
+                            logger.error("[GOV_SCRAPER] Nenhum input MFA encontrado na página")
+                            screenshot_b64 = await _take_screenshot(page, "mfa_no_input")
+                            return ScraperResult(
+                                success=False,
+                                error="mfa_no_input",
+                                step_failed="mfa_input",
+                                screenshot_b64=screenshot_b64,
+                            )
+
+                    except Exception as mfa_err:
+                        logger.error(f"[GOV_SCRAPER] Erro ao preencher MFA: {type(mfa_err).__name__}: {mfa_err}")
+                        screenshot_b64 = await _take_screenshot(page, "mfa_fill_error")
+                        return ScraperResult(
+                            success=False,
+                            error="mfa_error",
+                            step_failed="mfa_fill",
+                            screenshot_b64=screenshot_b64,
+                        )
+
+                elif mfa_detected and not process_id:
+                    # MFA detetado mas sem process_id — não podemos esperar
+                    logger.warning("[GOV_SCRAPER] MFA detetado mas sem process_id — não é possível aguardar código")
+                    screenshot_b64 = await _take_screenshot(page, "mfa_no_process_id")
+                    return ScraperResult(
+                        success=False,
+                        error="mfa_requerido",
+                        step_failed="check_login",
+                        screenshot_b64=screenshot_b64,
+                    )
+
+                # Se não foi MFA, é credenciais inválidas
+                if not mfa_detected:
+                    return ScraperResult(
+                        success=False,
+                        error="credenciais_invalidas",
+                        step_failed="check_login",
+                        screenshot_b64=screenshot_b64,
+                    )
 
             login_success = True
             logger.info(f"[GOV_SCRAPER] Login bem-sucedido para NIF {masked_nif}! URL: {page.url[:80]}")
@@ -2004,15 +2222,26 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                 )
 
             # Verificar URL — deteção genérica de página de login/MFA/OTP
+            # Incluindo acesso.gov.pt (CMD challenge, etc.) que pode não ter
+            # "login" na URL (ex: cmdchallenge.jsp)
             current_url = page.url.lower()
-            if any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp")):
+            still_on_auth = (
+                any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp"))
+                or "acesso.gov.pt" in current_url
+            )
+            if still_on_auth:
                 await asyncio.sleep(3)
                 current_url = page.url.lower()
-                if any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp")):
+                still_on_auth_2 = (
+                    any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp"))
+                    or "acesso.gov.pt" in current_url
+                )
+                if still_on_auth_2:
                     # Verificar MFA — se detetado, entrar em modo de espera
                     # v5: Selectors expandidos + fallback genérico de input
 
                     # Passo 1: Selectors específicos de texto/input MFA
+                    # Incluindo selectors para acesso.gov.pt CMD challenge
                     mfa_selectors = [
                         "text=Chave Móvel Digital",
                         "text=código de segurança",
@@ -2020,13 +2249,20 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                         "text=código",
                         "text=email",
                         "text=SMS",
+                        "text=Introduza o código",
+                        "text=Verificação de segurança",
+                        "text=código de verificação",
                         "input[placeholder*='código']",
                         "input[placeholder*='Código']",
+                        "input[placeholder*='digito']",
+                        "input[placeholder*='Dígito']",
                         "input[name*='code']",
                         "input[name*='token']",
                         "input[name*='otp']",
+                        "input[name*='cmdPin']",
                         "input[type='number']",
                         "input[type='tel'][maxlength]",
+                        "#cmdPin",
                     ]
                     mfa_detected = False
                     for sel in mfa_selectors:
@@ -2128,9 +2364,14 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                         )
                         try:
                             # Procurar o input do código MFA
+                            # Incluindo selectors para acesso.gov.pt CMD challenge
                             mfa_input_selectors = [
+                                "#cmdPin",
+                                "input[name*='cmdPin']",
                                 "input[placeholder*='código']",
                                 "input[placeholder*='Código']",
+                                "input[placeholder*='digito']",
+                                "input[placeholder*='Dígito']",
                                 "input[name*='code']",
                                 "input[name*='otp']",
                                 "input[type='tel'][maxlength]",
@@ -2180,13 +2421,17 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                                 await asyncio.sleep(0.5)
 
                                 # Procurar botão de submissão do MFA
+                                # Incluindo selectors para acesso.gov.pt CMD
                                 mfa_submit_selectors = [
+                                    "button:has-text('Autenticar')",
                                     "button:has-text('Verificar')",
                                     "button:has-text('Validar')",
                                     "button:has-text('Confirmar')",
                                     "button:has-text('Submeter')",
+                                    "button:has-text('Enviar')",
                                     "button[type='submit']",
                                     "#submitBtn",
+                                    "#btnAutenticar",
                                     "input[type='submit']",
                                 ]
                                 submitted = False
@@ -2224,7 +2469,11 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                                 # Verificar se login foi bem-sucedido após MFA
                                 await asyncio.sleep(3)
                                 current_url = page.url.lower()
-                                if any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp")):
+                                still_on_mfa = (
+                                    any(kw in current_url for kw in ("login", "autenticacao", "mfa", "otp"))
+                                    or ("acesso.gov.pt" in current_url and "dashboard" not in current_url and "seg-social" not in current_url)
+                                )
+                                if still_on_mfa:
                                     # MFA incorreto ou falhou
                                     logger.warning(
                                         f"[GOV_SCRAPER] Após MFA, ainda na página "
