@@ -508,6 +508,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
     }
 
     setLoading(true);
+    let startedAsyncJob = false;
     try {
       const token = localStorage.getItem('portal_token');
       if (!token) throw new Error('Sessão expirada.');
@@ -559,7 +560,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
           // Fallback: usar process_id como job_id
           setScraperJobId(data.process_id);
         }
-        setLoading(true);
+        startedAsyncJob = true;
         // O useEffect de polling vai verificar o estado automaticamente
       } else if (res.ok && data.success === false) {
         // App-level error returned as 200 + success:false (scraper unavailable, etc.)
@@ -590,14 +591,22 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
     } catch (err) {
       setError(err.message || 'Erro de ligação. Tente novamente.');
     } finally {
-      setLoading(false);
+      // NÃO fazer setLoading(false) se iniciámos um job assíncrono —
+      // o polling useEffect gere o estado loading daqui em diante.
+      if (!startedAsyncJob) {
+        setLoading(false);
+      }
     }
   };
 
   return (
     <ClientOnly>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent title={sourceLabel} description={`Obter documentos do ${sourceLabel}`} className="sm:max-w-md">
+      <Dialog open={open} onOpenChange={(newOpen) => {
+        // Impedir fecho acidental do diálogo durante polling do scraper
+        if (!newOpen && scraperJobId && !success) return;
+        onOpenChange(newOpen);
+      }}>
+        <DialogContent title={sourceLabel} description={`Obter documentos do ${sourceLabel}`} className="sm:max-w-md" onInteractOutside={(e) => { if (scraperJobId && !success) e.preventDefault(); }}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {sourceIcon}
