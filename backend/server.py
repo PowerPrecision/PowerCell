@@ -438,12 +438,24 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def general_exception_handler(request: Request, exc: Exception):
     """
     Handler para excepções não tratadas.
-    Regista o erro e retorna 500.
+    Regista o erro, imprime traceback completo na consola e retorna 500.
     Inclui headers CORS para garantir que erros não bloqueiam o frontend.
     """
+    exception_type = type(exc).__name__
+    import traceback as _tb
+    full_tb = _tb.format_exc()
+
+    # === SEMPRE imprimir traceback completo na consola ===
+    logger.error(
+        f"!!! EXCEPÇÃO NÃO TRATADA: {exception_type}: {exc}\n"
+        f"    Path: {request.method} {request.url.path}\n"
+        f"    Traceback completo:\n{full_tb}"
+    )
+
+    # Registar no sistema de logs do MongoDB
     try:
         from services.system_error_logger import system_error_logger
-        
+
         await system_error_logger.log_error(
             error_type="unhandled_exception",
             message=str(exc),
@@ -451,41 +463,33 @@ async def general_exception_handler(request: Request, exc: Exception):
             details={
                 "path": str(request.url.path),
                 "method": request.method,
-                "exception_type": type(exc).__name__,
+                "exception_type": exception_type,
+                "traceback": full_tb,
             },
             severity="critical",
             request_path=str(request.url.path)
         )
     except Exception as log_error:
-        logger.error(f"Erro ao registar excepção: {type(log_error).__name__}: {log_error}")
+        logger.error(f"Erro ao registar excepção no system_error_logger: {type(log_error).__name__}: {log_error}")
 
-    logger.exception(f"Unhandled exception: {exc}")
-    
     # Obter origin do request para CORS
     origin = request.headers.get("origin", "*")
-    
-    # Construir detalhe do erro com info de debug (sem expor stack trace)
+
+    # Construir detalhe do erro
     error_detail = "Erro interno do servidor"
-    exception_type = type(exc).__name__
-    
-    # Incluir tipo de excepção para facilitar diagnóstico
-    # (não incluímos str(exc) para evitar leak de info sensível)
     if exception_type not in ("HTTPException", "ValidationError", "RequestValidationError"):
         error_detail = f"Erro interno do servidor [{exception_type}]"
-    
-    # === DIAGNÓSTICO TEMPORÁRIO: Para TypeErrors, incluir traceback e linha exata ===
-    if exception_type == "TypeError":
-        import traceback as _tb
-        full_tb = _tb.format_exc()
-        logger.error(f"!!! TypeError DETALHADO:\n{full_tb}")
+
+    # Em modo de desenvolvimento, incluir traceback na resposta para debug
+    is_dev = os.getenv("ENVIRONMENT", "dev") == "dev"
+    if is_dev:
         # Extrair a linha relevante do traceback
         error_line = ""
         for line in full_tb.split('\n'):
             if '.py"' in line or '.py' in line:
                 error_line = line.strip()
-        # Incluir traceback parcial na resposta para diagnóstico
-        error_detail = f"TypeError: {str(exc)} | Linha: {error_line} | TB: {full_tb[-800:]}"
-    
+        error_detail = f"{exception_type}: {str(exc)} | Linha: {error_line} | TB: {full_tb[-800:]}"
+
     # Verificar se a origin é permitida
     allowed_origin = None
     if origin in CORS_ORIGINS:
@@ -496,14 +500,14 @@ async def general_exception_handler(request: Request, exc: Exception):
             if re.match(pattern, origin):
                 allowed_origin = origin
                 break
-    
+
     headers = {}
     if allowed_origin:
         headers = {
             "Access-Control-Allow-Origin": allowed_origin,
             "Access-Control-Allow-Credentials": "true",
         }
-    
+
     return JSONResponse(
         status_code=500,
         content={"detail": error_detail},
