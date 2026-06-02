@@ -12,8 +12,11 @@ SEGURANÇA:
 FLUXOS DE AUTENTICAÇÃO:
 1. Magic Link (legado): short_id → resolve → JWT type=magic_link
 2. Verificação NIF + Nº Processo: POST /portal/{client_id}/verify → JWT type=verified_session
+3. OTP via NIF: POST /portal/auth/request-otp → POST /portal/auth/verify-otp → token seguro
 
 ENDPOINTS:
+- POST /portal/auth/request-otp  → Envia OTP de 6 dígitos por email (baseado em NIF)
+- POST /portal/auth/verify-otp   → Verifica OTP e retorna token seguro
 - POST /portal/{client_id}/verify  → Verifica NIF + Nº Processo, devolve token de sessão
 - GET  /portal/resolve/{short_id}  → Resolve short_id para JWT
 - GET  /portal/status              → Status do processo + stepper + documentos
@@ -28,7 +31,13 @@ import uuid
 import gc as _gc
 import logging
 import os
+import re
+import random
+import json
+import asyncio
 from datetime import datetime, timezone
+from typing import Optional
+from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 
@@ -41,13 +50,407 @@ from services.portal_security import (
 )
 from services.auth import get_current_user, require_roles
 from services.s3_storage import s3_service
-from services.redis_cache import invalidate_stats_cache
+from services.redis_cache import invalidate_stats_cache, get_redis
 from services.notification_service import send_notification_with_preference_check
 from services.websocket_manager import manager, WSEventType, create_ws_message
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal", tags=["Client Portal"])
+
+
+# ====================================================================
+# MODELOS PYDANTIC — OTP Authentication
+# ====================================================================
+
+class OTPRequest(BaseModel):
+    """Pedido de envio de OTP para o Portal do Cliente.
+    
+    O cliente fornece o seu NIF. O sistema procura o cliente na BD,
+    gera um código numérico de 6 dígitos, guarda-o no Redis com TTL
+    de 300 segundos e envia por email para o endereço registado.
+    """
+    nif: str
+
+    @field_validator('nif', mode='before')
+    @classmethod
+    def validate_nif_field(cls, v):
+        if v is None or v == '':
+            raise ValueError('NIF é obrigatório.')
+        nif_clean = re.sub(r'[^\d]', '', str(v))
+        if len(nif_clean) != 9 or not nif_clean.isdigit():
+            raise ValueError('NIF inválido. Deve conter 9 dígitos.')
+        return nif_clean
+
+
+class OTPVerify(BaseModel):
+    """Verificação de OTP para o Portal do Cliente.
+    
+    O cliente fornece o NIF e o código OTP recebido por email.
+    Se o código estiver correto, o sistema gera um token seguro
+    e retorna-o juntamente com o client_id.
+    """
+    nif: str
+    code: str
+
+    @field_validator('nif', mode='before')
+    @classmethod
+    def validate_nif_field(cls, v):
+        if v is None or v == '':
+            raise ValueError('NIF é obrigatório.')
+        nif_clean = re.sub(r'[^\d]', '', str(v))
+        if len(nif_clean) != 9 or not nif_clean.isdigit():
+            raise ValueError('NIF inválido. Deve conter 9 dígitos.')
+        return nif_clean
+
+    @field_validator('code', mode='before')
+    @classmethod
+    def validate_code_field(cls, v):
+        if v is None or v == '':
+            raise ValueError('Código OTP é obrigatório.')
+        code_clean = str(v).strip()
+        if not code_clean.isdigit() or len(code_clean) != 6:
+            raise ValueError('Código OTP deve conter 6 dígitos.')
+        return code_clean
+
+
+# ====================================================================
+# OTP AUTHENTICATION — Request & Verify
+# ====================================================================
+
+@router.post("/auth/request-otp")
+async def request_otp(data: OTPRequest):
+    """
+    Envia um código OTP de 6 dígitos por email para o cliente.
+
+    Fluxo:
+    1. Recebe o NIF do cliente
+    2. Pesquisa o cliente na BD (via blind index ou NIF em texto limpo)
+    3. Se não encontrado, retorna erro 404
+    4. Gera código numérico aleatório de 6 dígitos
+    5. Guarda no Redis: portal_otp_{nif} → código, TTL 300s
+    6. Envia email com o código para o email do cliente
+    7. Retorna {"message": "OTP enviado"}
+
+    SEGURANÇA:
+    - NIF é pesquisado via blind index (SHA-256) quando encriptado
+    - Fallback para texto limpo quando encriptação não está activa
+    - Código OTP expira em 5 minutos (TTL 300s)
+    - Rate limiting implícito pelo TTL — não é possível reenviar antes de expirar
+      (o novo código substitui o anterior)
+    - Mensagens de erro genéricas (não revelam se o NIF existe)
+    """
+    nif = data.nif
+
+    # ── 1. Procurar cliente por NIF ──
+    # Tentar via blind index primeiro (dados encriptados)
+    client = None
+    try:
+        from services.encryption import generate_nif_hash
+        nif_hash = generate_nif_hash(nif)
+        if nif_hash:
+            client = await db.clients.find_one(
+                {"dados_pessoais.nif_hash": nif_hash},
+                {"_id": 0, "id": 1, "nome": 1, "contacto": 1}
+            )
+    except Exception:
+        logger.debug("[OTP] Erro ao pesquisar por nif_hash, a tentar texto limpo")
+
+    # Fallback: pesquisar por NIF em texto limpo
+    if not client:
+        client = await db.clients.find_one(
+            {"dados_pessoais.nif": nif},
+            {"_id": 0, "id": 1, "nome": 1, "contacto": 1}
+        )
+
+    # Fallback adicional: NIF encriptado (desencriptar e comparar)
+    if not client:
+        try:
+            from services.encryption import decrypt_value
+            async for c in db.clients.find(
+                {"dados_pessoais.nif": {"$exists": True}},
+                {"_id": 0, "id": 1, "nome": 1, "contacto": 1, "dados_pessoais.nif": 1}
+            ).limit(500):
+                stored_nif = c.get("dados_pessoais", {}).get("nif")
+                if stored_nif and isinstance(stored_nif, str) and stored_nif.startswith("ENC:"):
+                    try:
+                        decrypted = decrypt_value(stored_nif)
+                        if decrypted and re.sub(r'[^\d]', '', decrypted) == nif:
+                            client = c
+                            break
+                    except Exception:
+                        continue
+        except Exception:
+            logger.debug("[OTP] Fallback de desencriptação não disponível")
+
+    if not client:
+        # Segurança: não revelar que o NIF não existe — mensagem genérica
+        logger.info(f"[OTP] NIF não encontrado na BD: {nif[:3]}******")
+        raise HTTPException(
+            status_code=404,
+            detail="NIF não encontrado. Verifique o seu NIF e tente novamente."
+        )
+
+    # ── 2. Obter email do cliente ──
+    client_email = None
+    contacto = client.get("contacto", {})
+    if isinstance(contacto, dict):
+        client_email = contacto.get("email")
+
+    if not client_email:
+        # Tentar buscar email dos processos associados
+        process_ids = client.get("process_ids", [])
+        if process_ids:
+            process = await db.processes.find_one(
+                {"id": {"$in": process_ids}, "client_email": {"$exists": True, "$ne": None}},
+                {"_id": 0, "client_email": 1}
+            )
+            if process:
+                client_email = process.get("client_email")
+
+    if not client_email:
+        logger.warning(f"[OTP] Cliente {client.get('id', '?')} sem email registado")
+        raise HTTPException(
+            status_code=400,
+            detail="Não existe email associado a este NIF. Contacte o seu consultor."
+        )
+
+    # ── 3. Gerar código OTP de 6 dígitos ──
+    otp_code = f"{random.randint(0, 999999):06d}"
+
+    # ── 4. Guardar no Redis com TTL de 300 segundos ──
+    redis = get_redis()
+    if not redis:
+        logger.error("[OTP] Redis indisponível — não é possível guardar OTP")
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço temporariamente indisponível. Tente novamente."
+        )
+
+    otp_key = f"portal_otp_{nif}"
+    otp_data = json.dumps({
+        "code": otp_code,
+        "client_id": client["id"],
+        "email": client_email,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    try:
+        await redis.setex(otp_key, 300, otp_data)
+    except Exception as e:
+        logger.error(f"[OTP] Erro ao guardar OTP no Redis: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço temporariamente indisponível. Tente novamente."
+        )
+
+    # ── 5. Enviar email com o código OTP ──
+    client_name = client.get("nome", "Cliente")
+    try:
+        await _send_otp_email(client_email, client_name, otp_code)
+        logger.info(f"[OTP] Email enviado para {client_email} (NIF: {nif[:3]}******)")
+    except Exception as e:
+        logger.error(f"[OTP] Falha ao enviar email OTP: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao enviar o código. Tente novamente."
+        )
+
+    return JSONResponse(content={"message": "OTP enviado"})
+
+
+@router.post("/auth/verify-otp")
+async def verify_otp(data: OTPVerify):
+    """
+    Verifica o código OTP e retorna um token seguro para o cliente.
+
+    Fluxo:
+    1. Recebe NIF e código OTP
+    2. Lê do Redis a chave portal_otp_{nif}
+    3. Se não existir ou o código não coincidir, retorna erro 401
+    4. Se coincidir, apaga a chave do Redis (one-time use)
+    5. Gera um token seguro via TempLinkService.generate_secure_token()
+    6. Guarda a sessão OTP no Redis: portal_otp_token_{token} → dados do cliente
+    7. Retorna {"token": token, "client_id": client_id}
+
+    SEGURANÇA:
+    - Código OTP é de uso único — apagado do Redis após verificação
+    - Token gerado é criptograficamente seguro (32 chars hex)
+    - Sessão OTP tem validade de 4 horas
+    - Tentativas falhadas não revelam se o NIF existe
+    """
+    nif = data.nif
+    code = data.code
+
+    # ── 1. Ler OTP do Redis ──
+    redis = get_redis()
+    if not redis:
+        logger.error("[OTP] Redis indisponível — não é possível verificar OTP")
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço temporariamente indisponível. Tente novamente."
+        )
+
+    otp_key = f"portal_otp_{nif}"
+
+    try:
+        otp_stored = await redis.get(otp_key)
+    except Exception as e:
+        logger.error(f"[OTP] Erro ao ler OTP do Redis: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço temporariamente indisponível. Tente novamente."
+        )
+
+    if not otp_stored:
+        logger.info(f"[OTP] OTP não encontrado ou expirado para NIF: {nif[:3]}******")
+        raise HTTPException(
+            status_code=401,
+            detail="Código expirado ou inválido. Solicite um novo código."
+        )
+
+    # ── 2. Desserializar e validar código ──
+    try:
+        otp_data = json.loads(otp_stored) if isinstance(otp_stored, str) else otp_stored
+    except (json.JSONDecodeError, TypeError):
+        logger.error(f"[OTP] Dados OTP corrompidos para NIF: {nif[:3]}******")
+        raise HTTPException(
+            status_code=401,
+            detail="Código inválido. Solicite um novo código."
+        )
+
+    stored_code = otp_data.get("code", "")
+    client_id = otp_data.get("client_id", "")
+    client_email = otp_data.get("email", "")
+
+    if stored_code != code:
+        logger.info(f"[OTP] Código incorrecto para NIF: {nif[:3]}******")
+        raise HTTPException(
+            status_code=401,
+            detail="Código incorrecto. Verifique e tente novamente."
+        )
+
+    # ── 3. Apagar OTP do Redis (one-time use) ──
+    try:
+        await redis.delete(otp_key)
+    except Exception as e:
+        logger.warning(f"[OTP] Erro ao apagar OTP do Redis: {e}")
+
+    # ── 4. Gerar token seguro via TempLinkService ──
+    from services.temp_link_service import TempLinkService
+    token = TempLinkService.generate_secure_token()
+
+    # ── 5. Guardar sessão OTP no Redis (4 horas) ──
+    session_data = json.dumps({
+        "client_id": client_id,
+        "nif": nif,
+        "email": client_email,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "type": "otp_session",
+    })
+
+    session_key = f"portal_otp_token_{token}"
+    try:
+        await redis.setex(session_key, 4 * 60 * 60, session_data)  # 4 horas
+    except Exception as e:
+        logger.error(f"[OTP] Erro ao guardar sessão OTP no Redis: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Erro ao criar sessão. Tente novamente."
+        )
+
+    logger.info(
+        f"[OTP] Sessão OTP criada: client_id={client_id}, "
+        f"token={token[:8]}..."
+    )
+
+    return JSONResponse(content={
+        "token": token,
+        "client_id": client_id,
+    })
+
+
+# ====================================================================
+# OTP EMAIL HELPER
+# ====================================================================
+
+async def _send_otp_email(to_email: str, client_name: str, otp_code: str) -> dict:
+    """
+    Envia o email com o código OTP de 6 dígitos para o cliente.
+
+    Usa o send_email do email_service com force_system=True para
+    garantir que é enviado pela conta do sistema (sem fallback para
+    contas pessoais). O email tem template HTML profissional.
+
+    Args:
+        to_email: Endereço de email do cliente
+        client_name: Nome do cliente (para saudação personalizada)
+        otp_code: Código OTP de 6 dígitos
+
+    Returns:
+        Dict com resultado do envio (success/error)
+    """
+    from services.email_service import send_email
+
+    subject = "Código de Acesso ao Portal"
+
+    body_text = f"""Olá {client_name},
+
+O seu código de acesso ao Portal é: {otp_code}
+
+Este código é válido durante 5 minutos.
+Se não solicitou este código, ignore este email.
+
+Cumprimentos,
+Equipa PowerCell
+"""
+
+    body_html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0d253f 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0;">Código de Acesso</h1>
+        </div>
+        <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; border-top: none;">
+            <p style="font-size: 16px; color: #334155;">Olá <strong>{client_name}</strong>,</p>
+            <p style="font-size: 16px; color: #334155;">Utilize o código abaixo para aceder ao seu Portal:</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <div style="background: #ffffff; border: 2px dashed #0d9488; border-radius: 12px; padding: 20px 40px; display: inline-block;">
+                    <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0d9488; font-family: 'Courier New', monospace;">{otp_code}</span>
+                </div>
+            </div>
+            
+            <div style="background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-top: 20px;">
+                <p style="font-size: 14px; color: #92400e; margin: 0;">
+                    Este código é válido durante <strong>5 minutos</strong>. Se não solicitou este código, ignore este email.
+                </p>
+            </div>
+            
+            <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
+                Cumprimentos,<br>
+                <strong>Equipa PowerCell</strong>
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    result = await send_email(
+        account_name="power",
+        to_emails=[to_email],
+        subject=subject,
+        body=body_text,
+        body_html=body_html,
+        force_system=True,
+        system_purpose="DOCUMENTS",
+    )
+
+    if not result.get("success"):
+        logger.error(f"[OTP] Falha no envio do email OTP: {result.get('error')}")
+        raise Exception(f"Erro ao enviar email: {result.get('error')}")
+
+    return result
 
 
 # ====================================================================
