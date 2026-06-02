@@ -2358,6 +2358,23 @@ async def move_process_kanban(
             logger.error(f"Erro ao sincronizar com Trello: {e}")
             # Não falhar a operação por erro no Trello
     
+    # === GATILHO: Fila de espera ao mover para estado terminal ===
+    # Se o processo foi atribuído a um indexador e moveu para concluídos/desistências,
+    # o indexador libertou um slot — verificar se há processos na fila_espera.
+    if new_status in ["concluidos", "desistencias"]:
+        try:
+            from services.process_assignment import check_waitlist_for_indexer
+            import asyncio as _asyncio
+            assigned_indexer_id = process.get("assigned_indexacao_id")
+            if assigned_indexer_id:
+                _asyncio.create_task(check_waitlist_for_indexer(assigned_indexer_id))
+                logger.info(
+                    f"[KANBAN-MOVE] Gatilho de fila de espera disparado para "
+                    f"indexador {assigned_indexer_id} (processo {process_id} → {new_status})"
+                )
+        except Exception as waitlist_err:
+            logger.warning(f"[KANBAN-MOVE] Erro ao verificar fila de espera: {waitlist_err}")
+    
     return {
         "message": "Processo movido com sucesso", 
         "new_status": new_status,
@@ -2687,6 +2704,33 @@ async def mark_process_indexed(
         f"[INDEXACAO] Processo {process_ref} marcado como indexado por {user.get('email')}. "
         f"Notificações enviadas para {len(assigned_ids)} utilizadores."
     )
+    
+    # ── Gatilho: Verificar fila de espera para o indexador ──
+    # Quando o indexador marca is_indexed=true, liberta um slot na sua lista.
+    # Verificar se há processos na fila_espera que possam ser atribuídos.
+    try:
+        from services.process_assignment import check_waitlist_for_indexer
+        import asyncio
+        assigned_indexer_id = process.get("assigned_indexacao_id")
+        if assigned_indexer_id:
+            asyncio.create_task(check_waitlist_for_indexer(assigned_indexer_id))
+            logger.info(
+                f"[INDEXACAO] Gatilho de fila de espera disparado para indexador {assigned_indexer_id}"
+            )
+        else:
+            # Se não havia indexador atribuído, verificar todos os indexadores
+            # (pode haver fila e algum indexador com vaga agora)
+            from services.process_assignment import process_queue_for_freed_indexer
+            from services.role_query import build_deep_role_query
+            indexers_cursor = db.users.find(
+                build_deep_role_query({"is_active": True}, role="indexacao"),
+                {"_id": 0, "id": 1}
+            )
+            indexers = await indexers_cursor.to_list(length=100)
+            for idx in indexers:
+                asyncio.create_task(process_queue_for_freed_indexer(idx["id"]))
+    except Exception as waitlist_err:
+        logger.warning(f"[INDEXACAO] Erro ao verificar fila de espera: {waitlist_err}")
     
     return {
         "success": True,

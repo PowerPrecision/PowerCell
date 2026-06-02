@@ -363,6 +363,10 @@ async def _count_active_processes_for_indexer(indexer_id: str) -> int:
     Um processo conta como "ativo" para o indexador se:
     - Está atribuído a ele (assigned_indexacao_id == indexer_id)
     - O seu status NÃO está na lista de estados inativos (concluído, arquivo, etc.)
+    - A sua indexação NÃO está concluída (is_indexed != true)
+
+    Isto significa que quando o indexador marca is_indexed=true, esse processo
+    deixa de contar para a sua carga ativa, libertando vaga na sua lista.
 
     Args:
         indexer_id: ID do utilizador indexador
@@ -373,6 +377,10 @@ async def _count_active_processes_for_indexer(indexer_id: str) -> int:
     active_query = {
         "assigned_indexacao_id": indexer_id,
         "status": {"$nin": list(INDEXER_INACTIVE_STATUSES)},
+        "$or": [
+            {"is_indexed": {"$ne": True}},
+            {"is_indexed": {"$exists": False}},
+        ],
     }
 
     count = await db.processes.count_documents(active_query)
@@ -840,3 +848,61 @@ async def process_queue_for_freed_indexer(indexer_id: str) -> int:
         )
 
     return assigned_count
+
+
+# ==== GATILHO DE LIBERTAÇÃO DA FILA DE ESPERA ====
+
+async def check_waitlist_for_indexer(user_id: str) -> int:
+    """
+    Verifica se o indexador tem capacidade e puxa o processo mais antigo da fila.
+
+    Gatilho principal do motor de onboarding: quando um indexador completa
+    a indexação de um processo (is_indexed=true) ou um processo atribuído
+    a ele muda para estado terminal, esta função é invocada para verificar
+    se há processos na fila_espera que possam ser atribuídos.
+
+    Fluxo:
+    1. Verifica se o user_id tem role 'indexacao' (direto ou additional_roles).
+    2. Conta os processos ativos actuais do indexador.
+    3. Se < MAX_ACTIVE_PROCESSES_PER_INDEXER, procura o processo mais antigo
+       no estado 'fila_espera' (ordem de created_at ASC).
+    4. Se existir, atribui ao indexador, muda o estado para 'fase_documental'
+       e envia notificação por email e in-app.
+    5. Repete enquanto houver vagas e processos na fila.
+
+    Deve ser chamada (via asyncio.create_task para não bloquear):
+    - Em mark_process_indexed (is_indexed = true)
+    - Em move_process_kanban (status → terminal: concluidos, desistencias)
+    - Em update_process (status → terminal)
+
+    Args:
+        user_id: ID do utilizador indexador que libertou capacidade
+
+    Returns:
+        Número de processos da fila atribuídos ao indexador
+    """
+    from services.role_query import deep_role_filter
+
+    # Verificar se o utilizador tem role indexacao
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "role": 1, "additional_roles": 1})
+    if not user:
+        logger.debug(f"[WAITLIST] Utilizador {user_id} não encontrado")
+        return 0
+
+    user_role = user.get("role", "")
+    additional_roles = user.get("additional_roles") or []
+
+    is_indexer = user_role == "indexacao" or "indexacao" in additional_roles
+    if not is_indexer:
+        logger.debug(f"[WAITLIST] Utilizador {user_id} não é indexador (role={user_role})")
+        return 0
+
+    # Delegar para a função de processamento da fila
+    assigned = await process_queue_for_freed_indexer(user_id)
+
+    if assigned > 0:
+        logger.info(
+            f"[WAITLIST] {assigned} processo(s) da fila atribuídos ao indexador {user_id}"
+        )
+
+    return assigned
