@@ -144,6 +144,9 @@ DOCUMENT_CATEGORY_MAP = {
     "Outros": {"label": "Outro Documento", "icon": "📎"},
 }
 
+# Categorias internas que NÃO devem ser visíveis no Portal do Cliente
+PORTAL_HIDDEN_CATEGORIES = {"Index"}
+
 # Fallback categories usadas quando o admin não criou docs REQUESTED
 DEFAULT_PENDING_CATEGORIES = [
     "Cartao_Cidadao",
@@ -341,7 +344,8 @@ async def get_portal_status(
         {
             "process_id": process_id,
             "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
-            "source": {"$ne": "admin_received"}  # Exclude admin-marked received docs
+            "source": {"$ne": "admin_received"},  # Exclude admin-marked received docs
+            "category": {"$nin": list(PORTAL_HIDDEN_CATEGORIES)}  # Hide internal categories
         },
         {"_id": 0, "file_content": 0}
     ).sort("created_at", 1)
@@ -372,7 +376,8 @@ async def get_portal_status(
     uploaded_cursor = db.documents.find(
         {
             "process_id": process_id,
-            "status": {"$in": ["UPLOADED", "SUBMITTED", "uploaded", "submitted"]}
+            "status": {"$in": ["UPLOADED", "SUBMITTED", "uploaded", "submitted"]},
+            "category": {"$nin": list(PORTAL_HIDDEN_CATEGORIES)}  # Hide internal categories
         },
         {"_id": 0, "file_content": 0}
     ).sort("uploaded_at", -1)
@@ -401,7 +406,8 @@ async def get_portal_status(
     received_cursor = db.documents.find(
         {
             "process_id": process_id,
-            "status": {"$in": ["RECEIVED", "received"]}
+            "status": {"$in": ["RECEIVED", "received"]},
+            "category": {"$nin": list(PORTAL_HIDDEN_CATEGORIES)}  # Hide internal categories
         },
         {"_id": 0, "file_content": 0}
     ).sort("updated_at", -1)
@@ -671,6 +677,10 @@ async def generate_portal_upload_url(
 
     if not filename:
         raise HTTPException(status_code=400, detail="Nome do ficheiro é obrigatório")
+
+    # Bloquear categorias internas no portal do cliente
+    if category in PORTAL_HIDDEN_CATEGORIES:
+        raise HTTPException(status_code=403, detail="Categoria de documento não disponível no portal")
 
     # Normalizar nome
     safe_filename = filename.replace(" ", "_").replace("/", "-").replace("\\", "-")

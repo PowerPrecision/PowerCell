@@ -202,6 +202,7 @@ class DocumentCategory(str, Enum):
     FISCAIS = "Fiscais"
     SIMULACOES = "Simulações"
     MINUTAS = "Minutas"
+    INDEX = "Index"
     OUTROS = "Outros"
     
     @classmethod

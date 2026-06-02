@@ -127,7 +127,7 @@ const getContrastColor = (bgColor) => {
   if (!bgColor) return '#ffffff';
   const namedColors = {
     yellow: '#EAB308', orange: '#F97316', blue: '#3B82F6',
-    green: '#22C55E', red: '#EF4444', purple: '#A855F7', gray: '#6B7280',
+    green: '#22C55E', red: '#EF4444', purple: '#A855F7', gray: '#6B7280', teal: '#14B8A6',
   };
   let hex = namedColors[bgColor?.toLowerCase()] || bgColor;
   if (!hex.startsWith('#')) return '#ffffff';
@@ -145,6 +145,7 @@ const CATEGORIES = [
   { id: "Financeiros", label: "Financeiros", icon: Briefcase, color: "green" },
   { id: "Imóvel", label: "Imóvel", icon: Building2, color: "purple" },
   { id: "Bancários", label: "Bancários", icon: CreditCard, color: "orange" },
+  { id: "Index", label: "Index", icon: FileText, color: "teal" },
   { id: "Outros", label: "Outros", icon: FolderOpen, color: "gray" },
 ];
 
@@ -2085,6 +2086,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       purple: "text-purple-500",
                       orange: "text-orange-500",
                       gray: "text-gray-500",
+                      teal: "text-teal-500",
                     };
                     const isDropTarget = dropTarget === cat.id;
                     const isDraggingMultiple = draggedFiles.length > 1;
