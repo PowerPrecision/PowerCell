@@ -20,6 +20,7 @@ import os
 import uuid
 import logging
 import re
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -3150,6 +3151,109 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         raise HTTPException(status_code=500, detail=f"Erro interno ao serializar dados do processo: {str(e)[:200]}")
 
 
+# ====================================================================
+# EMAIL AUTOMÁTICO — Atribuição de Processos
+# ====================================================================
+
+async def _send_assignment_email(
+    newly_assigned_ids: list,
+    process_id: str,
+    client_name: str,
+    process_number: str,
+    role_label: str,
+):
+    """
+    Envia email de notificação aos utilizadores recém-atribuídos a um processo.
+    Executa de forma assíncrona e silenciosa (não bloqueia a resposta da API).
+    """
+    from services.email import get_base_template
+
+    frontend_url = os.environ.get("FRONTEND_URL", "")
+    process_link = f"{frontend_url}/processo/{process_id}" if frontend_url else ""
+
+    for uid in newly_assigned_ids:
+        try:
+            target_user = await db.users.find_one({"id": uid}, {"email": 1, "name": 1})
+            if not target_user or not target_user.get("email"):
+                continue
+
+            user_email = target_user["email"]
+            user_name = target_user.get("name", "Utilizador")
+
+            subject = f"Novo Processo Atribuído: {client_name}"
+
+            # Corpo em texto simples (fallback)
+            body_text = (
+                f"Olá {user_name},\n\n"
+                f"Foi-lhe atribuído um novo processo como {role_label}.\n\n"
+                f"Cliente: {client_name}\n"
+                f"Processo: {process_number or process_id[:8]}\n"
+            )
+            if process_link:
+                body_text += f"\nAceda ao processo em: {process_link}\n"
+
+            # Corpo em HTML
+            link_html = ""
+            if process_link:
+                link_html = f"""
+                <tr>
+                    <td style="padding: 15px 30px; text-align: center;">
+                        <a href="{process_link}" style="
+                            display: inline-block;
+                            background: linear-gradient(135deg, #1e3a5f, #2d5a87);
+                            color: #ffffff;
+                            padding: 12px 30px;
+                            border-radius: 8px;
+                            text-decoration: none;
+                            font-weight: 600;
+                            font-size: 14px;
+                        ">Abrir Processo no CRM</a>
+                    </td>
+                </tr>"""
+
+            content_html = f"""
+            <table width="100%" cellpadding="0" cellspacing="0" style="padding: 20px 0;">
+                <tr>
+                    <td style="padding: 10px 30px;">
+                        <p style="margin: 0 0 10px 0; font-size: 16px;">Olá <strong>{user_name}</strong>,</p>
+                        <p style="margin: 0 0 20px 0; font-size: 15px; color: #555;">
+                            Foi-lhe atribuído um novo processo como <strong>{role_label}</strong>.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 15px 30px; background: #f8f9fa; border-radius: 8px;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td style="padding: 8px 0; font-size: 14px; color: #666; width: 120px;"><strong>Cliente:</strong></td>
+                                <td style="padding: 8px 0; font-size: 14px;">{client_name}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px 0; font-size: 14px; color: #666;"><strong>Processo:</strong></td>
+                                <td style="padding: 8px 0; font-size: 14px;">{process_number or process_id[:8]}</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                {link_html}
+            </table>"""
+
+            html_body = get_base_template(content_html, title=subject)
+
+            await send_notification_with_preference_check(
+                to_email=user_email,
+                subject=subject,
+                body=body_text,
+                html_body=html_body,
+                notification_type="process_assigned",
+            )
+
+            logger.info(f"[ASSIGN-EMAIL] Email enviado para {user_email} ({role_label}) — processo {process_id}")
+
+        except Exception as e:
+            logger.warning(f"[ASSIGN-EMAIL] Erro ao enviar email de atribuição para {uid}: {e}")
+
+
 @router.post("/{process_id}/assign")
 async def assign_process(
     process_id: str, 
@@ -3335,7 +3439,35 @@ async def assign_process(
                     old_user = await db.users.find_one({"id": old_parceiro}, {"name": 1})
                     old_name = old_user.get("name") if old_user else None
                 await log_history(process_id, user, "Atribuiu parceiro", "assigned_parceiro_id", old_name, parceiro_user["name"])
-    
+
+    # ── Deteção de novos utilizadores atribuídos (para email automático) ──
+    newly_assigned_consultores = []
+    newly_assigned_mediadores = []
+    newly_assigned_indexacao = []
+    newly_assigned_parceiro = []
+
+    # Consultores recém-atribuídos
+    new_consultor_list = update_data.get("assigned_consultor_ids")
+    if new_consultor_list:
+        old_set = set(old_consultor_ids or [])
+        newly_assigned_consultores = [cid for cid in new_consultor_list if cid not in old_set]
+
+    # Mediadores recém-atribuídos
+    new_mediador_list = update_data.get("assigned_mediador_ids")
+    if new_mediador_list:
+        old_set = set(old_mediador_ids or [])
+        newly_assigned_mediadores = [mid for mid in new_mediador_list if mid not in old_set]
+
+    # Indexação recém-atribuída
+    new_indexacao = update_data.get("assigned_indexacao_id")
+    if new_indexacao and new_indexacao != old_indexacao:
+        newly_assigned_indexacao = [new_indexacao]
+
+    # Parceiro recém-atribuído
+    new_parceiro = update_data.get("assigned_parceiro_id")
+    if new_parceiro and new_parceiro != old_parceiro:
+        newly_assigned_parceiro = [new_parceiro]
+
     inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     
@@ -3357,7 +3489,27 @@ async def assign_process(
         prioridade=updated_process.get("prioridade"),
         updated_at=updated_process.get("updated_at")
     )
-    
+
+    # === EMAIL AUTOMÁTICO: Notificar utilizadores recém-atribuídos ===
+    client_name = process.get("client_name", "Cliente")
+    process_number = process.get("process_number", "")
+    if newly_assigned_consultores:
+        asyncio.create_task(_send_assignment_email(
+            newly_assigned_consultores, process_id, client_name, process_number, "Consultor"
+        ))
+    if newly_assigned_mediadores:
+        asyncio.create_task(_send_assignment_email(
+            newly_assigned_mediadores, process_id, client_name, process_number, "Intermediário"
+        ))
+    if newly_assigned_indexacao:
+        asyncio.create_task(_send_assignment_email(
+            newly_assigned_indexacao, process_id, client_name, process_number, "Indexação"
+        ))
+    if newly_assigned_parceiro:
+        asyncio.create_task(_send_assignment_email(
+            newly_assigned_parceiro, process_id, client_name, process_number, "Parceiro"
+        ))
+
     return {"success": True, "message": "Atribuições actualizadas com sucesso"}
 
 
