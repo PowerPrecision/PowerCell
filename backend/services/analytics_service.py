@@ -19,15 +19,21 @@ from typing import Dict, List, Any, Optional
 logger = logging.getLogger(__name__)
 
 
-async def generate_weekly_team_report(db) -> Dict[str, Any]:
+async def generate_weekly_team_report(
+    db,
+    period_start: Optional[datetime] = None,
+    period_end: Optional[datetime] = None
+) -> Dict[str, Any]:
     """
     Gerar relatório semanal de produtividade da equipa.
 
     Agrega dados das colecções `history`, `task_logs` e `processes`
-    dos últimos 7 dias, agrupados por utilizador.
+    do período especificado, agrupados por utilizador.
 
     Args:
         db: Instância Motor da base de dados MongoDB (async)
+        period_start: Data de início do período (UTC). Por defeito, há 7 dias.
+        period_end: Data de fim do período (UTC). Por defeito, agora.
 
     Returns:
         Dict com:
@@ -37,13 +43,17 @@ async def generate_weekly_team_report(db) -> Dict[str, Any]:
         - summary: métricas globais da equipa
     """
     now = datetime.now(timezone.utc)
-    period_start = now - timedelta(days=7)
+    if period_end is None:
+        period_end = now
+    if period_start is None:
+        period_start = period_end - timedelta(days=7)
+
     period_start_iso = period_start.isoformat()
-    period_end_iso = now.isoformat()
+    period_end_iso = period_end.isoformat()
 
     logger.info(
-        f"[Analytics] A gerar relatório semanal: "
-        f"{period_start.strftime('%d/%m/%Y')} - {now.strftime('%d/%m/%Y')}"
+        f"[Analytics] A gerar relatório de produtividade: "
+        f"{period_start.strftime('%d/%m/%Y')} - {period_end.strftime('%d/%m/%Y')}"
     )
 
     # ----------------------------------------------------------------

@@ -3111,6 +3111,57 @@ async def get_stale_processes(
     }
 
 
+@router.get("/team-performance")
+async def get_team_performance(
+    start_date: Optional[str] = Query(None, description="Data de início (YYYY-MM-DD). Por defeito, há 7 dias"),
+    end_date: Optional[str] = Query(None, description="Data de fim (YYYY-MM-DD). Por defeito, hoje"),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Obter estatísticas de desempenho da equipa para um dado período.
+    Retorna a lista de colaboradores com: processos avançados,
+    tarefas concluídas, tarefas atrasadas e tarefas pendentes.
+
+    Reutiliza a lógica de agregação do analytics_service.
+    """
+    from services.analytics_service import generate_weekly_team_report
+
+    now = datetime.now(timezone.utc)
+
+    # Parse dates with defaults
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, tzinfo=timezone.utc
+            )
+        except ValueError:
+            raise HTTPException(status_code=422, detail="end_date inválido. Use YYYY-MM-DD")
+    else:
+        end_dt = now
+
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(
+                hour=0, minute=0, second=0, tzinfo=timezone.utc
+            )
+        except ValueError:
+            raise HTTPException(status_code=422, detail="start_date inválido. Use YYYY-MM-DD")
+    else:
+        start_dt = end_dt - timedelta(days=7)
+
+    if start_dt >= end_dt:
+        raise HTTPException(status_code=422, detail="start_date deve ser anterior a end_date")
+
+    report = await generate_weekly_team_report(db, period_start=start_dt, period_end=end_dt)
+
+    return {
+        "period_start": report["period_start"],
+        "period_end": report["period_end"],
+        "summary": report["summary"],
+        "users": report["users"],
+    }
+
+
 # ============== PROD → DEV DATABASE SYNC (RGPD SANITIZATION) ==============
 
 # In-memory lock to prevent concurrent sync operations
