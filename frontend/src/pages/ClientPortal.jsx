@@ -50,12 +50,15 @@ import {
   User,
   Save,
   Lock,
+  Download,
+  Calculator,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { safeDateStr } from '../lib/utils';
 import ClientPortalLogin from './ClientPortalLogin';
+import SimulatorCH from '../components/portal/SimulatorCH';
 
 // ====================================================================
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
@@ -1018,19 +1021,48 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
             <CheckCircle2 className="w-5 h-5 text-teal-500" />
             Documentos Recebidos ({received.length})
           </h3>
-          <p className="text-xs text-gray-400 mb-3">Documentos submetidos e já recebidos pela nossa equipa.</p>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
+          <p className="text-xs text-gray-400 mb-3">Documentos submetidos e já recebidos pela nossa equipa. Clique no ícone para descarregar.</p>
+          <div className="space-y-2 max-h-80 overflow-y-auto">
             {received.map((doc) => (
-              <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-teal-50/50 hover:bg-teal-50 transition-colors">
+              <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-teal-50/50 hover:bg-teal-50 transition-colors group">
                 <span className="text-base flex-shrink-0">{doc.icon || '📄'}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-gray-700 truncate font-medium">{typeof doc.filename === 'string' ? doc.filename : String(doc.filename || '')}</p>
                   <p className="text-xs text-gray-400">
                     {typeof (doc.category_label || doc.category) === 'string' ? (doc.category_label || doc.category) : String(doc.category_label || doc.category || '')}
                     {doc.received_at && ` · ${new Date(safeDateStr(doc.received_at)).toLocaleDateString('pt-PT')}`}
+                    {doc.file_size && ` · ${(doc.file_size / 1024).toFixed(0)} KB`}
                   </p>
                 </div>
-                <Check className="w-4 h-4 text-teal-500 flex-shrink-0" />
+                {/* Botão Download — chama /portal/download-url com o token de sessão */}
+                {doc.s3_path ? (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const token = getPortalToken();
+                        if (!token) { toast.error('Sessão expirada.'); return; }
+                        const res = await fetchWithRetry(
+                          `${BACKEND_URL}/portal/download-url?file_key=${encodeURIComponent(doc.s3_path)}`,
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok && data.url) {
+                          window.open(data.url, '_blank', 'noopener');
+                        } else {
+                          toast.error(data.detail || 'Erro ao gerar link de download.');
+                        }
+                      } catch (err) {
+                        toast.error('Erro de ligação ao tentar descarregar.');
+                      }
+                    }}
+                    className="flex-shrink-0 p-1.5 rounded-lg text-teal-500 hover:bg-teal-100 hover:text-teal-700 transition-colors opacity-60 group-hover:opacity-100"
+                    title="Descarregar documento"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <Check className="w-4 h-4 text-teal-500 flex-shrink-0" />
+                )}
               </div>
             ))}
           </div>
@@ -2323,6 +2355,18 @@ export default function ClientPortal() {
                 <span className="sm:hidden">Perfil</span>
               </button>
               <button
+                onClick={() => setActiveTab('simulador')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === 'simulador'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                }`}
+              >
+                <Calculator className="w-4 h-4" />
+                <span className="hidden sm:inline">Simulador</span>
+                <span className="sm:hidden">Calc</span>
+              </button>
+              <button
                 onClick={() => setActiveTab('visitas')}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   activeTab === 'visitas'
@@ -2437,6 +2481,11 @@ export default function ClientPortal() {
             {/* ═══ Tab: O Meu Perfil ═══ */}
             {activeTab === 'perfil' && (
               <ProfilePanel />
+            )}
+
+            {/* ═══ Tab: Simulador de Crédito Habitação ═══ */}
+            {activeTab === 'simulador' && (
+              <SimulatorCH />
             )}
 
             {/* ═══ Tab: As Minhas Visitas ═══ */}

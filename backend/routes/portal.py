@@ -21,6 +21,7 @@ ENDPOINTS:
 - GET  /portal/me                  → Dados pessoais do cliente (perfil)
 - PUT  /portal/me                  → Atualiza dados pessoais (bloqueado se tem processo)
 - GET  /portal/status              → Status do processo + stepper + documentos
+- GET  /portal/download-url        → Gera pre-signed URL para download de documento
 - POST /portal/upload-url          → Gera pre-signed URL para upload
 - POST /portal/confirm-upload      → Confirma upload após PUT para S3
 - POST /portal/authenticate        → Valida magic link e retorna info
@@ -957,6 +958,7 @@ async def get_portal_status(
             "uploaded_at": doc.get("uploaded_at", ""),
             "file_size": doc.get("file_size"),
             "status": doc.get("status", "UPLOADED"),
+            "s3_path": doc.get("s3_path") or doc.get("file_key"),
         })
 
     # ── Documentos recebidos pelo admin (marcados como RECEIVED) ──
@@ -983,6 +985,7 @@ async def get_portal_status(
             "category_label": cat_info["label"],
             "icon": cat_info["icon"],
             "received_at": doc.get("reviewed_at", doc.get("updated_at", "")),
+            "s3_path": doc.get("s3_path") or doc.get("file_key"),
         })
 
     # ── Fallback: se não há docs REQUESTED, calcular pendentes por categoria ──
@@ -1459,6 +1462,98 @@ async def confirm_portal_upload(
         "s3_path": file_key,
         "temporary_url": temporary_url,
         "ai_categorization": ai_categorization_info,
+    }
+
+
+# ====================================================================
+# DOWNLOAD DE DOCUMENTOS (Portal do Cliente)
+# ====================================================================
+
+@router.get("/download-url")
+async def get_portal_download_url(
+    file_key: str,
+    client_data: dict = Depends(get_current_client)
+):
+    """
+    Gera uma pre-signed URL para download de um documento do processo do cliente.
+
+    SEGURANÇA:
+    - Requer autenticação via token do portal
+    - Valida que o ficheiro pertence ao processo do cliente (escopo do token)
+    - URL temporária com validade de 1 hora
+    - Bloqueia acesso a ficheiros de outros processos
+
+    Query Params:
+    - file_key: Caminho S3 do ficheiro (obrigatório)
+    """
+    if not file_key:
+        raise HTTPException(status_code=400, detail="file_key é obrigatório.")
+
+    if not s3_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço de armazenamento indisponível."
+        )
+
+    # ── Validação de segurança: o ficheiro deve pertencer ao processo do cliente ──
+    process = client_data.get("process")
+    if not process:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem processo associado. Não é possível descarregar documentos."
+        )
+
+    process_id = process["id"]
+
+    # Verificar se o documento existe na BD e pertence a este processo
+    doc = await db.documents.find_one(
+        {"s3_path": file_key, "process_id": process_id},
+        {"_id": 0, "id": 1, "s3_path": 1}
+    )
+
+    # Fallback: verificar por file_key se s3_path não existir
+    if not doc:
+        doc = await db.documents.find_one(
+            {"file_key": file_key, "process_id": process_id},
+            {"_id": 0, "id": 1, "s3_path": 1}
+        )
+
+    if not doc:
+        # Tentativa de acesso a ficheiro de outro processo — negar
+        logger.warning(
+            f"[PORTAL DOWNLOAD] Acesso negado: file_key={file_key} "
+            f"não pertence ao processo {process_id}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Ficheiro não encontrado ou sem permissão de acesso."
+        )
+
+    # Verificar se o ficheiro existe no S3
+    if not s3_service.file_exists(file_key):
+        raise HTTPException(
+            status_code=404,
+            detail="Ficheiro não encontrado no armazenamento."
+        )
+
+    # Gerar URL pré-assinada (válida por 1 hora)
+    presigned_url = s3_service.get_presigned_url(file_key, expiration=3600)
+
+    if not presigned_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao gerar link de download."
+        )
+
+    logger.info(
+        f"[PORTAL DOWNLOAD] Download autorizado: file_key={file_key} "
+        f"para processo {process_id}"
+    )
+
+    return {
+        "success": True,
+        "url": presigned_url,
+        "expires_in": 3600,
     }
 
 
