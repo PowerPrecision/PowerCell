@@ -3,16 +3,32 @@
 SERVIÇO DE ATRIBUIÇÃO DE PROCESSOS - CREDITOIMO
 ====================================================================
 Lógica de negócio para atribuição de consultores e intermediários
-a processos.
+a processos, incluindo auto-atribuição inteligente de indexadores
+com limite de carga e fila de espera.
 ====================================================================
 """
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, List
 
 from database import db
 
 logger = logging.getLogger(__name__)
+
+# ==== CONSTANTES DE ATRIBUIÇÃO ====
+
+# Número máximo de processos ativos que um indexador pode ter
+MAX_ACTIVE_PROCESSES_PER_INDEXER = 15
+
+# Status que NÃO contam como processos ativos para o indexador
+# (processos concluídos, arquivados, perdidos ou desistidos)
+INDEXER_INACTIVE_STATUSES = {
+    "concluidos",
+    "arquivo",
+    "perdido",
+    "desistencias",
+    "eliminados",
+}
 
 
 # ==== VALIDAÇÃO DE ATRIBUIÇÃO ====
@@ -336,3 +352,491 @@ async def get_users_for_assignment(role_filter: Optional[str] = None) -> list:
     ).sort("name", 1)
     
     return await cursor.to_list(length=100)
+
+
+# ==== AUTO-ATRIBUIÇÃO INTELIGENTE DE INDEXADORES ====
+
+async def _count_active_processes_for_indexer(indexer_id: str) -> int:
+    """
+    Conta quantos processos ATIVOS um indexador tem atualmente na sua posse.
+
+    Um processo conta como "ativo" para o indexador se:
+    - Está atribuído a ele (assigned_indexacao_id == indexer_id)
+    - O seu status NÃO está na lista de estados inativos (concluído, arquivo, etc.)
+
+    Args:
+        indexer_id: ID do utilizador indexador
+
+    Returns:
+        Número de processos ativos atribuídos ao indexador
+    """
+    active_query = {
+        "assigned_indexacao_id": indexer_id,
+        "status": {"$nin": list(INDEXER_INACTIVE_STATUSES)},
+    }
+
+    count = await db.processes.count_documents(active_query)
+    return count
+
+
+async def assign_to_indexer(process_id: str) -> Tuple[bool, dict, str]:
+    """
+    Atribui automaticamente um processo ao indexador com menor carga.
+
+    Algoritmo de distribuição:
+    1. Encontra todos os utilizadores com o role 'indexacao' (incluindo additional_roles).
+    2. Para cada indexador, conta os processos ativos (status não terminal).
+    3. Filtra os indexadores com menos de MAX_ACTIVE_PROCESSES_PER_INDEXER processos.
+    4. Ordena pelo número de processos ativos (ascendente) — distribui a quem tem menos.
+    5. Se houver indexador disponível:
+       - Atribui o processo (assigned_indexacao_id + indexacao_name).
+       - Altera o status do processo para 'fase_documental' (pronto para indexação).
+       - Envia email de notificação ao indexador.
+       - Envia notificação em tempo real (in-app).
+    6. Se TODOS os indexadores estiverem no limite:
+       - O processo NÃO é atribuído a ninguém.
+       - O status muda para 'fila_espera' (aguarda vaga).
+
+    Args:
+        process_id: ID do processo a atribuir
+
+    Returns:
+        Tuple com (sucesso, dados atualizados, mensagem)
+    """
+    from services.role_query import build_deep_role_query
+    from services.notification_service import send_notification_with_preference_check
+    from services.realtime_notifications import send_realtime_notification
+    from services.history import log_history
+
+    # ── 1. Obter o processo ──
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        return False, {}, f"Processo {process_id} não encontrado"
+
+    # Evitar re-atribuição se já tem indexador
+    if process.get("assigned_indexacao_id"):
+        existing_name = process.get("indexacao_name", "desconhecido")
+        return False, {}, (
+            f"Processo já atribuído ao indexador: {existing_name}"
+        )
+
+    # ── 2. Encontrar todos os indexadores ativos ──
+    query = build_deep_role_query({"is_active": True}, role="indexacao")
+    indexers_cursor = db.users.find(
+        query,
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1}
+    )
+    indexers = await indexers_cursor.to_list(length=100)
+
+    if not indexers:
+        # Sem indexadores no sistema — colocar na fila
+        now = datetime.now(timezone.utc).isoformat()
+        update_data = {
+            "status": "fila_espera",
+            "updated_at": now,
+        }
+        await db.processes.update_one(
+            {"id": process_id},
+            {"$set": update_data}
+        )
+        logger.warning(
+            f"[ASSIGN-INDEXER] Nenhum indexador encontrado no sistema. "
+            f"Processo {process_id} colocado na fila de espera."
+        )
+        return True, {
+            "status": "fila_espera",
+            "assigned": False,
+            "reason": "no_indexers",
+        }, "Nenhum indexador disponível no sistema — processo colocado na fila de espera"
+
+    # ── 3. Contar processos ativos por indexador ──
+    indexer_loads: List[Dict] = []
+    for indexer in indexers:
+        active_count = await _count_active_processes_for_indexer(indexer["id"])
+        indexer_loads.append({
+            "id": indexer["id"],
+            "name": indexer.get("name", ""),
+            "email": indexer.get("email", ""),
+            "active_count": active_count,
+        })
+        logger.debug(
+            f"[ASSIGN-INDEXER] Indexador {indexer.get('name')} "
+            f"({indexer['id'][:8]}): {active_count} processos ativos"
+        )
+
+    # ── 4. Filtrar indexadores disponíveis (menos de 15 processos) ──
+    available_indexers = [
+        ix for ix in indexer_loads
+        if ix["active_count"] < MAX_ACTIVE_PROCESSES_PER_INDEXER
+    ]
+
+    # ── 5. Se não há indexadores disponíveis → FILA DE ESPERA ──
+    if not available_indexers:
+        now = datetime.now(timezone.utc).isoformat()
+        update_data = {
+            "status": "fila_espera",
+            "updated_at": now,
+        }
+        result = await db.processes.update_one(
+            {"id": process_id},
+            {"$set": update_data}
+        )
+
+        if result.modified_count == 0:
+            return False, {}, "Erro ao atualizar processo para fila de espera"
+
+        # Registar no histórico (utilizador sistema)
+        system_user = {"id": "system", "name": "Sistema", "role": "admin"}
+        await log_history(
+            process_id=process_id,
+            user=system_user,
+            action="Processo colocado na fila de espera — todos os indexadores no limite",
+            field="status",
+            old_value=process.get("status", ""),
+            new_value="fila_espera",
+        )
+
+        logger.info(
+            f"[ASSIGN-INDEXER] Todos os {len(indexers)} indexadores estão no limite "
+            f"({MAX_ACTIVE_PROCESSES_PER_INDEXER} processos). "
+            f"Processo {process_id} colocado na fila de espera."
+        )
+
+        return True, {
+            "status": "fila_espera",
+            "assigned": False,
+            "reason": "all_indexers_full",
+            "indexers_checked": len(indexers),
+        }, (
+            f"Todos os {len(indexers)} indexadores estão no limite de "
+            f"{MAX_ACTIVE_PROCESSES_PER_INDEXER} processos — processo na fila de espera"
+        )
+
+    # ── 6. Ordenar por carga (ascendente) e escolher o menos carregado ──
+    available_indexers.sort(key=lambda ix: ix["active_count"])
+    chosen = available_indexers[0]
+
+    logger.info(
+        f"[ASSIGN-INDEXER] Indexador escolhido: {chosen['name']} "
+        f"com {chosen['active_count']} processos ativos "
+        f"(de {len(available_indexers)} disponíveis)"
+    )
+
+    # ── 7. Atribuir processo ao indexador ──
+    now = datetime.now(timezone.utc).isoformat()
+    update_data = {
+        "assigned_indexacao_id": chosen["id"],
+        "indexacao_name": chosen["name"],
+        "status": "fase_documental",
+        "updated_at": now,
+    }
+
+    result = await db.processes.update_one(
+        {"id": process_id},
+        {"$set": update_data}
+    )
+
+    if result.modified_count == 0:
+        return False, {}, "Erro ao atribuir processo ao indexador"
+
+    # Registar no histórico (utilizador sistema)
+    system_user = {"id": "system", "name": "Sistema", "role": "admin"}
+    await log_history(
+        process_id=process_id,
+        user=system_user,
+        action=f"Auto-atribuição ao indexador {chosen['name']}",
+        field="assigned_indexacao_id",
+        old_value=None,
+        new_value=chosen["name"],
+    )
+
+    # ── 8. Enviar notificações (email + in-app) ──
+    client_name = process.get("client_name", "Cliente")
+    process_number = process.get("process_number") or process.get("process_ref") or process_id[:8]
+
+    # Email de notificação
+    try:
+        from services.email import get_base_template
+        import os
+
+        frontend_url = os.environ.get("FRONTEND_URL", "")
+        process_link = f"{frontend_url}/processo/{process_id}" if frontend_url else ""
+
+        subject = f"Novo Processo Atribuído: {client_name}"
+        body_text = (
+            f"Olá {chosen['name']},\n\n"
+            f"Foi-lhe atribuído automaticamente um novo processo como Indexação.\n\n"
+            f"Cliente: {client_name}\n"
+            f"Processo: {process_number}\n"
+        )
+        if process_link:
+            body_text += f"\nAceda ao processo em: {process_link}\n"
+
+        # Corpo em HTML
+        link_html = ""
+        if process_link:
+            link_html = f"""
+            <tr>
+                <td style="padding: 15px 30px; text-align: center;">
+                    <a href="{process_link}" style="
+                        display: inline-block;
+                        background: linear-gradient(135deg, #1e3a5f, #2d5a87);
+                        color: #ffffff;
+                        padding: 12px 30px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 14px;
+                    ">Abrir Processo no CRM</a>
+                </td>
+            </tr>"""
+
+        content_html = f"""
+        <table width="100%" cellpadding="0" cellspacing="0" style="padding: 20px 0;">
+            <tr>
+                <td style="padding: 10px 30px;">
+                    <p style="margin: 0 0 10px 0; font-size: 16px;">Olá <strong>{chosen['name']}</strong>,</p>
+                    <p style="margin: 0 0 20px 0; font-size: 15px; color: #555;">
+                        Foi-lhe atribuído automaticamente um novo processo como <strong>Indexação</strong>.
+                    </p>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 15px 30px; background: #f8f9fa; border-radius: 8px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                        <tr>
+                            <td style="padding: 8px 0; font-size: 14px; color: #666; width: 120px;"><strong>Cliente:</strong></td>
+                            <td style="padding: 8px 0; font-size: 14px;">{client_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-size: 14px; color: #666;"><strong>Processo:</strong></td>
+                            <td style="padding: 8px 0; font-size: 14px;">{process_number}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-size: 14px; color: #666;"><strong>Processos Ativos:</strong></td>
+                            <td style="padding: 8px 0; font-size: 14px;">{chosen['active_count'] + 1} / {MAX_ACTIVE_PROCESSES_PER_INDEXER}</td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+            {link_html}
+        </table>"""
+
+        html_body = get_base_template(content_html, title=subject)
+
+        await send_notification_with_preference_check(
+            to_email=chosen["email"],
+            subject=subject,
+            body=body_text,
+            html_body=html_body,
+            notification_type="process_assigned",
+        )
+        logger.info(
+            f"[ASSIGN-INDEXER] Email de notificação enviado para {chosen['email']}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[ASSIGN-INDEXER] Erro ao enviar email de atribuição para {chosen['id']}: {e}"
+        )
+
+    # Notificação em tempo real (in-app)
+    try:
+        await send_realtime_notification(
+            user_id=chosen["id"],
+            title="Novo Processo Atribuído",
+            message=f"Foi-lhe atribuído automaticamente o processo de {client_name}",
+            notification_type="process_assigned",
+            link=f"/processo/{process_id}",
+            process_id=process_id,
+        )
+    except Exception as e:
+        logger.warning(
+            f"[ASSIGN-INDEXER] Erro ao enviar notificação in-app para {chosen['id']}: {e}"
+        )
+
+    return True, {
+        "assigned_indexacao_id": chosen["id"],
+        "indexacao_name": chosen["name"],
+        "status": "fase_documental",
+        "assigned": True,
+        "indexer_active_count": chosen["active_count"] + 1,
+        "indexers_available": len(available_indexers),
+    }, (
+        f"Processo atribuído automaticamente a {chosen['name']} "
+        f"({chosen['active_count']} → {chosen['active_count'] + 1} processos ativos)"
+    )
+
+
+async def process_queue_for_freed_indexer(indexer_id: str) -> int:
+    """
+    Processa a fila de espera quando um indexador liberta capacidade.
+
+    Quando um indexador completa ou entrega um processo, a sua carga diminui.
+    Esta função verifica se existem processos na 'fila_espera' e, se sim,
+    atribui o mais antigo ao indexador que ficou com vaga.
+
+    Deve ser chamada quando:
+    - Um processo com indexador atribuído muda para status terminal (concluído, desistência)
+    - Um indexador é removido de um processo manualmente
+
+    Args:
+        indexer_id: ID do indexador que libertou capacidade
+
+    Returns:
+        Número de processos da fila que foram atribuídos
+    """
+    from services.history import log_history
+
+    # Verificar se o indexador tem capacidade agora
+    active_count = await _count_active_processes_for_indexer(indexer_id)
+    if active_count >= MAX_ACTIVE_PROCESSES_PER_INDEXER:
+        return 0  # Ainda sem vaga
+
+    # Obter dados do indexador
+    indexer = await db.users.find_one({"id": indexer_id}, {"_id": 0, "name": 1, "email": 1})
+    if not indexer:
+        return 0
+
+    # Buscar processos na fila de espera (ordenados por data de criação — mais antigo primeiro)
+    queue_cursor = db.processes.find(
+        {"status": "fila_espera"},
+        {"_id": 0}
+    ).sort("created_at", 1)
+
+    queue_processes = await queue_cursor.to_list(length=MAX_ACTIVE_PROCESSES_PER_INDEXER - active_count)
+
+    assigned_count = 0
+    for proc in queue_processes:
+        proc_id = proc["id"]
+
+        # Verificar se ainda tem vaga
+        current_active = await _count_active_processes_for_indexer(indexer_id)
+        if current_active >= MAX_ACTIVE_PROCESSES_PER_INDEXER:
+            break
+
+        # Atribuir processo
+        now = datetime.now(timezone.utc).isoformat()
+        update_data = {
+            "assigned_indexacao_id": indexer_id,
+            "indexacao_name": indexer.get("name", ""),
+            "status": "fase_documental",
+            "updated_at": now,
+        }
+
+        await db.processes.update_one(
+            {"id": proc_id},
+            {"$set": update_data}
+        )
+
+        # Histórico
+        system_user = {"id": "system", "name": "Sistema", "role": "admin"}
+        await log_history(
+            process_id=proc_id,
+            user=system_user,
+            action=f"Retirado da fila e atribuído a {indexer.get('name')}",
+            field="status",
+            old_value="fila_espera",
+            new_value="fase_documental",
+        )
+
+        # Notificações
+        client_name = proc.get("client_name", "Cliente")
+        try:
+            from services.notification_service import send_notification_with_preference_check
+            from services.realtime_notifications import send_realtime_notification
+            from services.email import get_base_template
+            import os
+
+            frontend_url = os.environ.get("FRONTEND_URL", "")
+            process_link = f"{frontend_url}/processo/{proc_id}" if frontend_url else ""
+            process_number = proc.get("process_number") or proc.get("process_ref") or proc_id[:8]
+
+            subject = f"Processo da Fila Atribuído: {client_name}"
+            body_text = (
+                f"Olá {indexer.get('name', '')},\n\n"
+                f"Um processo que estava na fila de espera foi-lhe atribuído.\n\n"
+                f"Cliente: {client_name}\n"
+                f"Processo: {process_number}\n"
+            )
+
+            link_html = ""
+            if process_link:
+                link_html = f"""
+                <tr>
+                    <td style="padding: 15px 30px; text-align: center;">
+                        <a href="{process_link}" style="
+                            display: inline-block;
+                            background: linear-gradient(135deg, #1e3a5f, #2d5a87);
+                            color: #ffffff;
+                            padding: 12px 30px;
+                            border-radius: 8px;
+                            text-decoration: none;
+                            font-weight: 600;
+                            font-size: 14px;
+                        ">Abrir Processo no CRM</a>
+                    </td>
+                </tr>"""
+
+            content_html = f"""
+            <table width="100%" cellpadding="0" cellspacing="0" style="padding: 20px 0;">
+                <tr>
+                    <td style="padding: 10px 30px;">
+                        <p style="margin: 0 0 10px 0; font-size: 16px;">Olá <strong>{indexer.get('name', '')}</strong>,</p>
+                        <p style="margin: 0 0 20px 0; font-size: 15px; color: #555;">
+                            Um processo que estava na <strong>fila de espera</strong> foi-lhe atribuído.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 15px 30px; background: #f8f9fa; border-radius: 8px;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td style="padding: 8px 0; font-size: 14px; color: #666; width: 120px;"><strong>Cliente:</strong></td>
+                                <td style="padding: 8px 0; font-size: 14px;">{client_name}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px 0; font-size: 14px; color: #666;"><strong>Processo:</strong></td>
+                                <td style="padding: 8px 0; font-size: 14px;">{process_number}</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                {link_html}
+            </table>"""
+
+            html_body = get_base_template(content_html, title=subject)
+
+            await send_notification_with_preference_check(
+                to_email=indexer.get("email", ""),
+                subject=subject,
+                body=body_text,
+                html_body=html_body,
+                notification_type="process_assigned",
+            )
+
+            await send_realtime_notification(
+                user_id=indexer_id,
+                title="Processo da Fila Atribuído",
+                message=f"Um processo da fila de espera de {client_name} foi-lhe atribuído",
+                notification_type="process_assigned",
+                link=f"/processo/{proc_id}",
+                process_id=proc_id,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[QUEUE-PROCESS] Erro ao notificar indexador {indexer_id} sobre processo {proc_id}: {e}"
+            )
+
+        assigned_count += 1
+        logger.info(
+            f"[QUEUE-PROCESS] Processo {proc_id} retirado da fila e atribuído a "
+            f"{indexer.get('name')} (vaga libertada)"
+        )
+
+    if assigned_count > 0:
+        logger.info(
+            f"[QUEUE-PROCESS] {assigned_count} processos da fila atribuídos a "
+            f"{indexer.get('name')} (carga actual: {active_count + assigned_count})"
+        )
+
+    return assigned_count

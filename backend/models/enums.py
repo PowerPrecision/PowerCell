@@ -36,6 +36,9 @@ class ProcessStatus(str, Enum):
     ARQUIVO = "arquivo"
     PERDIDO = "perdido"
     DESISTENCIAS = "desistencias"
+
+    # Fila de Espera — sem indexador disponível
+    FILA_ESPERA = "fila_espera"
     
     @classmethod
     def active_statuses(cls) -> List[str]:
@@ -51,6 +54,7 @@ class ProcessStatus(str, Enum):
             cls.CPCV.value,
             cls.MINUTA.value,
             cls.ESCRITURA.value,
+            cls.FILA_ESPERA.value,
         ]
     
     @classmethod
