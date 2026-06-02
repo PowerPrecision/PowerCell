@@ -25,6 +25,7 @@ ENDPOINTS:
 - GET  /portal/messages/unread     → Conta mensagens não lidas do staff
 """
 import uuid
+import gc as _gc
 import logging
 import os
 from datetime import datetime, timezone
@@ -264,7 +265,7 @@ async def get_portal_status(
     - Informações do processo (sem dados sensíveis)
     - Stepper dinâmico baseado no workflow (vindo da BD)
     - Documentos solicitados (status REQUESTED/PENDING)
-    - Documentos já submetidos (status UPLOADED)
+    - Documentos já submetidos (status RECEIVED via upload ou scraper)
     - Contactos do consultor
 
     Documentos pendentes:
@@ -714,7 +715,8 @@ async def confirm_portal_upload(
     """
     Confirma upload para S3 e regista na base de dados.
 
-    O documento fica com status=UPLOADED para aparecer no CRM do admin.
+    O documento fica com status=RECEIVED — ao carregar pelo portal, o documento
+    é automaticamente marcado como Recebido tanto no portal como no CRM.
     Se for fornecido document_id (de um doc REQUESTED), esse registo é atualizado
     em vez de criar um novo.
 
@@ -804,7 +806,7 @@ async def confirm_portal_upload(
             {"id": document_id, "process_id": process_id},
             {
                 "$set": {
-                    "status": "UPLOADED",
+                    "status": "RECEIVED",
                     "filename": original_filename,
                     "original_filename": original_filename,
                     "file_size": file_size,
@@ -813,6 +815,8 @@ async def confirm_portal_upload(
                     "uploaded_at": now,
                     "uploaded_by": "portal_client",
                     "source": "client_portal",
+                    "reviewed_by": "portal_client",
+                    "reviewed_at": now,
                     "updated_at": now,
                 }
             }
@@ -820,7 +824,7 @@ async def confirm_portal_upload(
 
         if update_result.matched_count > 0:
             doc_id = document_id
-            logger.info(f"[PORTAL] Doc REQUESTED atualizado para UPLOADED: {document_id}")
+            logger.info(f"[PORTAL] Doc REQUESTED atualizado para RECEIVED: {document_id}")
         else:
             # document_id não encontrado — criar novo
             doc_id = str(uuid.uuid4())
@@ -886,7 +890,7 @@ async def _create_document_record(
     file_size: int, content_type: str, now: str,
     custom_label: str = None
 ):
-    """Cria um registo de documento na BD com status UPLOADED."""
+    """Cria um registo de documento na BD com status RECEIVED."""
     document = {
         "id": doc_id,
         "process_id": process_id,
@@ -896,10 +900,12 @@ async def _create_document_record(
         "file_size": file_size,
         "content_type": content_type,
         "s3_path": file_key,
-        "status": "UPLOADED",
+        "status": "RECEIVED",
         "uploaded_at": now,
         "uploaded_by": "portal_client",
         "source": "client_portal",
+        "reviewed_by": "portal_client",
+        "reviewed_at": now,
     }
     if custom_label:
         document["custom_label"] = custom_label
@@ -1240,6 +1246,19 @@ async def fetch_financas_documents(
         "updated_at": now,
     })
 
+    # ── Passar apenas campos necessários do processo (evitar reter dados grandes em memória) ──
+    process_minimal = {
+        "id": process.get("id"),
+        "client_name": process.get("client_name", ""),
+        "process_number": process.get("process_number", ""),
+        "assigned_consultor_ids": process.get("assigned_consultor_ids"),
+        "assigned_consultor_id": process.get("assigned_consultor_id"),
+        "assigned_mediador_ids": process.get("assigned_mediador_ids"),
+        "assigned_mediador_id": process.get("assigned_mediador_id"),
+        "assigned_indexacao_id": process.get("assigned_indexacao_id"),
+        "assigned_parceiro_id": process.get("assigned_parceiro_id"),
+    }
+
     # ── Agendar execução pesada em BackgroundTask ──
     background_tasks.add_task(
         _run_financas_background,
@@ -1248,7 +1267,7 @@ async def fetch_financas_documents(
         process_id=process_id,
         client_name=client_name,
         client_email=client_email,
-        process=process,
+        process=process_minimal,
         scraper_job_id=scraper_job_id,
     )
 
@@ -1325,6 +1344,19 @@ async def fetch_seguranca_social_documents(
         "updated_at": now,
     })
 
+    # ── Passar apenas campos necessários do processo (evitar reter dados grandes em memória) ──
+    process_minimal = {
+        "id": process.get("id"),
+        "client_name": process.get("client_name", ""),
+        "process_number": process.get("process_number", ""),
+        "assigned_consultor_ids": process.get("assigned_consultor_ids"),
+        "assigned_consultor_id": process.get("assigned_consultor_id"),
+        "assigned_mediador_ids": process.get("assigned_mediador_ids"),
+        "assigned_mediador_id": process.get("assigned_mediador_id"),
+        "assigned_indexacao_id": process.get("assigned_indexacao_id"),
+        "assigned_parceiro_id": process.get("assigned_parceiro_id"),
+    }
+
     # ── Agendar execução pesada em BackgroundTask ──
     background_tasks.add_task(
         _run_seguranca_social_background,
@@ -1333,7 +1365,7 @@ async def fetch_seguranca_social_documents(
         process_id=process_id,
         client_name=client_name,
         client_email=client_email,
-        process=process,
+        process=process_minimal,
         scraper_job_id=scraper_job_id,
     )
 
@@ -1543,6 +1575,11 @@ async def _run_financas_background(
             except Exception as ws_err:
                 logger.warning(f"[PORTAL-BG] Erro ao notificar via WebSocket: {ws_err}")
 
+            # Libertar memória: limpar screenshot e documentos do result
+            result.pop("screenshot_b64", None)
+            result.pop("documents", None)
+            _gc.collect()
+
         else:
             error_detail = result.get("error", "erro_desconhecido")
             logger.error(f"[PORTAL-BG] Erro do scraper Finanças: {error_detail}")
@@ -1563,6 +1600,9 @@ async def _run_financas_background(
             elif error_detail == "mfa_error":
                 error_message = "Erro ao processar o código de verificação. Tente novamente."
                 error_type = "mfa_error"
+            elif error_detail == "memory_error" or error_detail == "MemoryError":
+                error_message = "O servidor não tem memória suficiente para executar a obtenção automática neste momento. Por favor, tente novamente mais tarde ou faça download manualmente."
+                error_type = "scraper_unavailable"
             else:
                 error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente do Portal das Finanças e envie os documentos através do botão de upload."
                 error_type = "scraper_unavailable"
@@ -1600,7 +1640,7 @@ async def _run_financas_background(
                 pass
 
     except Exception as e:
-        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Finanças: {type(e).__name__}")
+        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Finanças: {type(e).__name__}: {e}", exc_info=True)
 
         # Atualizar job na BD
         await db.portal_scraper_jobs.update_one(
@@ -1690,6 +1730,11 @@ async def _run_seguranca_social_background(
             except Exception as ws_err:
                 logger.warning(f"[PORTAL-BG] Erro ao notificar via WebSocket: {ws_err}")
 
+            # Libertar memória: limpar screenshot e documentos do result
+            result.pop("screenshot_b64", None)
+            result.pop("documents", None)
+            _gc.collect()
+
         else:
             error_detail = result.get("error", "erro_desconhecido")
             logger.error(f"[PORTAL-BG] Erro do scraper Seg. Social: {error_detail}")
@@ -1709,6 +1754,9 @@ async def _run_seguranca_social_background(
             elif error_detail == "mfa_error" or error_detail == "mfa_no_input":
                 error_message = "Erro ao processar o código de verificação. Tente novamente."
                 error_type = "mfa_error"
+            elif error_detail == "memory_error" or error_detail == "MemoryError":
+                error_message = "O servidor não tem memória suficiente para executar a obtenção automática neste momento. Por favor, tente novamente mais tarde ou faça download manualmente."
+                error_type = "scraper_unavailable"
             else:
                 error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
                 error_type = "scraper_unavailable"
@@ -1743,7 +1791,7 @@ async def _run_seguranca_social_background(
                 pass
 
     except Exception as e:
-        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Seg. Social: {type(e).__name__}")
+        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Seg. Social: {type(e).__name__}: {e}", exc_info=True)
 
         await db.portal_scraper_jobs.update_one(
             {"id": scraper_job_id},

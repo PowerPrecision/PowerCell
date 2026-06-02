@@ -684,7 +684,7 @@ class ScheduledTasksService:
         msg['To'] = to_email
         msg.attach(MIMEText(html_content, 'html'))
         
-        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+        with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30) as server:
             server.login(smtp_email, smtp_password)
             server.sendmail(smtp_email, to_email, msg.as_string())
         
@@ -1443,6 +1443,9 @@ async def run_email_auto_sync(interval_seconds: int = 180):
         try:
             await service.connect()
             await service.auto_sync_emails()
+        except asyncio.CancelledError:
+            logger.info("[Email Auto-Sync] Cancelado, a sair do loop")
+            break
         except Exception as e:
             logger.error(f"[Email Auto-Sync] Erro no ciclo: {e}")
         finally:
@@ -1470,6 +1473,9 @@ async def run_daemon(interval_hours: int = 24):
     while True:
         try:
             await service.run_all_tasks()
+        except asyncio.CancelledError:
+            logger.info("[Daemon] Cancelado, a sair do loop")
+            break
         except Exception as e:
             logger.error(f"Erro no daemon: {e}")
         

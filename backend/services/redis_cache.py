@@ -64,6 +64,8 @@ class InMemoryCache:
     Em dev (1 processo no Render free tier), isto é aceitável.
     """
     
+    MAX_ENTRIES = 500  # Limite de segurança para evitar crescimento infinito
+    
     def __init__(self):
         self._store: dict = {}  # key → {"value": str, "expires_at": float}
         logger.info("[IN-MEMORY CACHE] Inicializado — fallback para DEV (sem Redis)")
@@ -73,6 +75,19 @@ class InMemoryCache:
         now = time.time()
         expired_keys = [k for k, v in self._store.items() if v["expires_at"] < now]
         for k in expired_keys:
+            del self._store[k]
+    
+    def _evict_if_full(self):
+        """Se o cache exceder MAX_ENTRIES, evict as entradas que expiram mais cedo."""
+        if len(self._store) < self.MAX_ENTRIES:
+            return
+        self._cleanup_expired()
+        if len(self._store) < self.MAX_ENTRIES:
+            return
+        # Evict 25% das entradas mais próximas de expirar
+        sorted_keys = sorted(self._store.keys(),
+                           key=lambda k: self._store[k]["expires_at"])
+        for k in sorted_keys[:len(self._store) // 4 + 1]:
             del self._store[k]
     
     async def get(self, key: str) -> Optional[str]:
@@ -86,6 +101,7 @@ class InMemoryCache:
         return entry["value"]
     
     async def setex(self, key: str, ttl: int, value: str) -> bool:
+        self._evict_if_full()
         self._store[key] = {
             "value": value,
             "expires_at": time.time() + ttl,

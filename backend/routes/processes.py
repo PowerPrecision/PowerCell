@@ -3001,7 +3001,23 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             await log_data_changes(process_id, user, existing_credit, incoming_credit, "dados de crédito")
             await log_audit_event(process_id, user, "Alterou dados de crédito", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["credit_data"] = merged_credit
-        
+
+        # ── Dados financeiros (financial_data) ──
+        # O frontend envia financial_data no body do PUT, mas ProcessUpdate
+        # não inclui este campo (é schemaless dict no MongoDB).
+        # Extraímos do raw_body e fazemos merge com os dados existentes.
+        if can_update_financial:
+            incoming_fd = raw_body.get("financial_data")
+            if isinstance(incoming_fd, dict):
+                _fd = process.get("financial_data")
+                existing_fd = _fd if isinstance(_fd, dict) else {}
+                merged_fd = {**existing_fd, **incoming_fd}
+                # Remover campos com valor None (utilizador limpou o campo)
+                merged_fd = {k: v for k, v in merged_fd.items() if v is not None and v != ""}
+                await log_data_changes(process_id, user, existing_fd, incoming_fd, "dados financeiros")
+                await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
+                update_data["financial_data"] = merged_fd
+
         # Campos adicionais do CPCV
         if data.co_buyers is not None:
             update_data["co_buyers"] = data.co_buyers

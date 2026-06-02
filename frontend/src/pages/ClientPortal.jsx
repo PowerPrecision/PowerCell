@@ -858,7 +858,7 @@ function DocumentHelpDialog({ open, onOpenChange }) {
 }
 
 function DocumentsPanel({ documents, onUploadSuccess }) {
-  const { requested = [], uploaded = [], received = [], has_pending } = documents || {};
+  const { requested = [], received = [], has_pending } = documents || {};
   const [credDialogSource, setCredDialogSource] = useState(null); // 'financas' | 'seguranca_social' | null
   const [helpOpen, setHelpOpen] = useState(false);
   const [scraperAvailable, setScraperAvailable] = useState(null); // null=unchecked, true/false
@@ -982,31 +982,6 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
         </button>
       </div>
 
-      {/* Uploaded by client */}
-      {uploaded.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-            Documentos Entregues ({uploaded.length})
-          </h3>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {uploaded.map((doc) => (
-              <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-emerald-50/50 hover:bg-emerald-50 transition-colors">
-                <span className="text-base flex-shrink-0">{doc.icon || '📄'}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-gray-700 truncate font-medium">{typeof doc.filename === 'string' ? doc.filename : String(doc.filename || '')}</p>
-                  <p className="text-xs text-gray-400">
-                    {typeof (doc.category_label || doc.category) === 'string' ? (doc.category_label || doc.category) : String(doc.category_label || doc.category || '')}
-                    {doc.uploaded_at && ` · ${new Date(safeDateStr(doc.uploaded_at)).toLocaleDateString('pt-PT')}`}
-                  </p>
-                </div>
-                <Check className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Credentials Dialog */}
       <CredentialsDialog
         open={credDialogSource !== null}
@@ -1021,14 +996,14 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
         onOpenChange={setHelpOpen}
       />
 
-      {/* Received by admin (documents delivered outside portal) */}
+      {/* Documentos Recebidos (via portal ou admin) */}
       {received && received.length > 0 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-teal-500" />
             Documentos Recebidos ({received.length})
           </h3>
-          <p className="text-xs text-gray-400 mb-3">Estes documentos foram recebidos pela nossa equipa.</p>
+          <p className="text-xs text-gray-400 mb-3">Documentos submetidos e já recebidos pela nossa equipa.</p>
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {received.map((doc) => (
               <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-teal-50/50 hover:bg-teal-50 transition-colors">

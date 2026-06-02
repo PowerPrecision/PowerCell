@@ -4868,7 +4868,8 @@ const ProcessDetails = () => {
                   {/* Documents Tab - Destaque para fácil acesso */}
                   <TabsContent value="documents" className="mt-4">
                     <div className="space-y-4">
-                      {/* Header com info */}
+                      {/* Header com info — só visível para admin e CEO */}
+                      {hasAnyRole(user, ["admin", "ceo"]) && (
                       <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
@@ -4882,8 +4883,10 @@ const ProcessDetails = () => {
                           </div>
                         </div>
                       </div>
-                      
-                      {/* AI Executive Summary — Analisar IA (Auditoria) */}
+                      )}
+
+                      {/* AI Executive Summary — só visível para admin e CEO */}
+                      {hasAnyRole(user, ["admin", "ceo"]) && (
                       <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10">
                         <CardContent className="pt-4">
                           <div className="flex items-center justify-between">
@@ -4961,6 +4964,7 @@ const ProcessDetails = () => {
                           )}
                         </CardContent>
                       </Card>
+                      )}
 
                       {/* Painel de Documentos Unificado */}
                       <Card className="border-amber-200 dark:border-amber-800">
