@@ -291,8 +291,8 @@ function App() {
           {/* Client Portal - Magic Link (passwordless, no auth required) */}
           <Route path="/portal/:token" element={<ErrorBoundary variant="page" moduleName="Portal do Cliente"><ClientPortal /></ErrorBoundary>} />
           
-          {/* /portal sem token — redirecionar para login com aviso */}
-          <Route path="/portal" element={<Navigate to="/login?info=portal" replace />} />
+          {/* /portal — ecrã de login OTP (novo fluxo NIF + OTP) */}
+          <Route path="/portal" element={<ErrorBoundary variant="page" moduleName="Portal do Cliente"><ClientPortal /></ErrorBoundary>} />
           
           {/* Staff login */}
           <Route path="/login" element={<LoginPage />} />

@@ -1,16 +1,16 @@
 /**
- * ClientPortal — Portal do Cliente (Login Obrigatório + Magic Link).
+ * ClientPortal — Portal do Cliente (Login OTP + Magic Link legado).
  *
  * Layout: Dashboard profissional full-width — horizontal stepper + 2 colunas.
  * - Topo (lg:col-span-12): Resumo + Timeline Horizontal (Stepper)
  * - Esquerda (lg:col-span-7): Gestão de Documentos + RGPD + Equipa
  * - Direita (lg:col-span-5): Mensagens / Chat
  *
- * Fluxo de autenticação (v2 — Login obrigatório):
- *   1. Utilizador acede ao portal (via link com client_id ou magic link)
- *   2. Se não tem verified_session token → Mostra ecrã de login
- *   3. Login: NIF + Nº Processo → POST /portal/{client_id}/verify → JWT
- *   4. Token gravado em localStorage → Acesso concedido ao portal
+ * Fluxo de autenticação (v3 — OTP via NIF):
+ *   1. Utilizador acede ao portal (/portal)
+ *   2. Se não tem token em sessionStorage → Mostra ecrã de login OTP
+ *   3. Login: NIF → OTP email → Código 6 dígitos → Token seguro
+ *   4. Token gravado em sessionStorage (só dura enquanto a aba estiver aberta)
  *   5. Fluxo legado (magic link) ainda funciona como fallback
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
@@ -46,6 +46,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { safeDateStr } from '../lib/utils';
+import ClientPortalLogin from './ClientPortalLogin';
 
 // ====================================================================
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
@@ -69,6 +70,11 @@ function LoaderFallback() {
 }
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
+
+// ── Helper: obter token do portal (sessionStorage > localStorage legado) ──
+function getPortalToken() {
+  return sessionStorage.getItem('portalToken') || localStorage.getItem('portal_token');
+}
 
 // ====================================================================
 // FETCH WITH RETRY — handles Render cold starts (503) automatically
@@ -200,7 +206,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
     setProgress(0);
 
     try {
-      const token = localStorage.getItem('portal_token');
+      const token = getPortalToken();
       if (!token) throw new Error('Sessão expirada. Recarregue a página.');
 
       // Step 1: pre-signed URL
@@ -471,7 +477,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
     setMfaSubmitting(true);
     setError(null);
     try {
-      const token = localStorage.getItem('portal_token');
+      const token = getPortalToken();
       if (!token) throw new Error('Sessão expirada.');
 
       const res = await fetchWithRetry(`${BACKEND_URL}/portal/submit-mfa`, {
@@ -519,7 +525,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
     setLoading(true);
     let startedAsyncJob = false;
     try {
-      const token = localStorage.getItem('portal_token');
+      const token = getPortalToken();
       if (!token) throw new Error('Sessão expirada.');
 
       const endpoint = isFinancas ? 'fetch-financas' : 'fetch-seguranca-social';
@@ -1460,14 +1466,16 @@ export default function ClientPortal() {
   const rawToken = useRef(window.location.pathname.split('/portal/')[1]);
 
   // Verificar se já tem sessão verificada — validar token no backend
-  // (nunca confiar apenas no flag portal_verified; o token pode ter expirado)
+  // (nunca confiar apenas no flag; o token pode ter expirado)
+  // Suporta sessionStorage (OTP v3) e localStorage legado (magic link)
   useEffect(() => {
     let cancelled = false;
-    const token = localStorage.getItem('portal_token');
-    const verified = localStorage.getItem('portal_verified') === 'true';
+    // Prioridade: sessionStorage (OTP) > localStorage (magic link legado)
+    const token = getPortalToken();
+    const verified = sessionStorage.getItem('portalVerified') === 'true' || localStorage.getItem('portal_verified') === 'true';
 
     if (!token || !verified) {
-      // Sem token ou sem flag — mostrar login
+      sessionStorage.removeItem('portalVerified');
       localStorage.removeItem('portal_verified');
       return;
     }
@@ -1485,6 +1493,10 @@ export default function ClientPortal() {
           setIsVerified(true);
         } else {
           // Token inválido/expirado — limpar sessão e mostrar login
+          sessionStorage.removeItem('portalToken');
+          sessionStorage.removeItem('portalClientId');
+          sessionStorage.removeItem('portalAuthMethod');
+          sessionStorage.removeItem('portalVerified');
           localStorage.removeItem('portal_token');
           localStorage.removeItem('portal_verified');
           localStorage.removeItem('portal_client_id');
@@ -1493,6 +1505,7 @@ export default function ClientPortal() {
         }
       } catch {
         // Erro de rede — não auto-verificar, mostrar login
+        sessionStorage.removeItem('portalVerified');
         localStorage.removeItem('portal_verified');
       }
     })();
@@ -1515,12 +1528,13 @@ export default function ClientPortal() {
 
   // ── Resolve magic link (apenas extrai client_id, NÃO carrega dados) ──
   // Os dados do portal só são carregados APÓS o login ser verificado.
+  // Se não há token na URL (fluxo OTP via /portal), simplesmente ignorar.
   useEffect(() => {
     let cancelled = false;
     const token = rawToken.current;
 
     if (!token) {
-      setError('Link inválido. Contacte o seu consultor.');
+      // Sem token na URL — fluxo OTP normal (/portal), não fazer nada
       setLoading(false);
       return;
     }
@@ -1591,7 +1605,7 @@ export default function ClientPortal() {
     let cancelled = false;
 
     const fetchStatus = async () => {
-      const jwt = localStorage.getItem('portal_token');
+      const jwt = getPortalToken();
       if (!jwt) {
         setError('Sessão inválida. Recarregue a página.');
         setLoading(false);
@@ -1654,7 +1668,7 @@ export default function ClientPortal() {
   const [visitRequestResult, setVisitRequestResult] = useState(null);
 
   const fetchMessages = useCallback(async () => {
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/messages`, {
@@ -1672,7 +1686,7 @@ export default function ClientPortal() {
   }, []);
 
   const fetchUnreadCount = useCallback(async () => {
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/messages/unread`, {
@@ -1689,7 +1703,7 @@ export default function ClientPortal() {
 
   const sendMessage = useCallback(async () => {
     if (!newMessage.trim()) return;
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     setSendingMessage(true);
     try {
@@ -1722,7 +1736,7 @@ export default function ClientPortal() {
 
   // ── Fetch recommended properties ──
   const fetchRecommendations = useCallback(async () => {
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/recommendations`, {
@@ -1745,7 +1759,7 @@ export default function ClientPortal() {
 
   // ── Fetch visits ──
   const fetchVisits = useCallback(async () => {
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/visits`, {
@@ -1774,7 +1788,7 @@ export default function ClientPortal() {
     return data?.welcome_message || '';
   }, [data?.welcome_message]);
 
-  // ── Login Gate — Se não está verificado, mostrar ecrã de login ──
+  // ── Login Gate — Se não está verificado, mostrar ecrã de login OTP ──
   const handleLoginSuccess = useCallback((token) => {
     // Login verificado — o useEffect [isVerified, refreshKey] vai carregar os dados
     setIsVerified(true);
@@ -1783,10 +1797,7 @@ export default function ClientPortal() {
   if (!isVerified) {
     return (
       <ClientOnly>
-        <PortalLoginScreen
-          onLoginSuccess={handleLoginSuccess}
-          client_id={clientId}
-        />
+        <ClientPortalLogin onLoginSuccess={handleLoginSuccess} />
       </ClientOnly>
     );
   }
@@ -1849,9 +1860,13 @@ export default function ClientPortal() {
             <span>Acesso Seguro</span>
           </div>
           {/* Botão Terminar Sessão */}
-          {localStorage.getItem('portal_verified') === 'true' && (
+          {(sessionStorage.getItem('portalVerified') === 'true' || localStorage.getItem('portal_verified') === 'true') && (
             <button
               onClick={() => {
+                sessionStorage.removeItem('portalToken');
+                sessionStorage.removeItem('portalClientId');
+                sessionStorage.removeItem('portalAuthMethod');
+                sessionStorage.removeItem('portalVerified');
                 localStorage.removeItem('portal_token');
                 localStorage.removeItem('portal_verified');
                 localStorage.removeItem('portal_client_id');
@@ -2071,7 +2086,7 @@ export default function ClientPortal() {
                     setRequestingVisit(true);
                     setVisitRequestResult(null);
                     try {
-                      const token = localStorage.getItem('portal_token');
+                      const token = getPortalToken();
                       if (!token) throw new Error('Sessão expirada.');
                       const res = await fetchWithRetry(`${BACKEND_URL}/portal/visits/request`, {
                         method: 'POST',
