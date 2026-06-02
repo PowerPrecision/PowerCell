@@ -1447,10 +1447,14 @@ const ProcessDetails = () => {
   // Helper para limpar dados do imóvel antes de enviar
   const cleanRealEstateDataForSubmit = (data) => {
     const cleaned = { ...data };
-    // Remover campos undefined ou vazios
+    // Converter strings vazias → null (para permitir limpar campos no backend)
+    // Campos undefined são removidos (não foram alterados).
+    // Campos com "" significam que o utilizador limpou o campo → enviar null.
     Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined || cleaned[key] === '') {
+      if (cleaned[key] === undefined) {
         delete cleaned[key];
+      } else if (cleaned[key] === '') {
+        cleaned[key] = null;
       }
     });
     return cleaned;
@@ -1512,8 +1516,13 @@ const ProcessDetails = () => {
     
     const cleaned = {};
     for (const key of validFields) {
-      if (data[key] !== undefined && data[key] !== null && data[key] !== '') {
-        cleaned[key] = data[key];
+      if (data[key] !== undefined) {
+        if (data[key] === null || data[key] === '') {
+          // Utilizador limpou o campo → enviar null para o backend limpar
+          cleaned[key] = null;
+        } else {
+          cleaned[key] = data[key];
+        }
       }
     }
     return cleaned;
