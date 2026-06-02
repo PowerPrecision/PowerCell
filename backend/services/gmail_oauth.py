@@ -670,7 +670,7 @@ def _fetch_imap_sync(
 
     try:
         ssl_context = ssl.create_default_context(cafile=certifi.where())
-        mail = imaplib.IMAP4_SSL(imap_server, int(imap_port), ssl_context=ssl_context)
+        mail = imaplib.IMAP4_SSL(imap_server, int(imap_port), ssl_context=ssl_context, timeout=30)
         mail.login(account_email, password)
 
         since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
@@ -876,6 +876,25 @@ async def test_imap_connection(email_config: dict) -> Dict[str, Any]:
             "error": "Password não configurada",
         }
 
+    # Validar campos obrigatórios antes de tentar a ligação
+    email_addr = email_config.get("email_address", "")
+    imap_server = email_config.get("imap_server", "")
+    smtp_server = email_config.get("smtp_server", "")
+    missing = []
+    if not email_addr:
+        missing.append("endereço de email")
+    if not imap_server:
+        missing.append("servidor IMAP")
+    if not smtp_server:
+        missing.append("servidor SMTP")
+    if missing:
+        logger.warning(f"[EMAIL-TEST] Campos em falta para teste: {', '.join(missing)}")
+        return {
+            "success": False,
+            "auth_method": "imap_smtp",
+            "error": f"Campos obrigatórios em falta: {', '.join(missing)}. Preencha a configuração de email antes de testar.",
+        }
+
     password = encryption_service.decrypt(encrypted_password)
     if not password or password.startswith("ENC:"):
         return {
@@ -907,37 +926,49 @@ async def test_imap_connection(email_config: dict) -> Dict[str, Any]:
         imap_ok = False
         smtp_ok = False
         error = None
+        email_addr = email_config.get("email_address", "")
+        imap_host = email_config.get("imap_server", "")
+        smtp_host = email_config.get("smtp_server", "")
 
-        # Test IMAP
+        logger.info(f"[EMAIL-TEST] A testar IMAP {imap_host}:{email_config.get('imap_port', 993)} para {email_addr}")
+
+        # Test IMAP (timeout de 25s)
         try:
             ssl_context = ssl.create_default_context(cafile=certifi.where())
             imap_port = email_config.get("imap_port", 993) or 993
             mail = imaplib.IMAP4_SSL(
-                email_config.get("imap_server", ""),
+                imap_host,
                 int(imap_port),
                 ssl_context=ssl_context,
+                timeout=25,
             )
-            mail.login(email_config.get("email_address", ""), password)
+            mail.login(email_addr, password)
             mail.logout()
             imap_ok = True
+            logger.info(f"[EMAIL-TEST] IMAP OK para {email_addr}")
         except Exception as e:
             error = _parse_error(str(e), "IMAP")
+            logger.warning(f"[EMAIL-TEST] IMAP FALHOU para {email_addr}: {e}")
 
-        # Test SMTP
+        # Test SMTP (timeout de 25s)
         try:
             ssl_context = ssl.create_default_context(cafile=certifi.where())
             smtp_port = email_config.get("smtp_port", 465) or 465
+            logger.info(f"[EMAIL-TEST] A testar SMTP {smtp_host}:{smtp_port} para {email_addr}")
             smtp_server = smtplib.SMTP_SSL(
-                email_config.get("smtp_server", ""),
+                smtp_host,
                 int(smtp_port),
                 context=ssl_context,
+                timeout=25,
             )
-            smtp_server.login(email_config.get("email_address", ""), password)
+            smtp_server.login(email_addr, password)
             smtp_server.quit()
             smtp_ok = True
+            logger.info(f"[EMAIL-TEST] SMTP OK para {email_addr}")
         except Exception as e:
             smtp_err = _parse_error(str(e), "SMTP")
             error = f"{error}. {smtp_err}" if error else smtp_err
+            logger.warning(f"[EMAIL-TEST] SMTP FALHOU para {email_addr}: {e}")
 
         return {
             "success": imap_ok and smtp_ok,
@@ -949,4 +980,18 @@ async def test_imap_connection(email_config: dict) -> Dict[str, Any]:
         }
 
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_legacy_executor, _test)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(_legacy_executor, _test),
+            timeout=60.0,  # 60s total para IMAP + SMTP
+        )
+    except asyncio.TimeoutError:
+        logger.error("[EMAIL-TEST] Timeout (60s) a testar ligação IMAP/SMTP")
+        return {
+            "success": False,
+            "auth_method": "imap_smtp",
+            "imap_connected": False,
+            "smtp_connected": False,
+            "gmail_api_connected": False,
+            "error": "Tempo de conexão esgotado (60s). O servidor pode estar inacessível a partir desta infraestrutura. Verifique se as portas IMAP (993) e SMTP (465) estão abertas.",
+        }

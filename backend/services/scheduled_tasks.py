@@ -684,7 +684,7 @@ class ScheduledTasksService:
         msg['To'] = to_email
         msg.attach(MIMEText(html_content, 'html'))
         
-        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+        with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30) as server:
             server.login(smtp_email, smtp_password)
             server.sendmail(smtp_email, to_email, msg.as_string())
         

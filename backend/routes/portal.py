@@ -1640,7 +1640,7 @@ async def _run_financas_background(
                 pass
 
     except Exception as e:
-        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Finanças: {type(e).__name__}")
+        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Finanças: {type(e).__name__}: {e}", exc_info=True)
 
         # Atualizar job na BD
         await db.portal_scraper_jobs.update_one(
@@ -1791,7 +1791,7 @@ async def _run_seguranca_social_background(
                 pass
 
     except Exception as e:
-        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Seg. Social: {type(e).__name__}")
+        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Seg. Social: {type(e).__name__}: {e}", exc_info=True)
 
         await db.portal_scraper_jobs.update_one(
             {"id": scraper_job_id},

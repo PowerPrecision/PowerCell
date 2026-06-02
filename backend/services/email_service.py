@@ -821,7 +821,7 @@ async def test_email_connection(account_name: str = None) -> Dict[str, Any]:
         # Testar IMAP
         try:
             context = ssl.create_default_context()
-            mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context)
+            mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context, timeout=25)
             # Usar encode UTF-8 para suportar caracteres especiais na password
             mail.login(email, password)
             mail.logout()
@@ -888,7 +888,7 @@ def _fetch_all_from_folder_sync(
     
     try:
         context = ssl.create_default_context()
-        mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context)
+        mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context, timeout=30)
         mail.login(account.email, account.password)
         
         since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
@@ -2047,7 +2047,7 @@ def _imap_store_flags_sync(
     
     try:
         context = ssl.create_default_context()
-        mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context)
+        mail = imaplib.IMAP4_SSL(account.imap_server, account.imap_port, ssl_context=context, timeout=30)
         mail.login(account.email, account.password)
         
         # Select folder
@@ -2199,7 +2199,7 @@ async def imap_move_to_trash(
     
     def _move_sync():
         try:
-            mail = imaplib.IMAP4_SSL(email_account.imap_server, email_account.imap_port)
+            mail = imaplib.IMAP4_SSL(email_account.imap_server, email_account.imap_port, timeout=30)
             mail.login(email_account.email, email_account.password)
             
             # Select source folder
