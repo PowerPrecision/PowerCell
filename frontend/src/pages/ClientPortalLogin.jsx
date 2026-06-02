@@ -1,32 +1,25 @@
 /**
- * ClientPortalLogin — Ecrã de Login do Portal do Cliente (NIF + OTP).
+ * ClientPortalLogin — Ecrã de Login do Portal do Cliente (Email + Código de Acesso).
  *
  * Fluxo de autenticação:
- *   Fase 1: Utilizador insere NIF → POST /portal/auth/request-otp → email com código
- *   Fase 2: Utilizador insere código OTP (6 dígitos) → POST /portal/auth/verify-otp → token
+ *   O utilizador insere o seu Email e o Código de Acesso fixo (formato XXX-XXX)
+ *   que foi gerado automaticamente quando o seu registo foi criado.
+ *   POST /portal/auth/login → recebe token JWT + client_id
  *
- * O token devolvido é guardado em sessionStorage (portalToken).
- * O URL fica sempre limpo (/portal) e a sessão mantém-se enquanto a aba estiver aberta.
- *
- * Integração com InputOTP do shadcn/ui para o código de 6 dígitos.
+ * O token devolvido é guardado em localStorage (portalToken) para persistir
+ * entre reloads (dentro do prazo de 15 min de inatividade).
+ * A última actividade é registada em localStorage (portalLastActivity).
  */
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import {
   Shield,
   Loader2,
   AlertCircle,
   Mail,
-  ArrowLeft,
   KeyRound,
-  RefreshCw,
+  LogIn,
 } from 'lucide-react';
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-  InputOTPSeparator,
-} from '@/components/ui/input-otp';
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
 
@@ -63,8 +56,8 @@ async function fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches
 // ====================================================================
 function ClientOnly({ children, fallback = null }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => { setMounted(true); }, []);
   return mounted ? children : fallback;
 }
 
@@ -73,101 +66,52 @@ function ClientOnly({ children, fallback = null }) {
 // ====================================================================
 export default function ClientPortalLogin({ onLoginSuccess }) {
   // ── State ──
-  const [step, setStep] = useState(1); // 1 = NIF, 2 = OTP
-  const [nif, setNif] = useState('');
-  const [otpCode, setOtpCode] = useState('');
+  const [email, setEmail] = useState('');
+  const [accessCode, setAccessCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [otpSent, setOtpSent] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
 
-  // Ref para auto-submit quando OTP estiver completo
-  const otpCompleteRef = useRef(false);
-
-  // ── Cooldown timer para reenvio de OTP ──
-  useEffect(() => {
-    if (resendCooldown <= 0) return;
-    const timer = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [resendCooldown]);
-
-  // ── Auto-submit OTP quando o código estiver completo (6 dígitos) ──
-  useEffect(() => {
-    if (step !== 2) return;
-    if (otpCode.length === 6 && !otpCompleteRef.current && !loading) {
-      otpCompleteRef.current = true;
-      handleVerifyOtp(otpCode);
+  // ── Formatar código de acesso enquanto o utilizador digita ──
+  const handleAccessCodeChange = useCallback((raw) => {
+    // Permitir apenas letras e dígitos
+    let clean = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    // Limitar a 6 caracteres
+    clean = clean.slice(0, 6);
+    // Inserir hífen após 3 caracteres (visual: XXX-XXX)
+    if (clean.length > 3) {
+      clean = clean.slice(0, 3) + '-' + clean.slice(3);
     }
-    // Reset flag quando o utilizador apaga dígitos
-    if (otpCode.length < 6) {
-      otpCompleteRef.current = false;
-    }
-  }, [otpCode, step, loading]);
+    setAccessCode(clean);
+  }, []);
 
-  // ── Fase 1: Pedir OTP ──
-  const handleRequestOtp = useCallback(async (e) => {
+  // ── Submeter login ──
+  const handleLogin = useCallback(async (e) => {
     e?.preventDefault();
     setError(null);
 
-    const cleanNif = nif.replace(/\D/g, '');
-    if (cleanNif.length !== 9) {
-      setError('O NIF deve conter exatamente 9 dígitos.');
+    // Validações locais
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setError('Introduza um email válido.');
+      return;
+    }
+
+    // Remover hífen para enviar ao backend (A4B-9X2 → A4B9X2)
+    const cleanCode = accessCode.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (cleanCode.length !== 6) {
+      setError('O código de acesso deve conter 6 caracteres.');
       return;
     }
 
     setLoading(true);
     try {
-      const res = await fetchWithRetry(`${BACKEND_URL}/portal/auth/request-otp`, {
+      const res = await fetchWithRetry(`${BACKEND_URL}/portal/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nif: cleanNif }),
-      });
-
-      let data;
-      try {
-        data = await res.json();
-      } catch {
-        if (res.status === 503) {
-          setError('O servidor está a iniciar. Aguarde uns segundos e tente novamente.');
-          return;
-        }
-        setError('Erro inesperado. Tente novamente.');
-        return;
-      }
-
-      if (res.ok) {
-        // OTP enviado com sucesso — passar para a Fase 2
-        setStep(2);
-        setOtpSent(true);
-        setOtpCode('');
-        setResendCooldown(30); // 30 segundos de cooldown para reenvio
-        toast.success('Código enviado para o seu email!');
-      } else {
-        // Erro — mostrar mensagem do backend
-        setError(data.detail || 'Erro ao enviar o código. Tente novamente.');
-      }
-    } catch (err) {
-      setError(err.message || 'Erro de ligação. Tente novamente.');
-    } finally {
-      setLoading(false);
-    }
-  }, [nif]);
-
-  // ── Fase 2: Verificar OTP ──
-  const handleVerifyOtp = useCallback(async (code) => {
-    const cleanNif = nif.replace(/\D/g, '');
-    if (!code || code.length !== 6) {
-      setError('Introduza o código de 6 dígitos.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchWithRetry(`${BACKEND_URL}/portal/auth/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nif: cleanNif, code }),
+        body: JSON.stringify({
+          email: cleanEmail,
+          access_code: cleanCode,
+        }),
       });
 
       let data;
@@ -183,90 +127,44 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
       }
 
       if (res.ok && data.token) {
-        // ── Sucesso! Guardar token em sessionStorage ──
-        sessionStorage.setItem('portalToken', data.token);
-        sessionStorage.setItem('portalClientId', data.client_id || '');
-        sessionStorage.setItem('portalAuthMethod', 'otp');
-        sessionStorage.setItem('portalVerified', 'true');
+        // ── Sucesso! Guardar token e actividade em localStorage ──
+        localStorage.setItem('portalToken', data.token);
+        localStorage.setItem('portalClientId', data.client_id || '');
+        localStorage.setItem('portalClientName', data.client_name || '');
+        localStorage.setItem('portalProcessId', data.process_id || '');
+        localStorage.setItem('portalAuthMethod', 'access_code');
+        localStorage.setItem('portalLastActivity', String(Date.now()));
 
-        // Limpar localStorage legado (evitar conflitos com o modelo antigo)
-        localStorage.removeItem('portal_token');
-        localStorage.removeItem('portal_verified');
-        localStorage.removeItem('portal_client_id');
-        localStorage.removeItem('portal_client_name');
-        localStorage.removeItem('portal_process_id');
+        // Limpar sessionStorage legado (modelo antigo OTP)
+        sessionStorage.removeItem('portalToken');
+        sessionStorage.removeItem('portalClientId');
+        sessionStorage.removeItem('portalAuthMethod');
+        sessionStorage.removeItem('portalVerified');
+
+        toast.success(`Bem-vindo, ${data.client_name || 'Cliente'}!`);
 
         if (onLoginSuccess) {
           onLoginSuccess(data.token);
         }
+      } else if (res.status === 429) {
+        // Rate limited — muitas tentativas falhadas
+        setError(data.detail || 'Muitas tentativas falhadas. Tente novamente mais tarde.');
+      } else if (res.status === 401) {
+        // Credenciais inválidas
+        setError(data.detail || 'Credenciais inválidas. Verifique o seu email e código.');
       } else {
-        // OTP incorrecto ou expirado
-        otpCompleteRef.current = false;
-        setOtpCode('');
-        setError(data.detail || 'Código inválido. Tente novamente.');
+        setError(data.detail || 'Erro ao fazer login. Tente novamente.');
       }
     } catch (err) {
-      otpCompleteRef.current = false;
       setError(err.message || 'Erro de ligação. Tente novamente.');
     } finally {
       setLoading(false);
     }
-  }, [nif, onLoginSuccess]);
+  }, [email, accessCode, onLoginSuccess]);
 
-  // ── Reenviar OTP ──
-  const handleResendOtp = useCallback(async () => {
-    if (resendCooldown > 0) return;
-    setError(null);
-    setOtpCode('');
-    otpCompleteRef.current = false;
-
-    const cleanNif = nif.replace(/\D/g, '');
-    if (cleanNif.length !== 9) return;
-
-    setLoading(true);
-    try {
-      const res = await fetchWithRetry(`${BACKEND_URL}/portal/auth/request-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nif: cleanNif }),
-      });
-
-      let data;
-      try { data = await res.json(); } catch {
-        setError('Erro ao reenviar. Tente novamente.');
-        return;
-      }
-
-      if (res.ok) {
-        setResendCooldown(30);
-        toast.success('Novo código enviado!');
-      } else {
-        setError(data.detail || 'Erro ao reenviar o código.');
-      }
-    } catch (err) {
-      setError(err.message || 'Erro de ligação.');
-    } finally {
-      setLoading(false);
-    }
-  }, [nif, resendCooldown]);
-
-  // ── Voltar à Fase 1 ──
-  const handleBack = useCallback(() => {
-    setStep(1);
-    setOtpCode('');
-    setError(null);
-    otpCompleteRef.current = false;
-  }, []);
-
-  // NIF limpo para display
-  const displayNif = nif.replace(/\D/g, '');
-  // Máscara de email (mostrar apenas primeira letra + ***@dominio)
-  const maskEmail = (email) => {
-    if (!email) return 'o seu email';
-    const [local, domain] = email.split('@');
-    if (!domain) return email;
-    return local.length > 1 ? `${local[0]}${'*'.repeat(Math.min(local.length - 1, 5))}@${domain}` : `***@${domain}`;
-  };
+  // Código limpo para habilitar botão
+  const cleanCode = accessCode.replace(/[^A-Za-z0-9]/g, '');
+  const canSubmit = email.trim().includes('@') && cleanCode.length === 6 && !loading;
 
   return (
     <ClientOnly>
@@ -283,185 +181,105 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
 
           {/* Login Card */}
           <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
-            {/* Header — muda conforme a fase */}
+            {/* Header */}
             <div className="text-center mb-6">
-              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg transition-colors duration-300 ${
-                step === 1
-                  ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
-                  : 'bg-gradient-to-br from-blue-500 to-indigo-600'
-              }`}>
-                {step === 1 ? (
-                  <Shield className="w-8 h-8 text-white" />
-                ) : (
-                  <KeyRound className="w-8 h-8 text-white" />
-                )}
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg bg-gradient-to-br from-emerald-500 to-teal-600">
+                <LogIn className="w-8 h-8 text-white" />
               </div>
-              <h1 className="text-xl font-bold text-gray-900">
-                {step === 1 ? 'Portal do Cliente' : 'Verificação'}
-              </h1>
+              <h1 className="text-xl font-bold text-gray-900">Portal do Cliente</h1>
               <p className="text-sm text-gray-500 mt-1">
-                {step === 1
-                  ? 'Introduza o seu NIF para receber um código de acesso'
-                  : 'Introduza o código de 6 dígitos enviado para o seu email'
-                }
+                Introduza o seu email e código de acesso
               </p>
             </div>
 
             {/* Security notice */}
-            <div className={`flex items-start gap-2 rounded-lg p-3 mb-5 transition-colors duration-300 ${
-              step === 1
-                ? 'bg-emerald-50 border border-emerald-200'
-                : 'bg-blue-50 border border-blue-200'
-            }`}>
-              {step === 1 ? (
-                <Shield className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-              ) : (
-                <Mail className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-              )}
-              <p className={`text-xs ${step === 1 ? 'text-emerald-700' : 'text-blue-700'}`}>
-                {step === 1 ? (
-                  <><strong>Acesso seguro.</strong> Os seus dados são encriptados e nunca são partilhados.</>
-                ) : (
-                  <>Enviámos um código para <strong>o email associado ao seu NIF</strong>. O código é válido durante 5 minutos.</>
-                )}
+            <div className="flex items-start gap-2 rounded-lg p-3 mb-5 bg-emerald-50 border border-emerald-200">
+              <Shield className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-emerald-700">
+                <strong>Acesso seguro.</strong> Os seus dados são encriptados e nunca são partilhados. 
+                O código de acesso foi enviado para o seu email quando se registou.
               </p>
             </div>
 
-            {/* ═══════════════════════════════════════════════
-                FASE 1 — Pedir NIF
-            ═══════════════════════════════════════════════ */}
-            {step === 1 && (
-              <form onSubmit={handleRequestOtp} className="space-y-4">
-                {/* NIF Input */}
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                    NIF (Número de Identificação Fiscal)
-                  </label>
+            {/* Formulário */}
+            <form onSubmit={handleLogin} className="space-y-4">
+              {/* Email Input */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                  Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
-                    type="text"
-                    value={nif}
-                    onChange={(e) => setNif(e.target.value.replace(/\D/g, '').slice(0, 9))}
-                    placeholder="123456789"
-                    className="w-full px-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all"
-                    inputMode="numeric"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="exemplo@email.com"
+                    className="w-full pl-10 pr-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all"
                     disabled={loading}
+                    autoComplete="email"
                     autoFocus
                   />
-                  <p className="text-[10px] text-gray-400 mt-1">9 dígitos do seu Cartão de Cidadão</p>
                 </div>
-
-                {/* Error */}
-                {error && (
-                  <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-200">
-                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
-
-                {/* Submit */}
-                <button
-                  type="submit"
-                  disabled={loading || displayNif.length !== 9}
-                  className="w-full py-3 text-sm font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      A enviar código...
-                    </>
-                  ) : (
-                    <>
-                      <Mail className="w-4 h-4" />
-                      Enviar Código
-                    </>
-                  )}
-                </button>
-              </form>
-            )}
-
-            {/* ═══════════════════════════════════════════════
-                FASE 2 — Código OTP (InputOTP)
-            ═══════════════════════════════════════════════ */}
-            {step === 2 && (
-              <div className="space-y-5">
-                {/* OTP Input — InputOTP do shadcn/ui */}
-                <div className="flex flex-col items-center gap-2">
-                  <InputOTP
-                    maxLength={6}
-                    value={otpCode}
-                    onChange={(value) => setOtpCode(value)}
-                    disabled={loading}
-                    containerClassName="gap-2"
-                  >
-                    <InputOTPGroup>
-                      <InputOTPSlot index={0} className="h-14 w-12 text-xl font-bold border-2 rounded-lg data-[active]:ring-2 data-[active]:ring-blue-400 data-[active]:border-blue-400" />
-                      <InputOTPSlot index={1} className="h-14 w-12 text-xl font-bold border-2 rounded-lg data-[active]:ring-2 data-[active]:ring-blue-400 data-[active]:border-blue-400" />
-                      <InputOTPSlot index={2} className="h-14 w-12 text-xl font-bold border-2 rounded-lg data-[active]:ring-2 data-[active]:ring-blue-400 data-[active]:border-blue-400" />
-                    </InputOTPGroup>
-                    <InputOTPSeparator className="mx-1" />
-                    <InputOTPGroup>
-                      <InputOTPSlot index={3} className="h-14 w-12 text-xl font-bold border-2 rounded-lg data-[active]:ring-2 data-[active]:ring-blue-400 data-[active]:border-blue-400" />
-                      <InputOTPSlot index={4} className="h-14 w-12 text-xl font-bold border-2 rounded-lg data-[active]:ring-2 data-[active]:ring-blue-400 data-[active]:border-blue-400" />
-                      <InputOTPSlot index={5} className="h-14 w-12 text-xl font-bold border-2 rounded-lg data-[active]:ring-2 data-[active]:ring-blue-400 data-[active]:border-blue-400" />
-                    </InputOTPGroup>
-                  </InputOTP>
-                  <p className="text-[10px] text-gray-400">
-                    {loading ? 'A verificar...' : 'Código de 6 dígitos · Verificação automática'}
-                  </p>
-                </div>
-
-                {/* Error */}
-                {error && (
-                  <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-200">
-                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
-
-                {/* Loading overlay quando está a verificar */}
-                {loading && (
-                  <div className="flex items-center justify-center gap-2 py-2">
-                    <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-                    <span className="text-sm text-blue-600 font-medium">A verificar código...</span>
-                  </div>
-                )}
-
-                {/* Reenviar código */}
-                <div className="text-center">
-                  <p className="text-xs text-gray-500 mb-1">Não recebeu o código?</p>
-                  {resendCooldown > 0 ? (
-                    <p className="text-xs text-gray-400">
-                      Reenviar disponível em <span className="font-medium text-gray-600">{resendCooldown}s</span>
-                    </p>
-                  ) : (
-                    <button
-                      onClick={handleResendOtp}
-                      disabled={loading}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50 flex items-center justify-center gap-1 mx-auto"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      Reenviar código
-                    </button>
-                  )}
-                </div>
-
-                {/* Voltar */}
-                <button
-                  onClick={handleBack}
-                  disabled={loading}
-                  className="w-full py-2 text-xs text-gray-500 hover:text-gray-700 transition-colors flex items-center justify-center gap-1"
-                >
-                  <ArrowLeft className="w-3 h-3" />
-                  Voltar ao NIF
-                </button>
               </div>
-            )}
+
+              {/* Access Code Input */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                  Código de Acesso
+                </label>
+                <div className="relative">
+                  <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={accessCode}
+                    onChange={(e) => handleAccessCodeChange(e.target.value)}
+                    placeholder="A4B-9X2"
+                    className="w-full pl-10 pr-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all font-mono tracking-widest text-center text-base uppercase"
+                    disabled={loading}
+                    autoComplete="off"
+                    maxLength={7}  // XXX-XXX = 7 chars com hífen
+                    style={{ letterSpacing: '0.2em' }}
+                  />
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  6 caracteres alfanuméricos (ex: A4B-9X2)
+                </p>
+              </div>
+
+              {/* Error */}
+              {error && (
+                <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-200">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* Submit */}
+              <button
+                type="submit"
+                disabled={!canSubmit}
+                className="w-full py-3 text-sm font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    A verificar...
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    Entrar
+                  </>
+                )}
+              </button>
+            </form>
           </div>
 
           {/* Footer */}
           <div className="text-center mt-6">
             <p className="text-xs text-gray-400">
-              Não tem acesso? Contacte o seu consultor.
+              Não tem o código de acesso? Contacte o seu consultor.
             </p>
             <div className="flex items-center justify-center gap-1.5 mt-2 text-xs text-gray-400">
               <Shield className="w-3 h-3" />

@@ -1,20 +1,26 @@
 /**
- * ClientPortal — Portal do Cliente (Login OTP + Magic Link legado).
+ * ClientPortal — Portal do Cliente (Email + Código de Acesso + Sliding Session).
  *
  * Layout: Dashboard profissional full-width — horizontal stepper + 2 colunas.
  * - Topo (lg:col-span-12): Resumo + Timeline Horizontal (Stepper)
  * - Esquerda (lg:col-span-7): Gestão de Documentos + RGPD + Equipa
  * - Direita (lg:col-span-5): Mensagens / Chat
  *
- * Fluxo de autenticação (v3 — OTP via NIF):
+ * Fluxo de autenticação (v4 — Código de Acesso Fixo):
  *   1. Utilizador acede ao portal (/portal)
- *   2. Se não tem token em sessionStorage → Mostra ecrã de login OTP
- *   3. Login: NIF → OTP email → Código 6 dígitos → Token seguro
- *   4. Token gravado em sessionStorage (só dura enquanto a aba estiver aberta)
+ *   2. Se não tem token em localStorage → Mostra ecrã de login
+ *   3. Login: Email + Código de Acesso → POST /portal/auth/login → Token JWT
+ *   4. Token gravado em localStorage com Sliding Session (15 min de inactividade)
  *   5. Fluxo legado (magic link) ainda funciona como fallback
+ *
+ * Sliding Session:
+ *   - A sessão não expira enquanto o utilizador estiver activo
+ *   - Após 15 min de inactividade → logout automático
+ *   - Ao fechar a aba → limpa storage (obriga novo login)
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { toast } from 'sonner';
+import useSlidingSession from '../hooks/useSlidingSession';
 import {
   FileText,
   Upload,
@@ -71,9 +77,9 @@ function LoaderFallback() {
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
 
-// ── Helper: obter token do portal (sessionStorage > localStorage legado) ──
+// ── Helper: obter token do portal (localStorage > sessionStorage legado) ──
 function getPortalToken() {
-  return sessionStorage.getItem('portalToken') || localStorage.getItem('portal_token');
+  return localStorage.getItem('portalToken') || localStorage.getItem('portal_token') || sessionStorage.getItem('portalToken');
 }
 
 // ====================================================================
@@ -483,7 +489,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
       const res = await fetchWithRetry(`${BACKEND_URL}/portal/submit-mfa`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ process_id: localStorage.getItem('portal_process_id') || '', mfa_code: mfaCode }),
+        body: JSON.stringify({ process_id: localStorage.getItem('portalProcessId') || localStorage.getItem('portal_process_id') || '', mfa_code: mfaCode }),
       });
 
       let data;
@@ -1465,22 +1471,24 @@ export default function ClientPortal() {
 
   const rawToken = useRef(window.location.pathname.split('/portal/')[1]);
 
+  // ── Sliding Session — auto-logout após 15 min de inactividade ──
+  const { logout: sessionLogout } = useSlidingSession({
+    onExpired: () => {
+      setIsVerified(false);
+      setData(null);
+    },
+  });
+
   // Verificar se já tem sessão verificada — validar token no backend
-  // (nunca confiar apenas no flag; o token pode ter expirado)
-  // Suporta sessionStorage (OTP v3) e localStorage legado (magic link)
+  // (nunca confiar apenas na presença do token; pode ter expirado)
+  // Suporta localStorage (Código de Acesso v4) e sessionStorage legado (OTP v3)
   useEffect(() => {
     let cancelled = false;
-    // Prioridade: sessionStorage (OTP) > localStorage (magic link legado)
     const token = getPortalToken();
-    const verified = sessionStorage.getItem('portalVerified') === 'true' || localStorage.getItem('portal_verified') === 'true';
 
-    if (!token || !verified) {
-      sessionStorage.removeItem('portalVerified');
-      localStorage.removeItem('portal_verified');
-      return;
-    }
+    if (!token) return;
 
-    // Tem token e flag — validar no backend antes de conceder acesso
+    // Tem token — validar no backend antes de conceder acesso
     (async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/portal/status`, {
@@ -1489,24 +1497,29 @@ export default function ClientPortal() {
         if (cancelled) return;
 
         if (res.ok) {
-          // Token válido — auto-verificar
+          // Token válido — auto-verificar e registar actividade
           setIsVerified(true);
+          localStorage.setItem('portalLastActivity', String(Date.now()));
         } else {
           // Token inválido/expirado — limpar sessão e mostrar login
-          sessionStorage.removeItem('portalToken');
-          sessionStorage.removeItem('portalClientId');
-          sessionStorage.removeItem('portalAuthMethod');
-          sessionStorage.removeItem('portalVerified');
+          localStorage.removeItem('portalToken');
+          localStorage.removeItem('portalClientId');
+          localStorage.removeItem('portalClientName');
+          localStorage.removeItem('portalProcessId');
+          localStorage.removeItem('portalAuthMethod');
+          localStorage.removeItem('portalLastActivity');
           localStorage.removeItem('portal_token');
           localStorage.removeItem('portal_verified');
           localStorage.removeItem('portal_client_id');
           localStorage.removeItem('portal_client_name');
           localStorage.removeItem('portal_process_id');
+          sessionStorage.removeItem('portalToken');
+          sessionStorage.removeItem('portalClientId');
+          sessionStorage.removeItem('portalAuthMethod');
+          sessionStorage.removeItem('portalVerified');
         }
       } catch {
-        // Erro de rede — não auto-verificar, mostrar login
-        sessionStorage.removeItem('portalVerified');
-        localStorage.removeItem('portal_verified');
+        // Erro de rede — não limpar sessão, pode ser temporário
       }
     })();
 
@@ -1788,10 +1801,12 @@ export default function ClientPortal() {
     return data?.welcome_message || '';
   }, [data?.welcome_message]);
 
-  // ── Login Gate — Se não está verificado, mostrar ecrã de login OTP ──
+  // ── Login Gate — Se não está verificado, mostrar ecrã de login ──
   const handleLoginSuccess = useCallback((token) => {
     // Login verificado — o useEffect [isVerified, refreshKey] vai carregar os dados
     setIsVerified(true);
+    // Registar actividade para o sliding session
+    localStorage.setItem('portalLastActivity', String(Date.now()));
   }, []);
 
   if (!isVerified) {
@@ -1860,18 +1875,10 @@ export default function ClientPortal() {
             <span>Acesso Seguro</span>
           </div>
           {/* Botão Terminar Sessão */}
-          {(sessionStorage.getItem('portalVerified') === 'true' || localStorage.getItem('portal_verified') === 'true') && (
+          {isVerified && (
             <button
               onClick={() => {
-                sessionStorage.removeItem('portalToken');
-                sessionStorage.removeItem('portalClientId');
-                sessionStorage.removeItem('portalAuthMethod');
-                sessionStorage.removeItem('portalVerified');
-                localStorage.removeItem('portal_token');
-                localStorage.removeItem('portal_verified');
-                localStorage.removeItem('portal_client_id');
-                localStorage.removeItem('portal_client_name');
-                localStorage.removeItem('portal_process_id');
+                sessionLogout(false); // false = sem toast (foi o utilizador que escolheu sair)
                 setIsVerified(false);
                 setData(null);
               }}
