@@ -2969,10 +2969,12 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     else:
         # Staff updates — APENAS dados de negócio (não dados pessoais)
         if data.real_estate_data and can_update_real_estate:
-            incoming_re = data.real_estate_data.model_dump(exclude_unset=True, exclude_none=True)
+            incoming_re = data.real_estate_data.model_dump(exclude_unset=True)
             _re = process.get("real_estate_data")
             existing_re = _re if isinstance(_re, dict) else {}
             merged_re = {**existing_re, **incoming_re}
+            # Remover campos com valor None (utilizador limpou o campo)
+            merged_re = {k: v for k, v in merged_re.items() if v is not None}
             await log_data_changes(process_id, user, existing_re, incoming_re, "dados imobiliários")
             await log_audit_event(process_id, user, "Alterou dados imobiliários", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["real_estate_data"] = merged_re
