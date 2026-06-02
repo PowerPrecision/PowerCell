@@ -47,6 +47,9 @@ import {
   Home,
   MapPin,
   CalendarClock,
+  User,
+  Save,
+  Lock,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -1232,6 +1235,358 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
 }
 
 // ====================================================================
+// PROFILE PANEL — "O Meu Perfil" tab content
+// ====================================================================
+function ProfilePanel() {
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saveResult, setSaveResult] = useState(null);
+  const [formData, setFormData] = useState({
+    // Contacto
+    email: '',
+    email_secundario: '',
+    telefone: '',
+    telefone_secundario: '',
+    // Dados Pessoais
+    morada_fiscal: '',
+    estado_civil: '',
+    profissao: '',
+    naturalidade: '',
+    nacionalidade: '',
+    data_nascimento: '',
+    documento_id: '',
+    data_validade_cc: '',
+    sexo: '',
+  });
+
+  // ── Fetch profile data ──
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getPortalToken();
+        if (!token) throw new Error('Sessão expirada.');
+
+        const res = await fetchWithRetry(`${BACKEND_URL}/portal/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (cancelled) return;
+
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.detail || 'Erro ao carregar perfil.');
+        }
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        setProfile(data);
+        setFormData({
+          email: data.contacto?.email || '',
+          email_secundario: data.contacto?.email_secundario || '',
+          telefone: data.contacto?.telefone || '',
+          telefone_secundario: data.contacto?.telefone_secundario || '',
+          morada_fiscal: data.dados_pessoais?.morada_fiscal || '',
+          estado_civil: data.dados_pessoais?.estado_civil || '',
+          profissao: data.dados_pessoais?.profissao || '',
+          naturalidade: data.dados_pessoais?.naturalidade || '',
+          nacionalidade: data.dados_pessoais?.nacionalidade || '',
+          data_nascimento: data.dados_pessoais?.data_nascimento || data.dados_pessoais?.birth_date || '',
+          documento_id: data.dados_pessoais?.documento_id || '',
+          data_validade_cc: data.dados_pessoais?.data_validade_cc || '',
+          sexo: data.dados_pessoais?.sexo || '',
+        });
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    setSaveResult(null);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSaveResult(null);
+
+    try {
+      const token = getPortalToken();
+      if (!token) throw new Error('Sessão expirada.');
+
+      const payload = {
+        contacto: {
+          email: formData.email || null,
+          email_secundario: formData.email_secundario || null,
+          telefone: formData.telefone || null,
+          telefone_secundario: formData.telefone_secundario || null,
+        },
+        dados_pessoais: {
+          morada_fiscal: formData.morada_fiscal || null,
+          estado_civil: formData.estado_civil || null,
+          profissao: formData.profissao || null,
+          naturalidade: formData.naturalidade || null,
+          nacionalidade: formData.nacionalidade || null,
+          data_nascimento: formData.data_nascimento || null,
+          documento_id: formData.documento_id || null,
+          data_validade_cc: formData.data_validade_cc || null,
+          sexo: formData.sexo || null,
+        },
+      };
+
+      const res = await fetchWithRetry(`${BACKEND_URL}/portal/me`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status === 403) {
+        setError(data.detail || 'Dados trancados. Processo já em análise.');
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(data.detail || 'Erro ao guardar perfil.');
+      }
+
+      setSaveResult({ success: true, message: data.message || 'Perfil atualizado com sucesso.' });
+      toast.success('Perfil atualizado com sucesso!');
+    } catch (err) {
+      setError(err.message);
+      setSaveResult({ success: false, message: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isLocked = profile?.has_process === true;
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
+          <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+          A carregar o seu perfil...
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !profile) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 rounded-lg px-4 py-3">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Field component for consistency ──
+  const Field = ({ label, field, type = 'text', placeholder = '', options = null }) => (
+    <div>
+      <label className="text-xs font-medium text-gray-600 mb-1 block">{label}</label>
+      {options ? (
+        <select
+          value={formData[field]}
+          onChange={(e) => handleChange(field, e.target.value)}
+          disabled={isLocked}
+          className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors ${
+            isLocked ? 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed' : 'border-gray-200 bg-white'
+          }`}
+        >
+          <option value="">—</option>
+          {options.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={type}
+          value={formData[field]}
+          onChange={(e) => handleChange(field, e.target.value)}
+          placeholder={placeholder}
+          disabled={isLocked}
+          className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors ${
+            isLocked ? 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed' : 'border-gray-200 bg-white'
+          }`}
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* ── Banner de bloqueio condicional ── */}
+      {isLocked && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <Lock className="w-5 h-5 text-blue-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-bold text-blue-800">Processo em Análise</h3>
+              <p className="text-xs text-blue-600 mt-0.5">
+                O seu processo já se encontra em análise pela nossa equipa. Os dados estão protegidos e não podem ser alterados.
+              </p>
+              <p className="text-xs text-blue-500 mt-1">
+                Se precisar de corrigir algum dado, contacte o seu consultor através do chat.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Perfil editável (quando não tem processo) ── */}
+      {!isLocked && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <User className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-bold text-emerald-800">Complete o seu Perfil</h3>
+              <p className="text-xs text-emerald-600 mt-0.5">
+                Preencha os seus dados pessoais para agilizar o processo. Assim que o seu processo for criado, os dados ficarão protegidos.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Nome (read-only, nunca editável pelo cliente) ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <User className="w-5 h-5 text-blue-500" />
+          Dados Pessoais
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Nome — read-only */}
+          <div className="sm:col-span-2">
+            <label className="text-xs font-medium text-gray-600 mb-1 block">Nome Completo</label>
+            <input
+              type="text"
+              value={profile?.nome || ''}
+              disabled
+              className="w-full px-3 py-2 text-sm border border-gray-100 rounded-lg bg-gray-50 text-gray-400 cursor-not-allowed"
+            />
+            <p className="text-[10px] text-gray-400 mt-0.5">O nome não pode ser alterado. Contacte o seu consultor se precisar.</p>
+          </div>
+
+          <Field label="Data de Nascimento" field="data_nascimento" type="date" />
+          <Field
+            label="Estado Civil"
+            field="estado_civil"
+            options={[
+              { value: 'solteiro', label: 'Solteiro(a)' },
+              { value: 'casado', label: 'Casado(a)' },
+              { value: 'divorciado', label: 'Divorciado(a)' },
+              { value: 'viuvo', label: 'Viúvo(a)' },
+              { value: 'uniao_de_facto', label: 'União de Facto' },
+              { value: 'separado', label: 'Separado(a)' },
+            ]}
+          />
+          <Field label="Nacionalidade" field="nacionalidade" placeholder="Portuguesa" />
+          <Field label="Naturalidade" field="naturalidade" placeholder="Lisboa" />
+          <Field label="Profissão" field="profissao" placeholder="Engenheiro(a)" />
+          <Field
+            label="Sexo"
+            field="sexo"
+            options={[
+              { value: 'M', label: 'Masculino' },
+              { value: 'F', label: 'Feminino' },
+            ]}
+          />
+        </div>
+      </div>
+
+      {/* ── Documento de Identificação ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Shield className="w-5 h-5 text-teal-500" />
+          Documento de Identificação
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Nº do Documento (CC/Passaporte)" field="documento_id" placeholder="00000000" />
+          <Field label="Validade do Documento" field="data_validade_cc" type="date" />
+        </div>
+      </div>
+
+      {/* ── Morada ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <MapPin className="w-5 h-5 text-rose-500" />
+          Morada Fiscal
+        </h3>
+        <div className="grid grid-cols-1 gap-4">
+          <Field label="Morada Fiscal" field="morada_fiscal" placeholder="Rua Exemplo, Nº 1, 1000-001 Lisboa" />
+        </div>
+      </div>
+
+      {/* ── Contactos ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Phone className="w-5 h-5 text-violet-500" />
+          Contactos
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Email Principal" field="email" type="email" placeholder="email@exemplo.pt" />
+          <Field label="Email Secundário" field="email_secundario" type="email" placeholder="email2@exemplo.pt" />
+          <Field label="Telefone" field="telefone" type="tel" placeholder="912345678" />
+          <Field label="Telefone Secundário" field="telefone_secundario" type="tel" placeholder="912345678" />
+        </div>
+      </div>
+
+      {/* ── Botão Guardar (só visível se NÃO bloqueado) ── */}
+      {!isLocked && (
+        <div className="flex items-center justify-end gap-3">
+          {saveResult?.success && (
+            <div className="flex items-center gap-1.5 text-sm text-emerald-600">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{saveResult.message}</span>
+            </div>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+          >
+            {saving ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> A guardar...</>
+            ) : (
+              <><Save className="w-4 h-4" /> Guardar Alterações</>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* ── Erro de atualização (ex: 403 bloqueado) ── */}
+      {error && profile && (
+        <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-4 py-2.5">
+          <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ====================================================================
 // IFRAME DETECTOR (non-intrusive)
 // ====================================================================
 function IframeDetector({ children }) {
@@ -1939,7 +2294,7 @@ export default function ClientPortal() {
             </div>
           </div>
 
-          {/* ═══ LEFT COLUMN: Tabs — Documentos / As Minhas Visitas ═══ */}
+          {/* ═══ LEFT COLUMN: Tabs — Documentos / O Meu Perfil / As Minhas Visitas ═══ */}
           <div className="lg:col-span-7 space-y-5">
             {/* ── Tab Navigation ── */}
             <div className="flex gap-1 bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5">
@@ -1952,7 +2307,20 @@ export default function ClientPortal() {
                 }`}
               >
                 <FileText className="w-4 h-4" />
-                Documentos
+                <span className="hidden sm:inline">Documentos</span>
+                <span className="sm:hidden">Docs</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('perfil')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === 'perfil'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                }`}
+              >
+                <User className="w-4 h-4" />
+                <span className="hidden sm:inline">O Meu Perfil</span>
+                <span className="sm:hidden">Perfil</span>
               </button>
               <button
                 onClick={() => setActiveTab('visitas')}
@@ -1963,7 +2331,8 @@ export default function ClientPortal() {
                 }`}
               >
                 <Home className="w-4 h-4" />
-                As Minhas Visitas
+                <span className="hidden sm:inline">As Minhas Visitas</span>
+                <span className="sm:hidden">Visitas</span>
                 {visits.filter(v => v.status === 'solicitada').length > 0 && (
                   <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-violet-200 text-violet-800 text-[10px] font-bold">
                     {visits.filter(v => v.status === 'solicitada').length}
@@ -1973,7 +2342,7 @@ export default function ClientPortal() {
             </div>
 
             {/* ── Tab Content ── */}
-            {activeTab === 'documentos' ? (
+            {activeTab === 'documentos' && (
               <>
                 <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
 
@@ -2063,10 +2432,16 @@ export default function ClientPortal() {
 
             <TeamCard team={team} consultor={consultor} />
               </>
-            ) : (
-              <>
-            {/* ═══ Tab: As Minhas Visitas ═══ */}
+            )}
 
+            {/* ═══ Tab: O Meu Perfil ═══ */}
+            {activeTab === 'perfil' && (
+              <ProfilePanel />
+            )}
+
+            {/* ═══ Tab: As Minhas Visitas ═══ */}
+            {activeTab === 'visitas' && (
+              <>
             {/* ── Pedir Visita ── */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <h3 className="text-base font-bold text-gray-800 mb-1 flex items-center gap-2">

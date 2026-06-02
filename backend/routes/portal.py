@@ -18,6 +18,8 @@ ENDPOINTS:
 - POST /portal/auth/login          → Login com Email + Código de Acesso
 - POST /portal/{client_id}/verify  → Verifica NIF + Nº Processo, devolve token de sessão
 - GET  /portal/resolve/{short_id}  → Resolve short_id para JWT
+- GET  /portal/me                  → Dados pessoais do cliente (perfil)
+- PUT  /portal/me                  → Atualiza dados pessoais (bloqueado se tem processo)
 - GET  /portal/status              → Status do processo + stepper + documentos
 - POST /portal/upload-url          → Gera pre-signed URL para upload
 - POST /portal/confirm-upload      → Confirma upload após PUT para S3
@@ -534,6 +536,254 @@ async def authenticate_portal(client_data: dict = Depends(get_current_client)):
         "process_type": process.get("process_type", "credito_habitacao"),
         "token_expires": token_payload.get("exp"),
     })
+
+
+# ====================================================================
+# PERFIL DO CLIENTE — GET /me + PUT /me
+# ====================================================================
+
+# Campos que o cliente pode atualizar no seu perfil (camada de segurança)
+PROFILE_UPDATABLE_CONTACT_FIELDS = {"email", "email_secundario", "telefone", "telefone_secundario"}
+PROFILE_UPDATABLE_PERSONAL_FIELDS = {
+    "morada_fiscal", "estado_civil", "profissao", "naturalidade",
+    "nacionalidade", "data_nascimento", "documento_id", "data_validade_cc",
+    "sexo",
+}
+# Campos SENSÍVEIS que NÃO são devolvidos ao frontend (mesmo encriptados)
+PROFILE_HIDDEN_FIELDS = {"nif", "nome_pai", "nome_mae", "altura"}
+
+
+def _decrypt_if_needed(value):
+    """Desencripta um valor se tiver o prefixo ENC:."""
+    if not value or not isinstance(value, str) or not value.startswith("ENC:"):
+        return value
+    try:
+        from services.encryption import decrypt_value
+        decrypted = decrypt_value(value)
+        return decrypted if decrypted else value
+    except Exception:
+        return value
+
+
+def _get_client_id_from_token(client_data: dict) -> Optional[str]:
+    """
+    Extrai o client_id dos dados do token do portal.
+
+    Para access_code_session com "no_process": client_id vem no payload.
+    Para outros tipos: client_id vem do campo client_id do processo.
+    """
+    # Caso 1: token access_code_session com "no_process"
+    if client_data.get("client_id"):
+        return client_data["client_id"]
+
+    # Caso 2: processo com client_id
+    process = client_data.get("process")
+    if process and process.get("client_id"):
+        return process["client_id"]
+
+    return None
+
+
+@router.get("/me")
+async def get_client_profile(
+    client_data: dict = Depends(get_current_client)
+):
+    """
+    Retorna os dados pessoais do cliente autenticado para o formulário
+    de perfil no Portal do Cliente.
+
+    SEGURANÇA:
+    - Requer autenticação via token do portal (get_current_client)
+    - NÃO devolve campos sensíveis (NIF, nome dos pais, etc.)
+    - Desencripta campos encriptados (ENC:) antes de enviar
+    - Indica se o cliente tem processo associado (para bloqueio de edição)
+    """
+    client_id = _get_client_id_from_token(client_data)
+
+    if not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível identificar o cliente. Verifique a sua autenticação."
+        )
+
+    # Buscar dados do cliente
+    client = await db.clients.find_one(
+        {"id": client_id},
+        {"_id": 0, "portal_access_code": 0, "notas": 0, "fonte": 0, "tags": 0, "created_by": 0}
+    )
+
+    if not client:
+        raise HTTPException(
+            status_code=404,
+            detail="Cliente não encontrado."
+        )
+
+    # Determinar se o cliente tem processo associado (para bloqueio de edição)
+    process_ids = client.get("process_ids", [])
+    has_process = False
+    if process_ids:
+        # Verificar se existe pelo menos um processo activo
+        active_process = await db.processes.find_one(
+            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1}
+        )
+        has_process = active_process is not None
+
+    # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
+    dados_pessoais = client.get("dados_pessoais", {}) or {}
+    clean_dados_pessoais = {}
+    for key, value in dados_pessoais.items():
+        if key in PROFILE_HIDDEN_FIELDS:
+            continue  # Não devolver campos sensíveis
+        clean_dados_pessoais[key] = _decrypt_if_needed(value)
+
+    # Preparar dados de contacto (desencriptar campos encriptados)
+    contacto = client.get("contacto", {}) or {}
+    clean_contacto = {}
+    for key, value in contacto.items():
+        # Ocultar email_hash (campo interno para blind index)
+        if key.endswith("_hash"):
+            continue
+        clean_contacto[key] = _decrypt_if_needed(value)
+
+    return {
+        "id": client.get("id"),
+        "nome": client.get("nome", ""),
+        "contacto": clean_contacto,
+        "dados_pessoais": clean_dados_pessoais,
+        "has_process": has_process,
+    }
+
+
+class ClientProfileUpdate(BaseModel):
+    """Schema para atualização de perfil do cliente via Portal."""
+    contacto: Optional[dict] = None
+    dados_pessoais: Optional[dict] = None
+
+
+@router.put("/me")
+async def update_client_profile(
+    data: ClientProfileUpdate,
+    client_data: dict = Depends(get_current_client)
+):
+    """
+    Atualiza os dados pessoais do cliente autenticado.
+
+    REGRAS DE SEGURANÇA:
+    - Requer autenticação via token do portal
+    - BLOQUEIA a atualização se o cliente já tiver um Process associado
+      → Retorna 403: 'Dados trancados. Processo já em análise.'
+    - Apenas campos permitidos são atualizados (whitelist)
+    - NIF e nome NÃO podem ser alterados pelo cliente
+    - Campos encriptados são re-encriptados antes de guardar
+    """
+    client_id = _get_client_id_from_token(client_data)
+
+    if not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível identificar o cliente. Verifique a sua autenticação."
+        )
+
+    # ── REGRA CRÍTICA: Verificar se o cliente tem processo associado ──
+    client = await db.clients.find_one(
+        {"id": client_id},
+        {"_id": 0, "process_ids": 1}
+    )
+
+    if not client:
+        raise HTTPException(
+            status_code=404,
+            detail="Cliente não encontrado."
+        )
+
+    process_ids = client.get("process_ids", [])
+    if process_ids:
+        # Verificar se existe pelo menos um processo activo (não eliminado)
+        active_process = await db.processes.find_one(
+            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1}
+        )
+        if active_process:
+            raise HTTPException(
+                status_code=403,
+                detail="Dados trancados. Processo já em análise."
+            )
+
+    # ── Filtrar campos permitidos (whitelist) ──
+    update_fields = {}
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Processar contacto
+    if data.contacto:
+        contacto_updates = {}
+        for key, value in data.contacto.items():
+            if key in PROFILE_UPDATABLE_CONTACT_FIELDS:
+                # Encriptar campos sensíveis (email)
+                if key in ("email", "email_secundario") and value:
+                    try:
+                        from services.encryption import encrypt_value, generate_email_hash
+                        encrypted = encrypt_value(str(value).strip().lower())
+                        if encrypted:
+                            contacto_updates[key] = encrypted
+                            # Atualizar blind index para pesquisa
+                            if key == "email":
+                                email_hash = generate_email_hash(str(value).strip().lower())
+                                if email_hash:
+                                    contacto_updates["email_hash"] = email_hash
+                        else:
+                            contacto_updates[key] = str(value).strip().lower()
+                    except Exception:
+                        # Se a encriptação falhar, guardar em texto limpo (fallback)
+                        contacto_updates[key] = str(value).strip().lower()
+                else:
+                    contacto_updates[key] = value
+
+        if contacto_updates:
+            update_fields["contacto"] = contacto_updates
+
+    # Processar dados pessoais
+    if data.dados_pessoais:
+        dp_updates = {}
+        for key, value in data.dados_pessoais.items():
+            if key in PROFILE_UPDATABLE_PERSONAL_FIELDS:
+                dp_updates[key] = value
+
+        if dp_updates:
+            update_fields["dados_pessoais"] = dp_updates
+
+    if not update_fields:
+        return {"success": True, "message": "Nenhum campo para atualizar.", "updated_fields": []}
+
+    # ── Aplicar atualização no MongoDB (merge com dados existentes) ──
+    mongo_update = {"updated_at": now}
+
+    # Para contacto: usar notação dot para merge (não substituir o documento inteiro)
+    if "contacto" in update_fields:
+        for key, value in update_fields["contacto"].items():
+            mongo_update[f"contacto.{key}"] = value
+
+    # Para dados_pessoais: usar notação dot para merge
+    if "dados_pessoais" in update_fields:
+        for key, value in update_fields["dados_pessoais"].items():
+            mongo_update[f"dados_pessoais.{key}"] = value
+
+    result = await db.clients.update_one(
+        {"id": client_id},
+        {"$set": mongo_update}
+    )
+
+    updated_fields = list(update_fields.keys())
+
+    logger.info(
+        f"[PORTAL PROFILE] Cliente {client_id} atualizou perfil: {updated_fields}"
+    )
+
+    return {
+        "success": True,
+        "message": "Perfil atualizado com sucesso.",
+        "updated_fields": updated_fields,
+    }
 
 
 # ====================================================================
