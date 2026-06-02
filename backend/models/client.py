@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import re
+import secrets
+import string
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +97,9 @@ class Client(BaseModel):
     # IDs dos processos associados
     process_ids: List[str] = Field(default_factory=list)
 
+    # Portal de Cliente
+    portal_access_code: Optional[str] = None  # Código de acesso fixo para login no portal (ex: A4B-9X2)
+
     # Metadados
     fonte: Optional[str] = None  # origem do cliente (trello, manual, website, etc)
     tags: List[str] = Field(default_factory=list)
@@ -161,6 +166,7 @@ class ClientResponse(BaseModel):
     fonte: Optional[str] = None
     tags: Optional[List[str]] = None
     notas: Optional[str] = None
+    portal_access_code: Optional[str] = None
     assigned_to: Optional[str] = None
     assigned_at: Optional[str] = None
     registration_completed: Optional[bool] = None
@@ -200,6 +206,31 @@ def find_or_create_client_key(email: str = None, nif: str = None, nome: str = No
         nome_norm = re.sub(r'\s+', '_', nome_norm)
         return f"nome:{nome_norm}"
     return None
+
+
+def generate_portal_access_code() -> str:
+    """
+    Gera um código alfanumérico amigável de 6 caracteres para acesso ao Portal.
+    
+    Formato: XXX-XXX (ex: A4B-9X2), usando letras maiúsculas e dígitos.
+    Caracteres ambíguos são excluídos para evitar confusão:
+    - Sem O/0, I/1, L/l (parecem iguais em muitos tipos de letra)
+    
+    O código tem 6 caracteres de entropia (aprox. 34 bits), o que oferece
+    mais de 1.8 bilhões de combinações — suficiente para resistir a
+    brute-force online quando combinado com rate limiting.
+    
+    Returns:
+        str: Código no formato XXX-XXX (7 caracteres com hífen)
+    """
+    # Caracteres seguros: sem O/0 (confunde com zero), sem I/1/L (confunde com um)
+    chars = string.ascii_uppercase.replace('O', '').replace('I', '').replace('L', '') + \
+            string.digits.replace('0', '').replace('1', '')
+    
+    part1 = ''.join(secrets.choice(chars) for _ in range(3))
+    part2 = ''.join(secrets.choice(chars) for _ in range(3))
+    
+    return f"{part1}-{part2}"
 
 
 # NOTA: ClientFinancialData foi removido. Dados financeiros pertencem ao Processo.

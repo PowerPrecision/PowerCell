@@ -158,13 +158,19 @@ class TaskQueueService:
     async def send_registration_email(
         self,
         client_email: str,
-        client_name: str
+        client_name: str,
+        portal_access_code: str = None
     ) -> Optional[str]:
         """Enfileira email de confirmação de registo."""
+        kwargs = {
+            "client_email": client_email,
+            "client_name": client_name,
+        }
+        if portal_access_code:
+            kwargs["portal_access_code"] = portal_access_code
         return await self.enqueue(
             "send_registration_email_task",
-            client_email=client_email,
-            client_name=client_name
+            **kwargs
         )
     
     # ================================================================
@@ -296,14 +302,15 @@ class DirectExecutionFallback:
     async def send_registration_email(
         self,
         client_email: str,
-        client_name: str
+        client_name: str,
+        portal_access_code: str = None
     ) -> bool:
         """Envia email de registo directamente."""
         logger.warning("[FALLBACK] Enviando email de registo directamente")
         
         try:
             from services.email import send_registration_confirmation
-            return await send_registration_confirmation(client_email, client_name)
+            return await send_registration_confirmation(client_email, client_name, portal_access_code)
         except Exception as e:
             logger.error(f"[FALLBACK] Erro: {str(e)}")
             return False

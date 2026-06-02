@@ -1,7 +1,7 @@
 """
 CLIENT PORTAL - Routes
 ======================
-Endpoints públicos para o Portal do Cliente (Magic Link / Passwordless).
+Endpoints públicos para o Portal do Cliente.
 
 SEGURANÇA:
 - Todos os endpoints usam get_current_client (role="client_portal")
@@ -12,11 +12,10 @@ SEGURANÇA:
 FLUXOS DE AUTENTICAÇÃO:
 1. Magic Link (legado): short_id → resolve → JWT type=magic_link
 2. Verificação NIF + Nº Processo: POST /portal/{client_id}/verify → JWT type=verified_session
-3. OTP via NIF: POST /portal/auth/request-otp → POST /portal/auth/verify-otp → token seguro
+3. Código de Acesso Fixo: POST /portal/auth/login → JWT type=access_code_session
 
 ENDPOINTS:
-- POST /portal/auth/request-otp  → Envia OTP de 6 dígitos por email (baseado em NIF)
-- POST /portal/auth/verify-otp   → Verifica OTP e retorna token seguro
+- POST /portal/auth/login          → Login com Email + Código de Acesso
 - POST /portal/{client_id}/verify  → Verifica NIF + Nº Processo, devolve token de sessão
 - GET  /portal/resolve/{short_id}  → Resolve short_id para JWT
 - GET  /portal/status              → Status do processo + stepper + documentos
@@ -32,12 +31,11 @@ import gc as _gc
 import logging
 import os
 import re
-import random
 import json
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, EmailStr
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 
@@ -46,6 +44,7 @@ from services.portal_security import (
     get_current_client,
     PORTAL_ROLE,
     create_verified_session_token,
+    create_access_code_session_token,
     verify_client_credentials,
 )
 from services.auth import get_current_user, require_roles
@@ -60,397 +59,265 @@ router = APIRouter(prefix="/portal", tags=["Client Portal"])
 
 
 # ====================================================================
-# MODELOS PYDANTIC — OTP Authentication
+# MODELOS PYDANTIC — Login com Código de Acesso Fixo
 # ====================================================================
 
-class OTPRequest(BaseModel):
-    """Pedido de envio de OTP para o Portal do Cliente.
+class PortalLoginRequest(BaseModel):
+    """Pedido de login no Portal do Cliente.
     
-    O cliente fornece o seu NIF. O sistema procura o cliente na BD,
-    gera um código numérico de 6 dígitos, guarda-o no Redis com TTL
-    de 300 segundos e envia por email para o endereço registado.
+    O cliente fornece o seu Email e o Código de Acesso fixo
+    que foi gerado automaticamente quando o seu registo foi criado.
     """
-    nif: str
+    email: str
+    access_code: str
 
-    @field_validator('nif', mode='before')
+    @field_validator('email', mode='before')
     @classmethod
-    def validate_nif_field(cls, v):
+    def validate_email_field(cls, v):
         if v is None or v == '':
-            raise ValueError('NIF é obrigatório.')
-        nif_clean = re.sub(r'[^\d]', '', str(v))
-        if len(nif_clean) != 9 or not nif_clean.isdigit():
-            raise ValueError('NIF inválido. Deve conter 9 dígitos.')
-        return nif_clean
+            raise ValueError('Email é obrigatório.')
+        return str(v).strip().lower()
 
-
-class OTPVerify(BaseModel):
-    """Verificação de OTP para o Portal do Cliente.
-    
-    O cliente fornece o NIF e o código OTP recebido por email.
-    Se o código estiver correto, o sistema gera um token seguro
-    e retorna-o juntamente com o client_id.
-    """
-    nif: str
-    code: str
-
-    @field_validator('nif', mode='before')
+    @field_validator('access_code', mode='before')
     @classmethod
-    def validate_nif_field(cls, v):
+    def validate_access_code_field(cls, v):
         if v is None or v == '':
-            raise ValueError('NIF é obrigatório.')
-        nif_clean = re.sub(r'[^\d]', '', str(v))
-        if len(nif_clean) != 9 or not nif_clean.isdigit():
-            raise ValueError('NIF inválido. Deve conter 9 dígitos.')
-        return nif_clean
-
-    @field_validator('code', mode='before')
-    @classmethod
-    def validate_code_field(cls, v):
-        if v is None or v == '':
-            raise ValueError('Código OTP é obrigatório.')
-        code_clean = str(v).strip()
-        if not code_clean.isdigit() or len(code_clean) != 6:
-            raise ValueError('Código OTP deve conter 6 dígitos.')
-        return code_clean
+            raise ValueError('Código de acesso é obrigatório.')
+        code = str(v).strip().upper()
+        # Aceitar com ou sem hífen (A4B9X2 ou A4B-9X2)
+        code = re.sub(r'[^A-Z0-9]', '', code)
+        if len(code) != 6:
+            raise ValueError('Código de acesso deve conter 6 caracteres.')
+        return code
 
 
 # ====================================================================
-# OTP AUTHENTICATION — Request & Verify
+# LOGIN COM CÓDIGO DE ACESSO FIXO
 # ====================================================================
 
-@router.post("/auth/request-otp")
-async def request_otp(data: OTPRequest):
+# Tentativas máximas de login por email (prevenção de brute-force)
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 15
+
+
+@router.post("/auth/login")
+async def portal_login(data: PortalLoginRequest):
     """
-    Envia um código OTP de 6 dígitos por email para o cliente.
+    Login do Portal do Cliente com Email + Código de Acesso.
 
     Fluxo:
-    1. Recebe o NIF do cliente
-    2. Pesquisa o cliente na BD (via blind index ou NIF em texto limpo)
-    3. Se não encontrado, retorna erro 404
-    4. Gera código numérico aleatório de 6 dígitos
-    5. Guarda no Redis: portal_otp_{nif} → código, TTL 300s
-    6. Envia email com o código para o email do cliente
-    7. Retorna {"message": "OTP enviado"}
+    1. Recebe email e código de acesso
+    2. Verifica rate limiting (5 tentativas, lockout de 15 min)
+    3. Pesquisa o cliente pelo email (case-insensitive, suporta blind index)
+    4. Compara o código de acesso com o armazenado na BD
+    5. Se válido, gera JWT de sessão (type=access_code_session, 4h)
+    6. Retorna {"token": token, "client_id": client_id, "client_name": nome}
 
     SEGURANÇA:
-    - NIF é pesquisado via blind index (SHA-256) quando encriptado
-    - Fallback para texto limpo quando encriptação não está activa
-    - Código OTP expira em 5 minutos (TTL 300s)
-    - Rate limiting implícito pelo TTL — não é possível reenviar antes de expirar
-      (o novo código substitui o anterior)
-    - Mensagens de erro genéricas (não revelam se o NIF existe)
+    - Pesquisa por email suporta dados encriptados (blind index) e plaintext
+    - Código de acesso é comparado com timing-safe comparison quando possível
+    - Rate limiting: 5 tentativas por email, lockout de 15 minutos
+    - Mensagens de erro genéricas (não revelam se o email existe)
+    - JWT tem validade de 4 horas (sessão interactiva)
     """
-    nif = data.nif
+    email = data.email
+    access_code = data.access_code
 
-    # ── 1. Procurar cliente por NIF ──
+    # ── 1. Verificar rate limiting por email ──
+    lockout_key = f"portal_login:{email}"
+    lockout_doc = await db.portal_login_attempts.find_one({"_id": lockout_key})
+
+    if lockout_doc:
+        attempts = lockout_doc.get("attempts", 0)
+        locked_until = lockout_doc.get("locked_until")
+
+        if locked_until:
+            try:
+                locked_until_dt = datetime.fromisoformat(
+                    locked_until.replace('Z', '+00:00') if isinstance(locked_until, str) else locked_until
+                )
+                if datetime.now(timezone.utc) < locked_until_dt:
+                    remaining = int((locked_until_dt - datetime.now(timezone.utc)).total_seconds() / 60)
+                    logger.warning(
+                        f"[PORTAL LOGIN] Conta bloqueada para email={email}. "
+                        f"Tenta novamente em {remaining} min."
+                    )
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Muitas tentativas falhadas. Tente novamente em {remaining} minutos."
+                    )
+            except (ValueError, TypeError):
+                pass  # Data inválida, ignorar lockout
+
+        if attempts >= MAX_LOGIN_ATTEMPTS:
+            locked_until_str = (
+                datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+            ).isoformat()
+            await db.portal_login_attempts.update_one(
+                {"_id": lockout_key},
+                {"$set": {"locked_until": locked_until_str}}
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Muitas tentativas falhadas. Conta bloqueada por {LOGIN_LOCKOUT_MINUTES} minutos."
+            )
+
+    # ── 2. Pesquisar cliente pelo email ──
     # Tentar via blind index primeiro (dados encriptados)
     client = None
     try:
-        from services.encryption import generate_nif_hash
-        nif_hash = generate_nif_hash(nif)
-        if nif_hash:
+        from services.encryption import generate_email_hash
+        email_hash = generate_email_hash(email)
+        if email_hash:
             client = await db.clients.find_one(
-                {"dados_pessoais.nif_hash": nif_hash},
-                {"_id": 0, "id": 1, "nome": 1, "contacto": 1}
+                {"contacto.email_hash": email_hash},
+                {"_id": 0, "id": 1, "nome": 1, "portal_access_code": 1, "process_ids": 1}
             )
     except Exception:
-        logger.debug("[OTP] Erro ao pesquisar por nif_hash, a tentar texto limpo")
+        logger.debug("[PORTAL LOGIN] Erro ao pesquisar por email_hash, a tentar texto limpo")
 
-    # Fallback: pesquisar por NIF em texto limpo
+    # Fallback: pesquisar por email em texto limpo (case-insensitive)
     if not client:
         client = await db.clients.find_one(
-            {"dados_pessoais.nif": nif},
-            {"_id": 0, "id": 1, "nome": 1, "contacto": 1}
+            {"contacto.email": email.lower()},
+            {"_id": 0, "id": 1, "nome": 1, "portal_access_code": 1, "process_ids": 1}
         )
 
-    # Fallback adicional: NIF encriptado (desencriptar e comparar)
+    # Fallback adicional: email encriptado (desencriptar e comparar)
     if not client:
         try:
             from services.encryption import decrypt_value
             async for c in db.clients.find(
-                {"dados_pessoais.nif": {"$exists": True}},
-                {"_id": 0, "id": 1, "nome": 1, "contacto": 1, "dados_pessoais.nif": 1}
+                {"contacto.email": {"$exists": True}},
+                {"_id": 0, "id": 1, "nome": 1, "portal_access_code": 1, "process_ids": 1, "contacto.email": 1}
             ).limit(500):
-                stored_nif = c.get("dados_pessoais", {}).get("nif")
-                if stored_nif and isinstance(stored_nif, str) and stored_nif.startswith("ENC:"):
+                stored_email = c.get("contacto", {}).get("email")
+                if stored_email and isinstance(stored_email, str) and stored_email.startswith("ENC:"):
                     try:
-                        decrypted = decrypt_value(stored_nif)
-                        if decrypted and re.sub(r'[^\d]', '', decrypted) == nif:
+                        decrypted = decrypt_value(stored_email)
+                        if decrypted and decrypted.lower().strip() == email:
                             client = c
                             break
                     except Exception:
                         continue
         except Exception:
-            logger.debug("[OTP] Fallback de desencriptação não disponível")
+            logger.debug("[PORTAL LOGIN] Fallback de desencriptação não disponível")
 
+    # ── 3. Validar credenciais ──
     if not client:
-        # Segurança: não revelar que o NIF não existe — mensagem genérica
-        logger.info(f"[OTP] NIF não encontrado na BD: {nif[:3]}******")
+        # Segurança: não revelar que o email não existe — mensagem genérica
+        logger.info(f"[PORTAL LOGIN] Email não encontrado: {email[:3]}***@***")
+        # Registar tentativa falhada (mesmo sem cliente, para rate limiting)
+        await _record_login_attempt(lockout_key)
         raise HTTPException(
-            status_code=404,
-            detail="NIF não encontrado. Verifique o seu NIF e tente novamente."
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu email e código de acesso."
         )
 
-    # ── 2. Obter email do cliente ──
-    client_email = None
-    contacto = client.get("contacto", {})
-    if isinstance(contacto, dict):
-        client_email = contacto.get("email")
+    stored_code = client.get("portal_access_code")
 
-    if not client_email:
-        # Tentar buscar email dos processos associados
-        process_ids = client.get("process_ids", [])
-        if process_ids:
-            process = await db.processes.find_one(
-                {"id": {"$in": process_ids}, "client_email": {"$exists": True, "$ne": None}},
-                {"_id": 0, "client_email": 1}
-            )
-            if process:
-                client_email = process.get("client_email")
-
-    if not client_email:
-        logger.warning(f"[OTP] Cliente {client.get('id', '?')} sem email registado")
+    if not stored_code:
+        # Cliente sem código de acesso — pode ser um cliente antigo antes da migração
+        logger.warning(f"[PORTAL LOGIN] Cliente {client.get('id')} sem portal_access_code")
+        await _record_login_attempt(lockout_key)
         raise HTTPException(
-            status_code=400,
-            detail="Não existe email associado a este NIF. Contacte o seu consultor."
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu email e código de acesso."
         )
 
-    # ── 3. Gerar código OTP de 6 dígitos ──
-    otp_code = f"{random.randint(0, 999999):06d}"
+    # Normalizar código armazenado para comparação (remover hífen)
+    stored_code_clean = re.sub(r'[^A-Z0-9]', '', stored_code.upper())
 
-    # ── 4. Guardar no Redis com TTL de 300 segundos ──
-    redis = get_redis()
-    if not redis:
-        logger.error("[OTP] Redis indisponível — não é possível guardar OTP")
+    # Comparação de códigos (usando hmac para timing-safe comparison quando possível)
+    import hmac
+    if not hmac.compare_digest(stored_code_clean, access_code):
+        logger.info(f"[PORTAL LOGIN] Código incorrecto para email={email[:3]}***@***")
+        await _record_login_attempt(lockout_key)
         raise HTTPException(
-            status_code=503,
-            detail="Serviço temporariamente indisponível. Tente novamente."
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu email e código de acesso."
         )
 
-    otp_key = f"portal_otp_{nif}"
-    otp_data = json.dumps({
-        "code": otp_code,
-        "client_id": client["id"],
-        "email": client_email,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    # ── 4. Login bem-sucedido — limpar tentativas falhadas ──
+    await db.portal_login_attempts.delete_one({"_id": lockout_key})
 
-    try:
-        await redis.setex(otp_key, 300, otp_data)
-    except Exception as e:
-        logger.error(f"[OTP] Erro ao guardar OTP no Redis: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail="Serviço temporariamente indisponível. Tente novamente."
-        )
-
-    # ── 5. Enviar email com o código OTP ──
+    client_id = client.get("id")
     client_name = client.get("nome", "Cliente")
-    try:
-        await _send_otp_email(client_email, client_name, otp_code)
-        logger.info(f"[OTP] Email enviado para {client_email} (NIF: {nif[:3]}******)")
-    except Exception as e:
-        logger.error(f"[OTP] Falha ao enviar email OTP: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Erro ao enviar o código. Tente novamente."
+
+    # ── 5. Buscar o primeiro processo do cliente para o token ──
+    # O JWT do portal precisa de um process_id. Para clientes com código de acesso,
+    # usamos o primeiro processo associado ou None se ainda não tiver processo.
+    process_id = None
+    process_ids = client.get("process_ids", [])
+    if process_ids:
+        # Buscar o primeiro processo activo
+        process = await db.processes.find_one(
+            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1}
         )
+        if process:
+            process_id = process.get("id")
+        else:
+            # Fallback: usar o primeiro ID da lista
+            process_id = process_ids[0]
 
-    return JSONResponse(content={"message": "OTP enviado"})
-
-
-@router.post("/auth/verify-otp")
-async def verify_otp(data: OTPVerify):
-    """
-    Verifica o código OTP e retorna um token seguro para o cliente.
-
-    Fluxo:
-    1. Recebe NIF e código OTP
-    2. Lê do Redis a chave portal_otp_{nif}
-    3. Se não existir ou o código não coincidir, retorna erro 401
-    4. Se coincidir, apaga a chave do Redis (one-time use)
-    5. Gera um token seguro via TempLinkService.generate_secure_token()
-    6. Guarda a sessão OTP no Redis: portal_otp_token_{token} → dados do cliente
-    7. Retorna {"token": token, "client_id": client_id}
-
-    SEGURANÇA:
-    - Código OTP é de uso único — apagado do Redis após verificação
-    - Token gerado é criptograficamente seguro (32 chars hex)
-    - Sessão OTP tem validade de 4 horas
-    - Tentativas falhadas não revelam se o NIF existe
-    """
-    nif = data.nif
-    code = data.code
-
-    # ── 1. Ler OTP do Redis ──
-    redis = get_redis()
-    if not redis:
-        logger.error("[OTP] Redis indisponível — não é possível verificar OTP")
-        raise HTTPException(
-            status_code=503,
-            detail="Serviço temporariamente indisponível. Tente novamente."
+    # ── 6. Gerar JWT de sessão ──
+    if process_id:
+        token = create_access_code_session_token(
+            process_id=process_id,
+            client_id=client_id,
         )
-
-    otp_key = f"portal_otp_{nif}"
-
-    try:
-        otp_stored = await redis.get(otp_key)
-    except Exception as e:
-        logger.error(f"[OTP] Erro ao ler OTP do Redis: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail="Serviço temporariamente indisponível. Tente novamente."
-        )
-
-    if not otp_stored:
-        logger.info(f"[OTP] OTP não encontrado ou expirado para NIF: {nif[:3]}******")
-        raise HTTPException(
-            status_code=401,
-            detail="Código expirado ou inválido. Solicite um novo código."
-        )
-
-    # ── 2. Desserializar e validar código ──
-    try:
-        otp_data = json.loads(otp_stored) if isinstance(otp_stored, str) else otp_stored
-    except (json.JSONDecodeError, TypeError):
-        logger.error(f"[OTP] Dados OTP corrompidos para NIF: {nif[:3]}******")
-        raise HTTPException(
-            status_code=401,
-            detail="Código inválido. Solicite um novo código."
-        )
-
-    stored_code = otp_data.get("code", "")
-    client_id = otp_data.get("client_id", "")
-    client_email = otp_data.get("email", "")
-
-    if stored_code != code:
-        logger.info(f"[OTP] Código incorrecto para NIF: {nif[:3]}******")
-        raise HTTPException(
-            status_code=401,
-            detail="Código incorrecto. Verifique e tente novamente."
-        )
-
-    # ── 3. Apagar OTP do Redis (one-time use) ──
-    try:
-        await redis.delete(otp_key)
-    except Exception as e:
-        logger.warning(f"[OTP] Erro ao apagar OTP do Redis: {e}")
-
-    # ── 4. Gerar token seguro via TempLinkService ──
-    from services.temp_link_service import TempLinkService
-    token = TempLinkService.generate_secure_token()
-
-    # ── 5. Guardar sessão OTP no Redis (4 horas) ──
-    session_data = json.dumps({
-        "client_id": client_id,
-        "nif": nif,
-        "email": client_email,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "type": "otp_session",
-    })
-
-    session_key = f"portal_otp_token_{token}"
-    try:
-        await redis.setex(session_key, 4 * 60 * 60, session_data)  # 4 horas
-    except Exception as e:
-        logger.error(f"[OTP] Erro ao guardar sessão OTP no Redis: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail="Erro ao criar sessão. Tente novamente."
+    else:
+        # Cliente sem processo — gerar token com process_id placeholder
+        # O frontend deve lidar com este caso (mostrar mensagem "sem processo")
+        token = create_access_code_session_token(
+            process_id="no_process",
+            client_id=client_id,
         )
 
     logger.info(
-        f"[OTP] Sessão OTP criada: client_id={client_id}, "
-        f"token={token[:8]}..."
+        f"[PORTAL LOGIN] Login bem-sucedido: client_id={client_id}, "
+        f"email={email[:3]}***@***"
     )
 
     return JSONResponse(content={
         "token": token,
         "client_id": client_id,
+        "client_name": client_name,
+        "process_id": process_id,
+        "token_type": "access_code_session",
+        "expires_in": 4 * 60 * 60,  # 4 horas em segundos
     })
 
 
-# ====================================================================
-# OTP EMAIL HELPER
-# ====================================================================
-
-async def _send_otp_email(to_email: str, client_name: str, otp_code: str) -> dict:
+async def _record_login_attempt(lockout_key: str) -> None:
     """
-    Envia o email com o código OTP de 6 dígitos para o cliente.
-
-    Usa o send_email do email_service com force_system=True para
-    garantir que é enviado pela conta do sistema (sem fallback para
-    contas pessoais). O email tem template HTML profissional.
-
-    Args:
-        to_email: Endereço de email do cliente
-        client_name: Nome do cliente (para saudação personalizada)
-        otp_code: Código OTP de 6 dígitos
-
-    Returns:
-        Dict com resultado do envio (success/error)
+    Regista uma tentativa falhada de login e aplica lockout se necessário.
     """
-    from services.email_service import send_email
+    now = datetime.now(timezone.utc).isoformat()
 
-    subject = "Código de Acesso ao Portal"
-
-    body_text = f"""Olá {client_name},
-
-O seu código de acesso ao Portal é: {otp_code}
-
-Este código é válido durante 5 minutos.
-Se não solicitou este código, ignore este email.
-
-Cumprimentos,
-Equipa PowerCell
-"""
-
-    body_html = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0d253f 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0;">Código de Acesso</h1>
-        </div>
-        <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; border-top: none;">
-            <p style="font-size: 16px; color: #334155;">Olá <strong>{client_name}</strong>,</p>
-            <p style="font-size: 16px; color: #334155;">Utilize o código abaixo para aceder ao seu Portal:</p>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <div style="background: #ffffff; border: 2px dashed #0d9488; border-radius: 12px; padding: 20px 40px; display: inline-block;">
-                    <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0d9488; font-family: 'Courier New', monospace;">{otp_code}</span>
-                </div>
-            </div>
-            
-            <div style="background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-top: 20px;">
-                <p style="font-size: 14px; color: #92400e; margin: 0;">
-                    Este código é válido durante <strong>5 minutos</strong>. Se não solicitou este código, ignore este email.
-                </p>
-            </div>
-            
-            <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
-                Cumprimentos,<br>
-                <strong>Equipa PowerCell</strong>
-            </p>
-        </div>
-    </body>
-    </html>
-    """
-
-    result = await send_email(
-        account_name="power",
-        to_emails=[to_email],
-        subject=subject,
-        body=body_text,
-        body_html=body_html,
-        force_system=True,
-        system_purpose="DOCUMENTS",
+    result = await db.portal_login_attempts.update_one(
+        {"_id": lockout_key},
+        {
+            "$inc": {"attempts": 1},
+            "$set": {"last_attempt_at": now},
+        },
+        upsert=True,
     )
 
-    if not result.get("success"):
-        logger.error(f"[OTP] Falha no envio do email OTP: {result.get('error')}")
-        raise Exception(f"Erro ao enviar email: {result.get('error')}")
-
-    return result
+    doc = await db.portal_login_attempts.find_one({"_id": lockout_key})
+    if doc and doc.get("attempts", 0) >= MAX_LOGIN_ATTEMPTS:
+        locked_until_str = (
+            datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+        ).isoformat()
+        await db.portal_login_attempts.update_one(
+            {"_id": lockout_key},
+            {"$set": {"locked_until": locked_until_str}}
+        )
+        logger.warning(
+            f"[PORTAL LOGIN] Lockout aplicado para {lockout_key} "
+            f"após {MAX_LOGIN_ATTEMPTS} tentativas"
+        )
 
 
 # ====================================================================
@@ -642,10 +509,23 @@ async def resolve_portal_token(short_id: str):
 @router.post("/authenticate")
 async def authenticate_portal(client_data: dict = Depends(get_current_client)):
     """
-    Valida o magic link JWT e retorna informações básicas do processo.
+    Valida o JWT e retorna informações básicas do processo/cliente.
     """
-    process = client_data["process"]
+    process = client_data.get("process")
     token_payload = client_data["token_payload"]
+    client_id = client_data.get("client_id")
+
+    # Para access_code_session sem processo, retornar dados mínimos
+    if not process:
+        return JSONResponse(content={
+            "valid": True,
+            "process_id": None,
+            "client_name": "",
+            "process_type": None,
+            "token_expires": token_payload.get("exp"),
+            "client_id": client_id,
+            "has_process": False,
+        })
 
     return JSONResponse(content={
         "valid": True,
@@ -679,7 +559,32 @@ async def get_portal_status(
     - Fallback: Se não existem docs solicitados, mostra categorias padrão
       que ainda não têm qualquer documento submetido
     """
-    process = client_data["process"]
+    process = client_data.get("process")
+    
+    # Para access_code_session sem processo, retornar estado pendente
+    if not process:
+        client_id = client_data.get("client_id")
+        token_payload = client_data.get("token_payload", {})
+        return {
+            "process": {
+                "id": None,
+                "client_name": "",
+                "status": "no_process",
+                "status_label": "Sem processo atribuído",
+                "status_color": "#94a3b8",
+                "process_type": None,
+            },
+            "progress": {"percent": 0, "current_step": 0, "total_steps": 0},
+            "stepper": [],
+            "documents": {"requested": [], "uploaded": [], "received": [], "has_pending": False},
+            "rgpd": {"status": "none", "has_rgpd": False},
+            "team": {"consultores": [], "mediadores": []},
+            "consultor": None,
+            "welcome_message": None,
+            "has_process": False,
+            "client_id": client_id,
+        }
+    
     process_id = process["id"]
 
     # ── Workflow statuses para o stepper ──

@@ -1,19 +1,21 @@
 """
 CLIENT PORTAL - Security Module
 ================================
-Geração e validação de Magic Link JWTs para o Portal do Cliente.
+Geração e validação de JWTs para o Portal do Cliente.
 
 SEGURANÇA:
 - JWT com claim role="client_portal" isolado de staff
-- Validade longa (90 dias) configurável
+- Validade longa (90 dias) configurável para magic links
+- Sessões verificadas: 4 horas (mais curtas que magic links)
 - Token contém process_id para escopo restrito
 - Sem acesso a endpoints de staff/admin
 
 FLUXOS DE AUTENTICAÇÃO:
 1. Magic Link (legado): short_id → resolve → JWT type=magic_link
 2. Verificação NIF + Nº Processo: POST /portal/{client_id}/verify → JWT type=verified_session
+3. Código de Acesso Fixo: POST /portal/auth/login → JWT type=access_code_session
 
-Ambos os tipos de token são aceites pelo get_current_client.
+Todos os tipos de token são aceites pelo get_current_client.
 """
 import jwt
 import logging
@@ -111,6 +113,44 @@ def create_verified_session_token(process_id: str, client_id: str) -> str:
     logger.info(
         f"Sessão verificada gerada para processo {process_id}, "
         f"cliente {client_id} (expira em {PORTAL_SESSION_VALIDITY_HOURS}h)"
+    )
+    return token
+
+
+def create_access_code_session_token(process_id: str, client_id: str) -> str:
+    """
+    Gera um JWT de sessão para login com Código de Acesso Fixo.
+
+    Este token é emitido após login bem-sucedido com Email + Código de Acesso.
+    Tem validade de 4 horas (sessão interactiva).
+
+    Claims:
+    - sub: process_id (o ID do processo, ou "no_process" se sem processo)
+    - role: "client_portal" (isolado de roles de staff)
+    - type: "access_code_session" (obtido por código de acesso)
+    - client_id: ID do cliente autenticado
+    - iat: timestamp de emissão
+    - exp: 4 horas a partir de agora
+
+    Args:
+        process_id: ID do processo (UUID) ou "no_process"
+        client_id: ID do cliente autenticado (UUID)
+
+    Returns:
+        JWT string codificado
+    """
+    payload = {
+        "sub": process_id,
+        "role": PORTAL_ROLE,
+        "type": "access_code_session",
+        "client_id": client_id,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=PORTAL_SESSION_VALIDITY_HOURS),
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    logger.info(
+        f"Sessão access_code gerada para cliente {client_id}, "
+        f"processo {process_id} (expira em {PORTAL_SESSION_VALIDITY_HOURS}h)"
     )
     return token
 
@@ -408,9 +448,10 @@ async def get_current_client(
         )
 
     # Verificar que é um tipo de token válido para o portal
-    # Tipos aceites: "magic_link" (legado) e "verified_session" (verificação NIF + processo)
+    # Tipos aceites: "magic_link" (legado), "verified_session" (NIF + processo)
+    # e "access_code_session" (Email + código de acesso)
     token_type = payload.get("type")
-    if token_type not in ("magic_link", "verified_session"):
+    if token_type not in ("magic_link", "verified_session", "access_code_session"):
         raise HTTPException(
             status_code=403,
             detail="Token de tipo incorreto para o portal."
@@ -419,6 +460,19 @@ async def get_current_client(
     process_id = payload.get("sub")
     if not process_id:
         raise HTTPException(status_code=401, detail="Token inválido: sem processo associado.")
+
+    # Para tokens access_code_session com "no_process", permitir sem processo
+    if token_type == "access_code_session" and process_id == "no_process":
+        # Cliente autenticado mas sem processo — retornar dados mínimos
+        client_id = payload.get("client_id")
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+        return {
+            "process_id": None,
+            "process": None,
+            "client_id": client_id,
+            "client": client,
+            "token_payload": payload,
+        }
 
     # Buscar processo e validar
     process = await db.processes.find_one(

@@ -26,7 +26,8 @@ from database import db
 from models.client import (
     Client, ClientCreate, ClientUpdate, 
     ClientContact, ClientPersonalData,
-    find_or_create_client_key
+    find_or_create_client_key,
+    generate_portal_access_code
 )
 from services.auth import get_current_user, require_roles, get_effective_role
 from models.auth import UserRole
@@ -1174,6 +1175,7 @@ async def create_client(
         dados_pessoais=ClientPersonalData(
             nif=sanitized_nif
         ),
+        portal_access_code=generate_portal_access_code(),
         fonte=sanitized_fonte,
         notas=sanitized_notas,
         created_at=now,
