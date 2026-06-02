@@ -1182,6 +1182,20 @@ async def confirm_portal_upload(
     # ── Notificar equipa atribuída ──
     await _notify_assigned_team_upload(process, original_filename, category)
 
+    # ── Gatilho de Onboarding — verificar se o cliente completou os docs ──
+    # Executar de forma assíncrona (não bloquear a resposta ao cliente)
+    try:
+        from services.onboarding_service import check_onboarding_completion
+        # Determinar o client_id a partir do token ou do processo
+        token_payload = client_data.get("token_payload", {})
+        client_id = token_payload.get("client_id") or process.get("client_id")
+
+        if client_id:
+            # Verificar de forma assíncrona (fire-and-forget)
+            asyncio.create_task(_trigger_onboarding_check(client_id))
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao agendar verificação de onboarding: {e}")
+
     logger.info(
         f"[PORTAL] Upload confirmado: {original_filename} "
         f"({category}) para processo {process_id}"
@@ -1199,8 +1213,38 @@ async def confirm_portal_upload(
 
 
 # ====================================================================
-# HELPERS: Document Creation & Notification
+# HELPERS: Document Creation, Notification & Onboarding
 # ====================================================================
+
+async def _trigger_onboarding_check(client_id: str):
+    """
+    Gatilho assíncrono para verificar se o cliente completou o onboarding.
+
+    Executado via asyncio.create_task() após cada upload de documento.
+    Se o cliente tiver todos os documentos obrigatórios, um Process
+    é criado automaticamente e os documentos são ancorados.
+
+    Esta função é fire-and-forget — erros são logados mas não propagados.
+    """
+    try:
+        from services.onboarding_service import check_onboarding_completion
+        result = await check_onboarding_completion(client_id)
+
+        if result.get("completed"):
+            logger.info(
+                f"[ONBOARDING] Processo criado automaticamente para "
+                f"cliente {client_id}: processo #{result.get('process_number')} "
+                f"({result.get('anchored_docs', 0)} docs ancorados)"
+            )
+        else:
+            missing = result.get("missing", [])
+            if missing:
+                logger.info(
+                    f"[ONBOARDING] Cliente {client_id} ainda precisa de: {missing}"
+                )
+    except Exception as e:
+        logger.error(f"[ONBOARDING] Erro na verificação de onboarding para {client_id}: {e}")
+
 
 async def _create_document_record(
     doc_id: str, process_id: str, file_key: str,
