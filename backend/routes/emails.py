@@ -654,7 +654,8 @@ async def get_document_recipients(
 ):
     """
     Obter lista de destinatários disponíveis para envio de documentação.
-    Apenas Admin e CEO podem editar as configurações.
+    Retorna balcões globais (sistema) + balcões personalizados do utilizador.
+    Os personalizados são identificados com is_custom: true.
     """
     from services.system_config import get_system_config
     
@@ -673,13 +674,30 @@ async def get_document_recipients(
     
     import json
     
-    # Parse recipients JSON
+    # Parse recipients JSON (balcões globais do sistema)
     recipients = []
     if doc_config.recipients:
         try:
             recipients = json.loads(doc_config.recipients)
         except (json.JSONDecodeError, TypeError):
             recipients = []
+    
+    # Marcar balcões globais como não-personalizados
+    for r in recipients:
+        r["is_custom"] = False
+    
+    # Adicionar balcões personalizados do utilizador
+    user_id = current_user["_id"]
+    cursor = db["user_custom_branches"].find({"user_id": user_id}).sort("name", 1)
+    user_branches = await cursor.to_list(100)
+    for b in user_branches:
+        recipients.append({
+            "id": str(b["_id"]),
+            "name": b["name"],
+            "email": b["email"],
+            "is_custom": True,
+            "active": True,
+        })
     
     # Parse default_to_emails (múltiplos emails TO)
     default_to_emails = []

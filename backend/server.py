@@ -117,6 +117,7 @@ from routes.portal_settings import router as portal_settings_router
 from routes.ai_analysis import router as ai_analysis_router
 from routes.announcements import router as announcements_router
 from routes.gov_auth import router as gov_auth_router
+from routes.user_branches import router as user_branches_router
 try:
     from routes.admin_process_migration import router as admin_process_migration_router
     _admin_process_migration_import_error = None
@@ -569,6 +570,7 @@ app.include_router(portal_settings_router, prefix="/api")
 app.include_router(ai_analysis_router, prefix="/api")
 app.include_router(announcements_router, prefix="/api")
 app.include_router(gov_auth_router, prefix="/api")
+app.include_router(user_branches_router, prefix="/api")
 if admin_process_migration_router:
     app.include_router(admin_process_migration_router, prefix="/api")
 else:

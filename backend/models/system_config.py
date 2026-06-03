@@ -313,3 +313,19 @@ class ConfigField(BaseModel):
     options: Optional[List[Dict[str, str]]] = None  # Para select
     help_text: Optional[str] = None
     depends_on: Optional[Dict[str, Any]] = None  # Mostrar apenas se outra opção tiver valor X
+
+
+class UserCustomBranchCreate(BaseModel):
+    """Request para criar um balcão personalizado do utilizador"""
+    name: str = Field(..., min_length=1, max_length=120, description="Nome do Balcão")
+    email: str = Field(..., min_length=3, max_length=254, description="Email do Balcão")
+
+
+class UserCustomBranchResponse(BaseModel):
+    """Resposta com dados de um balcão personalizado"""
+    id: str
+    user_id: str
+    name: str
+    email: str
+    is_custom: bool = True
+    created_at: Optional[str] = None
