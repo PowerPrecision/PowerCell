@@ -3615,7 +3615,7 @@ async def sync_process_emails(user: dict = Depends(require_roles([UserRole.ADMIN
         "total_checked": len(processes),
         "updated": updated,
         "errors": errors,
-        "message": f"Sincronização concluída: {updated} processos actualizados de {len(processos)} verificados."
+        "message": f"Sincronização concluída: {updated} processos actualizados de {len(processes)} verificados."
     }
 
 
