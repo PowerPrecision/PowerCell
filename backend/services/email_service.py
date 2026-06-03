@@ -340,6 +340,7 @@ def _send_via_resend(
     attachments: Optional[List[Dict[str, Any]]],
     email_signature: Optional[str] = None,
     reply_to: Optional[str] = None,
+    from_email_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Enviar email via Resend HTTP API.
@@ -358,11 +359,12 @@ def _send_via_resend(
     try:
         resend.api_key = api_key
 
-        # Construir header From
+        # Construir header From — usar override se fornecido (ex: email do utilizador)
+        effective_from = from_email_override or from_email
         if from_name:
-            from_header = f"{from_name} <{from_email}>"
+            from_header = f"{from_name} <{effective_from}>"
         else:
-            from_header = from_email
+            from_header = effective_from
 
         params: Dict[str, Any] = {
             "from": from_header,
@@ -448,6 +450,7 @@ async def send_email(
     system_purpose: Optional[str] = None,
     reply_to: Optional[str] = None,
     skip_proc_tag: bool = False,
+    from_email: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -693,8 +696,9 @@ async def send_email(
         # === NO-REPLY ENFORCEMENT ===
         # When force_system is True, this is a one-way system email.
         # Append no-reply footer to HTML body and text body.
-        # CRITICAL: Never inject a Reply-To header for system emails.
-        if force_system:
+        # EXCEPTION: When reply_to is provided (e.g. send-documentation),
+        # the email IS replyable, so skip the no-reply footer.
+        if force_system and not reply_to:
             _NO_REPLY_FOOTER_HTML = """
 <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e5e5;">
   <p style="font-size: 10px; color: #666; margin: 0; line-height: 1.5;">
@@ -710,11 +714,14 @@ async def send_email(
             body = body + _NO_REPLY_FOOTER_TEXT
 
         msg["Subject"] = subject
+        # Use from_email override when provided (e.g. user's email for documentation)
+        # Otherwise use account email (system default)
+        effective_from_email = from_email or account.email
         # Use formatted From header for system_smtp when from_name is available
         if account.name == "system_smtp" and from_name:
-            msg["From"] = f"{from_name} <{account.email}>"
+            msg["From"] = f"{from_name} <{effective_from_email}>"
         else:
-            msg["From"] = account.email
+            msg["From"] = effective_from_email
         msg["To"] = ", ".join(to_emails)
         
         if cc_emails:
@@ -761,6 +768,7 @@ async def send_email(
                 attachments=attachments,
                 email_signature=email_sig,
                 reply_to=reply_to,
+                from_email_override=from_email,
             )
         else:
             # --- SMTP directo (legado) ---
@@ -788,7 +796,7 @@ async def send_email(
                 "id": str(uuid.uuid4()),
                 "process_id": process_id,
                 "direction": "sent",
-                "from_email": account.email,
+                "from_email": effective_from_email,
                 "to_emails": to_emails,
                 "cc_emails": cc_emails or [],
                 "bcc_emails": bcc_emails or [],

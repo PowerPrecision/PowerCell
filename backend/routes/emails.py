@@ -1198,6 +1198,7 @@ async def _send_documentation_email_impl(
         cc_emails=cc_emails if cc_emails else None,
         bcc_emails=all_bcc,
         reply_to=current_user.get("email"),
+        from_email=current_user.get("email"),
         process_id=process_id,
         created_by=current_user["id"],
         attachments=email_attachments if email_attachments else None,
