@@ -21,6 +21,11 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "./ui/popover";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -59,6 +64,8 @@ import {
   Image as ImageIcon,
   File,
   Download,
+  Info,
+  Crown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, isToday, isYesterday } from "date-fns";
@@ -101,6 +108,7 @@ const ChatPanel = ({ open, onOpenChange }) => {
   const [newGroupDescription, setNewGroupDescription] = useState("");
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -893,11 +901,85 @@ const ChatPanel = ({ open, onOpenChange }) => {
           <div>
             <p className="font-medium text-sm">{selectedConversation?.name}</p>
             {selectedConversation?.isGroup && (
-              <p className="text-xs text-muted-foreground">
-                {selectedConversation.group?.members?.length || 0} membros
-              </p>
+              <Popover open={showMembers} onOpenChange={setShowMembers}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Info className="h-3 w-3" />
+                    {selectedConversation.group?.members?.length || 0} membros
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="bottom"
+                  align="start"
+                  className="w-64 p-0"
+                >
+                  <div className="p-3 border-b">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-purple-600" />
+                      <p className="font-semibold text-sm">{selectedConversation?.name}</p>
+                    </div>
+                    {selectedConversation.group?.description && (
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                        {selectedConversation.group.description}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {selectedConversation.group?.members?.length || 0} membros
+                    </p>
+                  </div>
+                  <ScrollArea className="max-h-60">
+                    <div className="p-2">
+                      {selectedConversation.group?.created_by && (
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 py-1 font-medium">
+                          Criador
+                        </p>
+                      )}
+                      {selectedConversation.group?.members
+                        ?.slice()
+                        .sort((a, b) => {
+                          // Criador primeiro
+                          const aCreator = a.user_id === selectedConversation.group?.created_by ? 0 : 1;
+                          const bCreator = b.user_id === selectedConversation.group?.created_by ? 0 : 1;
+                          return aCreator - bCreator;
+                        })
+                        .map((member) => {
+                          const isCreator = member.user_id === selectedConversation.group?.created_by;
+                          return (
+                            <div
+                              key={member.user_id}
+                              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/50"
+                            >
+                              <Avatar className="h-6 w-6">
+                                <AvatarFallback className="bg-primary/10 text-primary text-[10px]">
+                                  {getInitials(member.user_name)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">
+                                  {member.user_name}
+                                  {member.user_id === user?.id && (
+                                    <span className="text-muted-foreground font-normal"> (tu)</span>
+                                  )}
+                                </p>
+                                {member.user_role && (
+                                  <p className="text-[10px] text-muted-foreground capitalize">{member.user_role}</p>
+                                )}
+                              </div>
+                              {isCreator && (
+                                <Crown className="h-3 w-3 text-amber-500 shrink-0" />
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </ScrollArea>
+                </PopoverContent>
+              </Popover>
             )}
-            {typingUsers[selectedConversation?.id] && (
+            {!selectedConversation?.isGroup && typingUsers[selectedConversation?.id] && (
               <p className="text-xs text-primary animate-pulse">
                 {typingUsers[selectedConversation.id]} a escrever...
               </p>
