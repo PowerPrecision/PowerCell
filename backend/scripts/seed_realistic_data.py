@@ -117,6 +117,28 @@ STATUS_WEIGHTS = [
 PROCESS_TYPES = ["credito_habitacao", "credito_pessoal", "compra_direta",
                  "arrendamento", "consultoria", "refinanciamento"]
 
+# ==============================================================================
+# OPÇÕES DE IMÓVEL, CRÉDITO E FINANCIAMENTO
+# ==============================================================================
+
+LOCALIDADES_IMOVEL = ["Lisboa", "Porto", "Braga", "Setúbal", "Faro", "Coimbra"]
+
+TIPOS_IMOVEL = ["Apartamento T2", "Apartamento T3", "Moradia V3"]
+
+FINALIDADES_CREDITO = ["Aquisição HPP", "Transferência", "Construção"]
+
+PRAZOS_FINANCIAMENTO_MESES = [360, 420, 480]  # 30, 35 ou 40 anos
+
+# Range de valores para geração aleatória
+VALOR_IMOVEL_MIN = 120_000
+VALOR_IMOVEL_MAX = 450_000
+FINANCIAMENTO_PCT_MIN = 0.80  # 80% do valor do imóvel
+FINANCIAMENTO_PCT_MAX = 0.90  # 90% do valor do imóvel
+CAPITAIS_PROPRIOS_MIN = 10_000
+CAPITAIS_PROPRIOS_MAX = 60_000
+DESPESAS_MENSAIS_MAX = 400  # Outros créditos (0-400€)
+DEPENDENTES_MAX = 3
+
 FONTES = ["Manual", "Website", "Indicação", "Telefone", "Email", "Feira"]
 
 EMPRESAS = [
@@ -291,6 +313,11 @@ def gerar_cliente(client_id: str) -> dict:
     tipo_contrato = random.choice(TIPOS_CONTRATO)
     empresa = random.choice(EMPRESAS) if random.random() < 0.7 else None
 
+    # Dados financeiros complementares (Imóvel / Crédito)
+    despesas_mensais_outros = round(random.uniform(0, DESPESAS_MENSAIS_MAX), 2)
+    capitais_proprios = round(random.uniform(CAPITAIS_PROPRIOS_MIN, CAPITAIS_PROPRIOS_MAX), 2)
+    dependentes = random.randint(0, DEPENDENTES_MAX)
+
     # Validade CC
     data_validade_cc = None
     if random.random() < 0.7:
@@ -323,6 +350,14 @@ def gerar_cliente(client_id: str) -> dict:
         },
         "process_ids": [],
         "portal_access_code": None,
+        "dados_financeiros": {
+            "salario": salario,
+            "tipo_contrato": tipo_contrato,
+            "empresa": empresa,
+            "despesas_mensais_outros_creditos": despesas_mensais_outros,
+            "capitais_proprios": capitais_proprios,
+            "dependentes": dependentes,
+        },
         "fonte": random.choice(FONTES),
         "tags": random.sample(["VIP", "urgente", "retorno", "referência", "online"],
                               k=random.randint(0, 2)),
@@ -369,29 +404,72 @@ def gerar_processo(
     # Tipo de processo
     process_type = random.choice(PROCESS_TYPES)
 
-    # Dados imobiliários (50% dos processos)
-    real_estate_data = None
-    if random.random() < 0.5:
-        valor_imovel = round(random.uniform(120000, 650000), 2)
-        real_estate_data = {
-            "ja_tem_imovel": True,
-            "valor_imovel": valor_imovel,
-            "localizacao": cliente.get("dados_pessoais", {}).get("naturalidade", "Lisboa"),
-            "tipo_imovel": random.choice(["Apartamento", "Moradia", "T2", "T3", "T4", "Studio", "Loft"]),
-            "area": random.randint(45, 250),
-        }
+    # ── Dados do Imóvel (100% dos processos) ───────────────────────────────
+    valor_imovel = round(random.uniform(VALOR_IMOVEL_MIN, VALOR_IMOVEL_MAX), 2)
+    localidade_imovel = random.choice(LOCALIDADES_IMOVEL)
+    tipo_imovel = random.choice(TIPOS_IMOVEL)
+    area_imovel = random.randint(55, 200)  # m²
 
-    # Dados de crédito (60% dos processos)
-    credit_data = None
-    if random.random() < 0.6:
-        valor_credito = round(random.uniform(80000, 400000), 2)
-        credit_data = {
-            "valor_credito": valor_credito,
-            "prazo_anos": random.choice([15, 20, 25, 30, 35]),
-            "taxa": round(random.uniform(2.5, 4.5), 2),
-            "spread": round(random.uniform(0.5, 1.8), 2),
-            "tipo_taxa": random.choice(["fixa", "variável", "mista"]),
-            "prestacao_mensal": round(valor_credito * 0.004, 2),
+    real_estate_data = {
+        "ja_tem_imovel": True,
+        "valor_imovel": valor_imovel,
+        "localidade": localidade_imovel,
+        "tipo_imovel": tipo_imovel,
+        "area": area_imovel,
+    }
+
+    # ── Dados do Crédito / Operação (100% dos processos) ────────────────────
+    finalidade = random.choice(FINALIDADES_CREDITO)
+    pct_financiamento = round(random.uniform(FINANCIAMENTO_PCT_MIN, FINANCIAMENTO_PCT_MAX), 4)
+    valor_financiamento = round(valor_imovel * pct_financiamento, 2)
+    prazo_meses = random.choice(PRAZOS_FINANCIAMENTO_MESES)
+    prazo_anos = prazo_meses // 12
+
+    # Taxa de juro realista PT 2024-2025 (Euribor 12M + spread)
+    spread = round(random.uniform(0.50, 1.80), 2)
+    euribor = round(random.uniform(2.5, 3.8), 2)
+    taxa_anual = round(euribor + spread, 2)
+    tipo_taxa = random.choice(["variável", "mista", "fixa"])
+
+    # Prestação mensal aproximada (fórmula francês)
+    taxa_mensal = taxa_anual / 100 / 12
+    if taxa_mensal > 0:
+        prestacao_mensal = round(
+            valor_financiamento
+            * (taxa_mensal * (1 + taxa_mensal) ** prazo_meses)
+            / ((1 + taxa_mensal) ** prazo_meses - 1),
+            2,
+        )
+    else:
+        prestacao_mensal = round(valor_financiamento / prazo_meses, 2)
+
+    credit_data = {
+        "finalidade": finalidade,
+        "valor_financiamento": valor_financiamento,
+        "pct_financiamento": round(pct_financiamento * 100, 1),  # 80-90%
+        "prazo_meses": prazo_meses,
+        "prazo_anos": prazo_anos,
+        "taxa_anual": taxa_anual,
+        "spread": spread,
+        "euribor": euribor,
+        "tipo_taxa": tipo_taxa,
+        "prestacao_mensal": prestacao_mensal,
+    }
+
+    # ── Compra Sozinho / 2º Proponente ─────────────────────────────────────
+    compra_sozinho = random.choice([True, True, False])  # ~33% com 2º titular
+    titular2_data = None
+    if not compra_sozinho:
+        nome_titular2 = fake.name()
+        titular2_data = {
+            "name": nome_titular2,
+            "nif": gerar_nif_valido(),
+            "email": gerar_email(nome_titular2),
+            "phone": gerar_telefone_portugues(),
+            "profissao": random.choice(PROFISSOES),
+            "salario": round(random.uniform(700, 3500), 2),
+            "tipo_contrato": random.choice(TIPOS_CONTRATO),
+            "relacao": random.choice(["Cônjuge", "Companheiro(a)"]),
         }
 
     # Datas — processos mais antigos nas fases mais avançadas
@@ -429,13 +507,20 @@ def gerar_processo(
         # Dados do cliente principal (denormalizado para rápido acesso)
         "personal_data": cliente.get("dados_pessoais", {}).copy(),
 
+        # Dados financeiros do cliente (denormalizado)
+        "finance_data": cliente.get("dados_financeiros", {}),
+
         # Dados imobiliários e de crédito
         "real_estate_data": real_estate_data,
         "credit_data": credit_data,
 
-        # Co-compradores (15% dos processos)
+        # Compra sozinho / 2º Proponente
+        "compra_sozinho": compra_sozinho,
+        "titular2_data": titular2_data,
+
+        # Co-compradores (legado — mantido vazio se há titular2)
         "co_buyers": [],
-        "co_applicants": [],
+        "co_applicants": [titular2_data] if titular2_data else [],
 
         # Fonte e metadados
         "source": cliente.get("fonte", "Manual"),

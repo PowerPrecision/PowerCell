@@ -3693,6 +3693,12 @@ async def seed_realistic_data_endpoint(
         "Pedir documentos complementares", "Submeter proposta ao banco",
     ]
 
+    # ── Opções de Imóvel, Crédito e Financiamento ──
+    LOCALIDADES_IMOVEL = ["Lisboa", "Porto", "Braga", "Setúbal", "Faro", "Coimbra"]
+    TIPOS_IMOVEL = ["Apartamento T2", "Apartamento T3", "Moradia V3"]
+    FINALIDADES_CREDITO = ["Aquisição HPP", "Transferência", "Construção"]
+    PRAZOS_FINANCIAMENTO = [360, 420, 480]  # meses (30/35/40 anos)
+
     def _gerar_nif():
         primeiro = random.choice([1, 2, 3, 3, 3, 2, 1])
         digitos = [primeiro] + [random.randint(0, 9) for _ in range(8)]
@@ -3778,6 +3784,10 @@ async def seed_realistic_data_endpoint(
             profissao = random.choice(PROFISSOES_LOCAL)
             salario = round(random.uniform(850, 4500), 2)
             tipo_contrato = random.choice(TIPOS_CONTRATO_LOCAL)
+            empresa = random.choice(EMPRESAS_LOCAL) if random.random() < 0.7 else None
+            despesas_mensais_outros = round(random.uniform(0, 400), 2)
+            capitais_proprios = round(random.uniform(10_000, 60_000), 2)
+            dependentes = random.randint(0, 3)
 
             cliente = {
                 "id": cid, "nome": nome,
@@ -3796,6 +3806,14 @@ async def seed_realistic_data_endpoint(
                     "sexo": random.choice(["M", "F"]),
                 },
                 "process_ids": [],
+                "dados_financeiros": {
+                    "salario": salario,
+                    "tipo_contrato": tipo_contrato,
+                    "empresa": empresa,
+                    "despesas_mensais_outros_creditos": despesas_mensais_outros,
+                    "capitais_proprios": capitais_proprios,
+                    "dependentes": dependentes,
+                },
                 "fonte": random.choice(FONTES_LOCAL),
                 "tags": random.sample(["VIP", "urgente", "retorno", "referência", "online"],
                                       k=random.randint(0, 2)),
@@ -3839,26 +3857,66 @@ async def seed_realistic_data_endpoint(
             process_type = random.choice(PROCESS_TYPES_LOCAL)
             dias_atras = random.randint(1, 90)
 
-            real_estate_data = None
-            if random.random() < 0.5:
-                real_estate_data = {
-                    "ja_tem_imovel": True,
-                    "valor_imovel": round(random.uniform(120000, 650000), 2),
-                    "localizacao": cliente.get("dados_pessoais", {}).get("naturalidade", "Lisboa"),
-                    "tipo_imovel": random.choice(["Apartamento", "Moradia", "T2", "T3", "T4", "Studio"]),
-                    "area": random.randint(45, 250),
-                }
+            # ── Dados do Imóvel (100%) ──
+            valor_imovel = round(random.uniform(120_000, 450_000), 2)
+            localidade_imovel = random.choice(LOCALIDADES_IMOVEL)
+            tipo_imovel = random.choice(TIPOS_IMOVEL)
+            area_imovel = random.randint(55, 200)
 
-            credit_data = None
-            if random.random() < 0.6:
-                valor = round(random.uniform(80000, 400000), 2)
-                credit_data = {
-                    "valor_credito": valor,
-                    "prazo_anos": random.choice([15, 20, 25, 30, 35]),
-                    "taxa": round(random.uniform(2.5, 4.5), 2),
-                    "spread": round(random.uniform(0.5, 1.8), 2),
-                    "tipo_taxa": random.choice(["fixa", "variável", "mista"]),
-                    "prestacao_mensal": round(valor * 0.004, 2),
+            real_estate_data = {
+                "ja_tem_imovel": True,
+                "valor_imovel": valor_imovel,
+                "localidade": localidade_imovel,
+                "tipo_imovel": tipo_imovel,
+                "area": area_imovel,
+            }
+
+            # ── Dados do Crédito / Operação (100%) ──
+            finalidade = random.choice(FINALIDADES_CREDITO)
+            pct_financiamento = round(random.uniform(0.80, 0.90), 4)
+            valor_financiamento = round(valor_imovel * pct_financiamento, 2)
+            prazo_meses = random.choice(PRAZOS_FINANCIAMENTO)
+            prazo_anos = prazo_meses // 12
+            spread = round(random.uniform(0.50, 1.80), 2)
+            euribor = round(random.uniform(2.5, 3.8), 2)
+            taxa_anual = round(euribor + spread, 2)
+            tipo_taxa = random.choice(["variável", "mista", "fixa"])
+            taxa_mensal = taxa_anual / 100 / 12
+            if taxa_mensal > 0:
+                prestacao_mensal = round(
+                    valor_financiamento
+                    * (taxa_mensal * (1 + taxa_mensal) ** prazo_meses)
+                    / ((1 + taxa_mensal) ** prazo_meses - 1), 2)
+            else:
+                prestacao_mensal = round(valor_financiamento / prazo_meses, 2)
+
+            credit_data = {
+                "finalidade": finalidade,
+                "valor_financiamento": valor_financiamento,
+                "pct_financiamento": round(pct_financiamento * 100, 1),
+                "prazo_meses": prazo_meses,
+                "prazo_anos": prazo_anos,
+                "taxa_anual": taxa_anual,
+                "spread": spread,
+                "euribor": euribor,
+                "tipo_taxa": tipo_taxa,
+                "prestacao_mensal": prestacao_mensal,
+            }
+
+            # ── Compra Sozinho / 2º Proponente ──
+            compra_sozinho = random.choice([True, True, False])  # ~33% com 2º titular
+            titular2_data = None
+            if not compra_sozinho:
+                nome_t2 = fake_local.name()
+                titular2_data = {
+                    "name": nome_t2,
+                    "nif": _gerar_nif(),
+                    "email": _gerar_email(nome_t2),
+                    "phone": _gerar_telefone(),
+                    "profissao": random.choice(PROFISSOES_LOCAL),
+                    "salario": round(random.uniform(700, 3500), 2),
+                    "tipo_contrato": random.choice(TIPOS_CONTRATO_LOCAL),
+                    "relacao": random.choice(["Cônjuge", "Companheiro(a)"]),
                 }
 
             processo = {
@@ -3880,8 +3938,11 @@ async def seed_realistic_data_endpoint(
                 "assigned_mediador_ids": [intermediario["id"]] if intermediario else [],
                 "mediador_names": [intermediario["name"]] if intermediario else [],
                 "personal_data": cliente.get("dados_pessoais", {}).copy(),
+                "finance_data": cliente.get("dados_financeiros", {}),
                 "real_estate_data": real_estate_data, "credit_data": credit_data,
-                "co_buyers": [], "co_applicants": [],
+                "compra_sozinho": compra_sozinho,
+                "titular2_data": titular2_data,
+                "co_buyers": [], "co_applicants": [titular2_data] if titular2_data else [],
                 "source": cliente.get("fonte", "Manual"),
                 "prioridade": random.choice(["baixa", "normal", "normal", "normal", "alta"]),
                 "created_at": (datetime.now(timezone.utc) - timedelta(days=dias_atras)).isoformat(),
