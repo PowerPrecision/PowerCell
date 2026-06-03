@@ -1186,7 +1186,6 @@ async def _send_documentation_email_impl(
     
     # ==== ENVIAR EMAIL COM ANEXOS ====
     # Gerar versão plain-text a partir do HTML (strip tags) como fallback
-    import re
     plain_text_body = re.sub(r'<[^>]+>', '', email_body).strip()
     plain_text_body = re.sub(r'\n{3,}', '\n\n', plain_text_body)
     
