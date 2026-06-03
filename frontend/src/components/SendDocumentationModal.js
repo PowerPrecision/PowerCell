@@ -175,6 +175,7 @@ const SendDocumentationModal = ({
   const [selectedRecipients, setSelectedRecipients] = useState([]);
   const [emailTemplate, setEmailTemplate] = useState("");
   const [ccEmails, setCcEmails] = useState("");
+  const [bccEmails, setBccEmails] = useState("");
   const [config, setConfig] = useState(null);
   const [warnings, setWarnings] = useState([]);
   const [selectedToEmails, setSelectedToEmails] = useState([]);
@@ -384,6 +385,8 @@ const SendDocumentationModal = ({
         to_emails: selectedToEmails,
         bcc_recipients: selectedRecipients,
         cc_emails: ccEmails ? ccEmails.split(",").map(e => e.trim()) : [],
+        bcc_emails: bccEmails ? bccEmails.split(",").map(e => e.trim()) : [],
+        subject: emailSubject || undefined,
       };
 
       // Enviar HTML customizado do editor (disponível para todos os utilizadores)
@@ -416,6 +419,7 @@ const SendDocumentationModal = ({
         setEmailHtml("");
         setEmailSubject("");
         setCcEmails("");
+        setBccEmails("");
       } else {
         if (response.status === 404) {
           toast.error(data.detail || "Processo ou documento não encontrado.", { duration: 6000 });
@@ -650,6 +654,22 @@ const SendDocumentationModal = ({
                   value={ccEmails}
                   onChange={(e) => setCcEmails(e.target.value)}
                 />
+              </div>
+
+              {/* BCC (emails adicionais) */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5" />
+                  BCC Emails (adicional, separar por vírgula)
+                </Label>
+                <Input
+                  placeholder="email1@exemplo.pt, email2@exemplo.pt"
+                  value={bccEmails}
+                  onChange={(e) => setBccEmails(e.target.value)}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Estes emails serão adicionados à lista de BCC (cópia oculta) além dos destinatários seleccionados acima.
+                </p>
               </div>
             </div>
 

@@ -804,7 +804,7 @@ async def preview_documentation_email(
     return {
         "success": True,
         "html": email_body,
-        "subject": f"Documentação - {client_name} (Processo #{process_number})",
+        "subject": f"Documentação - {client_name}",
         "template_vars": template_vars,
         "available_variables": list(template_vars.keys()),
         "documents_count": len(documents) if documents else 0
@@ -1103,7 +1103,19 @@ async def send_documentation_email(
     # Último fallback: email do utilizador actual
     if not to_emails:
         to_emails = [current_user["email"]]
-    subject = f"Documentação - {client_name} (Processo #{process_number})"
+    # Subject: usar o assunto enviado pelo frontend (editável), ou gerar sem Proc-xxxx
+    custom_subject = data.get("subject")
+    if custom_subject and custom_subject.strip():
+        subject = custom_subject.strip()
+        # Remover tag [Proc-xxxx] caso exista no subject customizado
+        subject = re.sub(r'\s*\[Proc-[\w-]+\]\s*', ' ', subject).strip()
+    else:
+        subject = f"Documentação - {client_name}"
+    
+    # BCC adicional: emails introduzidos manualmente pelo utilizador
+    bcc_manual = [e for e in (sanitize_email(e) for e in data.get("bcc_emails", [])) if e]
+    # Combinar BCC dos destinatários validados + BCC manual
+    all_bcc = validated_bcc + [e for e in bcc_manual if e not in validated_bcc]
     
     # ==== PREPARAR ANEXOS (download do S3) ====
     email_attachments = []
@@ -1152,12 +1164,14 @@ async def send_documentation_email(
         body=plain_text_body,
         body_html=email_body,
         cc_emails=cc_emails if cc_emails else None,
-        bcc_emails=validated_bcc,
+        bcc_emails=all_bcc,
+        reply_to=current_user.get("email"),
         process_id=process_id,
         created_by=current_user["id"],
         attachments=email_attachments if email_attachments else None,
         force_system=True,
         system_purpose="DOCUMENTS",
+        skip_proc_tag=True,
     )
     
     if not result["success"]:
@@ -1180,13 +1194,13 @@ async def send_documentation_email(
     except Exception as e:
         logger.warning(f"Não foi possível adicionar label 'documentação' ao registo: {e}")
     
-    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {len(validated_bcc)} destinatários, {len(email_attachments)} anexos")
+    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {len(all_bcc)} destinatários BCC, {len(email_attachments)} anexos")
     
     return {
         "success": True,
-        "message": f"Documentação enviada com sucesso para {len(validated_bcc)} destinatário(s) ({len(email_attachments)} anexo(s))",
+        "message": f"Documentação enviada com sucesso para {len(all_bcc)} destinatário(s) ({len(email_attachments)} anexo(s))",
         "warnings": warnings,
-        "sent_to": validated_bcc,
+        "sent_to": all_bcc,
         "attachments_sent": len(email_attachments),
         "attachments_failed": len(failed_attachments) if failed_attachments else 0
     }

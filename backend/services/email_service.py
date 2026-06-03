@@ -339,6 +339,7 @@ def _send_via_resend(
     body_html: Optional[str],
     attachments: Optional[List[Dict[str, Any]]],
     email_signature: Optional[str] = None,
+    reply_to: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Enviar email via Resend HTTP API.
@@ -391,6 +392,10 @@ def _send_via_resend(
             params["cc"] = cc_emails
         if bcc_emails:
             params["bcc"] = bcc_emails
+        
+        # Reply-To
+        if reply_to:
+            params["reply_to"] = reply_to
 
         # Anexos
         if attachments:
@@ -441,6 +446,8 @@ async def send_email(
     attachments: Optional[List[Dict[str, Any]]] = None,
     force_system: bool = False,
     system_purpose: Optional[str] = None,
+    reply_to: Optional[str] = None,
+    skip_proc_tag: bool = False,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -634,7 +641,8 @@ async def send_email(
     try:
         # === TAG MÁGICA: Injetar [Proc-{id}] no assunto ===
         # Se o email está associado a um processo e o assunto ainda não tem a tag
-        if process_id:
+        # Skip se skip_proc_tag=True (ex: envio de documentação para bancos)
+        if process_id and not skip_proc_tag:
             tag = f"[Proc-{process_id}]"
             if tag not in subject:
                 subject = f"{subject} {tag}"
@@ -712,9 +720,15 @@ async def send_email(
         if cc_emails:
             msg["Cc"] = ", ".join(cc_emails)
         
-        # === CRITICAL: Reply-To is NEVER set for any email ===
-        # Policy: all emails (system and personal) do not include Reply-To.
-        # This line intentionally does NOT exist: msg["Reply-To"] = ...
+        # === Reply-To: quando fornecido, as respostas vão para o utilizador ===
+        if reply_to:
+            msg["Reply-To"] = reply_to
+        
+        # === CRITICAL: Reply-To default policy ===
+        # When force_system is True and no explicit reply_to is provided,
+        # we do NOT set Reply-To (no-reply policy for system emails).
+        # When reply_to is provided (e.g. send-documentation), it overrides
+        # the no-reply policy so replies go to the authenticated user.
 
         # === ENVIAR: Resend API vs SMTP ===
         if account.smtp_server == "resend" and account.password:
@@ -746,6 +760,7 @@ async def send_email(
                 body_html=body_html,
                 attachments=attachments,
                 email_signature=email_sig,
+                reply_to=reply_to,
             )
         else:
             # --- SMTP directo (legado) ---
