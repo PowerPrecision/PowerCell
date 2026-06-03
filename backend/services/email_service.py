@@ -1059,11 +1059,6 @@ async def sync_webmail_emails(
     days: int = 30,
     max_emails: int = 100
 ) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        logger.info("[sync_webmail_emails] BLOCKED — ENVIRONMENT != production — nenhuma ligação IMAP")
-        return {"success": True, "message": "Ignorado (ENVIRONMENT != production)", "accounts": {}}
     """
     Sincronizar TODOS os emails recentes do IMAP para o webmail.
     Sem filtro de processo — guarda todos os emails recebidos e enviados.
@@ -1076,7 +1071,14 @@ async def sync_webmail_emails(
     Returns:
         Dict com resultado da sincronização
     """
-    # (Kill switch moved to first line of function — see above)
+    # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
+    # Permite testar sync em dev/staging definindo EMAIL_SYNC_ENABLED=true.
+    import os
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        logger.info("[sync_webmail_emails] BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true")
+        return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
     accounts = await get_email_accounts_async()
     if not accounts:
@@ -1419,10 +1421,6 @@ async def sync_webmail_emails(
 
 
 async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        return {"success": True, "message": "Ignorado (ENVIRONMENT != production)", "accounts": {}}
     """
     Sincronizar emails para um utilizador específico usando a sua configuração pessoal.
     
@@ -1434,7 +1432,12 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
     Returns:
         Dict com resultado da sincronização
     """
-    # (Kill switch moved to first line of function — see above)
+    # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
+    import os
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
     from services.encryption import encryption_service
     
@@ -1693,10 +1696,6 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
 
 
 async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 200) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        return {"success": True, "message": "Ignorado (ENVIRONMENT != production)", "accounts": {}}
     """
     Sincronizar emails para um role partilhado (indexacao, suporte, etc.)
     usando a conta de email partilhada do departamento.
@@ -1712,7 +1711,12 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
     Returns:
         Dict com resultado da sincronização
     """
-    # (Kill switch moved to first line of function — see above)
+    # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
+    import os
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
     from services.encryption import encryption_service
     
@@ -1951,10 +1955,6 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
 
 
 async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        return {"success": True, "message": "Ignorado (ENVIRONMENT != production)", "accounts": {}}
     """
     Sincronizar emails para TODOS os utilizadores com configuração ativa.
     Usa asyncio.gather para execução concorrente.
@@ -1962,7 +1962,12 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     Returns:
         Dict com resumo global da sincronização
     """
-    # (Kill switch moved to first line of function — see above)
+    # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
+    import os
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
     # Query: utilizadores com email_config.is_configured == True
     # Excluir roles com email partilhado (indexacao, suporte) — esses usam sync_shared_role_emails

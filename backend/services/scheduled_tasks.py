@@ -1396,11 +1396,13 @@ class ScheduledTasksService:
         Returns:
             Dict com resumo da sincronização
         """
-        # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
+        # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
         import os
-        if os.environ.get('ENVIRONMENT') != 'production':
-            logger.info("[auto_sync_emails] BLOCKED — ENVIRONMENT != production")
-            return {"success": True, "error": "Email sync desativado (ENVIRONMENT != production)", "total_synced": 0}
+        env = os.environ.get('ENVIRONMENT', '')
+        sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+        if env != 'production' and not sync_enabled:
+            logger.info("[auto_sync_emails] BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true")
+            return {"success": False, "error": "Email sync desactivado (ENVIRONMENT != production). Defina EMAIL_SYNC_ENABLED=true.", "total_synced": 0}
 
         logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
         
@@ -1526,8 +1528,11 @@ class ScheduledTasksService:
 
 async def run_email_auto_sync(interval_seconds: int = 180):
     import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        return  # Aborta imediatamente em DEV
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        logger.info("[run_email_auto_sync] BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true")
+        return  # Aborta em DEV a menos que EMAIL_SYNC_ENABLED=true
 
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
     await asyncio.sleep(30)
@@ -1557,10 +1562,12 @@ async def run_daemon(interval_hours: int = 24):
     Executar tarefas em loop (modo daemon).
     Por defeito, executa a cada 24 horas.
     """
-    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE DAEMON
+    # KILL SWITCH — Só permite daemon em ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        logger.warning("[RADICAL BLOCK] run_daemon BLOCKED — ENVIRONMENT != production — daemon will NOT start")
+    env = os.environ.get('ENVIRONMENT', 'dev')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        logger.warning("[BLOCK] run_daemon BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true — daemon will NOT start")
         return
 
     service = ScheduledTasksService()
