@@ -104,6 +104,16 @@ services:
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /ms-playwright
 
+      # ── Logging / Anti-Buffering ──
+      # PYTHONUNBUFFERED=1 obriga o Python a enviar logs imediatamente
+      # para stdout, sem reter em memória. Essencial para o Render capturar
+      # logs em tempo real. Já definido no Dockerfile, mas repetido aqui
+      # para garantir que funciona mesmo sem Docker (e.g. render start command).
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
+
       # ── Uvicorn ──
       # IMPORTANTE: Com 2GB RAM, usar MÁXIMO 2 workers.
       # Com 4 workers, cada um inicia 4 background tasks = 16 tasks = OOM.
@@ -180,6 +190,12 @@ services:
         value: production
       - key: APP_ENV
         value: production
+
+      # ── Logging / Anti-Buffering ──
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
 
       # ── Base de Dados (SECRETS) ──
       - key: MONGO_URL

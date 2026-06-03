@@ -21,15 +21,9 @@ import time
 import tempfile
 from datetime import datetime, timezone, timedelta
 
-# Configurar logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger("worker")
+# Configurar logging (usar utils/logger.py para formato padronizado com Render)
+from utils.logger import get_logger
+logger = get_logger("worker")
 
 # Adicionar caminho do backend ao path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))

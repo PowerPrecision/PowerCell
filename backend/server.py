@@ -145,7 +145,13 @@ if SENTRY_DSN:
     )
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+# ── Configuração de Logging para Render ──
+# O utils/logger.py configura o root logger com sys.stdout e formato limpo.
+# Deve ser importado ANTES de criar o logger do server.py para que o
+# handler de stdout seja registado primeiro.
+from utils.logger import get_logger
+logger = get_logger(__name__)
 
 app = FastAPI(title="Sistema de Gestão de Processos")
 
@@ -735,6 +741,14 @@ async def background_job_monitor():
             
         except (IOError, OSError, ValueError, KeyError) as monitor_err:
             logger.error(f"Erro no background job monitor: {monitor_err}")
+
+# ====================================================================
+# LOGGING / RASTREABILIDADE MIDDLEWARE
+# Regista todos os pedidos HTTP com método, path, status, duração e user.
+# Adicionado ANTES do CORS para que execute DEPOIS na cadeia (reverse order).
+# ====================================================================
+from middleware.logging_middleware import LoggingMiddleware
+app.add_middleware(LoggingMiddleware)
 
 # ====================================================================
 # CORS MIDDLEWARE — MUST be last middleware added so it is OUTERMOST.
