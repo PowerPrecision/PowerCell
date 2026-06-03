@@ -1,10 +1,10 @@
 /**
- * BackgroundJobsPage - Página de Processos em Background
+ * BackgroundJobsPage - Centro de Operações
  * Permite visualizar o estado de importações e outros processos a correr
  * Suporta: Cancelar, Pausar e Retomar jobs
- * Inclui: Dashboard de métricas e notificações de jobs stuck
+ * Inclui: Dashboard de métricas, notificações de jobs stuck, logs detalhados
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -31,6 +31,8 @@ import {
   TrendingUp,
   Timer,
   Eye,
+  Terminal,
+  ChevronRight,
 } from "lucide-react";
 
 import {
@@ -40,6 +42,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
+
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "../components/ui/sheet";
+
 import { safeDateStr } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -63,13 +74,54 @@ const STATUS_CONFIG = {
   pending: { label: "Pendente", variant: "secondary", icon: Clock },
 };
 
-// Componente de Job Individual
+// ── Helper: Formatar duração ──────────────────────────────
+function formatDuration(isoStart, isoEnd) {
+  if (!isoStart) return "—";
+  const start = new Date(safeDateStr(isoStart));
+  const end = isoEnd ? new Date(safeDateStr(isoEnd)) : new Date();
+  const diffMs = end - start;
+  if (diffMs < 0) return "0s";
+  const totalSecs = Math.floor(diffMs / 1000);
+  const hrs = Math.floor(totalSecs / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  const secs = totalSecs % 60;
+  if (hrs > 0) return `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+// ── Componente: Contador de tempo decorrido (live) ────────
+const ElapsedTimer = ({ startedAt, finishedAt }) => {
+  const [elapsed, setElapsed] = useState(() => formatDuration(startedAt, finishedAt));
+
+  useEffect(() => {
+    if (!startedAt || finishedAt) {
+      setElapsed(formatDuration(startedAt, finishedAt));
+      return;
+    }
+    // Actualizar a cada segundo enquanto o job está a correr
+    const interval = setInterval(() => {
+      setElapsed(formatDuration(startedAt, null));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [startedAt, finishedAt]);
+
+  return (
+    <span className="flex items-center gap-1">
+      <Timer className="h-3.5 w-3.5" />
+      {elapsed}
+    </span>
+  );
+};
+
+// ════════════════════════════════════════════════════════════
+// Componente de Job Individual (Card Expandido)
+// ════════════════════════════════════════════════════════════
 const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) => {
   const Icon = JOB_TYPE_ICONS[job.job_type] || JOB_TYPE_ICONS[job.type] || JOB_TYPE_ICONS.default;
   const statusConfig = STATUS_CONFIG[job.status] || STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
   const [actionLoading, setActionLoading] = useState(false);
-  
+
   const formatDate = (isoString) => {
     if (!isoString) return "-";
     const date = new Date(safeDateStr(isoString));
@@ -81,75 +133,95 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
     });
   };
 
-  const getDuration = () => {
-    if (!job.started_at) return "-";
-    const start = new Date(safeDateStr(job.started_at));
-    const end = job.finished_at ? new Date(safeDateStr(job.finished_at)) : new Date();
-    const diffMs = end - start;
-    const diffSecs = Math.floor(diffMs / 1000);
-    
-    if (diffSecs < 60) return `${diffSecs}s`;
-    const diffMins = Math.floor(diffSecs / 60);
-    if (diffMins < 60) return `${diffMins}m ${diffSecs % 60}s`;
-    const diffHours = Math.floor(diffMins / 60);
-    return `${diffHours}h ${diffMins % 60}m`;
-  };
+  const isRunning = job.status === "running";
+  const isPaused = job.status === "paused";
+  const isActive = isRunning || isPaused;
+
+  // Cor da barra de progresso baseada no estado
+  const progressColor = isRunning
+    ? "bg-blue-500"
+    : isPaused
+    ? "bg-amber-500"
+    : job.status === "success"
+    ? "bg-green-500"
+    : "bg-red-500";
 
   return (
-    <Card className={`transition-all ${job.status === 'running' ? 'border-blue-300 shadow-md' : ''}`}>
+    <Card className={`transition-all ${isRunning ? 'border-blue-300 shadow-md dark:border-blue-700' : isPaused ? 'border-amber-300 dark:border-amber-700' : ''}`}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           {/* Ícone e Info Principal */}
           <div className="flex items-start gap-3 flex-1 min-w-0">
             <div className={`p-2.5 rounded-lg shrink-0 ${
-              job.status === 'running' ? 'bg-blue-100 dark:bg-blue-900/30' :
+              isRunning ? 'bg-blue-100 dark:bg-blue-900/30' :
               job.status === 'success' ? 'bg-green-100 dark:bg-green-900/30' :
               job.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30' :
+              isPaused ? 'bg-amber-100 dark:bg-amber-900/30' :
               'bg-gray-100 dark:bg-gray-800'
             }`}>
               <Icon className={`h-5 w-5 ${
-                job.status === 'running' ? 'text-blue-600' :
+                isRunning ? 'text-blue-600' :
                 job.status === 'success' ? 'text-green-600' :
                 job.status === 'failed' ? 'text-red-600' :
+                isPaused ? 'text-amber-600' :
                 'text-gray-600'
               }`} />
             </div>
             
             <div className="flex-1 min-w-0">
+              {/* Header: tipo + status badge */}
               <div className="flex items-center gap-2 flex-wrap">
                 <h4 className="font-medium text-sm">
                   {job.type === 'bulk_import' ? 'Importação Massiva' :
                    job.type === 'document_analysis' ? 'Análise de Documentos' :
                    job.type === 'email_sync' ? 'Sincronização de Email' :
+                   job.type === 'aggregated_import' ? 'Importação Agregada' :
                    job.type}
                 </h4>
                 <Badge 
                   variant={statusConfig.variant}
                   className={`text-xs ${statusConfig.className || ''}`}
                 >
-                  <StatusIcon className={`h-3 w-3 mr-1 ${job.status === 'running' ? 'animate-spin' : ''}`} />
+                  <StatusIcon className={`h-3 w-3 mr-1 ${isRunning ? 'animate-spin' : ''}`} />
                   {statusConfig.label}
                 </Badge>
               </div>
               
-              {/* Detalhes */}
+              {/* Meta info: início + tempo decorrido */}
               <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
                 <span>Início: {formatDate(job.started_at)}</span>
+                <ElapsedTimer startedAt={job.started_at} finishedAt={job.finished_at} />
                 {job.finished_at && <span>Fim: {formatDate(job.finished_at)}</span>}
-                <span>Duração: {getDuration()}</span>
               </div>
-              
-              {/* Progresso */}
-              {job.status === 'running' && job.total > 0 && (
+
+              {/* ══ PROGRESS BAR (sempre visível para jobs com total > 0) ══ */}
+              {(job.total > 0 || job.progress > 0) && (
                 <div className="mt-3">
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span>{job.processed} de {job.total} processados</span>
-                    <span>{job.progress}%</span>
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="text-muted-foreground">
+                      {job.processed ?? 0} de {job.total || "?"} processados
+                    </span>
+                    <span className="font-semibold">{job.progress ?? 0}%</span>
                   </div>
-                  <Progress value={job.progress} className="h-2" />
+                  <div className="relative">
+                    <Progress 
+                      value={job.progress ?? 0} 
+                      className={`h-2.5 ${isRunning ? 'animate-pulse' : ''}`} 
+                    />
+                  </div>
                 </div>
               )}
-              
+
+              {/* ══ CURRENT STEP — itálico abaixo da barra ══ */}
+              {job.current_step && isActive && (
+                <div className="mt-2 flex items-start gap-1.5">
+                  <ChevronRight className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${isRunning ? 'text-blue-500' : 'text-amber-500'}`} />
+                  <p className="text-xs italic text-muted-foreground leading-relaxed">
+                    {job.current_step}
+                  </p>
+                </div>
+              )}
+
               {/* Erros */}
               {job.errors > 0 && (
                 <div className="flex items-center gap-1 mt-2 text-xs text-amber-600">
@@ -159,12 +231,19 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
               )}
               
               {/* Mensagem de erro/sucesso */}
-              {job.message && (
+              {job.message && !isActive && (
                 <p className={`mt-2 text-xs ${
                   job.status === 'failed' ? 'text-red-600' : 'text-muted-foreground'
                 }`}>
                   {job.message}
                 </p>
+              )}
+
+              {/* Error log (para jobs falhados) */}
+              {job.error_log && job.status === 'failed' && (
+                <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/30 rounded text-xs text-red-700 dark:text-red-400 font-mono break-all">
+                  {job.error_log}
+                </div>
               )}
               
               {/* Detalhes adicionais */}
@@ -179,8 +258,7 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
           
           {/* Acções */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Botões para jobs em execução */}
-            {job.status === 'running' && (
+            {isRunning && (
               <>
                 <Button 
                   variant="outline" 
@@ -193,14 +271,7 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
                   }}
                   disabled={actionLoading}
                 >
-                  {actionLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Pause className="h-4 w-4 mr-1" />
-                      Pausar
-                    </>
-                  )}
+                  {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Pause className="h-4 w-4 mr-1" />Pausar</>}
                 </Button>
                 <Button 
                   variant="outline" 
@@ -213,20 +284,12 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
                   }}
                   disabled={actionLoading}
                 >
-                  {actionLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <XCircle className="h-4 w-4 mr-1" />
-                      Cancelar
-                    </>
-                  )}
+                  {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><XCircle className="h-4 w-4 mr-1" />Cancelar</>}
                 </Button>
               </>
             )}
             
-            {/* Botão para retomar jobs pausados */}
-            {job.status === 'paused' && (
+            {isPaused && (
               <>
                 <Button 
                   variant="outline" 
@@ -239,14 +302,7 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
                   }}
                   disabled={actionLoading}
                 >
-                  {actionLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Play className="h-4 w-4 mr-1" />
-                      Retomar
-                    </>
-                  )}
+                  {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Play className="h-4 w-4 mr-1" />Retomar</>}
                 </Button>
                 <Button 
                   variant="outline" 
@@ -265,18 +321,17 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
               </>
             )}
             
-            {/* Botão de ver detalhes */}
+            {/* Botão de ver detalhes (logs) */}
             <Button 
               variant="ghost" 
               size="sm"
               className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30"
               onClick={() => onViewDetails(job)}
-              title="Ver detalhes"
+              title="Ver detalhes e logs"
             >
-              <Eye className="h-4 w-4" />
+              <Terminal className="h-4 w-4" />
             </Button>
             
-            {/* Botão de eliminar para jobs terminados */}
             {!['running', 'paused'].includes(job.status) && (
               <Button 
                 variant="ghost" 
@@ -294,6 +349,159 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
   );
 };
 
+// ════════════════════════════════════════════════════════════
+// Componente: Painel de Logs (Mini-Terminal)
+// ════════════════════════════════════════════════════════════
+const JobLogSheet = ({ job, open, onOpenChange }) => {
+  if (!job) return null;
+
+  const stepLog = job.step_log || [];
+  const formatDate = (isoString) => {
+    if (!isoString) return "";
+    const date = new Date(safeDateStr(isoString));
+    return date.toLocaleString("pt-PT", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 1,
+    });
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-[480px] sm:max-w-[540px] sm:w-[540px] p-0 flex flex-col">
+        <SheetHeader className="p-6 pb-4 border-b">
+          <SheetTitle className="flex items-center gap-2">
+            <Terminal className="h-5 w-5 text-green-500" />
+            Logs do Processo
+          </SheetTitle>
+          <SheetDescription>
+            {job.type === 'bulk_import' ? 'Importação Massiva' :
+             job.type === 'document_analysis' ? 'Análise de Documentos' :
+             job.type === 'email_sync' ? 'Sincronização de Email' :
+             job.type} — {job.id?.slice(0, 8)}...
+          </SheetDescription>
+        </SheetHeader>
+
+        {/* Job summary */}
+        <div className="px-6 py-3 border-b bg-muted/30">
+          <div className="flex items-center gap-3 text-sm">
+            <Badge className={STATUS_CONFIG[job.status]?.className || ""}>
+              {STATUS_CONFIG[job.status]?.label || job.status}
+            </Badge>
+            {job.total > 0 && (
+              <span className="text-muted-foreground">
+                {job.processed ?? 0}/{job.total} processados ({job.progress ?? 0}%)
+              </span>
+            )}
+            {job.started_at && (
+              <span className="text-muted-foreground">
+                <Timer className="h-3 w-3 inline mr-1" />
+                {formatDuration(job.started_at, job.finished_at)}
+              </span>
+            )}
+          </div>
+          {job.current_step && (
+            <p className="text-xs italic text-muted-foreground mt-1.5">
+              → {job.current_step}
+            </p>
+          )}
+        </div>
+
+        {/* Terminal-style log */}
+        <div className="flex-1 overflow-hidden">
+          <ScrollArea className="h-full">
+            <div className="p-4">
+              <div className="bg-gray-950 dark:bg-gray-900 rounded-lg border border-gray-800 font-mono text-xs overflow-hidden">
+                {/* Terminal header */}
+                <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-800 bg-gray-900 dark:bg-gray-800">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                  <span className="ml-2 text-gray-400 text-[10px]">job-{job.id?.slice(0, 8)}.log</span>
+                </div>
+                
+                {/* Terminal body */}
+                <div className="p-3 space-y-1.5 max-h-[50vh] overflow-y-auto">
+                  {stepLog.length > 0 ? stepLog.map((entry, idx) => {
+                    const isLast = idx === stepLog.length - 1;
+                    const isFailed = entry.step === "Falhado";
+                    const isSuccess = entry.step === "Concluído";
+                    return (
+                      <div key={idx} className={`flex gap-2 ${isLast ? "opacity-100" : "opacity-70"}`}>
+                        <span className="text-gray-500 shrink-0 select-none">
+                          {formatDate(entry.ts)}
+                        </span>
+                        <span className={
+                          isFailed ? "text-red-400" :
+                          isSuccess ? "text-green-400" :
+                          isLast ? "text-blue-400" :
+                          "text-gray-300"
+                        }>
+                          {isLast && !isFailed && !isSuccess ? "▸ " : "  "}
+                          {entry.step}
+                        </span>
+                      </div>
+                    );
+                  }) : (
+                    <div className="text-gray-500 italic">Sem registos de log disponíveis</div>
+                  )}
+                  
+                  {/* Mensagem de erro no final */}
+                  {job.error_log && (
+                    <div className="mt-2 pt-2 border-t border-gray-700">
+                      <span className="text-red-400">✗ ERRO: {job.error_log}</span>
+                    </div>
+                  )}
+                  {job.message && job.status === 'failed' && !job.error_log && (
+                    <div className="mt-2 pt-2 border-t border-gray-700">
+                      <span className="text-red-400">✗ ERRO: {job.message}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Error messages list */}
+              {job.error_messages && job.error_messages.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs font-semibold text-muted-foreground mb-2">
+                    Mensagens de Erro ({job.error_messages.length})
+                  </h4>
+                  <div className="bg-red-50 dark:bg-red-950/20 rounded-lg border border-red-200 dark:border-red-800 p-3 space-y-1">
+                    {job.error_messages.slice(0, 20).map((msg, idx) => (
+                      <p key={idx} className="text-xs text-red-700 dark:text-red-400 font-mono break-all">
+                        {msg}
+                      </p>
+                    ))}
+                    {job.error_messages.length > 20 && (
+                      <p className="text-xs text-muted-foreground italic">
+                        ...e mais {job.error_messages.length - 20} mensagens
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Raw details */}
+              {job.details && Object.keys(job.details).length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs font-semibold text-muted-foreground mb-2">Detalhes</h4>
+                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto">
+                    {JSON.stringify(job.details, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+};
+
+// ════════════════════════════════════════════════════════════
+// Componente Principal
+// ════════════════════════════════════════════════════════════
 const BackgroundJobsPage = ({ embedded = false }) => {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
   const [jobs, setJobs] = useState([]);
@@ -305,7 +513,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
   const [metrics, setMetrics] = useState(null);
   const [showMetrics, setShowMetrics] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
-  const [showJobDetails, setShowJobDetails] = useState(false);
+  const [showLogSheet, setShowLogSheet] = useState(false);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -330,7 +538,6 @@ const BackgroundJobsPage = ({ embedded = false }) => {
     }
   }, [statusFilter]);
 
-  // Buscar notificações de jobs stuck
   const fetchNotifications = useCallback(async () => {
     try {
       const token = localStorage.getItem("token");
@@ -347,7 +554,6 @@ const BackgroundJobsPage = ({ embedded = false }) => {
     }
   }, []);
 
-  // Buscar métricas
   const fetchMetrics = useCallback(async () => {
     try {
       const token = localStorage.getItem("token");
@@ -364,7 +570,6 @@ const BackgroundJobsPage = ({ embedded = false }) => {
     }
   }, []);
 
-  // Limpar notificações
   const handleClearNotifications = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -379,7 +584,6 @@ const BackgroundJobsPage = ({ embedded = false }) => {
     }
   };
 
-  // Fetch inicial e auto-refresh
   useEffect(() => {
     fetchJobs();
     fetchNotifications();
@@ -389,7 +593,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
       const interval = setInterval(() => {
         fetchJobs();
         fetchNotifications();
-      }, 5000); // Refresh a cada 5 segundos
+      }, 5000);
       return () => clearInterval(interval);
     }
   }, [fetchJobs, fetchNotifications, fetchMetrics, autoRefresh]);
@@ -471,9 +675,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
   };
 
   const handleClearAll = async () => {
-    if (!window.confirm("Tem a certeza que deseja limpar todos os jobs terminados?")) {
-      return;
-    }
+    if (!window.confirm("Tem a certeza que deseja limpar todos os jobs terminados?")) return;
     
     try {
       const token = localStorage.getItem("token");
@@ -484,7 +686,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
       
       if (response.ok) {
         const data = await response.json();
-        toast.success(data.message);
+        toast.success(`${data.deleted || 0} jobs removidos`);
         fetchJobs();
       }
     } catch (error) {
@@ -492,7 +694,6 @@ const BackgroundJobsPage = ({ embedded = false }) => {
     }
   };
 
-  // Limpar jobs stuck (bloqueados há muito tempo)
   const handleCleanupStuck = async () => {
     const hours = window.prompt("Limpar jobs sem actividade há quantas horas?", "2");
     if (!hours) return;
@@ -505,15 +706,15 @@ const BackgroundJobsPage = ({ embedded = false }) => {
     
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/cleanup-stuck?max_age_hours=${hoursNum}`, {
+      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/cleanup-stuck?hours=${hoursNum}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` }
       });
       
       if (response.ok) {
         const data = await response.json();
-        if (data.stuck_jobs_found > 0) {
-          toast.success(`${data.jobs_cleaned} jobs bloqueados foram limpos`);
+        if (data.cleaned > 0) {
+          toast.success(`${data.cleaned} jobs bloqueados foram limpos`);
         } else {
           toast.info("Nenhum job bloqueado encontrado");
         }
@@ -527,11 +728,8 @@ const BackgroundJobsPage = ({ embedded = false }) => {
     }
   };
 
-  // Limpar TODOS os jobs (incluindo em execução)
   const handleClearAllJobs = async () => {
-    if (!window.confirm("⚠️ ATENÇÃO: Isto irá limpar TODOS os jobs, incluindo os que estão a correr!\n\nTem a certeza?")) {
-      return;
-    }
+    if (!window.confirm("⚠️ ATENÇÃO: Isto irá limpar TODOS os jobs, incluindo os que estão a correr!\n\nTem a certeza?")) return;
     
     try {
       const token = localStorage.getItem("token");
@@ -542,7 +740,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
       
       if (response.ok) {
         const data = await response.json();
-        toast.success(data.message);
+        toast.success(`${(data.deleted_db || 0) + (data.deleted_memory || 0)} jobs removidos`);
         fetchJobs();
       } else {
         const error = await response.json();
@@ -553,10 +751,9 @@ const BackgroundJobsPage = ({ embedded = false }) => {
     }
   };
 
-  // Ver detalhes do job
   const handleViewDetails = (job) => {
     setSelectedJob(job);
-    setShowJobDetails(true);
+    setShowLogSheet(true);
   };
 
   return wrapLayout(
@@ -596,10 +793,10 @@ const BackgroundJobsPage = ({ embedded = false }) => {
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Activity className="h-6 w-6" />
-              Processos em Background
+              Centro de Operações
             </h1>
             <p className="text-muted-foreground">
-              Monitorize importações e outros processos a correr no sistema
+              Monitorize importações e processos em tempo real
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -610,7 +807,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
               className={showMetrics ? "bg-blue-50 border-blue-300 dark:bg-blue-900/30" : ""}
             >
               <BarChart3 className="h-4 w-4 mr-2" />
-              {showMetrics ? "Ocultar Métricas" : "Ver Métricas"}
+              {showMetrics ? "Ocultar Métricas" : "Métricas"}
             </Button>
             <Button 
               variant="outline" 
@@ -619,20 +816,21 @@ const BackgroundJobsPage = ({ embedded = false }) => {
               className={autoRefresh ? "bg-green-50 border-green-300 dark:bg-green-900/30" : ""}
             >
               {autoRefresh ? (
-                <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Auto-refresh</>
+                <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Auto</>
               ) : (
-                <><RefreshCw className="h-4 w-4 mr-2" /> Auto-refresh OFF</>
+                <><RefreshCw className="h-4 w-4 mr-2" /> OFF</>
               )}
             </Button>
-            <Button variant="outline" onClick={fetchJobs}>
+            <Button variant="outline" size="sm" onClick={fetchJobs}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Recarregar
             </Button>
             {counts.running > 0 && (
               <Button 
                 variant="outline" 
+                size="sm"
                 onClick={handleCleanupStuck}
-                className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-600 dark:text-amber-400 dark:hover:bg-amber-900/30"
+                className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-600 dark:text-amber-400"
                 title="Limpar jobs bloqueados há muito tempo"
               >
                 <Zap className="h-4 w-4 mr-2" />
@@ -640,20 +838,9 @@ const BackgroundJobsPage = ({ embedded = false }) => {
               </Button>
             )}
             {counts.total - counts.running > 0 && (
-              <Button variant="outline" onClick={handleClearAll}>
+              <Button variant="outline" size="sm" onClick={handleClearAll}>
                 <Trash2 className="h-4 w-4 mr-2" />
                 Limpar Terminados
-              </Button>
-            )}
-            {counts.total > 0 && (
-              <Button 
-                variant="outline" 
-                onClick={handleClearAllJobs}
-                className="border-red-300 text-red-700 hover:bg-red-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/30"
-                title="Limpar TODOS os jobs (incluindo em execução)"
-              >
-                <Ban className="h-4 w-4 mr-2" />
-                Limpar Tudo
               </Button>
             )}
           </div>
@@ -665,12 +852,11 @@ const BackgroundJobsPage = ({ embedded = false }) => {
             <CardHeader className="pb-2">
               <CardTitle className="text-lg flex items-center gap-2">
                 <BarChart3 className="h-5 w-5 text-blue-600" />
-                Dashboard de Métricas (últimos {metrics.period_days} dias)
+                Métricas (últimos {metrics.period_days} dias)
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                {/* Taxa de Sucesso */}
                 <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                     <TrendingUp className="h-4 w-4" />
@@ -682,7 +868,6 @@ const BackgroundJobsPage = ({ embedded = false }) => {
                   <Progress value={metrics.success_rate} className="h-2 mt-2" />
                 </div>
                 
-                {/* Tempo Médio */}
                 <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                     <Timer className="h-4 w-4" />
@@ -693,38 +878,33 @@ const BackgroundJobsPage = ({ embedded = false }) => {
                   </div>
                 </div>
                 
-                {/* Total de Jobs */}
                 <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                     <Activity className="h-4 w-4" />
                     Total de Jobs
                   </div>
-                  <div className="text-2xl font-bold">
-                    {metrics.total_jobs}
-                  </div>
+                  <div className="text-2xl font-bold">{metrics.total_jobs}</div>
                 </div>
                 
-                {/* Jobs Stuck */}
                 <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                     <AlertTriangle className="h-4 w-4" />
                     Jobs Stuck
                   </div>
                   <div className={`text-2xl font-bold ${metrics.stuck_count > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                    {metrics.stuck_count} ({metrics.stuck_percentage}%)
+                    {metrics.stuck_count}
                   </div>
                 </div>
               </div>
               
-              {/* Por Status */}
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
                   <h4 className="font-medium mb-3">Por Status</h4>
                   <div className="space-y-2">
                     {Object.entries(metrics.by_status || {}).map(([status, count]) => (
                       <div key={status} className="flex items-center justify-between">
-                        <span className="text-sm capitalize">{status}</span>
-                        <Badge variant={status === 'success' || status === 'completed' ? 'default' : status === 'failed' ? 'destructive' : 'secondary'}>
+                        <span className="text-sm capitalize">{STATUS_CONFIG[status]?.label || status}</span>
+                        <Badge variant={status === 'success' ? 'default' : status === 'failed' ? 'destructive' : 'secondary'}>
                           {count}
                         </Badge>
                       </div>
@@ -732,19 +912,15 @@ const BackgroundJobsPage = ({ embedded = false }) => {
                   </div>
                 </div>
                 
-                {/* Jobs Mais Lentos */}
                 <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
-                  <h4 className="font-medium mb-3">Jobs Mais Lentos</h4>
+                  <h4 className="font-medium mb-3">Por Tipo</h4>
                   <div className="space-y-2">
-                    {(metrics.slowest_jobs || []).slice(0, 5).map((job, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-sm">
-                        <span className="truncate max-w-[180px]" title={job.name}>{job.name || job.id?.slice(0,8)}</span>
-                        <span className="text-muted-foreground">{job.duration_formatted}</span>
+                    {Object.entries(metrics.by_type || {}).map(([type, count]) => (
+                      <div key={type} className="flex items-center justify-between text-sm">
+                        <span className="capitalize">{type.replace(/_/g, ' ')}</span>
+                        <Badge variant="outline">{count}</Badge>
                       </div>
                     ))}
-                    {(!metrics.slowest_jobs || metrics.slowest_jobs.length === 0) && (
-                      <p className="text-sm text-muted-foreground">Sem dados</p>
-                    )}
                   </div>
                 </div>
               </div>
@@ -752,7 +928,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
           </Card>
         )}
 
-        {/* Stats */}
+        {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Card 
             className={`cursor-pointer transition-all ${statusFilter === null ? 'ring-2 ring-primary' : 'hover:shadow-md'}`}
@@ -856,96 +1032,12 @@ const BackgroundJobsPage = ({ embedded = false }) => {
           </CardContent>
         </Card>
 
-        {/* Modal de Detalhes do Job */}
-        <Dialog open={showJobDetails} onOpenChange={setShowJobDetails}>
-          <DialogContent className="max-w-2xl max-h-[80vh]">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Detalhes do Processo
-              </DialogTitle>
-              <DialogDescription className="sr-only">
-                Informações detalhadas do processo em background.
-              </DialogDescription>
-            </DialogHeader>
-            {selectedJob && (
-              <ScrollArea className="max-h-[60vh] pr-4">
-                <div className="space-y-4">
-                  {/* Info básica */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                      <p className="text-xs text-muted-foreground">ID</p>
-                      <p className="font-mono text-sm break-all">{selectedJob.id}</p>
-                    </div>
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                      <p className="text-xs text-muted-foreground">Tipo</p>
-                      <p className="text-sm">{selectedJob.job_type || selectedJob.type || 'N/A'}</p>
-                    </div>
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                      <p className="text-xs text-muted-foreground">Status</p>
-                      <Badge className={STATUS_CONFIG[selectedJob.status]?.className}>
-                        {STATUS_CONFIG[selectedJob.status]?.label || selectedJob.status}
-                      </Badge>
-                    </div>
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                      <p className="text-xs text-muted-foreground">Progresso</p>
-                      <p className="text-sm">{selectedJob.processed_files || 0} / {selectedJob.total_files || '?'}</p>
-                    </div>
-                  </div>
-
-                  {/* Timestamps */}
-                  <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                    <p className="text-xs text-muted-foreground mb-2">Timestamps</p>
-                    <div className="space-y-1 text-sm">
-                      {selectedJob.created_at && (
-                        <p><span className="text-muted-foreground">Criado:</span> {new Date(safeDateStr(selectedJob.created_at)).toLocaleString('pt-PT')}</p>
-                      )}
-                      {selectedJob.started_at && (
-                        <p><span className="text-muted-foreground">Iniciado:</span> {new Date(safeDateStr(selectedJob.started_at)).toLocaleString('pt-PT')}</p>
-                      )}
-                      {selectedJob.updated_at && (
-                        <p><span className="text-muted-foreground">Actualizado:</span> {new Date(safeDateStr(selectedJob.updated_at)).toLocaleString('pt-PT')}</p>
-                      )}
-                      {selectedJob.finished_at && (
-                        <p><span className="text-muted-foreground">Terminado:</span> {new Date(safeDateStr(selectedJob.finished_at)).toLocaleString('pt-PT')}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Mensagem/Erro */}
-                  {(selectedJob.message || selectedJob.error) && (
-                    <div className={`p-3 rounded-lg ${selectedJob.error ? 'bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800' : 'bg-gray-50 dark:bg-gray-800'}`}>
-                      <p className="text-xs text-muted-foreground mb-1">{selectedJob.error ? 'Erro' : 'Mensagem'}</p>
-                      <p className={`text-sm ${selectedJob.error ? 'text-red-600 dark:text-red-400' : ''}`}>
-                        {selectedJob.error || selectedJob.message}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Detalhes */}
-                  {selectedJob.details && Object.keys(selectedJob.details).length > 0 && (
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                      <p className="text-xs text-muted-foreground mb-2">Detalhes</p>
-                      <pre className="text-xs bg-white dark:bg-gray-900 p-2 rounded overflow-x-auto">
-                        {JSON.stringify(selectedJob.details, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-
-                  {/* Stats de erros */}
-                  {selectedJob.errors > 0 && (
-                    <div className="p-3 bg-amber-50 dark:bg-amber-950/50 rounded-lg border border-amber-200 dark:border-amber-800">
-                      <p className="text-xs text-amber-700 dark:text-amber-400">
-                        <AlertTriangle className="h-3 w-3 inline mr-1" />
-                        {selectedJob.errors} erro(s) durante o processamento
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-            )}
-          </DialogContent>
-        </Dialog>
+        {/* Sheet de Logs (Mini-Terminal) */}
+        <JobLogSheet 
+          job={selectedJob}
+          open={showLogSheet}
+          onOpenChange={setShowLogSheet}
+        />
       </div>
   );
 };

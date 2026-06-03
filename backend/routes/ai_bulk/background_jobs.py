@@ -42,6 +42,9 @@ async def create_background_job_db(job_type: str, user_email: str, details: dict
         "errors": 0,
         "details": details or {},
         "error_messages": [],
+        "error_log": None,
+        "current_step": "Iniciando...",
+        "step_log": [{"ts": datetime.now(timezone.utc).isoformat(), "step": "Iniciando..."}],
         "finished_at": None
     }
     
@@ -57,6 +60,20 @@ async def update_background_job_db(job_id: str, **kwargs):
     """Actualizar estado de um job em background (persistido na DB)."""
     update_data = {**kwargs, "updated_at": datetime.now(timezone.utc).isoformat()}
     
+    # Se current_step foi actualizado, adicionar ao step_log
+    if "current_step" in update_data:
+        step_entry = {"ts": datetime.now(timezone.utc).isoformat(), "step": update_data["current_step"]}
+        if job_id in background_processes:
+            background_processes[job_id].setdefault("step_log", []).append(step_entry)
+            # Manter no máximo 100 entradas no log
+            if len(background_processes[job_id]["step_log"]) > 100:
+                background_processes[job_id]["step_log"] = background_processes[job_id]["step_log"][-100:]
+        # Usar $push na DB para adicionar ao array sem sobrescrever
+        await db.background_jobs.update_one(
+            {"id": job_id},
+            {"$push": {"step_log": {"$each": [step_entry], "$slice": -100}}}
+        )
+    
     # Actualizar cache em memória
     if job_id in background_processes:
         background_processes[job_id].update(update_data)
@@ -66,10 +83,11 @@ async def update_background_job_db(job_id: str, **kwargs):
             update_data["progress"] = int((processed / total) * 100)
             background_processes[job_id]["progress"] = update_data["progress"]
     
-    # Actualizar na DB
+    # Actualizar na DB (excepto current_step que já foi feito com $push)
+    db_update = {k: v for k, v in update_data.items() if k != "step_log"}
     await db.background_jobs.update_one(
         {"id": job_id},
-        {"$set": update_data}
+        {"$set": db_update}
     )
 
 
@@ -81,6 +99,7 @@ async def finish_background_job_db(job_id: str, success: bool, message: str = No
     update_data = {
         "status": status,
         "finished_at": finished_at,
+        "current_step": "Concluído" if success else "Falhado",
         # Garantir que acknowledged_at existe como None para que o frontend
         # possa detetar a conclusão na primeira poll e exibir o toast.
         # O endpoint GET /tasks/active fará auto-acknowledge após a primeira leitura.
@@ -88,15 +107,25 @@ async def finish_background_job_db(job_id: str, success: bool, message: str = No
     }
     if message:
         update_data["message"] = message
+    if not success and message:
+        update_data["error_log"] = message
     
-    # Actualizar cache em memória
+    # Adicionar step final ao log
+    step_entry = {"ts": finished_at, "step": update_data["current_step"]}
     if job_id in background_processes:
+        background_processes[job_id].setdefault("step_log", []).append(step_entry)
         background_processes[job_id].update(update_data)
+        # Push step final na DB
+        await db.background_jobs.update_one(
+            {"id": job_id},
+            {"$push": {"step_log": {"$each": [step_entry], "$slice": -100}}}
+        )
     
     # Actualizar na DB
+    db_update = {k: v for k, v in update_data.items()}
     await db.background_jobs.update_one(
         {"id": job_id},
-        {"$set": update_data}
+        {"$set": db_update}
     )
     
     logger.info(f"Job background terminado: {job_id} ({status})")
@@ -209,7 +238,14 @@ async def get_background_jobs(
         "jobs": all_jobs,
         "total": len(all_jobs),
         "from_db": len(jobs),
-        "from_memory": len(memory_jobs)
+        "from_memory": len(memory_jobs),
+        "counts": {
+            "running": sum(1 for j in all_jobs if j.get("status") == "running"),
+            "paused": sum(1 for j in all_jobs if j.get("status") == "paused"),
+            "success": sum(1 for j in all_jobs if j.get("status") == "success"),
+            "failed": sum(1 for j in all_jobs if j.get("status") in ["failed", "cancelled"]),
+            "total": len(all_jobs),
+        }
     }
 
 
@@ -406,6 +442,34 @@ async def cancel_background_job(
     return {"success": True, "message": "Job cancelado"}
 
 
+@router.post("/background-jobs/{job_id}/pause")
+async def pause_background_job(
+    job_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """Pausa um job em execução."""
+    try:
+        from .jobs import pause_job
+        result = await pause_job(job_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/background-jobs/{job_id}/resume")
+async def resume_background_job(
+    job_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN]))
+):
+    """Retoma um job pausado."""
+    try:
+        from .jobs import resume_job
+        result = await resume_job(job_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/background-jobs/cleanup-stuck")
 async def cleanup_stuck_jobs(
     hours: int = Query(2, ge=1, le=24),
@@ -470,6 +534,7 @@ class ProgressUpdateRequest(BaseModel):
     processed: Optional[int] = None
     errors: Optional[int] = None
     message: Optional[str] = None
+    current_step: Optional[str] = None
 
 
 @router.post("/background-job/{job_id}/progress")
@@ -490,6 +555,8 @@ async def update_background_job_progress(
         update_fields["errors"] = request.errors
     if request.message:
         update_fields["message"] = request.message
+    if request.current_step:
+        update_fields["current_step"] = request.current_step
     
     if update_fields:
         await update_background_job_db(job_id, **update_fields)
