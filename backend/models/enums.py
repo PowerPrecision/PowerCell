@@ -12,7 +12,7 @@ from typing import List
 
 class ProcessStatus(str, Enum):
     """
-    Status do processo no workflow de 14 fases.
+    Status do processo no workflow de 15 fases.
     Valores correspondem aos nomes das colunas do Kanban.
     """
     # Fase 1-3: Início
