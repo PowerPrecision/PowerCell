@@ -491,9 +491,11 @@ const ChatPanel = ({ open, onOpenChange }) => {
     };
   }, []);
 
-  // Formatar data da mensagem
+  // Formatar data da mensagem (protecção defensiva contra datas inválidas)
   const formatMessageDate = (dateStr) => {
+    if (!dateStr) return "Data indisponível";
     const date = safeParseISO(dateStr);
+    if (!date) return "Data inválida";
     if (isToday(date)) {
       return format(date, "HH:mm", { locale: pt });
     }

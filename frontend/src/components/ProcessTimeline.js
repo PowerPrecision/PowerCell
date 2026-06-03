@@ -13,7 +13,7 @@ import { Loader2, CheckCircle, Clock, Circle, ArrowRight } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeLabel } from "./dashboard/DashboardShared";
-import { safeDateStr, safeFormat } from "../lib/utils";
+import { safeDateStr, safeFormat, safeDate, safeParseISO } from "../lib/utils";
 
 // Cores de fallback mapeadas a partir do nome da cor da BD
 const COLOR_MAP = {
@@ -171,10 +171,15 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
       return;
     }
 
-    // Ordenar histórico por data
-    const sortedHistory = [...history].sort((a, b) => 
-      new Date(safeDateStr(a.timestamp || a.created_at)) - new Date(safeDateStr(b.timestamp || b.created_at))
-    );
+    // Ordenar histórico por data (protecção defensiva contra datas inválidas)
+    const sortedHistory = [...history].sort((a, b) => {
+      const dateA = safeDate(a.timestamp || a.created_at);
+      const dateB = safeDate(b.timestamp || b.created_at);
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;  // items sem data ficam no fim
+      if (!dateB) return -1;
+      return dateA - dateB;
+    });
 
     // Construir timeline a partir do histórico
     const timeline = [];
@@ -189,8 +194,11 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
         const entryDate = entry.timestamp || entry.created_at;
         const nextDate = nextEntry ? (nextEntry.timestamp || nextEntry.created_at) : new Date().toISOString();
         
-        const daysInPhase = entryDate && nextDate 
-          ? differenceInDays(safeParseISO(nextDate), safeParseISO(entryDate))
+        // Protecção defensiva: differenceInDays lança erro se receber null/undefined
+        const parsedNext = safeParseISO(nextDate);
+        const parsedEntry = safeParseISO(entryDate);
+        const daysInPhase = (parsedNext && parsedEntry)
+          ? differenceInDays(parsedNext, parsedEntry)
           : 0;
 
         timeline.push({

@@ -152,7 +152,7 @@ import {
   Shield,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isAfter } from "date-fns";
+import { format, parseISO, isAfter, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
@@ -1710,7 +1710,7 @@ const ProcessDetails = () => {
         process_id: id,
         title: deadlineForm.title,
         description: deadlineForm.description,
-        due_date: format(selectedDate, "yyyy-MM-dd"),
+        due_date: selectedDate && isValid(selectedDate) ? format(selectedDate, "yyyy-MM-dd") : null,
         priority: deadlineForm.priority,
       });
       toast.success("Prazo criado com sucesso!");
@@ -5431,7 +5431,7 @@ const ProcessDetails = () => {
                                   <PopoverTrigger asChild>
                                     <Button variant="outline" className="w-full justify-start text-left font-normal">
                                       <CalendarIcon className="mr-2 h-4 w-4" />
-                                      {selectedDate ? format(selectedDate, "PPP", { locale: pt }) : "Selecione"}
+                                      {selectedDate && isValid(selectedDate) ? format(selectedDate, "PPP", { locale: pt }) : "Selecione"}
                                     </Button>
                                   </PopoverTrigger>
                                   <PopoverContent className="w-auto p-0">
