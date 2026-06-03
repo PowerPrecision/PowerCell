@@ -122,3 +122,26 @@ export const formatDateTime = (dateString) => {
     return "-";
   }
 };
+
+/**
+ * formatSafeDate — Função de formatação de datas 100% segura para Safari/iOS.
+ *
+ * Safari falha ao fazer parsing de strings de data com espaço em vez de 'T'
+ * (ex: '2025-03-15 14:30:00'). Esta função normaliza a string antes de
+ * criar o objeto Date, evitando o erro React "Invalid time value".
+ *
+ * @param {string|Date|null|undefined} dateString — A data a formatar
+ * @returns {string} — Data formatada em pt-PT ou texto de fallback
+ */
+export const formatSafeDate = (dateString) => {
+  if (!dateString) return 'Data indisponível';
+
+  // Normalização para o Safari: Substituir espaços por 'T' e garantir compatibilidade ISO
+  let safeString = dateString;
+  if (typeof dateString === 'string') {
+    safeString = dateString.replace(' ', 'T');
+  }
+
+  const d = new Date(safeString);
+  return isNaN(d.getTime()) ? 'Data inválida' : d.toLocaleString('pt-PT');
+};

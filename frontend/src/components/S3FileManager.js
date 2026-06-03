@@ -118,7 +118,7 @@ import {
 import { Input } from "./ui/input";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, safeDate, safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -965,16 +965,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
-  // Formatar data - dd/mm/AA hh:mm
+  // Formatar data - dd/mm/AA hh:mm (protecção defensiva contra datas inválidas / Safari)
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return "-";
-      return format(date, "dd/MM/yy HH:mm", { locale: pt });
-    } catch {
-      return "-";
-    }
+    return safeFormat(dateStr, "dd/MM/yy HH:mm", { locale: pt });
   };
 
   // Contar ficheiros por categoria

@@ -24,9 +24,9 @@ import {
   AlertTriangle, Calendar, Plus, Loader2, Sparkles, FolderOpen
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, differenceInDays } from "date-fns";
+import { format, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr, formatDate as formatDateUtil } from "../../lib/utils";
+import { safeDateStr, safeParseISO, formatDate as formatDateUtil } from "../../lib/utils";
 import { getProcesses, getStats, getUpcomingExpiries, getWorkflowStatuses, createDocumentExpiry, getClientS3Files, analyzeOneDriveDocument } from "../../services/api";
 
 // ====================================================================
@@ -108,7 +108,7 @@ export const getExpiryUrgency = (expiryDate) => {
   try {
     const safeStr = safeDateStr(expiryDate);
     if (!safeStr) return { color: "text-gray-600 bg-gray-50", label: "N/D" };
-    const days = differenceInDays(parseISO(safeStr), new Date());
+    const days = differenceInDays(safeParseISO(safeStr) || new Date(), new Date());
     if (days < 0) return { color: "text-red-600 bg-red-50", label: "Expirado" };
     if (days <= 7) return { color: "text-red-600 bg-red-50", label: `${days} dias` };
     if (days <= 30) return { color: "text-orange-600 bg-orange-50", label: `${days} dias` };
