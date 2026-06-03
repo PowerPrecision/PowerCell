@@ -866,6 +866,22 @@ async def send_documentation_email(
         HTTPException: 404 se processo não encontrado, 400 se parâmetros
             inválidos, 500 se falha no envio de email.
     """
+    try:
+        return await _send_documentation_email_impl(process_id, data, current_user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"[send-documentation] Erro inesperado: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Erro ao enviar documentação: {str(e)}")
+
+
+async def _send_documentation_email_impl(
+    process_id: str,
+    data: dict,
+    current_user: dict,
+):
+    """Implementação do envio de documentação (separada para error handling)."""
     from services.system_config import get_system_config
     
     # Obter processo
@@ -1145,8 +1161,7 @@ async def send_documentation_email(
         if s3_path:
             try:
                 from services.s3_storage import s3_service
-                loop = asyncio.get_event_loop()
-                content_bytes = await loop.run_in_executor(
+                content_bytes = await asyncio.get_running_loop().run_in_executor(
                     None, lambda p=s3_path: s3_service.get_file_content(p)
                 )
                 if content_bytes:
@@ -3534,7 +3549,7 @@ async def send_email_endpoint(
 
             try:
                 # Download content from temp S3 path
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 content_bytes = await loop.run_in_executor(
                     None, lambda tk=temp_key: s3_service.get_file_content(tk)
                 )
@@ -3592,7 +3607,7 @@ async def send_email_endpoint(
             for att_rec in temp_attachment_records:
                 permanent_s3_key = f"Emails/{sent_email['id']}/{att_rec['file_name']}"
                 try:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     moved = await loop.run_in_executor(
                         None,
                         lambda sk=att_rec["temp_key"], pk=permanent_s3_key: s3_service.rename_file(sk, pk)
@@ -3629,7 +3644,7 @@ async def send_email_endpoint(
         from services.s3_storage import s3_service
         for temp_key in temp_keys_to_cleanup:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, lambda tk=temp_key: s3_service.delete_file(tk))
             except Exception as e:
                 logger.warning(f"Failed to cleanup temp file {temp_key}: {e}")
