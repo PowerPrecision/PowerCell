@@ -575,10 +575,8 @@ const AdminDashboard = () => {
                 <Building className="h-4 w-4 shrink-0" />Leads
               </TabsTrigger>
               <TabsTrigger value="performance" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-performance">
-                <BarChart3 className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Desempenho</span><span className="sm:hidden">Perf</span>
+                <BarChart3 className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Desempenho da Equipa</span><span className="sm:hidden">Desemp.</span>
               </TabsTrigger>
-
-
             </TabsList>
           </div>
 
@@ -686,8 +684,6 @@ const AdminDashboard = () => {
           <TabsContent value="performance" className="mt-6">
             <TeamPerformanceTab token={localStorage.getItem('token')} />
           </TabsContent>
-
-
         </Tabs>
 
         {/* Create Event Dialog */}
