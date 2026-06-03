@@ -55,6 +55,7 @@ import {
   Keyboard,
   MessageSquare,
   Activity,
+  TrendingUp,
   FileSignature,
   Zap,
   Shield,
@@ -166,6 +167,8 @@ const DashboardLayout = ({ children, title }) => {
     const visaoGlobalRoutes = ["/clientes", "/cliente", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
     const comunicacoesRoutes = ["/webmail", "/minutas", "/ficheiros"];
+    // Rotas do grupo Dashboard Executivo (admin/CEO only)
+    const dashboardExecutivoRoutes = ["/admin/desempenho"];
     // Rotas do grupo Gestão e Operações
     const gestaoRoutes = ["/estatisticas", "/rascunhos"];
     // Verificar se /rascunhos está acessível por capability
@@ -176,6 +179,7 @@ const DashboardLayout = ({ children, title }) => {
       "visao-global": visaoGlobalRoutes.some(r => path.startsWith(r)),
       "comunicacoes": comunicacoesRoutes.some(r => path.startsWith(r)),
       "gestao-operacoes": gestaoRoutes.some(r => path.startsWith(r)),
+      "dashboard-executivo": dashboardExecutivoRoutes.some(r => path.startsWith(r)),
     };
   }, [location.pathname, effectiveRole]);
   
@@ -498,10 +502,26 @@ const DashboardLayout = ({ children, title }) => {
       const adminNegocioItems = [
         ...meuNegocioGroup.items,
       ];
+
+      // ── Dashboard Executivo — grupo ISOLADO, apenas Admin/CEO ──
+      const dashboardExecutivoGroup = {
+        id: "dashboard-executivo",
+        label: "Dashboard Executivo",
+        icon: Activity,
+        items: [
+          {
+            label: "Desempenho da Equipa",
+            icon: TrendingUp,
+            href: "/admin/desempenho",
+          },
+        ],
+      };
+
       const adminGroups = [
         { ...meuNegocioGroup, items: adminNegocioItems },
         visaoGlobalGroup,
         comunicacoesGroup,
+        dashboardExecutivoGroup,
       ];
       // Só mostrar "Gestão e Operações" se tiver items após filtrar capabilities
       if (gestaoOperacoesItems.length > 0) {

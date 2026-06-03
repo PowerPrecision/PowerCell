@@ -38,7 +38,7 @@ import {
   FolderOpen, Loader2, CheckCircle, XCircle, FileText, 
   Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building,
   TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight,
-  MessageSquare, Inbox, BarChart3
+  MessageSquare, Inbox
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
@@ -63,7 +63,6 @@ import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
-import TeamPerformanceTab from "../components/admin/TeamPerformanceTab";
 import { hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -574,9 +573,6 @@ const AdminDashboard = () => {
               <TabsTrigger value="leads" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-leads">
                 <Building className="h-4 w-4 shrink-0" />Leads
               </TabsTrigger>
-              <TabsTrigger value="performance" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-performance">
-                <BarChart3 className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Desempenho da Equipa</span><span className="sm:hidden">Desemp.</span>
-              </TabsTrigger>
             </TabsList>
           </div>
 
@@ -678,11 +674,6 @@ const AdminDashboard = () => {
           {/* Leads Tab */}
           <TabsContent value="leads" className="mt-6">
             <LeadsKanban />
-          </TabsContent>
-
-          {/* Team Performance Tab */}
-          <TabsContent value="performance" className="mt-6">
-            <TeamPerformanceTab token={localStorage.getItem('token')} />
           </TabsContent>
         </Tabs>
 

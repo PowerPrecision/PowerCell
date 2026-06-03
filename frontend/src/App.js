@@ -64,6 +64,7 @@ const UnifiedLogsPage = React.lazy(() => import("./pages/UnifiedLogsPage"));
 const PropertiesPage = React.lazy(() => import("./pages/PropertiesPage"));
 const ClientsPage = React.lazy(() => import("./pages/ClientsPage"));
 const LeadsPage = React.lazy(() => import("./pages/LeadsPage"));
+const TeamPerformanceDashboard = React.lazy(() => import("./pages/TeamPerformanceDashboard"));
 const VisitsPage = React.lazy(() => import("./pages/VisitsPage"));
 const MyClientsPage = React.lazy(() => import("./pages/MyClientsPage"));
 const ClientDetailPage = React.lazy(() => import("./pages/ClientDetailPage"));
@@ -334,6 +335,18 @@ function App() {
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <RouteBoundary name="Dashboard Operacional">
                   <AdminDashboard />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Team Performance Dashboard - Executivo (admin + CEO) */}
+          <Route
+            path="/admin/desempenho"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <RouteBoundary name="Desempenho da Equipa">
+                  <TeamPerformanceDashboard />
                 </RouteBoundary>
               </ProtectedRoute>
             }
