@@ -687,7 +687,7 @@ async def get_document_recipients(
         r["is_custom"] = False
     
     # Adicionar balcões personalizados do utilizador
-    user_id = current_user["_id"]
+    user_id = current_user["id"]
     cursor = db["user_custom_branches"].find({"user_id": user_id}).sort("name", 1)
     user_branches = await cursor.to_list(100)
     for b in user_branches:

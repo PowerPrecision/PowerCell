@@ -40,7 +40,7 @@ async def create_user_branch(
     - name e email são obrigatórios
     - não permite duplicado (mesmo name+email para o mesmo user)
     """
-    user_id = current_user["_id"]
+    user_id = current_user["id"]
 
     # Verificar duplicado (mesmo nome + email para o mesmo utilizador)
     existing = await db[COLLECTION].find_one({
@@ -81,7 +81,7 @@ async def list_user_branches(
     """
     Listar todos os balcões personalizados do utilizador autenticado.
     """
-    user_id = current_user["_id"]
+    user_id = current_user["id"]
 
     cursor = db[COLLECTION].find({"user_id": user_id}).sort("name", 1)
     branches = await cursor.to_list(100)
@@ -108,7 +108,7 @@ async def delete_user_branch(
     Apagar um balcão personalizado.
     Só o próprio utilizador pode apagar os seus balcões.
     """
-    user_id = current_user["_id"]
+    user_id = current_user["id"]
 
     if not ObjectId.is_valid(branch_id):
         raise HTTPException(status_code=400, detail="ID de balcão inválido.")
