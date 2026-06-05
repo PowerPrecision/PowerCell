@@ -170,28 +170,44 @@ async def get_me(user: dict = Depends(get_current_user)):
     # Para admin/ceo/diretor/administrativo, também verificar se existe config global (SystemConfigPage)
     if not email_configured and user.get("role") in ("admin", "ceo", "diretor", "administrativo"):
         try:
-            config = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "email": 1, "system_webmail": 1})
+            config = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "email": 1, "system_smtp": 1, "system_webmail": 1})
             if config:
-                # Verificar Bloco A (system_smtp) ou Bloco C (system_webmail)
+                # Verificar Bloco A (system_smtp — Resend API ou SMTP legado)
+                system_smtp_block = config.get("system_smtp", {})
+                has_resend_api = bool(
+                    system_smtp_block.get("resend_api_key") and
+                    system_smtp_block.get("resend_api_key") != "••••••••"
+                )
+                has_legacy_smtp = bool(
+                    system_smtp_block.get("smtp_host") and
+                    system_smtp_block.get("smtp_username")
+                )
+                # Verificar Bloco B (email legacy — dupla conta)
                 email_config_block = config.get("email", {})
-                system_webmail_block = config.get("system_webmail", {})
                 has_smtp_config = bool(
                     email_config_block.get("provider") == "smtp" and
                     email_config_block.get("smtp_host") and
                     email_config_block.get("smtp_user")
                 )
+                # Verificar Bloco C (system_webmail — indexação IMAP)
+                system_webmail_block = config.get("system_webmail", {})
                 has_webmail_config = bool(
                     system_webmail_block.get("imap_host") and
                     system_webmail_block.get("email_user") and
                     system_webmail_block.get("app_password")
                 )
                 # Também verificar contas de email via env vars (get_email_accounts)
-                if has_smtp_config or has_webmail_config:
+                # e provider transacional via email_v2 (EMAIL_API_KEY)
+                if has_resend_api or has_legacy_smtp or has_smtp_config or has_webmail_config:
                     email_configured = True
                 else:
                     from services.email_service import get_email_accounts
                     if get_email_accounts():
                         email_configured = True
+                    else:
+                        import os
+                        if os.environ.get("EMAIL_API_KEY"):
+                            email_configured = True
         except Exception:
             pass  # Falha silenciosa — não bloqueia o request
 

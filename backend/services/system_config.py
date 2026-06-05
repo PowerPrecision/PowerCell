@@ -175,7 +175,8 @@ async def update_config_section(section: str, data: Dict[str, Any], company_id: 
         "smtp_password_2", "imap_password_2",
         "smtp_password_system", "app_password",
         "api_key", "api_token", "dropbox_access_token",
-        "hcpro_password", "decisoes_password", "doutorfinancas_password", "custom_portal_password"
+        "hcpro_password", "decisoes_password", "doutorfinancas_password", "custom_portal_password",
+        "resend_api_key",  # system_smtp — impede sobrescrever API key com valor mascarado
     ]
     
     # Remover campos mascarados dos dados recebidos
