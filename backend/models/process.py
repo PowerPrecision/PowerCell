@@ -168,11 +168,13 @@ class CreditData(BaseModel):
 class ProcessCreate(BaseModel):
     process_type: str
     client_id: str = Field(..., description="ID obrigatório do cliente ligado a este processo")
+    second_client_id: Optional[str] = Field(None, description="ID do 2º titular/co-proponente (cliente existente)")
 
 class ProcessUpdate(BaseModel):
     real_estate_data: Optional[RealEstateData] = None
     credit_data: Optional[CreditData] = None
     status: Optional[str] = None
+    second_client_id: Optional[str] = Field(None, description="ID do 2º titular/co-proponente (cliente existente). Enviar null/string vazia para remover.")
     co_buyers: Optional[List[dict]] = None  
     co_applicants: Optional[List[dict]] = None 
     vendedor: Optional[dict] = None  
@@ -190,6 +192,7 @@ class ProcessResponse(BaseModel):
     process_number: Optional[int] = None  
     client_id: Optional[str] = Field(None, description="Referência para a pessoa fiscal (pode estar em falta em processos antigos)")
     client_ids: Optional[List[str]] = None  
+    second_client_id: Optional[str] = Field(None, description="ID do 2º titular/co-proponente ligado a este processo")
     process_type: Optional[str] = None
     type: Optional[str] = None  
     status: Optional[str] = None  

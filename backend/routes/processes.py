@@ -3066,6 +3066,25 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 update_data["financial_data"] = merged_fd
 
         # Campos adicionais do CPCV
+        # ── second_client_id (2º titular ligado a cliente existente) ──
+        if data.second_client_id is not None:
+            new_second_id = data.second_client_id.strip() if data.second_client_id else None
+            # Validar que o cliente existe (se foi fornecido um ID)
+            if new_second_id:
+                second_client = await db.clients.find_one({"id": new_second_id})
+                if not second_client:
+                    raise HTTPException(status_code=400, detail=f"Cliente com ID {new_second_id} não encontrado")
+                # Não permitir que o 2º titular seja o mesmo que o titular principal
+                if new_second_id == process.get("client_id"):
+                    raise HTTPException(status_code=400, detail="O 2º titular não pode ser o mesmo cliente que o titular principal")
+            update_data["second_client_id"] = new_second_id
+            # Se removeu o 2º titular, limpar dados associados
+            if not new_second_id:
+                update_data["second_client_name"] = None
+                # Não limpar titular2_data — pode ter dados preenchidos manualmente
+            else:
+                update_data["second_client_name"] = second_client.get("nome", "")
+
         if data.co_buyers is not None:
             update_data["co_buyers"] = data.co_buyers
         if data.co_applicants is not None:
