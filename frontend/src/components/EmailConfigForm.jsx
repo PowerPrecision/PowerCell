@@ -80,6 +80,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     smtp_port: 465,
     password: "",
   });
+  const [hasPassword, setHasPassword] = useState(false);
   const [webmailConfigured, setWebmailConfigured] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -131,6 +132,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
           smtp_port: config.smtp_port || 465,
           password: "",  // Never populate password from server
         });
+        setHasPassword(config.has_password || false);
         setWebmailConfigured(true);
         // Check Google OAuth status
         if (config.auth_method?.includes("google_oauth") || config.has_google_oauth || config.google_refresh_token) {
@@ -363,9 +365,16 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         )}
         {webmailConfigured && !isEditing && (
           <>
-            <span className="text-xs text-muted-foreground">
-              Deixe a password em branco para manter a atual
-            </span>
+            {hasPassword ? (
+              <span className="text-xs text-green-600 flex items-center gap-1">
+                <Shield className="h-3 w-3" />
+                Password configurada
+              </span>
+            ) : (
+              <span className="text-xs text-amber-600">
+                Sem password — configure para ativar sincronização
+              </span>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -449,7 +458,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         <div className="space-y-2">
           <Label htmlFor="ec_password">
             Password
-            {webmailConfigured && (
+            {webmailConfigured && hasPassword && (
               <span className="text-xs text-muted-foreground ml-1">(nova, opcional)</span>
             )}
           </Label>
@@ -462,7 +471,9 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
                 setEmailConfig({ ...emailConfig, password: e.target.value })
               }
               placeholder={
-                webmailConfigured
+                webmailConfigured && hasPassword
+                  ? "********"
+                  : webmailConfigured
                   ? "Nova password (deixar em branco para manter)"
                   : "Password do email"
               }
@@ -485,6 +496,12 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               )}
             </Button>
           </div>
+          {webmailConfigured && hasPassword && !isFieldsLocked && (
+            <p className="text-xs text-green-600 flex items-center gap-1">
+              <Shield className="h-3 w-3" />
+              Password configurada com sucesso. Preencha apenas se quiser alterar.
+            </p>
+          )}
         </div>
         <div className="space-y-2">
           <Label htmlFor="ec_imap_server">Servidor IMAP</Label>
