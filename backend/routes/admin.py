@@ -1009,6 +1009,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
             "name": clean_name,
             "phone": clean_phone,
             "role": data.role,
+            "company": data.company or None,  # Empresa do utilizador
             "additional_roles": data.additional_roles or [],
             "is_active": True,
             "onedrive_folder": None,  # Parceiros não precisam de pasta
@@ -1041,6 +1042,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
         "name": clean_name,
         "phone": clean_phone,
         "role": data.role,
+        "company": data.company or None,  # Empresa do utilizador (ex: "Power Real Estate", "Precision Crédito")
         "additional_roles": data.additional_roles or [],
         "is_active": True,
         "onedrive_folder": data.onedrive_folder or clean_name,
@@ -1049,7 +1051,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     }
     
     await db.users.insert_one(user_doc)
-    await _audit_log("user_created", "user", user_id, user, {"email": clean_email, "role": data.role, "additional_roles": data.additional_roles, "name": clean_name})
+    await _audit_log("user_created", "user", user_id, user, {"email": clean_email, "role": data.role, "additional_roles": data.additional_roles, "name": clean_name, "company": data.company})
     
     # Enviar email de boas-vindas com dados de acesso
     try:
@@ -1312,6 +1314,9 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
     # Processar additional_roles (múltiplos perfis)
     if data.additional_roles is not None:
         update_data["additional_roles"] = data.additional_roles
+    # Processar empresa (company) do utilizador
+    if data.company is not None:
+        update_data["company"] = data.company.strip() if data.company.strip() else None
     # Processar alteração de password (apenas admin pode alterar password de outros)
     if data.password is not None and data.password.strip():
         update_data["password"] = hash_password(data.password)

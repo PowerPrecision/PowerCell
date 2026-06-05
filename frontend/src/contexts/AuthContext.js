@@ -43,11 +43,11 @@ const AuthContext = createContext(null);
 
 // ── Brand Theme Helper ──
 // Aplica classe de tema no <html> consoante a empresa do utilizador.
-// "power" ou null = tema por defeito (sem classe extra)
-// "precision" = adiciona .theme-precision que sobrepõe --color-brand
+// "Power Real Estate" ou null = tema por defeito (sem classe extra)
+// "Precision Crédito" = adiciona .theme-precision que sobrepõe --color-brand
 function applyBrandTheme(company) {
   document.documentElement.classList.remove('theme-precision');
-  if (company === 'precision') {
+  if (company && company.toLowerCase().includes('precision')) {
     document.documentElement.classList.add('theme-precision');
   }
 }

@@ -217,6 +217,7 @@ async def get_me(user: dict = Depends(get_current_user)):
         "name": user["name"],
         "phone": user.get("phone"),
         "role": user["role"],
+        "company": user.get("company"),  # Empresa (ex: "Power Real Estate", "Precision Crédito")
         "created_at": user["created_at"],
         "onedrive_folder": user.get("onedrive_folder"),
         "is_active": user.get("is_active", True),

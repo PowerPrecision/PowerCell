@@ -53,6 +53,7 @@ const UsersManagementPage = ({ embedded = false }) => {
     password: "",
     phone: "",
     role: "consultor",
+    company: "",
     additional_roles: [],
     onedrive_folder: "",
     base_salary: 0,
@@ -142,6 +143,7 @@ const UsersManagementPage = ({ embedded = false }) => {
         password: "",
         phone: "",
         role: "consultor",
+        company: "",
         additional_roles: [],
         onedrive_folder: "",
         base_salary: 0,
@@ -235,6 +237,7 @@ const UsersManagementPage = ({ embedded = false }) => {
       password: "",
       phone: user.phone || "",
       role: user.role,
+      company: user.company || "",
       additional_roles: user.additional_roles || [],
       onedrive_folder: user.onedrive_folder || "",
       base_salary: user.base_salary || 0,
@@ -426,6 +429,22 @@ const UsersManagementPage = ({ embedded = false }) => {
                       </>
                     )}
                     <div className="space-y-2">
+                      <Label>Empresa</Label>
+                      <Select 
+                        value={formData.company} 
+                        onValueChange={(value) => setFormData({ ...formData, company: value })}
+                      >
+                        <SelectTrigger><SelectValue placeholder="Selecionar empresa..." /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Power Real Estate">Power Real Estate</SelectItem>
+                          <SelectItem value="Precision Crédito">Precision Crédito</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Define a empresa do utilizador para configuração de email e tema visual.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
                       <Label>Perfil</Label>
                       <Select 
                         value={formData.role} 
@@ -588,6 +607,7 @@ const UsersManagementPage = ({ embedded = false }) => {
                   <TableRow>
                     <TableHead>Nome</TableHead>
                     <TableHead>Email</TableHead>
+                    <TableHead>Empresa</TableHead>
                     <TableHead>Perfil</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Salário Fixo</TableHead>
@@ -600,6 +620,9 @@ const UsersManagementPage = ({ embedded = false }) => {
                     <TableRow key={user.id}>
                         <TableCell className="font-medium">{user.name}</TableCell>
                         <TableCell>{user.email}</TableCell>
+                        <TableCell>
+                          <span className="text-sm text-muted-foreground">{user.company || "—"}</span>
+                        </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
                             <Badge className={`${ROLE_COLORS[user.role] || ''} border font-semibold`}>
@@ -771,6 +794,22 @@ const UsersManagementPage = ({ embedded = false }) => {
                 </div>
               </>
             )}
+            <div className="space-y-2">
+              <Label>Empresa</Label>
+              <Select 
+                value={formData.company} 
+                onValueChange={(value) => setFormData({ ...formData, company: value })}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecionar empresa..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Power Real Estate">Power Real Estate</SelectItem>
+                  <SelectItem value="Precision Crédito">Precision Crédito</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Define a empresa do utilizador para configuração de email e tema visual.
+              </p>
+            </div>
             <div className="space-y-2">
               <Label>Perfil</Label>
               <Select 
