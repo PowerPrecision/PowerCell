@@ -66,8 +66,10 @@ export function AuthProvider({ children }) {
   const [isImpersonating, setIsImpersonating] = useState(false);
   const [originalAdminName, setOriginalAdminName] = useState(null);
   const [activeRole, setActiveRole] = useState(null);
+  const [activeCompanyId, setActiveCompanyId] = useState(null);
   const refreshTimeoutRef = useRef(null);
   const activeRoleInitialized = useRef(false);
+  const activeCompanyInitialized = useRef(false);
 
   // Função para decodificar JWT e obter expiração
   // (stable — empty deps, no outer references)
@@ -190,6 +192,33 @@ export function AuthProvider({ children }) {
         activeRoleInitialized.current = true;
       }
       
+      // Initialize activeCompanyId only once
+      if (!activeCompanyInitialized.current) {
+        const savedCompanyId = sessionStorage.getItem("activeCompanyId");
+        const companies = userData.companies || [];
+        if (companies.length > 0) {
+          if (savedCompanyId && companies.some(c => c.company_id === savedCompanyId)) {
+            setActiveCompanyId(savedCompanyId);
+          } else {
+            // Usar a empresa default (is_default=True) ou a primeira
+            const defaultCompany = companies.find(c => c.is_default) || companies[0];
+            const companyId = defaultCompany.company_id;
+            setActiveCompanyId(companyId);
+            sessionStorage.setItem("activeCompanyId", companyId);
+            // Atualizar brand theme para a empresa ativa
+            applyBrandTheme(defaultCompany.company_name || userData.company);
+          }
+        } else {
+          // Sem empresas na tabela — usar campo company como fallback
+          const fallbackId = userData.company || null;
+          if (fallbackId) {
+            setActiveCompanyId(fallbackId);
+            sessionStorage.setItem("activeCompanyId", fallbackId);
+          }
+        }
+        activeCompanyInitialized.current = true;
+      }
+      
       // Verificar se está em modo impersonate
       if (userData.is_impersonated) {
         setIsImpersonating(true);
@@ -289,10 +318,13 @@ export function AuthProvider({ children }) {
     document.documentElement.classList.remove('theme-precision');
     setOriginalAdminName(null);
 
-    // Clear active role on logout
+    // Clear active role and company on logout
     sessionStorage.removeItem("activeRole");
+    sessionStorage.removeItem("activeCompanyId");
     setActiveRole(null);
+    setActiveCompanyId(null);
     activeRoleInitialized.current = false;
+    activeCompanyInitialized.current = false;
   }, []);
 
   // Impersonate - ver como outro utilizador
@@ -380,6 +412,27 @@ export function AuthProvider({ children }) {
     sessionStorage.setItem("activeRole", newRole);
   }, []);
 
+  // Context Switching - Múltiplas Empresas
+  const switchActiveCompany = useCallback(async (companyId) => {
+    if (!companyId) return;
+    setActiveCompanyId(companyId);
+    sessionStorage.setItem("activeCompanyId", companyId);
+    
+    // Notificar o backend para atualizar a empresa ativa
+    try {
+      await api.post("/admin/user-company-roles/set-active-company", { company_id: companyId });
+    } catch (error) {
+      console.warn("[AuthContext] Erro ao definir empresa ativa no backend:", error);
+    }
+    
+    // Atualizar brand theme
+    const companies = user?.companies || [];
+    const target = companies.find(c => c.company_id === companyId);
+    if (target) {
+      applyBrandTheme(target.company_name);
+    }
+  }, [user]);
+
   // Refresh user data from /auth/me (e.g. after email config save)
   const refreshUser = useCallback(async () => {
     try {
@@ -407,9 +460,12 @@ export function AuthProvider({ children }) {
     stopImpersonating,
     activeRole,
     switchActiveRole,
+    activeCompanyId,
+    switchActiveCompany,
     refreshUser,
     effectiveRole: activeRole || user?.role,
-  }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole, refreshUser]);
+    effectiveCompanyId: activeCompanyId || user?.company,
+  }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole, activeCompanyId, switchActiveCompany, refreshUser]);
 
   return (
     <AuthContext.Provider value={value}>

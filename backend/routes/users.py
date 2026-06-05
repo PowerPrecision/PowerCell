@@ -68,6 +68,7 @@ async def get_my_email_config(
         do departamento. Qualquer config individual é ignorada.
     """
     from services.email_config_resolver import resolve_email_config
+    from services.auth import get_active_company_id_async
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
@@ -80,9 +81,12 @@ async def get_my_email_config(
     else:
         active_role = None  # Resolver will use "default" / flat fallback
 
+    # Determinar empresa ativa (X-Company-Id header ou fallback)
+    active_company_id = await get_active_company_id_async(request, current_user)
+
     # Para roles forçados, retornar info do shared role config
     if user_role in FORCED_SHARED_ROLES:
-        resolved = await resolve_email_config(user_id, active_role=active_role)
+        resolved = await resolve_email_config(user_id, active_role=active_role, active_company_id=active_company_id)
         return {
             "config_source": resolved.get("config_source", "none"),
             "is_configured": resolved.get("has_password") or resolved.get("has_google_oauth"),
@@ -103,7 +107,7 @@ async def get_my_email_config(
         }
 
     # Usar o resolver para seguir o caminho de herança
-    resolved = await resolve_email_config(user_id, active_role=active_role)
+    resolved = await resolve_email_config(user_id, active_role=active_role, active_company_id=active_company_id)
     source = resolved.get("config_source", "none")
 
     # MULTI-EMPRESA: listar company_ids disponíveis na config do user
@@ -285,6 +289,7 @@ async def test_my_email_config(
         _is_nested_email_config,
         _extract_role_email_config,
     )
+    from services.auth import get_active_company_id_async
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
@@ -296,9 +301,12 @@ async def test_my_email_config(
     else:
         active_role = None
 
+    # Determinar empresa ativa
+    active_company_id = await get_active_company_id_async(request, current_user)
+
     # Para roles com config partilhada, usar a config resolvida
     if user_role in FORCED_SHARED_ROLES:
-        resolved = await resolve_email_config_for_sync(user_id, active_role=active_role)
+        resolved = await resolve_email_config_for_sync(user_id, active_role=active_role, active_company_id=active_company_id)
         if not resolved:
             raise HTTPException(
                 status_code=400,
@@ -317,7 +325,7 @@ async def test_my_email_config(
         return await test_connection_smart(test_config, user_id)
 
     # Para utilizadores normais, usar config individual (role-aware)
-    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role)
+    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role, active_company_id=active_company_id)
     if not resolved:
         raise HTTPException(status_code=400, detail="Configuração de email não encontrada")
 

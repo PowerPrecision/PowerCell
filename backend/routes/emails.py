@@ -2972,7 +2972,9 @@ async def webmail_sync_user(
     # Usar o resolver que suporta config individual, company e system (herança)
     active_role = user_role  # já obtido acima via get_effective_role
     from services.email_config_resolver import resolve_email_config_for_sync
-    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role)
+    from services.auth import get_active_company_id_async
+    active_company_id = await get_active_company_id_async(request, current_user)
+    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role, active_company_id=active_company_id)
     
     if not resolved:
         return {

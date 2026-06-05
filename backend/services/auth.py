@@ -29,7 +29,7 @@ DECISÕES ARQUITECTURAIS:
 ====================================================================
 """
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
@@ -441,6 +441,146 @@ def require_staff():
             raise HTTPException(status_code=403, detail="Permissão negada")
         return user
     return staff_checker
+
+
+def get_active_company_id(request: Request, user: dict) -> Optional[str]:
+    """
+    Extrai o contexto de empresa ativa do pedido HTTP.
+
+    Prioridade:
+    1. Header X-Company-Id — se presente e válido para este utilizador
+    2. user["company"] — empresa padrão do utilizador (fallback)
+
+    Validação: O X-Company-Id só é aceite se existir na coleção
+    user_company_roles para este utilizador. Isto impede que um
+    utilizador aceda a dados de empresas a que não pertence.
+
+    Args:
+        request: Objeto FastAPI Request (para ler headers)
+        user: Dicionário do utilizador (do JWT)
+
+    Returns:
+        str | None: O company_id ativo, ou None se não houver contexto
+    """
+    active_company = request.headers.get("X-Company-Id")
+
+    if not active_company:
+        # Fallback: usar o campo company do utilizador
+        return user.get("company") or None
+
+    active_company = active_company.strip()
+
+    # Importar db aqui para evitar circular imports
+    import asyncio
+    from database import db as _db
+
+    # Validar: o utilizador deve ter associação com esta empresa
+    # Usar cache em request.state para evitar queries repetidas
+    cache_key = f"_company_valid_{active_company}"
+    cached = getattr(request.state, cache_key, None) if hasattr(request, 'state') else None
+
+    if cached is not None:
+        return active_company if cached else (user.get("company") or None)
+
+    try:
+        # Synchronous check — we're in async context
+        loop = asyncio.get_event_loop()
+
+        async def _check():
+            assoc = await _db.user_company_roles.find_one(
+                {"user_id": user["id"], "company_id": active_company},
+                {"_id": 0, "company_id": 1}
+            )
+            return assoc is not None
+
+        is_valid = loop.run_until_complete(_check())
+
+        # Cache result on request state
+        if hasattr(request, 'state'):
+            setattr(request.state, cache_key, is_valid)
+
+        if is_valid:
+            return active_company
+
+    except Exception as e:
+        logger.warning(
+            f"[get_active_company_id] Erro ao validar X-Company-Id '{active_company}' "
+            f"para user {user.get('id')}: {e}. A usar fallback."
+        )
+
+    # Fallback: usar campo company do user
+    return user.get("company") or None
+
+
+async def get_active_company_id_async(request: Request, user: dict) -> Optional[str]:
+    """
+    Versão assíncrona de get_active_company_id.
+
+    Preferir esta versão em endpoints FastAPI (que já são async).
+
+    Args:
+        request: Objeto FastAPI Request (para ler headers)
+        user: Dicionário do utilizador (do JWT)
+
+    Returns:
+        str | None: O company_id ativo, ou None se não houver contexto
+    """
+    active_company = request.headers.get("X-Company-Id")
+
+    if not active_company:
+        return user.get("company") or None
+
+    active_company = active_company.strip()
+
+    # Cache em request.state
+    cache_key = f"_company_valid_{active_company}"
+    if hasattr(request, 'state'):
+        cached = getattr(request.state, cache_key, None)
+        if cached is not None:
+            return active_company if cached else (user.get("company") or None)
+
+    try:
+        from database import db as _db
+
+        assoc = await _db.user_company_roles.find_one(
+            {"user_id": user["id"], "company_id": active_company},
+            {"_id": 0, "company_id": 1}
+        )
+
+        is_valid = assoc is not None
+
+        if hasattr(request, 'state'):
+            setattr(request.state, cache_key, is_valid)
+
+        if is_valid:
+            return active_company
+
+    except Exception as e:
+        logger.warning(
+            f"[get_active_company_id_async] Erro ao validar X-Company-Id "
+            f"'{active_company}' para user {user.get('id')}: {e}"
+        )
+
+    return user.get("company") or None
+
+
+async def get_user_companies(user_id: str) -> list:
+    """
+    Retorna todas as associações user-company-role para um utilizador.
+
+    Inclui a empresa padrão (is_default=True) e todas as outras.
+
+    Returns:
+        list[dict]: [{ company_id, company_name, role, is_default }]
+    """
+    from database import db as _db
+
+    associations = await _db.user_company_roles.find(
+        {"user_id": user_id},
+        {"_id": 0, "id": 1, "company_id": 1, "company_name": 1, "role": 1, "is_default": 1}
+    ).sort("company_name", 1).to_list(50)
+
+    return associations
 
 
 def require_permission(capability: str):

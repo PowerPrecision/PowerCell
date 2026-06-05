@@ -80,7 +80,8 @@ def _extract_role_email_config(
 
 
 async def resolve_email_config(
-    user_id: str, active_role: Optional[str] = None
+    user_id: str, active_role: Optional[str] = None,
+    active_company_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Resolve a configuração de email de um utilizador seguindo a herança.
@@ -90,6 +91,11 @@ async def resolve_email_config(
         active_role: Optional role key for per-role email configs.
                         If the user has a nested email_config, this selects
                         the sub-config for the given role (falls back to "default").
+        active_company_id: Optional company_id para resolução de email.
+                        Se fornecido, sobrepõe o campo `company` do utilizador
+                        para determinar qual a config da empresa a usar.
+                        Isto suporta a arquitetura multi-empresa onde um
+                        utilizador pode alternar entre empresas.
 
     Returns:
         Dict com:
@@ -109,7 +115,8 @@ async def resolve_email_config(
         return _empty_response("none")
 
     user_role = user.get("role", "")
-    user_company = user.get("company", "")
+    # Se active_company_id foi fornecido, usá-lo em vez do campo `company`
+    user_company = active_company_id or user.get("company", "")
     raw_email_config = user.get("email_config", {})
 
     # Normalize: extract per-role config if nested, or use flat (legacy)
@@ -223,14 +230,23 @@ async def resolve_email_config(
 
 
 async def resolve_email_config_for_sync(
-    user_id: str, active_role: Optional[str] = None
+    user_id: str, active_role: Optional[str] = None,
+    active_company_id: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Resolve config completa para sincronização/envio (inclui credenciais).
 
+    Args:
+        user_id: ID do utilizador.
+        active_role: Role ativo (para nested configs).
+        active_company_id: Empresa ativa (para resolução multi-empresa).
+
     Returns None se não for possível resolver uma config funcional.
     """
-    resolved = await resolve_email_config(user_id, active_role=active_role)
+    resolved = await resolve_email_config(
+        user_id, active_role=active_role,
+        active_company_id=active_company_id
+    )
     source = resolved.get("config_source", "none")
 
     if source == "none":

@@ -640,6 +640,20 @@ async def create_ttl_indexes(db) -> dict:
     for idx in company_email_indexes:
         await _create_index_safe(db.company_email_configs, idx, "company_email_configs", results)
 
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'user_company_roles' (M:N User-Company)
+    # ====================================================================
+    user_company_role_indexes = [
+        # Índice composto único — um user só pode ter um role por empresa
+        {"keys": [("user_id", 1), ("company_id", 1)], "name": "idx_user_company_unique", "unique": True},
+        # Índice no company_id — queries por empresa
+        {"keys": [("company_id", 1)], "name": "idx_company_id"},
+        # Índice para lookup rápido da empresa padrão
+        {"keys": [("user_id", 1), ("is_default", 1)], "name": "idx_user_default", "sparse": True},
+    ]
+    for idx in user_company_role_indexes:
+        await _create_index_safe(db.user_company_roles, idx, "user_company_roles", results)
+
     return results
 
 

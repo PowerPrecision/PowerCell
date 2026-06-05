@@ -121,14 +121,17 @@ async def login(request: Request, data: UserLogin, response: Response):
 
 
 @router.get("/me")
-async def get_me(user: dict = Depends(get_current_user)):
+async def get_me(request: Request, user: dict = Depends(get_current_user)):
     """Retorna o utilizador atual incluindo info de impersonate e permissões se aplicável.
     
     Sincroniza as permissões com as defaults do role em cada request,
     garantindo que alterações a DEFAULT_PERMISSIONS_BY_ROLE são refletidas
     imediatamente para todos os utilizadores (resolve permissões legacy).
+    
+    INCLUI: Lista de empresas associadas (user_company_roles) e empresa ativa.
     """
     from services.permissions import get_default_permissions_for_role, sync_permissions_with_role_defaults
+    from services.auth import get_user_companies, get_active_company_id_async
     
     # Sincronizar permissões: garantir que actions novas no role são adicionadas
     user_perms = user.get("permissions")
@@ -227,6 +230,26 @@ async def get_me(user: dict = Depends(get_current_user)):
         "email_configured": email_configured,
         "email_signature": user.get("email_signature", ""),
     }
+    
+    # ── Multi-Empresa: empresas associadas e empresa ativa ──
+    try:
+        user_companies = await get_user_companies(user["id"])
+        if user_companies:
+            response["companies"] = user_companies
+            # Determinar empresa ativa (X-Company-Id header ou default)
+            active_company_id = await get_active_company_id_async(request, user)
+            response["active_company_id"] = active_company_id
+            # Encontrar o role na empresa ativa
+            active_assoc = next(
+                (c for c in user_companies if c.get("company_id") == active_company_id),
+                None
+            )
+            if active_assoc:
+                response["active_company_role"] = active_assoc.get("role")
+                response["active_company_name"] = active_assoc.get("company_name")
+    except Exception as e:
+        logger.warning(f"[auth/me] Erro ao carregar empresas do utilizador: {e}")
+        # Não bloquear o request — empresas são opcional
     
     # Incluir informação de impersonate se presente
     if user.get("is_impersonated"):
