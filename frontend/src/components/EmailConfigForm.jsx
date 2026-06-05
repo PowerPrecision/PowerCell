@@ -94,10 +94,10 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   // Whether form fields should be disabled (configured + not editing)
   const isFieldsLocked = webmailConfigured && !isEditing;
 
-  // Load existing config
+  // Load existing config — recarregar quando companyId muda (troca de empresa)
   useEffect(() => {
     loadConfig();
-  }, []);
+  }, [companyId]);
 
   // Listen for Google OAuth popup messages (two-step flow)
   useEffect(() => {
@@ -120,6 +120,9 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
   const loadConfig = async () => {
     setLoading(true);
+    setIsEditing(false);       // Resetar edição ao trocar de empresa
+    setTestResult(null);       // Limpar resultado de teste
+    setGoogleOAuthConnected(false);
     try {
       const response = await api.get(getConfigUrl());
       const config = response.data;
@@ -138,9 +141,30 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         if (config.auth_method?.includes("google_oauth") || config.has_google_oauth || config.google_refresh_token) {
           setGoogleOAuthConnected(true);
         }
+      } else {
+        // Sem config para esta empresa — resetar formulário
+        setEmailConfig({
+          email_address: "",
+          imap_server: "",
+          imap_port: 993,
+          smtp_server: "",
+          smtp_port: 465,
+          password: "",
+        });
+        setHasPassword(false);
+        setWebmailConfigured(false);
       }
     } catch (error) {
       setWebmailConfigured(false);
+      setEmailConfig({
+        email_address: "",
+        imap_server: "",
+        imap_port: 993,
+        smtp_server: "",
+        smtp_port: 465,
+        password: "",
+      });
+      setHasPassword(false);
     } finally {
       setLoading(false);
     }

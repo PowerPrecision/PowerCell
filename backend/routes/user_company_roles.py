@@ -332,3 +332,35 @@ async def set_active_company(
         "active_company_name": association["company_name"],
         "active_company_role": association["role"],
     }
+
+
+# ====================================================================
+# MIGRATE EMAIL CONFIGS — Popular user_email_configs a partir do embebido
+# ====================================================================
+
+@router.post("/migrate-email-configs")
+async def migrate_email_configs():
+    """
+    Migração: move as configs de email embebidas nos documentos dos
+    utilizadores para a coleção user_email_configs.
+
+    A coleção user_email_configs tem índice único em (user_id, company_id),
+    garantindo que cada utilizador só tem UMA config de email por empresa.
+
+    Esta migração é segura de correr múltiplas vezes — configs já
+    existentes são ignoradas (skipped).
+    """
+    from services.user_email_config_service import migrate_embedded_to_collection
+
+    result = await migrate_embedded_to_collection()
+
+    logger.info(
+        f"[UserCompanyRole] Migração de email configs: "
+        f"{result['created']} criados, {result['skipped']} já existiam, "
+        f"{result['errors']} erros"
+    )
+
+    return {
+        "success": True,
+        **result,
+    }

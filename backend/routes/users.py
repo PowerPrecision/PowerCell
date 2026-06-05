@@ -55,11 +55,13 @@ async def get_my_email_config(
     Obter configuração de email do utilizador logado.
     NUNCA devolve a password real nem o refresh_token — apenas flags booleanas.
 
-    Suporta per-role configs: lê X-Active-Role header para determinar
-    qual sub-config retornar (fallback para "default" ou config flat).
+    MULTI-EMPRESA:
+      Lê a empresa ativa via X-Company-Id header (ou fallback).
+      A config é resolvida para essa empresa específica.
 
     HERANÇA (Caminho da Configuração):
-      1. User Config (email_config embedded no user)
+      0. Coleção user_email_configs (canónica, com índice único)
+      1. User Config (email_config embedded no user — backward compat)
       2. Company Config (company_email_configs — servidores padrão)
       3. System Config (system_config.email — globals)
 
@@ -69,6 +71,7 @@ async def get_my_email_config(
     """
     from services.email_config_resolver import resolve_email_config
     from services.auth import get_active_company_id_async
+    from services.user_email_config_service import get_user_companies_with_config
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
@@ -104,6 +107,7 @@ async def get_my_email_config(
             "managed_centralized": True,
             "company_name": resolved.get("company_name"),
             "display_name": resolved.get("display_name"),
+            "company_id": resolved.get("resolved_company_id", active_company_id),
         }
 
     # Usar o resolver para seguir o caminho de herança
@@ -111,18 +115,29 @@ async def get_my_email_config(
     source = resolved.get("config_source", "none")
 
     # MULTI-EMPRESA: listar company_ids disponíveis na config do user
-    existing_user_doc = await db.users.find_one(
-        {"id": user_id},
-        {"_id": 0, "email_config": 1}
-    )
-    raw_ec = (existing_user_doc or {}).get("email_config", {})
-    available_companies = []
-    if isinstance(raw_ec, dict):
-        for key in raw_ec.keys():
-            if key.startswith("company:"):
-                available_companies.append(key.replace("company:", ""))
-            elif key == "default":
-                available_companies.append("default")
+    # Fonte canónica: coleção user_email_configs
+    # Fallback: chaves embebidas no user.email_config
+    available_companies = await get_user_companies_with_config(user_id)
+
+    # Fallback: se a coleção estiver vazia (ainda não migrado), ler do embebido
+    if not available_companies:
+        existing_user_doc = await db.users.find_one(
+            {"id": user_id},
+            {"_id": 0, "email_config": 1}
+        )
+        raw_ec = (existing_user_doc or {}).get("email_config", {})
+        if isinstance(raw_ec, dict):
+            for key in raw_ec.keys():
+                if key.startswith("company:"):
+                    cid = key.replace("company:", "")
+                    if cid not in available_companies:
+                        available_companies.append(cid)
+                elif key == "default":
+                    if "default" not in available_companies:
+                        available_companies.append("default")
+
+    # Determinar o company_id resolvido (pode diferir do header se fallback)
+    resolved_company_id = resolved.get("resolved_company_id", active_company_id) or "default"
 
     return {
         "config_source": source,
@@ -138,8 +153,8 @@ async def get_my_email_config(
         "google_email": resolved.get("google_email"),
         "oauth_connected_at": resolved.get("oauth_connected_at"),
         "company_name": resolved.get("company_name"),
-        "company_id": "default",
-        "available_companies": available_companies,
+        "company_id": resolved_company_id,  # FIX: retornar o ID real da empresa ativa
+        "available_companies": available_companies or ["default"],
     }
 
 
@@ -154,8 +169,14 @@ async def save_my_email_config(
     A password é encriptada ANTES de ser guardada.
     Se a password não for fornecida, mantém a existente (se houver).
 
-    Suporta per-role configs: lê X-Active-Role header para determinar
-    sob qual chave guardar (e.g. email_config.consultor).
+    MULTI-EMPRESA:
+      O campo company_id no payload identifica a empresa a que esta
+      config pertence. A unicidade (user_id, company_id) é garantida
+      pela coleção user_email_configs.
+
+    DUAL-WRITE:
+      A config é guardada na coleção user_email_configs (canónica) E
+      no user.email_config embebido (backward compat).
 
     BLOQUEIO:
       - Utilizadores com role 'indexacao' não podem guardar config individual.
@@ -165,6 +186,8 @@ async def save_my_email_config(
     from services.email_config_resolver import (
         _is_nested_email_config, _extract_role_email_config,
     )
+    from services.user_email_config_service import upsert_user_email_config
+    from services.auth import get_active_company_id_async
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
@@ -181,24 +204,32 @@ async def save_my_email_config(
             ),
         )
 
-    # Determine the role key for storage
+    # Determinar o company_id para esta config
+    # Prioridade: 1) payload  2) X-Company-Id header  3) "default"
+    company_id = config.company_id or "default"
+    if company_id == "default":
+        # Tentar obter do header X-Company-Id
+        try:
+            header_company = await get_active_company_id_async(request, current_user)
+            if header_company:
+                company_id = header_company
+        except Exception:
+            pass
+
+    # Determine the role key for storage (backward compat embebido)
     active_role_header = request.headers.get("X-Active-Role", "")
     if active_role_header and active_role_header != user_role:
         storage_role = active_role_header
     else:
         storage_role = "default"
 
-    # MULTI-EMPRESA: Incorporar company_id na chave de armazenamento.
-    # Se company_id for fornecido e não for "default", a chave passa a ser
-    # "company:<company_id>" em vez de "default" ou do role.
-    # Isto permite que um utilizador tenha configs diferentes por empresa.
-    company_id = config.company_id or "default"
+    # MULTI-EMPRESA: Incorporar company_id na chave de armazenamento embebido.
     if company_id != "default":
         storage_key = f"company:{company_id}"
     else:
         storage_key = storage_role
 
-    # Buscar config existente para preservar password se não fornecida
+    # Buscar config existente (embebida) para preservar password se não fornecida
     existing_user = await db.users.find_one(
         {"id": user_id},
         {"_id": 0, "email_config": 1}
@@ -226,6 +257,29 @@ async def save_my_email_config(
     else:
         encrypted_password = ""
 
+    # ==================================================================
+    # GUARDAR NA COLEÇÃO user_email_configs (canónica)
+    # ==================================================================
+    await upsert_user_email_config(
+        user_id=user_id,
+        company_id=company_id,
+        email_address=config.email_address.strip().lower(),
+        imap_server=config.imap_server.strip(),
+        imap_port=config.imap_port,
+        smtp_server=config.smtp_server.strip(),
+        smtp_port=config.smtp_port,
+        encrypted_password=encrypted_password,
+        google_refresh_token=existing_role_config.get("google_refresh_token"),
+        google_access_token=existing_role_config.get("google_access_token"),
+        google_email=existing_role_config.get("google_email"),
+        auth_method=existing_role_config.get("auth_method", "none"),
+        oauth_connected_at=existing_role_config.get("oauth_connected_at"),
+        is_configured=True,
+    )
+
+    # ==================================================================
+    # DUAL-WRITE: Guardar no embebido (backward compat)
+    # ==================================================================
     new_role_config = {
         "email_address": config.email_address.strip().lower(),
         "imap_server": config.imap_server.strip(),
@@ -253,18 +307,16 @@ async def save_my_email_config(
     # Store under the storage key in the nested structure
     nested_existing[storage_key] = new_role_config
 
-    result = await db.users.update_one(
+    await db.users.update_one(
         {"id": user_id},
         {"$set": {"email_config": nested_existing}}
     )
-
-    if result.modified_count == 0:
-        raise HTTPException(status_code=500, detail="Erro ao guardar configuração")
 
     return {
         "success": True,
         "message": "Configuração guardada com sucesso",
         "is_configured": True,
+        "company_id": company_id,
     }
 
 

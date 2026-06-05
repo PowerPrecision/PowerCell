@@ -97,6 +97,14 @@ async def resolve_email_config(
                         Isto suporta a arquitetura multi-empresa onde um
                         utilizador pode alternar entre empresas.
 
+    RESOLUÇÃO MULTI-EMPRESA:
+        Quando active_company_id é fornecido, o resolver procura a config
+        do utilizador pela seguinte ordem:
+          1. Coleção user_email_configs (canónica, com índice único)
+          2. user.email_config["company:<company_id>"] (embebido, backward compat)
+          3. user.email_config["default"] (fallback para config genérica)
+          4. Extração por role (fallback final)
+
     Returns:
         Dict com:
           - config_source: "user" | "company" | "system" | "shared_role" | "none"
@@ -104,6 +112,7 @@ async def resolve_email_config(
           - has_password, has_google_oauth, auth_method
           - encrypted_password (se existir, para uso interno)
           - shared_role (se config_source == "shared_role")
+          - resolved_company_id: o company_id usado na resolução
     """
     # Buscar utilizador completo (role + company + email_config)
     user = await db.users.find_one(
@@ -119,8 +128,50 @@ async def resolve_email_config(
     user_company = active_company_id or user.get("company", "")
     raw_email_config = user.get("email_config", {})
 
-    # Normalize: extract per-role config if nested, or use flat (legacy)
-    user_email_config = _extract_role_email_config(raw_email_config, active_role)
+    # ==================================================================
+    # MULTI-EMPRESA: Extração por empresa ativa
+    # ==================================================================
+    # Quando active_company_id é fornecido, procurar a config do user
+    # para essa empresa específica, pela seguinte ordem:
+    #   1. Coleção user_email_configs (fonte canónica)
+    #   2. user.email_config["company:<company_id>"] (embebido)
+    #   3. Fallback para role/default
+    user_email_config = {}
+    resolved_from_collection = False
+
+    if active_company_id:
+        # CAMINHO 0a: Coleção user_email_configs (fonte canónica)
+        try:
+            collection_config = await db.user_email_configs.find_one(
+                {"user_id": user_id, "company_id": active_company_id},
+                {"_id": 0}
+            )
+            if collection_config and collection_config.get("is_configured"):
+                user_email_config = collection_config
+                resolved_from_collection = True
+                logger.debug(
+                    f"[EmailConfigResolver] Config resolvida da coleção "
+                    f"user_email_configs para user={user_id} company={active_company_id}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[EmailConfigResolver] Erro ao consultar user_email_configs: {e}. "
+                f"A tentar embebido."
+            )
+
+        # CAMINHO 0b: user.email_config["company:<company_id>"] (embebido)
+        if not resolved_from_collection:
+            company_key = f"company:{active_company_id}"
+            if isinstance(raw_email_config.get(company_key), dict):
+                user_email_config = raw_email_config[company_key]
+                logger.debug(
+                    f"[EmailConfigResolver] Config resolvida do embebido "
+                    f"email_config[\"{company_key}\"] para user={user_id}"
+                )
+
+    # CAMINHO 0c: Fallback para extração por role ou "default"
+    if not user_email_config:
+        user_email_config = _extract_role_email_config(raw_email_config, active_role)
 
     # ==================================================================
     # REGRAS PARA ROLES COM FORÇA PARTILHADA (indexacao, suporte, etc.)
@@ -163,6 +214,7 @@ async def resolve_email_config(
                 "google_refresh_token": user_email_config.get("google_refresh_token"),
                 "google_email": user_email_config.get("google_email"),
                 "oauth_connected_at": user_email_config.get("oauth_connected_at"),
+                "resolved_company_id": active_company_id or user_company,
             }
 
     # ==================================================================
@@ -195,6 +247,7 @@ async def resolve_email_config(
                 "google_refresh_token": user_email_config.get("google_refresh_token"),
                 "google_email": user_email_config.get("google_email"),
                 "company_name": user_company,
+                "resolved_company_id": active_company_id or user_company,
             }
 
     # ==================================================================
@@ -223,10 +276,11 @@ async def resolve_email_config(
             "auth_method": auth_method,
             "encrypted_password": user_email_config.get("encrypted_password", ""),
             "google_refresh_token": user_email_config.get("google_refresh_token"),
+            "resolved_company_id": active_company_id or user_company,
         }
 
     # Nenhuma config encontrada
-    return _empty_response("none")
+    return _empty_response("none", active_company_id=active_company_id)
 
 
 async def resolve_email_config_for_sync(
@@ -265,7 +319,7 @@ async def resolve_email_config_for_sync(
     return resolved
 
 
-def _empty_response(source: str, reason: str = "") -> Dict[str, Any]:
+def _empty_response(source: str, reason: str = "", active_company_id: Optional[str] = None) -> Dict[str, Any]:
     """Retorna resposta vazia com config_source indicado."""
     resp = {
         "config_source": source,
@@ -278,6 +332,7 @@ def _empty_response(source: str, reason: str = "") -> Dict[str, Any]:
         "has_google_oauth": False,
         "auth_method": "none",
         "encrypted_password": "",
+        "resolved_company_id": active_company_id,
     }
     if reason:
         resp["reason"] = reason

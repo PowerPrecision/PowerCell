@@ -80,7 +80,7 @@ import {
 // ====================================================================
 
 const ProfilePage = () => {
-  const { user, logout, refreshUser } = useAuth();
+  const { user, logout, refreshUser, effectiveCompanyId, companies: userCompanies } = useAuth();
   const navigate = useNavigate();
 
   // Estados para dados do perfil
@@ -118,8 +118,17 @@ const ProfilePage = () => {
   const [loadingEmailConfig, setLoadingEmailConfig] = useState(false);
 
   // MULTI-EMPRESA: seletor de empresa para config de email pessoal
+  // Sincronizado com o ContextSwitcher — quando o utilizador troca de
+  // empresa no navbar, o ecrã de webmail reflete a nova empresa.
   const [emailCompanyId, setEmailCompanyId] = useState("default");
   const [emailCompanies, setEmailCompanies] = useState([]);
+
+  // Sincronizar emailCompanyId com effectiveCompanyId do AuthContext
+  useEffect(() => {
+    if (effectiveCompanyId && effectiveCompanyId !== emailCompanyId) {
+      setEmailCompanyId(effectiveCompanyId);
+    }
+  }, [effectiveCompanyId]);
 
   // Carregar dados do utilizador
   useEffect(() => {
@@ -190,7 +199,7 @@ const ProfilePage = () => {
 
   useEffect(() => {
     loadEmailConfigInfo();
-  }, []);
+  }, [emailCompanyId]); // Recarregar quando o utilizador troca de empresa no dropdown
 
   // Guardar alterações do perfil
   const handleSaveProfile = async () => {
@@ -884,11 +893,18 @@ const ProfilePage = () => {
                       <SelectValue placeholder="Empresa..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {emailCompanies.map((cid) => (
-                        <SelectItem key={cid} value={cid}>
-                          {cid === "default" ? "Principal (Padrão)" : cid}
-                        </SelectItem>
-                      ))}
+                      {emailCompanies.map((cid) => {
+                        // Tentar obter nome legível do AuthContext
+                        const companyInfo = userCompanies?.find(c => c.company_id === cid);
+                        const displayName = cid === "default"
+                          ? "Principal (Padrão)"
+                          : companyInfo?.company_name || cid;
+                        return (
+                          <SelectItem key={cid} value={cid}>
+                            {displayName}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
