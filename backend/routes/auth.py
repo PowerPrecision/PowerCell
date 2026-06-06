@@ -214,62 +214,80 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
         except Exception:
             pass  # Falha silenciosa — não bloqueia o request
 
-    response = {
-        "id": user["id"],
-        "email": user["email"],
-        "name": user["name"],
-        "phone": user.get("phone"),
-        "role": user["role"],
-        "company": user.get("company"),  # Empresa (ex: "Power Real Estate", "Precision Crédito")
-        "created_at": user["created_at"],
-        "onedrive_folder": user.get("onedrive_folder"),
-        "is_active": user.get("is_active", True),
-        "permissions": synced_perms,
-        "additional_roles": user.get("additional_roles", []),
-        # Indica se o utilizador tem email configurado para sincronização
-        "email_configured": email_configured,
-        "email_signature": user.get("email_signature", ""),
-    }
-    
     # ── Multi-Empresa: empresas associadas e empresa ativa ──
     # ── Multi-Perfil: Ler X-Active-Role para context switching ──
     active_role_header = request.headers.get("X-Active-Role", "")
+
+    # Valores por defeito (dados globais do user)
+    effective_phone = user.get("phone")
+    effective_email_signature = user.get("email_signature", "")
+    active_company_id = None
+    active_assoc = None
+
     try:
         user_companies = await get_user_companies(user["id"])
         if user_companies:
-            response["companies"] = user_companies
             # Determinar empresa ativa (X-Company-Id header ou default)
             active_company_id = await get_active_company_id_async(request, user)
-            response["active_company_id"] = active_company_id
             # Encontrar a associação na empresa ativa
             active_assoc = next(
                 (c for c in user_companies if c.get("company_id") == active_company_id),
                 None
             )
             if active_assoc:
-                # O role da empresa pode ser sobrepsto pelo X-Active-Role
-                # se o utilizador tiver additional_roles e tiver trocado de perfil
-                company_role = active_assoc.get("role")
-                effective_active_role = active_role_header if active_role_header else company_role
-                response["active_company_role"] = effective_active_role
-                response["active_company_name"] = active_assoc.get("company_name")
-                response["active_company_signature"] = active_assoc.get("signature", "")
-                response["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
-                response["active_company_job_title"] = active_assoc.get("job_title", "")
-            else:
-                # Sem associação para esta empresa — usar X-Active-Role se disponível
-                response["active_company_role"] = active_role_header or user.get("role")
-                response["active_company_signature"] = ""
-                response["active_company_professional_phone"] = ""
-                response["active_company_job_title"] = ""
+                # ── MERGE: Sobrepor campos globais com dados da empresa ativa ──
+                # Se houver professional_phone para a empresa ativa, sobrepõe o
+                # phone global. Se houver signature, sobrepõe o email_signature.
+                # Isto garante que o frontend vê sempre os dados correctos
+                # independentemente de ler user.phone ou user.email_signature.
+                if active_assoc.get("professional_phone"):
+                    effective_phone = active_assoc["professional_phone"]
+                if active_assoc.get("signature"):
+                    effective_email_signature = active_assoc["signature"]
+    except Exception as e:
+        logger.warning(f"[auth/me] Erro ao carregar empresas do utilizador: {e}")
+        # Não bloquear o request — empresas são opcional
+        user_companies = []
+
+    # Construir resposta com os valores mergeados
+    response = {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "phone": effective_phone,  # ← Mergeado: professional_phone da empresa ativa ou phone global
+        "role": user["role"],
+        "company": user.get("company"),
+        "created_at": user["created_at"],
+        "onedrive_folder": user.get("onedrive_folder"),
+        "is_active": user.get("is_active", True),
+        "permissions": synced_perms,
+        "additional_roles": user.get("additional_roles", []),
+        "email_configured": email_configured,
+        "email_signature": effective_email_signature,  # ← Mergeado: signature da empresa ativa ou global
+    }
+
+    # Popular campos de multi-empresa na resposta
+    if user_companies:
+        response["companies"] = user_companies
+        response["active_company_id"] = active_company_id
+        if active_assoc:
+            company_role = active_assoc.get("role")
+            effective_active_role = active_role_header if active_role_header else company_role
+            response["active_company_role"] = effective_active_role
+            response["active_company_name"] = active_assoc.get("company_name")
+            response["active_company_signature"] = active_assoc.get("signature", "")
+            response["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
+            response["active_company_job_title"] = active_assoc.get("job_title", "")
         else:
             response["active_company_role"] = active_role_header or user.get("role")
             response["active_company_signature"] = ""
             response["active_company_professional_phone"] = ""
             response["active_company_job_title"] = ""
-    except Exception as e:
-        logger.warning(f"[auth/me] Erro ao carregar empresas do utilizador: {e}")
-        # Não bloquear o request — empresas são opcional
+    else:
+        response["active_company_role"] = active_role_header or user.get("role")
+        response["active_company_signature"] = ""
+        response["active_company_professional_phone"] = ""
+        response["active_company_job_title"] = ""
     
     # Incluir informação de impersonate se presente
     if user.get("is_impersonated"):
@@ -355,10 +373,44 @@ async def update_profile(
     user: dict = Depends(get_current_user)
 ):
     """
-    Permite ao utilizador atualizar o seu próprio perfil (nome e telefone).
+    Permite ao utilizador atualizar o seu próprio perfil.
+    
+    MULTI-EMPRESA: Se o header X-Company-Id estiver presente, os campos
+    phone e email_signature são guardados TANTO no documento global do
+    utilizador (backward compat) COMO na tabela user_company_roles para
+    a empresa ativa (professional_phone e signature). Isto garante que:
+    - A empresa ativa vê os dados específicos
+    - A empresa default mantém o campo global como fallback
+    - O GET /auth/me faz merge automático (dados da empresa sobrepõem-se)
     """
     user_id = user["id"]
     
+    # ── Determinar o contexto de empresa ativa ──
+    from services.auth import get_active_company_id_async, get_user_companies
+    active_company_id = None
+    active_assoc = None
+    user_companies = []
+    try:
+        active_company_id = await get_active_company_id_async(request, user)
+        user_companies = await get_user_companies(user_id)
+        if active_company_id and user_companies:
+            active_assoc = next(
+                (c for c in user_companies if c.get("company_id") == active_company_id),
+                None
+            )
+    except Exception as e:
+        logger.warning(f"[auth/profile] Erro ao determinar empresa ativa: {e}")
+    
+    # Se NÃO existe contexto de empresa (ou é a empresa principal),
+    # comportamento padrão: guardar nos campos globais do user.
+    # Se existe contexto de empresa ativa, os campos phone e email_signature
+    # são também guardados como professional_phone e signature no user_company_roles.
+    is_default_company = (
+        not active_company_id
+        or (active_assoc and active_assoc.get("is_default"))
+        or active_company_id == user.get("company")
+    )
+
     # Campos permitidos para actualização global pelo próprio utilizador
     allowed_fields = ["name", "phone", "email_signature"]
     update_data = {}
@@ -366,10 +418,8 @@ async def update_profile(
     for field in allowed_fields:
         if field in data and data[field] is not None:
             if field == "email_signature":
-                # Assinatura de email: guardar HTML tal como está (sem strip)
                 update_data[field] = data[field]
             else:
-                # Aceitar qualquer valor — sem validação de formato
                 update_data[field] = str(data[field]).strip()
 
     # Verificar se há campos específicos da empresa (validados separadamente abaixo)
@@ -381,7 +431,8 @@ async def update_profile(
     if not update_data and not has_company_fields:
         raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
     
-    # Atualizar campos globais do utilizador
+    # ── Atualizar campos globais do utilizador ──
+    # Sempre guardar nos campos globais (backward compat + empresa default)
     if update_data:
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         
@@ -401,17 +452,24 @@ async def update_profile(
         company_specific_fields["professional_phone"] = str(data["professional_phone"]).strip()
     if "job_title" in data and data["job_title"] is not None:
         company_specific_fields["job_title"] = str(data["job_title"]).strip()
+    
+    # ── MERGE: Se enviou phone/email_signature e há empresa ativa, ──
+    # ── espelhar também como professional_phone/signature no UCR  ──
+    if active_company_id and not is_default_company:
+        if "phone" in data and data["phone"] is not None and "professional_phone" not in data:
+            company_specific_fields["professional_phone"] = str(data["phone"]).strip()
+        if "email_signature" in data and data["email_signature"] is not None and "signature" not in data:
+            company_specific_fields["signature"] = data["email_signature"]
 
     # ── Avisos para o frontend (campos não guardados) ──
     profile_warnings = []
 
     if company_specific_fields:
         try:
-            from services.auth import get_active_company_id_async
-            active_company_id = await get_active_company_id_async(request, user)
             logger.info(
                 f"[auth/profile] Campos específicos empresa: {list(company_specific_fields.keys())}, "
-                f"active_company_id={active_company_id!r}, user_id={user_id}"
+                f"active_company_id={active_company_id!r}, user_id={user_id}, "
+                f"is_default={is_default_company}"
             )
             if active_company_id:
                 company_specific_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -439,32 +497,32 @@ async def update_profile(
             profile_warnings.append(f"Erro ao guardar dados da empresa: {e}")
             logger.warning(f"[auth/profile] Erro ao guardar campos específicos da empresa: {e}")
 
-    # Retornar o utilizador actualizado COM campos da empresa ativa
-    # (O frontend precisa dos campos active_company_* para atualizar o UI)
+    # ── Retornar o utilizador actualizado COM merge (igual ao GET /auth/me) ──
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
 
-    # Adicionar campos da empresa ativa (iguais ao GET /auth/me)
+    # Adicionar campos da empresa ativa + MERGE (igual ao GET /auth/me)
+    active_role_header_resp = request.headers.get("X-Active-Role", "")
     try:
-        from services.auth import get_active_company_id_async, get_user_companies
-        active_company_id_resp = await get_active_company_id_async(request, user)
-        # Ler X-Active-Role para context switching (igual ao GET /auth/me)
-        active_role_header_resp = request.headers.get("X-Active-Role", "")
-        if active_company_id_resp:
-            user_companies = await get_user_companies(user_id)
-            active_assoc = next(
-                (c for c in user_companies if c.get("company_id") == active_company_id_resp),
+        if active_company_id and user_companies:
+            # Re-ler associação (dados podem ter mudado com o update acima)
+            active_assoc_refreshed = next(
+                (c for c in user_companies if c.get("company_id") == active_company_id),
                 None
             )
-            if active_assoc:
-                updated_user["active_company_id"] = active_company_id_resp
-                # O role pode ser sobrepsto pelo X-Active-Role (context switching)
-                company_role = active_assoc.get("role")
+            if active_assoc_refreshed:
+                updated_user["active_company_id"] = active_company_id
+                company_role = active_assoc_refreshed.get("role")
                 updated_user["active_company_role"] = active_role_header_resp if active_role_header_resp else company_role
-                updated_user["active_company_name"] = active_assoc.get("company_name")
-                updated_user["active_company_signature"] = active_assoc.get("signature", "")
-                updated_user["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
-                updated_user["active_company_job_title"] = active_assoc.get("job_title", "")
+                updated_user["active_company_name"] = active_assoc_refreshed.get("company_name")
+                updated_user["active_company_signature"] = active_assoc_refreshed.get("signature", "")
+                updated_user["active_company_professional_phone"] = active_assoc_refreshed.get("professional_phone", "")
+                updated_user["active_company_job_title"] = active_assoc_refreshed.get("job_title", "")
                 updated_user["companies"] = user_companies
+                # ── MERGE: Sobrepor campos globais com dados da empresa ativa ──
+                if active_assoc_refreshed.get("professional_phone"):
+                    updated_user["phone"] = active_assoc_refreshed["professional_phone"]
+                if active_assoc_refreshed.get("signature"):
+                    updated_user["email_signature"] = active_assoc_refreshed["signature"]
     except Exception as e:
         logger.warning(f"[auth/profile] Erro ao adicionar campos da empresa na resposta: {e}")
 

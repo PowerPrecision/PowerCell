@@ -138,21 +138,28 @@ const ProfilePage = () => {
   // Quando o utilizador troca de empresa no ContextSwitcher, os campos
   // específicos da empresa (assinatura, telefone profissional, cargo)
   // devem atualizar automaticamente.
+  //
+  // NOTA: O backend GET /auth/me faz MERGE dos dados da empresa ativa
+  // sobre os campos globais (user.phone ← professional_phone da empresa,
+  // user.email_signature ← signature da empresa). Por isso, ao ler
+  // user.phone e user.email_signature já obtemos os valores correctos
+  // para o contexto actual, sem necessidade de fallback manual.
   useEffect(() => {
     if (user) {
-      // Campos globais (não mudam com a empresa)
+      // Campos mergeados pelo backend (phone/email_signature podem vir
+      // da empresa ativa ou dos campos globais, conforme o contexto)
       setProfileData({
         name: user.name || "",
         phone: user.phone || "",
         email: user.email || "",
       });
-      // Campos específicos da empresa ativa
+      // Campos específicos da empresa ativa (sempre do UCR)
       setEmailSignature(user.active_company_signature || user.email_signature || "");
       setProfessionalPhone(user.active_company_professional_phone || "");
       setJobTitle(user.active_company_job_title || "");
       setLoading(false);
     }
-  }, [user, effectiveCompanyId, effectiveRole]); // ← effectiveRole adicionado: troca de perfil atualiza dados
+  }, [user, effectiveCompanyId, effectiveRole]);
 
   // Carregar dados do utilizador (inicial — complementado pelo useEffect acima)
   // NOTA: A lógica de carregamento foi movida para o useEffect com [user, effectiveCompanyId]
@@ -542,7 +549,15 @@ const ProfilePage = () => {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="phone">Telefone</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="phone">Telefone</Label>
+                  {user?.active_company_name && user?.active_company_professional_phone && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                      <Building2 className="h-3 w-3 mr-0.5" />
+                      {user.active_company_name}
+                    </Badge>
+                  )}
+                </div>
                 <Input
                   id="phone"
                   value={profileData.phone}
@@ -551,6 +566,11 @@ const ProfilePage = () => {
                   }
                   placeholder="O seu telefone"
                 />
+                {user?.active_company_name && user?.active_company_professional_phone && (
+                  <p className="text-xs text-muted-foreground">
+                    Telefone específico de <strong>{user.active_company_name}</strong>. Alterar aqui atualiza também o contacto profissional desta empresa.
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-2">
@@ -566,7 +586,13 @@ const ProfilePage = () => {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant="secondary">{getRoleLabel(user?.role)}</Badge>
+              <Badge variant="secondary">{getRoleLabel(effectiveRole || user?.role)}</Badge>
+              {user?.active_company_name && (
+                <Badge variant="outline" className="text-xs font-normal">
+                  <Building2 className="h-3 w-3 mr-1" />
+                  {user.active_company_name}
+                </Badge>
+              )}
               <span className="text-sm text-muted-foreground">
                 Membro desde {formatDate(user?.created_at)}
               </span>
