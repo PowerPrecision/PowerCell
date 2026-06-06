@@ -51,6 +51,11 @@ const ContextSwitcher = () => {
   // representa contextos diferentes (dados, assinatura, etc.).
   // Além disso, adicionamos additional_roles que NÃO estejam cobertos
   // por nenhuma empresa (ex: "admin" como role adicional sem empresa).
+  // Encontrar o nome da empresa ativa (necessário antes de construir profileItems)
+  const activeCompanyName = companies.find(c => c.company_id === effectiveCompanyId)?.company_name
+    || user?.company
+    || "";
+
   let profileItems = [];
 
   if (companies.length > 0) {
@@ -59,24 +64,34 @@ const ContextSwitcher = () => {
     profileItems = [...companies];
 
     // Adicionar additional_roles não cobertos por nenhuma empresa
-    // Isto garante que roles como "admin" ou "ceo" aparecem mesmo que
-    // não exista entrada na tabela user_company_roles
+    // Atribuir a empresa ativa para que a troca de perfil funcione
     const companyRoles = new Set(companies.map(c => c.role));
     for (const role of additionalRoles) {
       if (!companyRoles.has(role)) {
-        profileItems.push({ role, company_id: null, company_name: null });
+        profileItems.push({ 
+          role, 
+          company_id: effectiveCompanyId, 
+          company_name: activeCompanyName || null 
+        });
       }
     }
 
-    // Incluir o role primário se não estiver coberto
+    // Incluir o role primário se não estiver coberto por companies nem additional_roles
     if (!companyRoles.has(user.role) && !additionalRoles.includes(user.role)) {
-      profileItems.unshift({ role: user.role, company_id: null, company_name: null });
+      profileItems.unshift({ 
+        role: user.role, 
+        company_id: effectiveCompanyId, 
+        company_name: activeCompanyName || null 
+      });
     }
   } else {
     // Fallback: additional_roles (strings) — sem company_id disponível
     const allRoles = [user.role, ...additionalRoles.filter(r => r !== user.role)];
     profileItems = allRoles.map(role => ({ role, company_id: null, company_name: null }));
   }
+
+  // Filtrar entradas sem role válido (defensivo)
+  profileItems = profileItems.filter(p => p.role);
 
   // Visibilidade: mostrar selector de Role se tem múltiplos perfis
   const hasMultipleRoles = profileItems.length > 1;
@@ -86,11 +101,6 @@ const ContextSwitcher = () => {
 
   const currentLabel = ROLE_LABELS[effectiveRole] || effectiveRole;
   const currentIcon = ROLE_ICONS[effectiveRole] || "👤";
-
-  // Encontrar o nome da empresa ativa
-  const activeCompanyName = companies.find(c => c.company_id === effectiveCompanyId)?.company_name
-    || user?.company
-    || "";
 
   return (
     <div className="flex items-center gap-1.5">

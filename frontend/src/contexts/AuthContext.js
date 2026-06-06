@@ -485,6 +485,12 @@ export function AuthProvider({ children }) {
     try {
       const response = await api.get("/auth/me");
       setUser(response.data);
+
+      // Atualizar activeRole se a nova empresa tem role diferente
+      if (target && target.role && target.role !== activeRole) {
+        setActiveRole(target.role);
+        sessionStorage.setItem("activeRole", target.role);
+      }
     } catch (error) {
       console.warn("[AuthContext] Erro ao recarregar dados após troca de empresa:", error);
     }
