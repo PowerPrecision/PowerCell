@@ -426,7 +426,17 @@ export function AuthProvider({ children }) {
       }
     }
 
-    // Gravar ambos os valores no sessionStorage ANTES do reload
+    // ── RASTREIO: Log para debugging do context switch ──
+    console.log(
+      "[ContextSwitch] Mudança para:", newRole,
+      "Empresa:", resolvedCompanyId,
+      "newCompanyId arg:", newCompanyId,
+      "user.companies:", user?.companies?.map(c => ({ id: c.company_id, role: c.role }))
+    );
+
+    // Gravar AMBOS os valores no sessionStorage ANTES do reload
+    // Isto garante que o interceptor api.js injecta os headers correctos
+    // em todos os pedidos subsequentes após o reload.
     sessionStorage.setItem("activeRole", newRole);
     if (resolvedCompanyId) {
       sessionStorage.setItem("activeCompanyId", resolvedCompanyId);
@@ -442,8 +452,16 @@ export function AuthProvider({ children }) {
   // Context Switching - Múltiplas Empresas
   const switchActiveCompany = useCallback(async (companyId) => {
     if (!companyId) return;
+
+    // ── RASTREIO: Log para debugging do context switch de empresa ──
+    console.log("[ContextSwitch] Troca de empresa:", companyId, "anterior:", sessionStorage.getItem("activeCompanyId"));
+
     setActiveCompanyId(companyId);
     sessionStorage.setItem("activeCompanyId", companyId);
+
+    // Verificar que o sessionStorage foi actualizado
+    const verified = sessionStorage.getItem("activeCompanyId");
+    console.log("[ContextSwitch] Verificação sessionStorage activeCompanyId:", verified, "→ match:", verified === companyId);
     
     // Notificar o backend para atualizar a empresa ativa
     try {

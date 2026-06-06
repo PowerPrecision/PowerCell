@@ -91,7 +91,10 @@ const ContextSwitcher = () => {
               return (
                 <DropdownMenuItem
                   key={company.company_id}
-                  onClick={() => switchActiveCompany(company.company_id)}
+                  onClick={() => {
+                    console.log("[ContextSwitcher] Company click:", company.company_id, company.company_name, "role:", company.role);
+                    switchActiveCompany(company.company_id);
+                  }}
                   className={`gap-2 cursor-pointer ${isActive ? "bg-primary/10 font-semibold" : ""}`}
                 >
                   <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -144,6 +147,7 @@ const ContextSwitcher = () => {
                   onClick={() => {
                     // Encontrar a empresa associada a este role
                     const matchingCompany = companies.find(c => c.role === role);
+                    console.log("[ContextSwitcher] Role click:", role, "→ Empresa:", matchingCompany?.company_id, "companies:", companies.map(c => ({ id: c.company_id, role: c.role, name: c.company_name })));
                     switchActiveRole(role, matchingCompany?.company_id);
                   }}
                   className={`gap-2 cursor-pointer ${isActive ? "bg-primary/10 font-semibold" : ""}`}

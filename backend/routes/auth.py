@@ -250,6 +250,9 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
         user_companies = []
 
     # Construir resposta com os valores mergeados
+    # IMPORTANTE: 'companies' e 'active_company_id' devem estar SEMPRE presentes
+    # na resposta, mesmo que vazios, para que o React possa saber os IDs das
+    # empresas e alternar entre elas no ContextSwitcher.
     response = {
         "id": user["id"],
         "email": user["email"],
@@ -264,27 +267,24 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
         "additional_roles": user.get("additional_roles", []),
         "email_configured": email_configured,
         "email_signature": effective_email_signature,  # ← Mergeado: signature da empresa ativa ou global
+        # ── Multi-empresa: SEMPRE presentes (fallback vazio) ──
+        "companies": user_companies or [],
+        "active_company_id": active_company_id or user.get("company"),
     }
 
-    # Popular campos de multi-empresa na resposta
-    if user_companies:
-        response["companies"] = user_companies
-        response["active_company_id"] = active_company_id
-        if active_assoc:
-            company_role = active_assoc.get("role")
-            effective_active_role = active_role_header if active_role_header else company_role
-            response["active_company_role"] = effective_active_role
-            response["active_company_name"] = active_assoc.get("company_name")
-            response["active_company_signature"] = active_assoc.get("signature", "")
-            response["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
-            response["active_company_job_title"] = active_assoc.get("job_title", "")
-        else:
-            response["active_company_role"] = active_role_header or user.get("role")
-            response["active_company_signature"] = ""
-            response["active_company_professional_phone"] = ""
-            response["active_company_job_title"] = ""
+    # Popular campos detalhados da empresa activa
+    if user_companies and active_assoc:
+        company_role = active_assoc.get("role")
+        effective_active_role = active_role_header if active_role_header else company_role
+        response["active_company_role"] = effective_active_role
+        response["active_company_name"] = active_assoc.get("company_name")
+        response["active_company_signature"] = active_assoc.get("signature", "")
+        response["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
+        response["active_company_job_title"] = active_assoc.get("job_title", "")
     else:
+        # Fallback: sem associação activa ou sem empresas
         response["active_company_role"] = active_role_header or user.get("role")
+        response["active_company_name"] = ""
         response["active_company_signature"] = ""
         response["active_company_professional_phone"] = ""
         response["active_company_job_title"] = ""
