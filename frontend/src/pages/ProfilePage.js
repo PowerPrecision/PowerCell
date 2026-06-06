@@ -80,8 +80,11 @@ import {
 // ====================================================================
 
 const ProfilePage = () => {
-  const { user, logout, refreshUser, effectiveCompanyId, effectiveRole, companies: userCompanies } = useAuth();
+  const { user, logout, refreshUser, effectiveCompanyId, effectiveRole } = useAuth();
   const navigate = useNavigate();
+
+  // Lista de empresas do utilizador (do GET /auth/me, sempre presente)
+  const userCompanies = user?.companies || [];
 
   // Estados para dados do perfil
   const [profileData, setProfileData] = useState({
@@ -124,13 +127,22 @@ const ProfilePage = () => {
   // MULTI-EMPRESA: seletor de empresa para config de email pessoal
   // Sincronizado com o ContextSwitcher — quando o utilizador troca de
   // empresa no navbar, o ecrã de webmail reflete a nova empresa.
-  const [emailCompanyId, setEmailCompanyId] = useState("default");
+  //
+  // NOTA: Inicializamos com effectiveCompanyId (não "default") porque o
+  // backend espera o ID real da empresa no header X-Company-Id. Se
+  // inicializássemos com "default", o GET /users/me/email-config não
+  // encontraria a config correcta na colecção user_email_configs.
+  const [emailCompanyId, setEmailCompanyId] = useState(effectiveCompanyId || "default");
   const [emailCompanies, setEmailCompanies] = useState([]);
 
   // Sincronizar emailCompanyId com effectiveCompanyId do AuthContext
+  // Isto garante que quando o ContextSwitcher troca de empresa, o
+  // formulário de webmail recarrega com a config da nova empresa.
   useEffect(() => {
-    if (effectiveCompanyId && effectiveCompanyId !== emailCompanyId) {
-      setEmailCompanyId(effectiveCompanyId);
+    const newId = effectiveCompanyId || "default";
+    if (newId !== emailCompanyId) {
+      console.log("[ProfilePage] Sincronizando emailCompanyId:", emailCompanyId, "→", newId);
+      setEmailCompanyId(newId);
     }
   }, [effectiveCompanyId]);
 
@@ -153,11 +165,24 @@ const ProfilePage = () => {
         phone: user.phone || "",
         email: user.email || "",
       });
-      // Campos específicos da empresa ativa (sempre do UCR)
-      setEmailSignature(user.active_company_signature || user.email_signature || "");
-      setProfessionalPhone(user.active_company_professional_phone || "");
-      setJobTitle(user.active_company_job_title || "");
+      // ── Campos específicos da empresa ativa ──
+      // Prioridade: active_company_* (campos separados do UCR) > campos
+      // mergeados no user (phone/email_signature). Isto permite mostrar
+      // valores diferentes quando o utilizador troca de empresa.
+      setEmailSignature(user.active_company_signature ?? user.email_signature ?? "");
+      setProfessionalPhone(user.active_company_professional_phone ?? "");
+      setJobTitle(user.active_company_job_title ?? "");
       setLoading(false);
+
+      // ── Debug: confirmar que os dados da empresa estão a chegar ──
+      console.log(
+        "[ProfilePage] Dados reidratados — empresa:", effectiveCompanyId,
+        "phone:", user.phone, "signature:", user.email_signature,
+        "active_company_name:", user.active_company_name,
+        "active_company_signature:", user.active_company_signature,
+        "active_company_professional_phone:", user.active_company_professional_phone,
+        "active_company_job_title:", user.active_company_job_title
+      );
     }
   }, [user, effectiveCompanyId, effectiveRole]);
 
@@ -183,6 +208,9 @@ const ProfilePage = () => {
   }, []);
 
   // Carregar info de config de email (para mostrar herança)
+  // O header X-Company-Id é injetado automaticamente pelo interceptor api.js
+  // a partir do sessionStorage. O emailCompanyId serve para forçar o reload
+  // quando o utilizador muda a empresa no dropdown LOCAL (sem ContextSwitcher).
   const loadEmailConfigInfo = async () => {
     setLoadingEmailConfig(true);
     try {
@@ -200,24 +228,34 @@ const ProfilePage = () => {
   };
 
   // Carregar empresas do sistema para o dropdown (além das do user)
+  // NOTA: As empresas do user já vêm em userCompanies (via GET /auth/me).
+  // Este useEffect complementa com as empresas do sistema (para admin).
   useEffect(() => {
     const fetchSystemCompanies = async () => {
       try {
+        // Primeiro: incluir empresas do utilizador (do AuthContext)
+        const userCompanyIds = userCompanies.map(c => c.company_id);
+
         const res = await api.get("/system-config/companies");
         const systemCompanies = (res.data?.companies || []).map(c => c.company_id);
-        // Merge com as do user, sem duplicados
+
+        // Merge sem duplicados
         setEmailCompanies(prev => {
-          const merged = new Set([...prev, ...systemCompanies]);
+          const merged = new Set([...prev, ...userCompanyIds, ...systemCompanies]);
           return [...merged];
         });
       } catch (err) {
-        // Silently fail — não é crítico
+        // Fallback: usar apenas as empresas do utilizador
+        setEmailCompanies(prev => {
+          const merged = new Set([...prev, ...userCompanies.map(c => c.company_id)]);
+          return [...merged];
+        });
       }
     };
     if (user && !hasRole(user, "indexacao")) {
       fetchSystemCompanies();
     }
-  }, [user]);
+  }, [user, userCompanies]);
 
   useEffect(() => {
     loadEmailConfigInfo();
@@ -1065,7 +1103,14 @@ const ProfilePage = () => {
                   </div>
                   <Select
                     value={emailCompanyId}
-                    onValueChange={setEmailCompanyId}
+                    onValueChange={(newId) => {
+                      console.log("[ProfilePage] Dropdown email empresa:", emailCompanyId, "→", newId);
+                      setEmailCompanyId(newId);
+                      // Sincronizar com o sessionStorage para que o interceptor
+                      // api.js envie o header X-Company-Id correcto nos pedidos
+                      // GET/POST /users/me/email-config subsequentes.
+                      sessionStorage.setItem("activeCompanyId", newId);
+                    }}
                   >
                     <SelectTrigger id="email-company-select" className="w-48">
                       <SelectValue placeholder="Empresa..." />
