@@ -406,7 +406,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   // Context Switching - Múltiplos Perfis
-  const switchActiveRole = useCallback((newRole) => {
+  const switchActiveRole = useCallback(async (newRole) => {
     if (!newRole) return;
     setActiveRole(newRole);
     // Persist to sessionStorage for reload survival
@@ -419,6 +419,18 @@ export function AuthProvider({ children }) {
     // os componentes a voltar a pedir dados ao backend com o novo
     // header X-Active-Role (injetado pelo interceptor de API).
     queryClient.invalidateQueries();
+
+    // ── REATIVIDADE: Recarregar dados do utilizador após troca de perfil ──
+    // O backend GET /auth/me agora lê X-Active-Role e devolve o role ativo
+    // correto em active_company_role. Sem este refetch, o AuthContext.user
+    // mantém o role anterior, e os componentes que dependem de
+    // user.active_company_role não atualizam.
+    try {
+      const response = await api.get("/auth/me");
+      setUser(response.data);
+    } catch (error) {
+      console.warn("[AuthContext] Erro ao recarregar dados após troca de perfil:", error);
+    }
   }, []);
 
   // Context Switching - Múltiplas Empresas

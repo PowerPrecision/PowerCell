@@ -232,6 +232,8 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
     }
     
     # ── Multi-Empresa: empresas associadas e empresa ativa ──
+    # ── Multi-Perfil: Ler X-Active-Role para context switching ──
+    active_role_header = request.headers.get("X-Active-Role", "")
     try:
         user_companies = await get_user_companies(user["id"])
         if user_companies:
@@ -239,22 +241,29 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
             # Determinar empresa ativa (X-Company-Id header ou default)
             active_company_id = await get_active_company_id_async(request, user)
             response["active_company_id"] = active_company_id
-            # Encontrar o role na empresa ativa
+            # Encontrar a associação na empresa ativa
             active_assoc = next(
                 (c for c in user_companies if c.get("company_id") == active_company_id),
                 None
             )
             if active_assoc:
-                response["active_company_role"] = active_assoc.get("role")
+                # O role da empresa pode ser sobrepsto pelo X-Active-Role
+                # se o utilizador tiver additional_roles e tiver trocado de perfil
+                company_role = active_assoc.get("role")
+                effective_active_role = active_role_header if active_role_header else company_role
+                response["active_company_role"] = effective_active_role
                 response["active_company_name"] = active_assoc.get("company_name")
                 response["active_company_signature"] = active_assoc.get("signature", "")
                 response["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
                 response["active_company_job_title"] = active_assoc.get("job_title", "")
             else:
+                # Sem associação para esta empresa — usar X-Active-Role se disponível
+                response["active_company_role"] = active_role_header or user.get("role")
                 response["active_company_signature"] = ""
                 response["active_company_professional_phone"] = ""
                 response["active_company_job_title"] = ""
         else:
+            response["active_company_role"] = active_role_header or user.get("role")
             response["active_company_signature"] = ""
             response["active_company_professional_phone"] = ""
             response["active_company_job_title"] = ""
@@ -438,6 +447,8 @@ async def update_profile(
     try:
         from services.auth import get_active_company_id_async, get_user_companies
         active_company_id_resp = await get_active_company_id_async(request, user)
+        # Ler X-Active-Role para context switching (igual ao GET /auth/me)
+        active_role_header_resp = request.headers.get("X-Active-Role", "")
         if active_company_id_resp:
             user_companies = await get_user_companies(user_id)
             active_assoc = next(
@@ -446,7 +457,9 @@ async def update_profile(
             )
             if active_assoc:
                 updated_user["active_company_id"] = active_company_id_resp
-                updated_user["active_company_role"] = active_assoc.get("role")
+                # O role pode ser sobrepsto pelo X-Active-Role (context switching)
+                company_role = active_assoc.get("role")
+                updated_user["active_company_role"] = active_role_header_resp if active_role_header_resp else company_role
                 updated_user["active_company_name"] = active_assoc.get("company_name")
                 updated_user["active_company_signature"] = active_assoc.get("signature", "")
                 updated_user["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
