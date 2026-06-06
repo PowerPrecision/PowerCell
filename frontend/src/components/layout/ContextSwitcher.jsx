@@ -141,7 +141,11 @@ const ContextSwitcher = () => {
               return (
                 <DropdownMenuItem
                   key={role}
-                  onClick={() => switchActiveRole(role)}
+                  onClick={() => {
+                    // Encontrar a empresa associada a este role
+                    const matchingCompany = companies.find(c => c.role === role);
+                    switchActiveRole(role, matchingCompany?.company_id);
+                  }}
                   className={`gap-2 cursor-pointer ${isActive ? "bg-primary/10 font-semibold" : ""}`}
                 >
                   <span className="text-base">{icon}</span>

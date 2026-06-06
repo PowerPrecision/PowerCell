@@ -405,33 +405,39 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  // Context Switching - Múltiplos Perfis
-  const switchActiveRole = useCallback(async (newRole) => {
+  // ── Context Switching — Múltiplos Perfis (Hard Reload) ──
+  // Recebe newRole e opcionalmente newCompanyId. Se newCompanyId não for
+  // fornecido, infere a empresa a partir de user.companies (procura a
+  // primeira empresa cujo role corresponda ao newRole).
+  // Após atualizar sessionStorage, faz hard reload para garantir que
+  // TODOS os componentes montam de novo, o interceptor api.js lê os
+  // cabeçalhos actualizados do sessionStorage, e cada ecrã carrega os
+  // dados da empresa/perfil certo — sem depender de invalidateQueries
+  // nem de refetch manual que pode falhar silenciosamente.
+  const switchActiveRole = useCallback((newRole, newCompanyId = null) => {
     if (!newRole) return;
-    setActiveRole(newRole);
-    // Persist to sessionStorage for reload survival
-    sessionStorage.setItem("activeRole", newRole);
 
-    // ── REATIVIDADE: Invalidar toda a cache do TanStack Query ──
-    // Quando o utilizador troca de perfil (role), os dados em cache
-    // podem estar associados ao perfil anterior (ex: processos filtrados
-    // por role, estatísticas por cargo). Ao invalidar, forçamos todos
-    // os componentes a voltar a pedir dados ao backend com o novo
-    // header X-Active-Role (injetado pelo interceptor de API).
-    queryClient.invalidateQueries();
-
-    // ── REATIVIDADE: Recarregar dados do utilizador após troca de perfil ──
-    // O backend GET /auth/me agora lê X-Active-Role e devolve o role ativo
-    // correto em active_company_role. Sem este refetch, o AuthContext.user
-    // mantém o role anterior, e os componentes que dependem de
-    // user.active_company_role não atualizam.
-    try {
-      const response = await api.get("/auth/me");
-      setUser(response.data);
-    } catch (error) {
-      console.warn("[AuthContext] Erro ao recarregar dados após troca de perfil:", error);
+    // Determinar a empresa associada ao novo role
+    let resolvedCompanyId = newCompanyId;
+    if (!resolvedCompanyId && user?.companies) {
+      const matchingCompany = user.companies.find(c => c.role === newRole);
+      if (matchingCompany) {
+        resolvedCompanyId = matchingCompany.company_id;
+      }
     }
-  }, []);
+
+    // Gravar ambos os valores no sessionStorage ANTES do reload
+    sessionStorage.setItem("activeRole", newRole);
+    if (resolvedCompanyId) {
+      sessionStorage.setItem("activeCompanyId", resolvedCompanyId);
+    }
+
+    // Hard Reload — refresh completo da aplicação
+    // O interceptor api.js lê os novos cabeçalhos limpos do
+    // sessionStorage e todos os ecrãs carregam os dados da
+    // empresa certa, sem cache residual.
+    window.location.reload();
+  }, [user]);
 
   // Context Switching - Múltiplas Empresas
   const switchActiveCompany = useCallback(async (companyId) => {
