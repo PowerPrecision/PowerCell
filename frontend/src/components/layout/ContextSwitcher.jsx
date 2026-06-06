@@ -42,17 +42,30 @@ const ContextSwitcher = () => {
     activeCompanyId, switchActiveCompany, effectiveCompanyId,
   } = useAuth();
 
-  const additionalRoles = user?.additional_roles || [];
   const companies = user?.companies || [];
 
-  // Só mostrar se tem additional_roles OU múltiplas empresas
-  const hasMultipleRoles = additionalRoles.length > 0;
+  // ── Construir lista de perfis únicos a partir de COMPANIES ──
+  // Cada company tem { company_id, role, company_name }.
+  // Ao iterar sobre companies em vez de additional_roles, garantimos
+  // que SEMPRE temos o company_id correto para passar ao switchActiveRole.
+  // Isto resolve o bug onde o matchingCompany ficava undefined porque
+  // allRoles era uma lista de strings sem ligação directa às empresas.
+  const uniqueCompanyProfiles = companies.reduce((acc, c) => {
+    // Evitar duplicados: se o mesmo role já existe, manter o primeiro
+    if (!acc.some(p => p.role === c.role)) {
+      acc.push(c);
+    }
+    return acc;
+  }, []);
+
+  // Só mostrar se tem múltiplos perfis por empresa OU múltiplas empresas
+  // Nota: usamos uniqueCompanyProfiles em vez de additional_roles porque
+  // additional_roles pode estar vazio mesmo quando o utilizador tem
+  // múltiplos roles em diferentes empresas (via user_company_roles).
+  const hasMultipleRoles = uniqueCompanyProfiles.length > 1;
   const hasMultipleCompanies = companies.length > 1;
 
   if (!hasMultipleRoles && !hasMultipleCompanies) return null;
-
-  // Build list of all available roles (primary + additional, no duplicates)
-  const allRoles = [user.role, ...additionalRoles.filter(r => r !== user.role)];
 
   const currentLabel = ROLE_LABELS[effectiveRole] || effectiveRole;
   const currentIcon = ROLE_ICONS[effectiveRole] || "👤";
@@ -137,29 +150,42 @@ const ContextSwitcher = () => {
               Modo de Operação
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {allRoles.map((role) => {
-              const isActive = role === effectiveRole;
-              const label = ROLE_LABELS[role] || role;
-              const icon = ROLE_ICONS[role] || "👤";
+            {uniqueCompanyProfiles.map((profile) => {
+              const selectedRole = profile.role;
+              const selectedCompanyId = profile.company_id;
+              const isActive = selectedRole === effectiveRole && selectedCompanyId === effectiveCompanyId;
+              const label = ROLE_LABELS[selectedRole] || selectedRole;
+              const icon = ROLE_ICONS[selectedRole] || "👤";
               return (
                 <DropdownMenuItem
-                  key={role}
+                  key={`${selectedRole}-${selectedCompanyId}`}
                   onClick={() => {
-                    // Encontrar a empresa associada a este role
-                    const matchingCompany = companies.find(c => c.role === role);
-                    console.log("[ContextSwitcher] Role click:", role, "→ Empresa:", matchingCompany?.company_id, "companies:", companies.map(c => ({ id: c.company_id, role: c.role, name: c.company_name })));
-                    switchActiveRole(role, matchingCompany?.company_id);
+                    // ── Mapeamento exacto: role + company_id do mesmo objeto ──
+                    // Antes: iterava allRoles (strings) e fazia find() — falhava
+                    // se companies=[] ou role duplicado. Agora: o company_id vem
+                    // directamente do mesmo objeto, garantido.
+                    console.log(
+                      "A mudar perfil para:", selectedRole,
+                      "Empresa ID:", selectedCompanyId,
+                      "company_name:", profile.company_name
+                    );
+                    switchActiveRole(selectedRole, selectedCompanyId);
                   }}
                   className={`gap-2 cursor-pointer ${isActive ? "bg-primary/10 font-semibold" : ""}`}
                 >
                   <span className="text-base">{icon}</span>
-                  <span className="flex-1">{label}</span>
+                  <div className="flex-1 min-w-0">
+                    <span>{label}</span>
+                    {companies.length > 1 && profile.company_name && (
+                      <span className="text-[10px] text-muted-foreground ml-1">({profile.company_name})</span>
+                    )}
+                  </div>
                   {isActive && (
                     <span className="text-[10px] px-1.5 py-0.5 bg-primary text-primary-foreground rounded-full font-bold">
                       ATIVO
                     </span>
                   )}
-                  {role === user.role && role !== effectiveRole && (
+                  {selectedRole === user.role && !isActive && (
                     <span className="text-[10px] text-muted-foreground">Principal</span>
                   )}
                 </DropdownMenuItem>
