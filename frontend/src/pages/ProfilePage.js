@@ -224,18 +224,27 @@ const ProfilePage = () => {
         name: profileData.name,
         phone: profileData.phone,
       });
-      toast({
-        title: "Perfil atualizado",
-        description: "Os seus dados foram atualizados com sucesso.",
-      });
-      // Actualizar o estado local
-      if (response.data.user) {
-        setProfileData({
-          ...profileData,
-          name: response.data.user.name || profileData.name,
-          phone: response.data.user.phone || profileData.phone,
+
+      // Verificar avisos do backend
+      if (response.data.warnings?.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Aviso",
+          description: response.data.warnings.join("; "),
+        });
+      } else {
+        toast({
+          title: "Perfil atualizado",
+          description: "Os seus dados foram atualizados com sucesso.",
         });
       }
+
+      // ── REATIVIDADE: Recarregar dados via GET /auth/me ──
+      // O PUT /auth/profile retorna o user da coleção users, mas os campos
+      // active_company_* só vêm em GET /auth/me. refreshUser() atualiza
+      // o AuthContext, que por sua vez dispara o useEffect [user, effectiveCompanyId]
+      // que atualiza os campos locais (signature, jobTitle, etc.).
+      if (refreshUser) await refreshUser();
     } catch (error) {
       toast({
         variant: "destructive",
@@ -251,16 +260,30 @@ const ProfilePage = () => {
   const handleSaveSignature = async () => {
     setSavingSignature(true);
     try {
-      await api.put("/auth/profile", {
+      const response = await api.put("/auth/profile", {
         signature: emailSignature,  // Campo específico da empresa → user_company_roles
         email_signature: emailSignature,  // Backward compat global
       });
-      toast({
-        title: "Assinatura guardada",
-        description: "A sua assinatura de email foi atualizada para esta empresa.",
-      });
-      // Atualizar o estado do utilizador no AuthContext
-      if (refreshUser) refreshUser();
+
+      // Verificar avisos do backend
+      if (response.data.warnings?.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Aviso",
+          description: response.data.warnings.join("; "),
+        });
+      } else {
+        toast({
+          title: "Assinatura guardada",
+          description: "A sua assinatura de email foi atualizada para esta empresa.",
+        });
+      }
+
+      // ── REATIVIDADE: Recarregar dados via GET /auth/me ──
+      // O await garante que o user no AuthContext é atualizado ANTES de
+      // o componente tentar usar os dados. Sem await, o useEffect pode
+      // ler dados antigos do user antes do refreshUser completar.
+      if (refreshUser) await refreshUser();
     } catch (error) {
       toast({
         variant: "destructive",
@@ -276,16 +299,30 @@ const ProfilePage = () => {
   const handleSaveCompanyFields = async () => {
     setSavingCompanyFields(true);
     try {
-      await api.put("/auth/profile", {
+      const response = await api.put("/auth/profile", {
         job_title: jobTitle,
         professional_phone: professionalPhone,
       });
-      toast({
-        title: "Dados profissionais guardados",
-        description: "O seu cargo e telefone profissional foram atualizados para esta empresa.",
-      });
-      // Atualizar o estado do utilizador no AuthContext
-      if (refreshUser) refreshUser();
+
+      // Verificar avisos do backend
+      if (response.data.warnings?.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Aviso",
+          description: response.data.warnings.join("; "),
+        });
+      } else {
+        toast({
+          title: "Dados profissionais guardados",
+          description: "O seu cargo e telefone profissional foram atualizados para esta empresa.",
+        });
+      }
+
+      // ── REATIVIDADE: Recarregar dados via GET /auth/me ──
+      // O await garante que o user no AuthContext é atualizado ANTES de
+      // o componente tentar usar os dados. Sem await, o useEffect pode
+      // ler dados antigos do user antes do refreshUser completar.
+      if (refreshUser) await refreshUser();
     } catch (error) {
       toast({
         variant: "destructive",

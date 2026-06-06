@@ -393,27 +393,76 @@ async def update_profile(
     if "job_title" in data and data["job_title"] is not None:
         company_specific_fields["job_title"] = str(data["job_title"]).strip()
 
+    # ── Avisos para o frontend (campos não guardados) ──
+    profile_warnings = []
+
     if company_specific_fields:
         try:
             from services.auth import get_active_company_id_async
             active_company_id = await get_active_company_id_async(request, user)
+            logger.info(
+                f"[auth/profile] Campos específicos empresa: {list(company_specific_fields.keys())}, "
+                f"active_company_id={active_company_id!r}, user_id={user_id}"
+            )
             if active_company_id:
                 company_specific_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
-                await db.user_company_roles.update_one(
+                result = await db.user_company_roles.update_one(
                     {"user_id": user_id, "company_id": active_company_id},
-                    {"$set": company_specific_fields}
+                    {"$set": company_specific_fields},
+                    upsert=True  # Criar documento se não existir
+                )
+                logger.info(
+                    f"[auth/profile] update_one result: matched={result.matched_count}, "
+                    f"modified={result.modified_count}, upserted={result.upserted_id}"
+                )
+            else:
+                profile_warnings.append(
+                    "Não foi possível determinar a empresa ativa. "
+                    "Os dados profissionais não foram guardados por empresa. "
+                    "Tente recarregar a página e repetir."
+                )
+                logger.warning(
+                    f"[auth/profile] active_company_id é None — campos da empresa NÃO guardados! "
+                    f"X-Company-Id header={request.headers.get('X-Company-Id')!r}, "
+                    f"user.company={user.get('company')!r}"
                 )
         except Exception as e:
+            profile_warnings.append(f"Erro ao guardar dados da empresa: {e}")
             logger.warning(f"[auth/profile] Erro ao guardar campos específicos da empresa: {e}")
 
-    # Retornar o utilizador actualizado
+    # Retornar o utilizador actualizado COM campos da empresa ativa
+    # (O frontend precisa dos campos active_company_* para atualizar o UI)
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
 
-    return {
+    # Adicionar campos da empresa ativa (iguais ao GET /auth/me)
+    try:
+        from services.auth import get_active_company_id_async, get_user_companies
+        active_company_id_resp = await get_active_company_id_async(request, user)
+        if active_company_id_resp:
+            user_companies = await get_user_companies(user_id)
+            active_assoc = next(
+                (c for c in user_companies if c.get("company_id") == active_company_id_resp),
+                None
+            )
+            if active_assoc:
+                updated_user["active_company_id"] = active_company_id_resp
+                updated_user["active_company_role"] = active_assoc.get("role")
+                updated_user["active_company_name"] = active_assoc.get("company_name")
+                updated_user["active_company_signature"] = active_assoc.get("signature", "")
+                updated_user["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
+                updated_user["active_company_job_title"] = active_assoc.get("job_title", "")
+                updated_user["companies"] = user_companies
+    except Exception as e:
+        logger.warning(f"[auth/profile] Erro ao adicionar campos da empresa na resposta: {e}")
+
+    response_data = {
         "success": True,
         "message": "Perfil atualizado com sucesso",
         "user": updated_user
     }
+    if profile_warnings:
+        response_data["warnings"] = profile_warnings
+    return response_data
 
 
 @router.post("/change-password")
