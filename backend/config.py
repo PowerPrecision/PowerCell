@@ -184,9 +184,18 @@ for origin in _cors_env.split(','):
 # Sempre que ALLOW_VERCEL_PREVIEWS=true, permite qualquer subdomínio de vercel.app
 # Isto é seguro porque previews do Vercel requerem autenticação do GitHub para aceder
 if _allow_vercel_previews:
-    # Regex para permitir qualquer subdomínio de vercel.app
-    CORS_ORIGIN_REGEX = [r"https://[a-z0-9-]+\.vercel\.app"]
-    print(f"✅ Vercel preview domains habilitados", file=sys.stderr)
+    # Regex para permitir qualquer subdomínio de vercel.app (incluindo aninhados)
+    # Exemplos que matcham:
+    #   https://power-cell.vercel.app
+    #   https://power-cell-git-dev-power-precisions-projects.vercel.app
+    #   https://power-cell-abc123.vercel.app
+    # Não matcha:
+    #   https://evil-vercel.app (domínio diferente)
+    #   http://power-cell.vercel.app (HTTP, não HTTPS)
+    CORS_ORIGIN_REGEX = [r"https://[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app(?::\d+)?$"]
+    print(f"✅ Vercel preview domains habilitados (regex: qualquer subdomínio .vercel.app)", file=sys.stderr)
+else:
+    print(f"⚠️  Vercel preview domains DESATIVADOS (ALLOW_VERCEL_PREVIEWS=false)", file=sys.stderr)
 
 # Reportar origens inválidas
 if _invalid_origins:
@@ -201,12 +210,20 @@ if not CORS_ORIGINS:
     )
 
 print(f"✅ CORS configurado (fail-secure): {', '.join(CORS_ORIGINS)}", file=sys.stderr)
+if CORS_ORIGIN_REGEX:
+    print(f"✅ CORS regex ativo: {CORS_ORIGIN_REGEX[0]}", file=sys.stderr)
 
 # Configurações adicionais de CORS (com defaults seguros)
 CORS_ALLOW_CREDENTIALS = os.environ.get('CORS_ALLOW_CREDENTIALS', 'true').lower() == 'true'
 CORS_ALLOW_METHODS = os.environ.get('CORS_ALLOW_METHODS', 'GET,POST,PUT,DELETE,OPTIONS,PATCH').split(',')
-CORS_ALLOW_HEADERS = os.environ.get('CORS_ALLOW_HEADERS', 'Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role').split(',')
+CORS_ALLOW_HEADERS = os.environ.get('CORS_ALLOW_HEADERS', 'Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role,X-Company-Id').split(',')
 CORS_MAX_AGE = int(os.environ.get('CORS_MAX_AGE', '600'))
+
+# Log de resumo CORS
+print(f"✅ CORS resumo: {len(CORS_ORIGINS)} origens explícitas, "
+      f"regex={'ativo' if CORS_ORIGIN_REGEX else 'inativo'}, "
+      f"credentials={CORS_ALLOW_CREDENTIALS}, "
+      f"max_age={CORS_MAX_AGE}", file=sys.stderr)
 
 
 # ====================================================================

@@ -753,6 +753,43 @@ from middleware.logging_middleware import LoggingMiddleware
 app.add_middleware(LoggingMiddleware)
 
 # ====================================================================
+# CORS DEBUG MIDDLEWARE — Regista origens rejeitadas para diagnóstico.
+# Adicionado ANTES do CORSMiddleware (executa DEPOIS na cadeia).
+# Isto permite-nos ver no log qual origin foi rejeitada e porquê.
+# ====================================================================
+import re as _re
+
+@app.middleware("http")
+async def cors_debug_middleware(request, call_next):
+    """
+    Middleware de debug CORS — regista origins que falham validação.
+    
+    Ajuda a diagnosticar erros CORS em produção, especialmente com
+    Vercel preview URLs que mudam frequentemente.
+    
+    Só regista quando o pedido é OPTIONS (preflight) e a origin
+    não está nas origens permitidas.
+    """
+    response = await call_next(request)
+    
+    # Só diagnosticar pedidos OPTIONS (CORS preflight)
+    if request.method == "OPTIONS":
+        origin = request.headers.get("origin", "")
+        if origin:
+            # Verificar se a origin foi permitida
+            allow_origin = response.headers.get("access-control-allow-origin", "")
+            if not allow_origin:
+                logger.warning(
+                    f"🚫 CORS REJEITADO: Origin '{origin}' não permitida | "
+                    f"Origins explícitas: {CORS_ORIGINS} | "
+                    f"Regex: {CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else 'nenhum'}"
+                )
+            else:
+                logger.debug(f"✅ CORS OK: Origin '{origin}' permitida")
+    
+    return response
+
+# ====================================================================
 # CORS MIDDLEWARE — MUST be last middleware added so it is OUTERMOST.
 #
 # In Starlette, middleware executes in REVERSE order of addition.
@@ -770,6 +807,12 @@ app.add_middleware(
     allow_headers=CORS_ALLOW_HEADERS,
     max_age=CORS_MAX_AGE,
 )
+
+# Log da configuração CORS no arranque
+logger.info(f"📋 CORS: {len(CORS_ORIGINS)} origins explícitas = {CORS_ORIGINS}")
+logger.info(f"📋 CORS: regex = {CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else 'nenhum'}")
+logger.info(f"📋 CORS: credentials = {CORS_ALLOW_CREDENTIALS}")
+logger.info(f"📋 CORS: max_age = {CORS_MAX_AGE}")
 
 @app.on_event("startup")
 async def startup():

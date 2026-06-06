@@ -3,6 +3,21 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-06] — Correção CORS: Vercel Preview URLs e Headers em Falta
+
+### Corrigido
+- **CORS bloqueia Vercel preview URLs** (`fix` — **CRÍTICO**): O frontend deployado em Vercel (branch `dev`) era bloqueado pelo backend no Render com erro CORS "It does not have HTTP ok status". Causas identificadas:
+  - `CORS_ORIGINS` no `render.yaml` não incluía `powercell-1.onrender.com` nem qualquer domínio Vercel
+  - `ALLOW_VERCEL_PREVIEWS` não estava explicitamente definido no `render.yaml`, podendo ser sobrescrito no dashboard do Render
+  - O regex CORS `r"https://[a-z0-9-]+\.vercel\.app"` era demasiado restritivo para subdomínios longos
+  - O header `X-Company-Id` (enviado pelo frontend) não estava nos `CORS_ALLOW_HEADERS`
+
+### Alterado
+- **render.yaml: CORS_ORIGINS expandido** (`refactor`): Adicionado `powercell-1.onrender.com` à lista de origens explícitas. Adicionada variável `ALLOW_VERCEL_PREVIEWS=true` explicitamente para garantir que o regex CORS cubra qualquer `*.vercel.app`
+- **config.py: Regex CORS mais robusto** (`refactor`): Regex atualizado de `r"https://[a-z0-9-]+\.vercel\.app"` para `r"https://[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app(?::\d+)?$"` — suporta subdomínios longos como `power-cell-git-dev-power-precisions-projects.vercel.app` e opcionalmente porta. Adicionado log quando `ALLOW_VERCEL_PREVIEWS` está desativado
+- **config.py: CORS_ALLOW_HEADERS atualizado** (`refactor`): Adicionado `X-Company-Id` aos headers permitidos (usado pelo ContextSwitcher multi-empresa no frontend)
+- **server.py: Middleware de debug CORS** (`refactor`): Novo middleware que regista no log origins rejeitadas durante preflight OPTIONS, facilitando diagnóstico de problemas CORS em produção. Adicionado log da configuração CORS completa no arranque
+
 ## [2026-05-24] — Correções: Timeout IRS e Anexos no Email de Sucesso
 
 ### Corrigido

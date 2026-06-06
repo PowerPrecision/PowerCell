@@ -57,8 +57,12 @@ services:
         sync: false
 
       # ── CORS ──
+      # Origens explícitas (o regex ALLOW_VERCEL_PREVIEWS cobre *.vercel.app)
       - key: CORS_ORIGINS
-        value: https://powercell.onrender.com,https://powercell-frontend.onrender.com,https://powercell.pt,https://www.powercell.pt
+        value: https://powercell.onrender.com,https://powercell-1.onrender.com,https://powercell-frontend.onrender.com,https://powercell.pt,https://www.powercell.pt
+      # Permitir qualquer subdomínio .vercel.app (previews de branch/PR)
+      - key: ALLOW_VERCEL_PREVIEWS
+        value: "true"
 
       # ── AWS S3 (SECRETS) ──
       - key: AWS_ACCESS_KEY_ID
