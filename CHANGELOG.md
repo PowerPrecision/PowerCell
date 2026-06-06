@@ -3,6 +3,31 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-11] — Atribuição de Registos à Tania Fernandes (Dev)
+
+### Alterado
+- **9 processos sem mediador atribuídos à Tania Fernandes** (`ops` — **DEV**): Todos os processos no ambiente de desenvolvimento que não tinham intermediário atribuído foram atribuídos à utilizadora **Tania Fernandes** (ID: `bc2a5a7f-0645-4e38-bdc3-91fd4c2f1c47`, role: `intermediario`, empresa: Precision Crédito). Os 9 processos estavam no estado `clientes_espera` e sem mediador. Atribuição realizada via API `POST /api/processes/{id}/assign?mediador_ids={user_id}` com autenticação admin.
+
+### Processos Atribuídos
+| # | Cliente | Estado |
+|---|---------|--------|
+| 94 | Camila Baptista Lima | clientes_espera |
+| 150 | Cristina Reis Silva Carneiro | clientes_espera |
+| 102 | Duarte Barbosa Silva | clientes_espera |
+| 118 | Fernanda Correia Ribeiro Machado | clientes_espera |
+| 130 | Fernanda Silva Correia Antunes | clientes_espera |
+| 82 | Isabel Carvalho Costa Soares | clientes_espera |
+| 174 | Isabel Vieira Martins Barbosa | clientes_espera |
+| 56 | Joana Baptista Soares Cruz | clientes_espera |
+| 202 | João Dias Tavares | clientes_espera |
+
+### Notas
+- Total de processos no dev: 20
+- Processos da Tania após atribuição: 9 (45%)
+- Processos de outros intermediários: 11
+- Processos sem mediador: 0
+- Operação realizada diretamente na BD de dev via API
+
 ## [2026-06-10] — Correção CORS Definitiva: Header X-Company-Id em Falta + Fallback Middleware
 
 ### Corrigido
