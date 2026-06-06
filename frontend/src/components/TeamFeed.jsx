@@ -44,6 +44,7 @@ const getAvatarColor = (name) => {
 
 const formatDate = (dateStr) => {
   const date = safeParseISO(dateStr);
+  if (!date || isNaN(date.getTime())) return "—";
   if (isToday(date)) return `Hoje às ${format(date, "HH:mm")}`;
   if (isYesterday(date)) return `Ontem às ${format(date, "HH:mm")}`;
   return format(date, "d MMM, HH:mm", { locale: pt });

@@ -21,8 +21,9 @@ import {
   Trophy, CalendarDays, RefreshCw
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, subDays } from "date-fns";
+import { format, subDays, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeParseISO } from "../../lib/utils";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com";
 
@@ -252,12 +253,19 @@ const TeamPerformanceTab = ({ token }) => {
           </CardTitle>
           <CardDescription>
             {users.length} colaborador{users.length !== 1 ? "es" : ""} no período
-            {data?.period_start && (
-              <span className="ml-1">
-                ({format(new Date(data.period_start), "dd/MM/yy", { locale: pt })} —{" "}
-                {format(new Date(data.period_end), "dd/MM/yy", { locale: pt })})
-              </span>
-            )}
+            {data?.period_start && (() => {
+              const start = safeParseISO(data.period_start);
+              const end = safeParseISO(data.period_end);
+              if (isValid(start) && isValid(end)) {
+                return (
+                  <span className="ml-1">
+                    ({format(start, "dd/MM/yy", { locale: pt })} —{" "}
+                    {format(end, "dd/MM/yy", { locale: pt })})
+                  </span>
+                );
+              }
+              return null;
+            })()
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
