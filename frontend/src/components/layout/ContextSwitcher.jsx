@@ -46,19 +46,32 @@ const ContextSwitcher = () => {
   const additionalRoles = user?.additional_roles || [];
 
   // ── Construir lista de perfis para o dropdown de Role ──
-  // ESTRATÉGIA: Usar companies (que têm company_id) como fonte principal.
-  // Se companies está vazio, fazer fallback para additional_roles (strings).
-  // Isto garante que o botão NÃO desaparece quando o utilizador tem
-  // additional_roles mas companies ainda não foi populado pelo backend.
+  // ESTRATÉGIA: Cada combinação empresa+role é um perfil DISTINTO.
+  // Não fazemos dedup por role — o mesmo role em empresas diferentes
+  // representa contextos diferentes (dados, assinatura, etc.).
+  // Além disso, adicionamos additional_roles que NÃO estejam cobertos
+  // por nenhuma empresa (ex: "admin" como role adicional sem empresa).
   let profileItems = [];
 
   if (companies.length > 0) {
     // Fonte principal: companies (objetos com company_id, role, company_name)
-    // Dedup por role — cada role aparece uma só vez
-    profileItems = companies.reduce((acc, c) => {
-      if (!acc.some(p => p.role === c.role)) acc.push(c);
-      return acc;
-    }, []);
+    // SEM dedup — cada empresa é um perfil distinto
+    profileItems = [...companies];
+
+    // Adicionar additional_roles não cobertos por nenhuma empresa
+    // Isto garante que roles como "admin" ou "ceo" aparecem mesmo que
+    // não exista entrada na tabela user_company_roles
+    const companyRoles = new Set(companies.map(c => c.role));
+    for (const role of additionalRoles) {
+      if (!companyRoles.has(role)) {
+        profileItems.push({ role, company_id: null, company_name: null });
+      }
+    }
+
+    // Incluir o role primário se não estiver coberto
+    if (!companyRoles.has(user.role) && !additionalRoles.includes(user.role)) {
+      profileItems.unshift({ role: user.role, company_id: null, company_name: null });
+    }
   } else {
     // Fallback: additional_roles (strings) — sem company_id disponível
     const allRoles = [user.role, ...additionalRoles.filter(r => r !== user.role)];
@@ -66,8 +79,7 @@ const ContextSwitcher = () => {
   }
 
   // Visibilidade: mostrar selector de Role se tem múltiplos perfis
-  // (via companies OU via additional_roles como fallback)
-  const hasMultipleRoles = profileItems.length > 1 || additionalRoles.length > 0;
+  const hasMultipleRoles = profileItems.length > 1;
   const hasMultipleCompanies = companies.length > 1;
 
   if (!hasMultipleRoles && !hasMultipleCompanies) return null;
