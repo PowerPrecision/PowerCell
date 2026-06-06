@@ -80,7 +80,7 @@ import {
 // ====================================================================
 
 const ProfilePage = () => {
-  const { user, logout, refreshUser, effectiveCompanyId, companies: userCompanies } = useAuth();
+  const { user, logout, refreshUser, effectiveCompanyId, effectiveRole, companies: userCompanies } = useAuth();
   const navigate = useNavigate();
 
   // Estados para dados do perfil
@@ -152,7 +152,7 @@ const ProfilePage = () => {
       setJobTitle(user.active_company_job_title || "");
       setLoading(false);
     }
-  }, [user, effectiveCompanyId]); // ← effectiveCompanyId como dependência
+  }, [user, effectiveCompanyId, effectiveRole]); // ← effectiveRole adicionado: troca de perfil atualiza dados
 
   // Carregar dados do utilizador (inicial — complementado pelo useEffect acima)
   // NOTA: A lógica de carregamento foi movida para o useEffect com [user, effectiveCompanyId]
@@ -214,7 +214,7 @@ const ProfilePage = () => {
 
   useEffect(() => {
     loadEmailConfigInfo();
-  }, [emailCompanyId, effectiveCompanyId]); // Recarregar quando o utilizador troca de empresa no dropdown ou no ContextSwitcher
+  }, [emailCompanyId, effectiveCompanyId, effectiveRole]); // Recarregar quando troca de empresa ou perfil
 
   // Guardar alterações do perfil
   const handleSaveProfile = async () => {

@@ -118,7 +118,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     setEmailConfig(prev => ({ ...prev, password: "" }));
 
     loadConfig();
-  }, [companyId, effectiveCompanyId]);
+  }, [companyId, effectiveCompanyId, effectiveRole]); // ← effectiveRole adicionado: troca de perfil recarrega config
 
   // Listen for Google OAuth popup messages (two-step flow)
   useEffect(() => {
@@ -141,9 +141,20 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
   const loadConfig = async () => {
     setLoading(true);
-    // NOTA: A limpeza visual (isEditing, showPassword, testResult, etc.) é feita
-    // no useEffect que chama loadConfig(), antes desta execução. Não duplicamos
-    // aqui para evitar inconsistências de ordem de execução.
+    // ── Limpeza visual ANTES do fetch ──
+    // Garante que o formulário não mostra dados da empresa/perfil anterior
+    // enquanto carrega os novos. Isto é redundante com o useEffect mas
+    // protege contra chamadas diretas a loadConfig() (ex: Google OAuth callback).
+    setWebmailConfigured(false);
+    setEmailConfig({
+      email_address: "",
+      imap_server: "",
+      imap_port: 993,
+      smtp_server: "",
+      smtp_port: 465,
+      password: "",
+    });
+    setHasPassword(false);
     try {
       const response = await api.get(getConfigUrl());
       const config = response.data;
