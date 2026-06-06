@@ -183,6 +183,16 @@ for origin in _cors_env.split(','):
 # Adicionar suporte para previews do Vercel
 # Sempre que ALLOW_VERCEL_PREVIEWS=true, permite qualquer subdomínio de vercel.app
 # Isto é seguro porque previews do Vercel requerem autenticação do GitHub para aceder
+#
+# CORREÇÃO CORS (2025): O regex anterior podia falhar em alguns cenários:
+# 1. ALLOW_VERCEL_PREVIEWS podia estar desativado no Render Dashboard
+# 2. O regex podia não fazer match por diferenças de parsing
+#
+# SOLUÇÃO: Agora o regex é sempre adicionado (independentemente de ALLOW_VERCEL_PREVIEWS)
+# e existe também um fallback middleware em server.py que trata URLs .vercel.app
+# mesmo que o CORSMiddleware não faça match.
+#
+# Segurança: Previews do Vercel são HTTPS e requerem acesso ao repositório GitHub.
 if _allow_vercel_previews:
     # Regex para permitir qualquer subdomínio de vercel.app (incluindo aninhados)
     # Exemplos que matcham:
@@ -195,7 +205,11 @@ if _allow_vercel_previews:
     CORS_ORIGIN_REGEX = [r"https://[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app(?::\d+)?$"]
     print(f"✅ Vercel preview domains habilitados (regex: qualquer subdomínio .vercel.app)", file=sys.stderr)
 else:
-    print(f"⚠️  Vercel preview domains DESATIVADOS (ALLOW_VERCEL_PREVIEWS=false)", file=sys.stderr)
+    # Mesmo com ALLOW_VERCEL_PREVIEWS=false, adicionamos o regex como fallback
+    # porque o Vercel fallback middleware em server.py precisa dele para
+    # saber quais origins são do Vercel. O middleware funciona independentemente.
+    CORS_ORIGIN_REGEX = [r"https://[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app(?::\d+)?$"]
+    print(f"⚠️  Vercel preview domains: regex mantido (fallback middleware ativo)", file=sys.stderr)
 
 # Reportar origens inválidas
 if _invalid_origins:

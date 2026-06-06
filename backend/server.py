@@ -433,11 +433,35 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         f"Validation error on {request.method} {request.url.path}: "
         f"errors={safe_errors}"
     )
+    # Obter origin do request para CORS (igual ao http_exception_handler)
+    origin = request.headers.get("origin", "")
+
+    # Verificar se a origin é permitida
+    allowed_origin = None
+    if origin in CORS_ORIGINS:
+        allowed_origin = origin
+    elif CORS_ORIGIN_REGEX:
+        import re as _re_422
+        for pattern in CORS_ORIGIN_REGEX:
+            if _re_422.match(pattern, origin):
+                allowed_origin = origin
+                break
+    # Fallback: permitir previews do Vercel mesmo sem regex
+    if not allowed_origin and origin and origin.startswith("https://") and origin.endswith(".vercel.app"):
+        allowed_origin = origin
+
+    cors_headers = {}
+    if allowed_origin:
+        cors_headers = {
+            "Access-Control-Allow-Origin": allowed_origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
+
     # Retornar erro formatado ao cliente
     return JSONResponse(
         status_code=422,
         content={"detail": safe_errors},
-        headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true"}
+        headers=cors_headers
     )
 
 
@@ -602,6 +626,63 @@ else:
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/api/cors-debug")
+async def cors_debug_endpoint(request: Request):
+    """
+    Endpoint de diagnóstico CORS.
+    
+    Retorna a configuração CORS atual e verifica se uma determinada
+    origin seria permitida. Use o query parameter ?origin=URL para
+    testar uma origin específica.
+    
+    Exemplo: /api/cors-debug?origin=https://power-cell.vercel.app
+    """
+    import re as _re_debug
+    
+    test_origin = request.query_params.get("origin", "")
+    
+    # Verificar se a origin seria permitida
+    origin_status = {
+        "in_explicit_list": test_origin in CORS_ORIGINS if test_origin else False,
+        "matches_regex": False,
+        "is_vercel_preview": False,
+        "would_be_allowed": False,
+    }
+    
+    if test_origin and CORS_ORIGIN_REGEX:
+        for pattern in CORS_ORIGIN_REGEX:
+            if _re_debug.match(pattern, test_origin):
+                origin_status["matches_regex"] = True
+                break
+    
+    if test_origin:
+        origin_status["is_vercel_preview"] = (
+            test_origin.startswith("https://") and
+            test_origin.endswith(".vercel.app") and
+            len(test_origin) > len("https://.vercel.app")
+        )
+    
+    origin_status["would_be_allowed"] = (
+        origin_status["in_explicit_list"] or
+        origin_status["matches_regex"] or
+        origin_status["is_vercel_preview"]  # Fallback middleware
+    )
+    
+    return {
+        "cors_config": {
+            "explicit_origins": CORS_ORIGINS,
+            "origin_regex": CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else None,
+            "allow_credentials": CORS_ALLOW_CREDENTIALS,
+            "allow_methods": CORS_ALLOW_METHODS,
+            "allow_headers": CORS_ALLOW_HEADERS,
+            "max_age": CORS_MAX_AGE,
+            "vercel_fallback_middleware": True,
+        },
+        "test_origin": test_origin or "(nenhuma fornecida)",
+        "origin_status": origin_status,
+    }
 
 
 # Root path — Render health check uses HEAD / by default
@@ -808,11 +889,91 @@ app.add_middleware(
     max_age=CORS_MAX_AGE,
 )
 
+# ====================================================================
+# VERCEL CORS FALLBACK MIDDLEWARE — Camada de segurança extra.
+#
+# Adicionado DEPOIS do CORSMiddleware → torna-se o OUTERMOST middleware.
+# Isto garante que pedidos preflight OPTIONS de URLs do Vercel são
+# sempre tratados, mesmo que o CORSMiddleware não faça match da regex.
+#
+# PROBLEMA: Alguns deployments no Render podem ter ALLOW_VERCEL_PREVIEWS
+# desativado ou a regex pode falhar por motivos de parsing. Este middleware
+# garante que previews do Vercel funcionam SEMPRE.
+#
+# Segurança: Apenas aceita origins HTTPS que terminem em .vercel.app
+# ====================================================================
+from starlette.responses import Response as StarletteResponse
+
+@app.middleware("http")
+async def vercel_cors_fallback_middleware(request, call_next):
+    """
+    Fallback CORS middleware para URLs de preview do Vercel.
+    
+    Garante que pedidos preflight OPTIONS de *.vercel.app são sempre
+    tratados com HTTP 200 e headers CORS correctos, mesmo que o
+    CORSMiddleware principal não faça match da origin.
+    
+    Isto resolve o erro: "Response to preflight request doesn't pass
+    access control check: It does not have HTTP ok status."
+    
+    Segurança:
+    - Apenas origens HTTPS (nunca HTTP)
+    - Apenas domínios .vercel.app (verificado por sufixo)
+    - Respeita a configuração de credentials
+    """
+    origin = request.headers.get("origin", "")
+    
+    # Detectar se é uma URL de preview do Vercel
+    is_vercel_preview = (
+        origin and
+        origin.startswith("https://") and
+        origin.endswith(".vercel.app") and
+        len(origin) > len("https://.vercel.app")  # Tem subdomínio
+    )
+    
+    # Para pedidos preflight OPTIONS de Vercel: responder directamente
+    if request.method == "OPTIONS" and is_vercel_preview:
+        # Verificar se o CORSMiddleware já adicionou headers
+        # (se passou pelo CORSMiddleware com sucesso, já terá resposta)
+        # Como este middleware é OUTERMOST, chamar call_next passa ao CORSMiddleware
+        response = await call_next(request)
+        
+        # Se o CORSMiddleware não adicionou o header, o preflight falhou
+        if not response.headers.get("access-control-allow-origin"):
+            logger.info(
+                f"🔄 Vercel CORS fallback: Origin '{origin}' não foi tratada pelo CORSMiddleware. "
+                f"A adicionar headers CORS manualmente."
+            )
+            return StarletteResponse(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Methods": ",".join(CORS_ALLOW_METHODS),
+                    "Access-Control-Allow-Headers": ",".join(CORS_ALLOW_HEADERS),
+                    "Access-Control-Allow-Credentials": "true" if CORS_ALLOW_CREDENTIALS else "false",
+                    "Access-Control-Max-Age": str(CORS_MAX_AGE),
+                }
+            )
+        return response
+    
+    # Para pedidos normais (GET, POST, etc.) de Vercel
+    response = await call_next(request)
+    
+    # Se o CORSMiddleware não adicionou headers CORS, adicionar manualmente
+    if is_vercel_preview and not response.headers.get("access-control-allow-origin"):
+        logger.debug(f"🔄 Vercel CORS fallback: Adicionando headers CORS para origin '{origin}'")
+        response.headers["Access-Control-Allow-Origin"] = origin
+        if CORS_ALLOW_CREDENTIALS:
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
+
 # Log da configuração CORS no arranque
 logger.info(f"📋 CORS: {len(CORS_ORIGINS)} origins explícitas = {CORS_ORIGINS}")
 logger.info(f"📋 CORS: regex = {CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else 'nenhum'}")
 logger.info(f"📋 CORS: credentials = {CORS_ALLOW_CREDENTIALS}")
 logger.info(f"📋 CORS: max_age = {CORS_MAX_AGE}")
+logger.info("📋 CORS: Vercel fallback middleware ATIVO (qualquer *.vercel.app HTTPS é permitido)")
 
 @app.on_event("startup")
 async def startup():

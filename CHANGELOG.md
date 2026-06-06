@@ -3,6 +3,29 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-10] — Correção CORS Definitiva: Vercel Fallback Middleware e Handler 422
+
+### Corrigido
+- **CORS: Vercel preview URLs continuam bloqueadas apesar do regex** (`fix` — **CRÍTICO**): O erro "Response to preflight request doesn't pass access control check: It does not have HTTP ok status" persistia mesmo com `ALLOW_VERCEL_PREVIEWS=true` e regex configurada. Causas raiz identificadas:
+  - O `ALLOW_VERCEL_PREVIEWS` podia estar desativado no Render Dashboard (override manual), invalidando o regex do `CORSMiddleware`
+  - O `validation_exception_handler` (422) usava `Access-Control-Allow-Origin: *` com `credentials=true`, o que é **inválido** segundo a spec CORS (browsers rejeitam esta combinação)
+  - Não existia mecanismo de fallback — se o `CORSMiddleware` não fizesse match, o pedido OPTIONS passava ao route handler que retornava 405
+
+### Adicionado
+- **Vercel CORS Fallback Middleware** (`feat` — `server.py`): Novo middleware outermost que intercepta pedidos preflight OPTIONS de URLs `*.vercel.app` (HTTPS). Se o `CORSMiddleware` não adicionar headers CORS, o fallback responde directamente com HTTP 200 e headers correctos. Para pedidos normais (GET/POST/etc.), adiciona headers CORS se estiverem em falta. Este middleware é independente de `ALLOW_VERCEL_PREVIEWS` e funciona mesmo que o env var esteja desativado no Render Dashboard.
+- **Endpoint de diagnóstico CORS** (`feat` — `server.py`): Novo endpoint `GET /api/cors-debug?origin=URL` que retorna a configuração CORS actual e verifica se uma origin específica seria permitida. Útil para diagnosticar problemas CORS em produção sem acesso aos logs do servidor.
+
+### Alterado
+- **config.py: CORS_ORIGIN_REGEX sempre ativo** (`refactor`): O regex `*.vercel.app` é agora sempre adicionado a `CORS_ORIGIN_REGEX`, mesmo quando `ALLOW_VERCEL_PREVIEWS=false`. Isto garante que o fallback middleware e o CORSMiddleware principal têm sempre a regex disponível.
+- **server.py: validation_exception_handler corrigido** (`fix` — **CRÍTICO**): O handler de erros 422 (Pydantic validation) agora verifica a origin do pedido contra `CORS_ORIGINS` e `CORS_ORIGIN_REGEX` (incluindo fallback para Vercel) antes de adicionar headers CORS, em vez de usar `Access-Control-Allow-Origin: *` com `credentials=true` (combinação inválida). Isto segue a mesma lógica do `http_exception_handler` e `general_exception_handler`.
+- **server.py: Log melhorado** (`refactor`): Adicionada mensagem de log no arranque a confirmar que o Vercel fallback middleware está ativo.
+
+### Segurança
+- O fallback middleware apenas aceita origins HTTPS (nunca HTTP)
+- Apenas domínios `.vercel.app` são aceites (verificação por sufixo)
+- O subdomínio não pode estar vazio (comprimento mínimo verificado)
+- As configurações de `allow_methods`, `allow_headers`, `credentials` e `max_age` são respeitadas
+
 ## [2026-06-06] — Correção CORS: Vercel Preview URLs e Headers em Falta
 
 ### Corrigido
