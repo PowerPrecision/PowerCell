@@ -95,8 +95,28 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   const isFieldsLocked = webmailConfigured && !isEditing;
 
   // Load existing config — recarregar quando companyId muda (troca de empresa)
-  // O effectiveCompanyId garante reatividade quando o ContextSwitcher muda a empresa ativa
+  // O effectiveCompanyId garante reatividade quando o ContextSwitcher muda a empresa ativa.
+  //
+  // PORQUÊ: Quando o utilizador troca de empresa no ContextSwitcher:
+  // 1. O AuthContext atualiza `effectiveCompanyId` via switchActiveCompany()
+  // 2. Este useEffect deteta a mudança e chama loadConfig()
+  // 3. loadConfig() faz GET /users/me/email-config com o header X-Company-Id atualizado
+  // 4. O formulário reflete a configuração da nova empresa ativa
+  //
+  // LIMPEZA VISUAL: Ao trocar de empresa, também limpamos:
+  // - Modo de edição (isEditing → false) para não mostrar dados da empresa anterior
+  // - Resultado de teste de ligação (testResult → null)
+  // - Estado de visibilidade da password (showPassword → false)
+  // - Flag de Google OAuth conectado (para reavaliar com base na nova empresa)
   useEffect(() => {
+    // Limpar cache visual antes de carregar nova config
+    setIsEditing(false);
+    setShowPassword(false);
+    setTestResult(null);
+    setGoogleOAuthConnected(false);
+    // Resetar password visual (nunca vem do servidor, mas limpa lixo de input anterior)
+    setEmailConfig(prev => ({ ...prev, password: "" }));
+
     loadConfig();
   }, [companyId, effectiveCompanyId]);
 
@@ -121,9 +141,9 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
   const loadConfig = async () => {
     setLoading(true);
-    setIsEditing(false);       // Resetar edição ao trocar de empresa
-    setTestResult(null);       // Limpar resultado de teste
-    setGoogleOAuthConnected(false);
+    // NOTA: A limpeza visual (isEditing, showPassword, testResult, etc.) é feita
+    // no useEffect que chama loadConfig(), antes desta execução. Não duplicamos
+    // aqui para evitar inconsistências de ordem de execução.
     try {
       const response = await api.get(getConfigUrl());
       const config = response.data;
@@ -490,7 +510,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
           <div className="relative">
             <Input
               id="ec_password"
-              type={showPassword ? "text" : "password"}
+              type={isFieldsLocked ? "password" : (showPassword ? "text" : "password")}
               value={emailConfig.password}
               onChange={(e) =>
                 setEmailConfig({ ...emailConfig, password: e.target.value })
@@ -503,23 +523,32 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
                   : "Password do email"
               }
               disabled={isFieldsLocked}
-              className={isFieldsLocked ? "bg-muted cursor-not-allowed pr-9" : "pr-9"}
+              className={isFieldsLocked ? "bg-muted cursor-not-allowed" : "pr-9"}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-0 top-0 h-full"
-              onClick={() => setShowPassword(!showPassword)}
-              tabIndex={isFieldsLocked ? -1 : 0}
-              disabled={isFieldsLocked}
-            >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </Button>
+            {/* ── UX: Ocultar botão "Olho" quando campos estão trancados ──
+                Se o email já está configurado e o utilizador NÃO está em modo
+                de edição, o campo mostra "********" (placeholder). O botão do
+                olho não faz sentido aqui porque:
+                1. A password real nunca é enviada do servidor
+                2. O campo está vazio (value=""), só tem placeholder visual
+                3. Clicar no olho só mostraria um campo vazio em texto plano
+                Só mostramos o botão quando o utilizador pode editar (isEditing
+                ou email ainda não configurado). */}
+            {!isFieldsLocked && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 h-full"
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </Button>
+            )}
           </div>
           {webmailConfigured && hasPassword && !isFieldsLocked && (
             <p className="text-xs text-green-600 flex items-center gap-1">

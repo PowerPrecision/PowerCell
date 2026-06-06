@@ -38,6 +38,7 @@
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 import { hasRole } from "../utils/roleUtils";
+import { queryClient } from "../lib/queryClient";
 
 const AuthContext = createContext(null);
 
@@ -410,6 +411,14 @@ export function AuthProvider({ children }) {
     setActiveRole(newRole);
     // Persist to sessionStorage for reload survival
     sessionStorage.setItem("activeRole", newRole);
+
+    // ── REATIVIDADE: Invalidar toda a cache do TanStack Query ──
+    // Quando o utilizador troca de perfil (role), os dados em cache
+    // podem estar associados ao perfil anterior (ex: processos filtrados
+    // por role, estatísticas por cargo). Ao invalidar, forçamos todos
+    // os componentes a voltar a pedir dados ao backend com o novo
+    // header X-Active-Role (injetado pelo interceptor de API).
+    queryClient.invalidateQueries();
   }, []);
 
   // Context Switching - Múltiplas Empresas
@@ -443,6 +452,13 @@ export function AuthProvider({ children }) {
     } catch (error) {
       console.warn("[AuthContext] Erro ao recarregar dados após troca de empresa:", error);
     }
+
+    // ── REATIVIDADE: Invalidar toda a cache do TanStack Query ──
+    // Quando o utilizador troca de empresa, os dados em cache pertencem
+    // à empresa anterior (ex: processos, emails, templates, kanban).
+    // Ao invalidar, forçamos todos os componentes a voltar a pedir dados
+    // ao backend com o novo header X-Company-Id (injetado pelo interceptor).
+    queryClient.invalidateQueries();
   }, [user]);
 
   // Refresh user data from /auth/me (e.g. after email config save)
