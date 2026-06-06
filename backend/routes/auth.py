@@ -375,13 +375,22 @@ async def update_profile(
     """
     Permite ao utilizador atualizar o seu próprio perfil.
     
-    MULTI-EMPRESA: Se o header X-Company-Id estiver presente, os campos
-    phone e email_signature são guardados TANTO no documento global do
-    utilizador (backward compat) COMO na tabela user_company_roles para
-    a empresa ativa (professional_phone e signature). Isto garante que:
-    - A empresa ativa vê os dados específicos
-    - A empresa default mantém o campo global como fallback
-    - O GET /auth/me faz merge automático (dados da empresa sobrepõem-se)
+    MULTI-EMPRESA — Lógica de Separação (sem fuga de dados):
+    
+    - Empresa DEFAULT (ou sem contexto):  phone e email_signature gravam-se
+      normalmente no documento global do utilizador (users collection).
+    
+    - Empresa NÃO-DEFAULT: phone e email_signature são EXTRAÍDOS do
+      update_data via .pop() e redirecionados para a tabela
+      user_company_roles (como professional_phone e signature).
+      Isto impede que dados específicos de uma empresa secundária
+      sobrescrevam os dados globais do utilizador.
+    
+    - Campos explicitamente da empresa (signature, professional_phone,
+      job_title) vão sempre para user_company_roles, independentemente
+      da empresa activa.
+    
+    - O campo "name" é sempre global (não varia por empresa).
     """
     user_id = user["id"]
     
@@ -401,17 +410,14 @@ async def update_profile(
     except Exception as e:
         logger.warning(f"[auth/profile] Erro ao determinar empresa ativa: {e}")
     
-    # Se NÃO existe contexto de empresa (ou é a empresa principal),
-    # comportamento padrão: guardar nos campos globais do user.
-    # Se existe contexto de empresa ativa, os campos phone e email_signature
-    # são também guardados como professional_phone e signature no user_company_roles.
+    # Empresa default = sem contexto, ou is_default=True, ou company_id = user.company
     is_default_company = (
         not active_company_id
         or (active_assoc and active_assoc.get("is_default"))
         or active_company_id == user.get("company")
     )
 
-    # Campos permitidos para actualização global pelo próprio utilizador
+    # ── Recolher campos globais permitidos ──
     allowed_fields = ["name", "phone", "email_signature"]
     update_data = {}
     
@@ -422,17 +428,51 @@ async def update_profile(
             else:
                 update_data[field] = str(data[field]).strip()
 
-    # Verificar se há campos específicos da empresa (validados separadamente abaixo)
+    # Verificar se há campos específicos da empresa (enviados explicitamente)
     has_company_fields = any(
         k in data and data[k] is not None
         for k in ("signature", "professional_phone", "job_title")
     )
     
-    if not update_data and not has_company_fields:
+    # ── Campos específicos por empresa — guardar em user_company_roles ──
+    company_specific_fields = {}
+    if "signature" in data and data["signature"] is not None:
+        company_specific_fields["signature"] = data["signature"]
+    if "professional_phone" in data and data["professional_phone"] is not None:
+        company_specific_fields["professional_phone"] = str(data["professional_phone"]).strip()
+    if "job_title" in data and data["job_title"] is not None:
+        company_specific_fields["job_title"] = str(data["job_title"]).strip()
+
+    # ── SEPARAÇÃO: Empresa não-default → extrair campos do global ──
+    # Quando a empresa activa NÃO é a default, phone e email_signature
+    # NÃO devem ser gravados no documento global (fuga de dados!).
+    # Em vez disso, são redirecionados para user_company_roles.
+    if active_company_id and not is_default_company:
+        # .pop() remove do update_data (não será gravado no global)
+        # e adiciona ao company_specific_fields (será gravado no UCR)
+        prof_phone = update_data.pop("phone", None)
+        if prof_phone is not None and "professional_phone" not in company_specific_fields:
+            company_specific_fields["professional_phone"] = prof_phone
+        
+        comp_sig = update_data.pop("email_signature", None)
+        if comp_sig is not None and "signature" not in company_specific_fields:
+            company_specific_fields["signature"] = comp_sig
+        
+        logger.info(
+            f"[auth/profile] Empresa não-default ({active_company_id!r}): "
+            f"phone/email_signature redirecionados para UCR. "
+            f"update_data restante={list(update_data.keys())}, "
+            f"company_fields={list(company_specific_fields.keys())}"
+        )
+
+    # ── Validação final: tem de haver algo para gravar ──
+    if not update_data and not has_company_fields and not company_specific_fields:
         raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
     
-    # ── Atualizar campos globais do utilizador ──
-    # Sempre guardar nos campos globais (backward compat + empresa default)
+    # ── Gravação Global Segura ──
+    # Só gravar no documento global se ainda houver campos (ex: name,
+    # ou phone/email_signature quando a empresa É a default).
+    # Se update_data ficou vazio após os .pop(), saltamos esta gravação.
     if update_data:
         update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
         
@@ -443,31 +483,14 @@ async def update_profile(
         
         if result.modified_count == 0 and result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Utilizador não encontrado")
-    
-    # ── Campos específicos por empresa — guardar em user_company_roles ──
-    company_specific_fields = {}
-    if "signature" in data and data["signature"] is not None:
-        company_specific_fields["signature"] = data["signature"]
-    if "professional_phone" in data and data["professional_phone"] is not None:
-        company_specific_fields["professional_phone"] = str(data["professional_phone"]).strip()
-    if "job_title" in data and data["job_title"] is not None:
-        company_specific_fields["job_title"] = str(data["job_title"]).strip()
-    
-    # ── MERGE: Se enviou phone/email_signature e há empresa ativa, ──
-    # ── espelhar também como professional_phone/signature no UCR  ──
-    if active_company_id and not is_default_company:
-        if "phone" in data and data["phone"] is not None and "professional_phone" not in data:
-            company_specific_fields["professional_phone"] = str(data["phone"]).strip()
-        if "email_signature" in data and data["email_signature"] is not None and "signature" not in data:
-            company_specific_fields["signature"] = data["email_signature"]
 
-    # ── Avisos para o frontend (campos não guardados) ──
+    # ── Gravação Específica (user_company_roles) ──
     profile_warnings = []
 
     if company_specific_fields:
         try:
             logger.info(
-                f"[auth/profile] Campos específicos empresa: {list(company_specific_fields.keys())}, "
+                f"[auth/profile] Campos empresa: {list(company_specific_fields.keys())}, "
                 f"active_company_id={active_company_id!r}, user_id={user_id}, "
                 f"is_default={is_default_company}"
             )
@@ -476,10 +499,10 @@ async def update_profile(
                 result = await db.user_company_roles.update_one(
                     {"user_id": user_id, "company_id": active_company_id},
                     {"$set": company_specific_fields},
-                    upsert=True  # Criar documento se não existir
+                    upsert=True
                 )
                 logger.info(
-                    f"[auth/profile] update_one result: matched={result.matched_count}, "
+                    f"[auth/profile] UCR update_one: matched={result.matched_count}, "
                     f"modified={result.modified_count}, upserted={result.upserted_id}"
                 )
             else:
@@ -501,12 +524,15 @@ async def update_profile(
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
 
     # Adicionar campos da empresa ativa + MERGE (igual ao GET /auth/me)
+    # Re-ler o UCR para obter os dados actualizados (o upsert acima pode
+    # ter modificado professional_phone e signature)
     active_role_header_resp = request.headers.get("X-Active-Role", "")
     try:
-        if active_company_id and user_companies:
-            # Re-ler associação (dados podem ter mudado com o update acima)
+        # Re-ler empresas para obter dados actualizados após o upsert
+        refreshed_companies = await get_user_companies(user_id)
+        if active_company_id and refreshed_companies:
             active_assoc_refreshed = next(
-                (c for c in user_companies if c.get("company_id") == active_company_id),
+                (c for c in refreshed_companies if c.get("company_id") == active_company_id),
                 None
             )
             if active_assoc_refreshed:
@@ -517,7 +543,7 @@ async def update_profile(
                 updated_user["active_company_signature"] = active_assoc_refreshed.get("signature", "")
                 updated_user["active_company_professional_phone"] = active_assoc_refreshed.get("professional_phone", "")
                 updated_user["active_company_job_title"] = active_assoc_refreshed.get("job_title", "")
-                updated_user["companies"] = user_companies
+                updated_user["companies"] = refreshed_companies
                 # ── MERGE: Sobrepor campos globais com dados da empresa ativa ──
                 if active_assoc_refreshed.get("professional_phone"):
                     updated_user["phone"] = active_assoc_refreshed["professional_phone"]
