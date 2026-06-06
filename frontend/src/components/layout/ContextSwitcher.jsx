@@ -43,26 +43,31 @@ const ContextSwitcher = () => {
   } = useAuth();
 
   const companies = user?.companies || [];
+  const additionalRoles = user?.additional_roles || [];
 
-  // ── Construir lista de perfis únicos a partir de COMPANIES ──
-  // Cada company tem { company_id, role, company_name }.
-  // Ao iterar sobre companies em vez de additional_roles, garantimos
-  // que SEMPRE temos o company_id correto para passar ao switchActiveRole.
-  // Isto resolve o bug onde o matchingCompany ficava undefined porque
-  // allRoles era uma lista de strings sem ligação directa às empresas.
-  const uniqueCompanyProfiles = companies.reduce((acc, c) => {
-    // Evitar duplicados: se o mesmo role já existe, manter o primeiro
-    if (!acc.some(p => p.role === c.role)) {
-      acc.push(c);
-    }
-    return acc;
-  }, []);
+  // ── Construir lista de perfis para o dropdown de Role ──
+  // ESTRATÉGIA: Usar companies (que têm company_id) como fonte principal.
+  // Se companies está vazio, fazer fallback para additional_roles (strings).
+  // Isto garante que o botão NÃO desaparece quando o utilizador tem
+  // additional_roles mas companies ainda não foi populado pelo backend.
+  let profileItems = [];
 
-  // Só mostrar se tem múltiplos perfis por empresa OU múltiplas empresas
-  // Nota: usamos uniqueCompanyProfiles em vez de additional_roles porque
-  // additional_roles pode estar vazio mesmo quando o utilizador tem
-  // múltiplos roles em diferentes empresas (via user_company_roles).
-  const hasMultipleRoles = uniqueCompanyProfiles.length > 1;
+  if (companies.length > 0) {
+    // Fonte principal: companies (objetos com company_id, role, company_name)
+    // Dedup por role — cada role aparece uma só vez
+    profileItems = companies.reduce((acc, c) => {
+      if (!acc.some(p => p.role === c.role)) acc.push(c);
+      return acc;
+    }, []);
+  } else {
+    // Fallback: additional_roles (strings) — sem company_id disponível
+    const allRoles = [user.role, ...additionalRoles.filter(r => r !== user.role)];
+    profileItems = allRoles.map(role => ({ role, company_id: null, company_name: null }));
+  }
+
+  // Visibilidade: mostrar selector de Role se tem múltiplos perfis
+  // (via companies OU via additional_roles como fallback)
+  const hasMultipleRoles = profileItems.length > 1 || additionalRoles.length > 0;
   const hasMultipleCompanies = companies.length > 1;
 
   if (!hasMultipleRoles && !hasMultipleCompanies) return null;
@@ -150,10 +155,10 @@ const ContextSwitcher = () => {
               Modo de Operação
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {uniqueCompanyProfiles.map((profile) => {
+            {profileItems.map((profile) => {
               const selectedRole = profile.role;
               const selectedCompanyId = profile.company_id;
-              const isActive = selectedRole === effectiveRole && selectedCompanyId === effectiveCompanyId;
+              const isActive = selectedRole === effectiveRole && (!selectedCompanyId || selectedCompanyId === effectiveCompanyId);
               const label = ROLE_LABELS[selectedRole] || selectedRole;
               const icon = ROLE_ICONS[selectedRole] || "👤";
               return (
