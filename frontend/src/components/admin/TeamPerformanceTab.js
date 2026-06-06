@@ -103,6 +103,15 @@ const TeamPerformanceTab = ({ token }) => {
 
   const medals = ["🥇", "🥈", "🥉"];
 
+  // ── Formatar período para exibição (com validação de datas) ──
+  const periodLabel = (() => {
+    if (!data?.period_start) return null;
+    const start = safeParseISO(data.period_start);
+    const end = safeParseISO(data.period_end);
+    if (!isValid(start) || !isValid(end)) return null;
+    return `${format(start, "dd/MM/yy", { locale: pt })} — ${format(end, "dd/MM/yy", { locale: pt })}`;
+  })();
+
   return (
     <div className="space-y-4">
       {/* ── Date selector + quick ranges ──────────────────── */}
@@ -253,19 +262,9 @@ const TeamPerformanceTab = ({ token }) => {
           </CardTitle>
           <CardDescription>
             {users.length} colaborador{users.length !== 1 ? "es" : ""} no período
-            {data?.period_start && (() => {
-              const start = safeParseISO(data.period_start);
-              const end = safeParseISO(data.period_end);
-              if (isValid(start) && isValid(end)) {
-                return (
-                  <span className="ml-1">
-                    ({format(start, "dd/MM/yy", { locale: pt })} —{" "}
-                    {format(end, "dd/MM/yy", { locale: pt })})
-                  </span>
-                );
-              }
-              return null;
-            })()
+            {periodLabel && (
+              <span className="ml-1">({periodLabel})</span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
