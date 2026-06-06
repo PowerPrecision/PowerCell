@@ -431,6 +431,18 @@ export function AuthProvider({ children }) {
     if (target) {
       applyBrandTheme(target.company_name);
     }
+
+    // ── REATIVIDADE: Recarregar dados do utilizador após troca de empresa ──
+    // Isto garante que os campos específicos da empresa (assinatura, cargo,
+    // telefone profissional) sejam atualizados no estado do AuthContext,
+    // propagando automaticamente para todos os componentes consumidores
+    // (ProfilePage, EmailConfigForm, etc.)
+    try {
+      const response = await api.get("/auth/me");
+      setUser(response.data);
+    } catch (error) {
+      console.warn("[AuthContext] Erro ao recarregar dados após troca de empresa:", error);
+    }
   }, [user]);
 
   // Refresh user data from /auth/me (e.g. after email config save)

@@ -117,6 +117,9 @@ async def create_user_company_role(payload: UserCompanyRoleCreate):
         "company_name": payload.company_name,
         "role": payload.role,
         "is_default": payload.is_default,
+        "signature": payload.signature,
+        "professional_phone": payload.professional_phone,
+        "job_title": payload.job_title,
         "created_at": now,
         "updated_at": now,
     }
@@ -163,6 +166,14 @@ async def update_user_company_role(role_id: str, payload: UserCompanyRoleUpdate)
                 {"$set": {"is_default": False, "updated_at": now}}
             )
         update_data["is_default"] = payload.is_default
+
+    # Campos específicos por empresa (multi-tenant)
+    if payload.signature is not None:
+        update_data["signature"] = payload.signature
+    if payload.professional_phone is not None:
+        update_data["professional_phone"] = payload.professional_phone
+    if payload.job_title is not None:
+        update_data["job_title"] = payload.job_title
 
     await db.user_company_roles.update_one(
         {"id": role_id},

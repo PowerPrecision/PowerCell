@@ -51,6 +51,10 @@ class UserCompanyRoleCreate(BaseModel):
     company_name: str  # Nome da empresa (denormalizado)
     role: str  # Role nesta empresa
     is_default: bool = False
+    # ── Campos específicos por empresa (multi-tenant) ──
+    signature: Optional[str] = None  # Assinatura de email HTML/Texto para esta empresa
+    professional_phone: Optional[str] = None  # Telefone profissional específico desta empresa
+    job_title: Optional[str] = None  # Cargo específico nesta empresa
 
     @field_validator("role")
     @classmethod
@@ -72,6 +76,10 @@ class UserCompanyRoleUpdate(BaseModel):
     """Payload para atualizar uma associação existente."""
     role: Optional[str] = None
     is_default: Optional[bool] = None
+    # ── Campos específicos por empresa (multi-tenant) ──
+    signature: Optional[str] = None  # Assinatura de email HTML/Texto para esta empresa
+    professional_phone: Optional[str] = None  # Telefone profissional específico desta empresa
+    job_title: Optional[str] = None  # Cargo específico nesta empresa
 
     @field_validator("role")
     @classmethod
@@ -91,6 +99,10 @@ class UserCompanyRoleResponse(BaseModel):
     company_name: str
     role: str
     is_default: bool = False
+    # ── Campos específicos por empresa (multi-tenant) ──
+    signature: Optional[str] = None  # Assinatura de email HTML/Texto para esta empresa
+    professional_phone: Optional[str] = None  # Telefone profissional específico desta empresa
+    job_title: Optional[str] = None  # Cargo específico nesta empresa
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

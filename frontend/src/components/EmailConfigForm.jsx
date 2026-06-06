@@ -51,7 +51,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onCancel, companyId = "default" }) => {
   const isSelf = mode === "self";
-  const { user, effectiveRole } = useAuth();
+  const { user, effectiveRole, effectiveCompanyId } = useAuth();
 
   // Whether the user has multiple roles (and thus per-role email configs)
   const hasMultipleRoles = isSelf && user?.additional_roles?.length > 0;
@@ -95,9 +95,10 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   const isFieldsLocked = webmailConfigured && !isEditing;
 
   // Load existing config — recarregar quando companyId muda (troca de empresa)
+  // O effectiveCompanyId garante reatividade quando o ContextSwitcher muda a empresa ativa
   useEffect(() => {
     loadConfig();
-  }, [companyId]);
+  }, [companyId, effectiveCompanyId]);
 
   // Listen for Google OAuth popup messages (two-step flow)
   useEffect(() => {

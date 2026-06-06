@@ -89,8 +89,12 @@ const ProfilePage = () => {
     phone: "",
     email: "",
   });
+  // ── Campos específicos por empresa (multi-tenant) ──
   const [emailSignature, setEmailSignature] = useState("");
+  const [professionalPhone, setProfessionalPhone] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
   const [savingSignature, setSavingSignature] = useState(false);
+  const [savingCompanyFields, setSavingCompanyFields] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -130,18 +134,29 @@ const ProfilePage = () => {
     }
   }, [effectiveCompanyId]);
 
-  // Carregar dados do utilizador
+  // ── REATIVIDADE: Recarregar dados do perfil quando a empresa ativa muda ──
+  // Quando o utilizador troca de empresa no ContextSwitcher, os campos
+  // específicos da empresa (assinatura, telefone profissional, cargo)
+  // devem atualizar automaticamente.
   useEffect(() => {
     if (user) {
+      // Campos globais (não mudam com a empresa)
       setProfileData({
         name: user.name || "",
         phone: user.phone || "",
         email: user.email || "",
       });
-      setEmailSignature(user.email_signature || "");
+      // Campos específicos da empresa ativa
+      setEmailSignature(user.active_company_signature || user.email_signature || "");
+      setProfessionalPhone(user.active_company_professional_phone || "");
+      setJobTitle(user.active_company_job_title || "");
       setLoading(false);
     }
-  }, [user]);
+  }, [user, effectiveCompanyId]); // ← effectiveCompanyId como dependência
+
+  // Carregar dados do utilizador (inicial — complementado pelo useEffect acima)
+  // NOTA: A lógica de carregamento foi movida para o useEffect com [user, effectiveCompanyId]
+  // para garantir reatividade à mudança de empresa.
 
   // Carregar sessões
   const loadSessions = async () => {
@@ -199,7 +214,7 @@ const ProfilePage = () => {
 
   useEffect(() => {
     loadEmailConfigInfo();
-  }, [emailCompanyId]); // Recarregar quando o utilizador troca de empresa no dropdown
+  }, [emailCompanyId, effectiveCompanyId]); // Recarregar quando o utilizador troca de empresa no dropdown ou no ContextSwitcher
 
   // Guardar alterações do perfil
   const handleSaveProfile = async () => {
@@ -232,17 +247,20 @@ const ProfilePage = () => {
     }
   };
 
-  // Guardar assinatura de email (separadamente para não sobrecarregar o perfil)
+  // Guardar assinatura de email (específica da empresa ativa)
   const handleSaveSignature = async () => {
     setSavingSignature(true);
     try {
-      const response = await api.put("/auth/profile", {
-        email_signature: emailSignature,
+      await api.put("/auth/profile", {
+        signature: emailSignature,  // Campo específico da empresa → user_company_roles
+        email_signature: emailSignature,  // Backward compat global
       });
       toast({
         title: "Assinatura guardada",
-        description: "A sua assinatura de email foi atualizada.",
+        description: "A sua assinatura de email foi atualizada para esta empresa.",
       });
+      // Atualizar o estado do utilizador no AuthContext
+      if (refreshUser) refreshUser();
     } catch (error) {
       toast({
         variant: "destructive",
@@ -251,6 +269,31 @@ const ProfilePage = () => {
       });
     } finally {
       setSavingSignature(false);
+    }
+  };
+
+  // Guardar campos específicos da empresa (cargo, telefone profissional)
+  const handleSaveCompanyFields = async () => {
+    setSavingCompanyFields(true);
+    try {
+      await api.put("/auth/profile", {
+        job_title: jobTitle,
+        professional_phone: professionalPhone,
+      });
+      toast({
+        title: "Dados profissionais guardados",
+        description: "O seu cargo e telefone profissional foram atualizados para esta empresa.",
+      });
+      // Atualizar o estado do utilizador no AuthContext
+      if (refreshUser) refreshUser();
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao guardar",
+        description: error.response?.data?.detail || "Não foi possível guardar os dados profissionais.",
+      });
+    } finally {
+      setSavingCompanyFields(false);
     }
   };
 
@@ -524,15 +567,87 @@ const ProfilePage = () => {
           </CardContent>
         </Card>
 
-        {/* Assinatura de Email */}
+        {/* Dados Profissionais por Empresa */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Dados Profissionais
+              {user?.active_company_name && (
+                <Badge variant="outline" className="ml-2 text-xs font-normal">
+                  {user.active_company_name}
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription>
+              Cargo e telefone profissional específicos para a empresa ativa.
+              Estes dados são utilizados na assinatura de email e nos templates.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="job_title">Cargo / Função</Label>
+                <Input
+                  id="job_title"
+                  value={jobTitle}
+                  onChange={(e) => setJobTitle(e.target.value)}
+                  placeholder="Ex: Consultor Imobiliário, Intermediário de Crédito..."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Cargo específico para esta empresa (pode diferir entre empresas).
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="professional_phone">Telefone Profissional</Label>
+                <Input
+                  id="professional_phone"
+                  value={professionalPhone}
+                  onChange={(e) => setProfessionalPhone(e.target.value)}
+                  placeholder="Ex: +351 912 345 678"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Contacto profissional específico para esta empresa.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                onClick={handleSaveCompanyFields}
+                disabled={savingCompanyFields}
+                size="sm"
+                className="gap-2"
+              >
+                {savingCompanyFields ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A guardar...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Guardar Dados Profissionais
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Assinatura de Email — Específica da Empresa Ativa */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <PenLine className="h-5 w-5" />
               Assinatura de Email
+              {user?.active_company_name && (
+                <Badge variant="outline" className="ml-2 text-xs font-normal">
+                  {user.active_company_name}
+                </Badge>
+              )}
             </CardTitle>
             <CardDescription>
-              Configure a sua assinatura pessoal. Será adicionada automaticamente no final de todos os emails que enviar.
+              Assinatura de email específica para a empresa ativa. Será adicionada automaticamente no final de todos os emails que enviar.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -545,7 +660,7 @@ const ProfilePage = () => {
             />
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                Suporta formatação de texto, cores, links e imagens.
+                Suporta formatação de texto, cores, links e imagens. Esta assinatura é específica para a empresa ativa.
               </p>
               <Button
                 onClick={handleSaveSignature}

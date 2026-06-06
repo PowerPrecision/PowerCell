@@ -247,6 +247,17 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
             if active_assoc:
                 response["active_company_role"] = active_assoc.get("role")
                 response["active_company_name"] = active_assoc.get("company_name")
+                response["active_company_signature"] = active_assoc.get("signature", "")
+                response["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
+                response["active_company_job_title"] = active_assoc.get("job_title", "")
+            else:
+                response["active_company_signature"] = ""
+                response["active_company_professional_phone"] = ""
+                response["active_company_job_title"] = ""
+        else:
+            response["active_company_signature"] = ""
+            response["active_company_professional_phone"] = ""
+            response["active_company_job_title"] = ""
     except Exception as e:
         logger.warning(f"[auth/me] Erro ao carregar empresas do utilizador: {e}")
         # Não bloquear o request — empresas são opcional
@@ -331,6 +342,7 @@ async def get_preferences(user: dict = Depends(get_current_user)):
 @router.put("/profile")
 async def update_profile(
     data: dict,
+    request: Request,
     user: dict = Depends(get_current_user)
 ):
     """
@@ -338,7 +350,7 @@ async def update_profile(
     """
     user_id = user["id"]
     
-    # Campos permitidos para actualização pelo próprio utilizador
+    # Campos permitidos para actualização global pelo próprio utilizador
     allowed_fields = ["name", "phone", "email_signature"]
     update_data = {}
     
@@ -350,23 +362,53 @@ async def update_profile(
             else:
                 # Aceitar qualquer valor — sem validação de formato
                 update_data[field] = str(data[field]).strip()
-    
-    if not update_data:
-        raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
-    
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
-    result = await db.users.update_one(
-        {"id": user_id},
-        {"$set": update_data}
+
+    # Verificar se há campos específicos da empresa (validados separadamente abaixo)
+    has_company_fields = any(
+        k in data and data[k] is not None
+        for k in ("signature", "professional_phone", "job_title")
     )
     
-    if result.modified_count == 0 and result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    if not update_data and not has_company_fields:
+        raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
     
+    # Atualizar campos globais do utilizador
+    if update_data:
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        result = await db.users.update_one(
+            {"id": user_id},
+            {"$set": update_data}
+        )
+        
+        if result.modified_count == 0 and result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    
+    # ── Campos específicos por empresa — guardar em user_company_roles ──
+    company_specific_fields = {}
+    if "signature" in data and data["signature"] is not None:
+        company_specific_fields["signature"] = data["signature"]
+    if "professional_phone" in data and data["professional_phone"] is not None:
+        company_specific_fields["professional_phone"] = str(data["professional_phone"]).strip()
+    if "job_title" in data and data["job_title"] is not None:
+        company_specific_fields["job_title"] = str(data["job_title"]).strip()
+
+    if company_specific_fields:
+        try:
+            from services.auth import get_active_company_id_async
+            active_company_id = await get_active_company_id_async(request, user)
+            if active_company_id:
+                company_specific_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+                await db.user_company_roles.update_one(
+                    {"user_id": user_id, "company_id": active_company_id},
+                    {"$set": company_specific_fields}
+                )
+        except Exception as e:
+            logger.warning(f"[auth/profile] Erro ao guardar campos específicos da empresa: {e}")
+
     # Retornar o utilizador actualizado
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    
+
     return {
         "success": True,
         "message": "Perfil atualizado com sucesso",

@@ -2055,31 +2055,60 @@ async def get_email_timeline(
 
 @router.get("/templates", response_model=List[EmailTemplateResponse])
 async def get_email_templates(
+    request: Request,
     category: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Listar templates de resposta rápida."""
+    """Listar templates de resposta rápida filtrados pela empresa ativa."""
+    from services.auth import get_active_company_id_async
+
     query = {}
     if category:
         query["category"] = category
-    
+
+    # MULTI-EMPRESA: filtrar templates por empresa ativa
+    # Mostrar: templates da empresa ativa + templates globais (sem company_id)
+    try:
+        active_company_id = await get_active_company_id_async(request, current_user)
+        if active_company_id:
+            query["$or"] = [
+                {"company_id": active_company_id},
+                {"company_id": {"$exists": False}},
+                {"company_id": None},
+                {"company_id": ""},
+            ]
+    except Exception:
+        pass  # Fallback: mostrar todos se não houver contexto
+
     templates = await db.email_templates.find(
         query,
         {"_id": 0}
     ).sort("usage_count", -1).to_list(50)
-    
+
     return templates
 
 
 @router.post("/templates", response_model=EmailTemplateResponse)
 async def create_email_template(
     template: EmailTemplateCreate,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Criar novo template de resposta."""
+    from services.auth import get_active_company_id_async
+
     template_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
+    # MULTI-EMPRESA: determinar company_id para este template
+    company_id = "default"
+    try:
+        active_company_id = await get_active_company_id_async(request, current_user)
+        if active_company_id:
+            company_id = active_company_id
+    except Exception:
+        pass
+
     template_doc = {
         "id": template_id,
         "name": sanitize_string(template.name, max_length=200),
@@ -2087,6 +2116,7 @@ async def create_email_template(
         "body": sanitize_string(template.body, max_length=10000),
         "category": template.category,
         "is_default": template.is_default,
+        "company_id": company_id,  # MULTI-EMPRESA
         "created_by": current_user["id"],
         "created_at": now,
         "usage_count": 0
