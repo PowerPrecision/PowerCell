@@ -230,13 +230,30 @@ if CORS_ORIGIN_REGEX:
 # Configurações adicionais de CORS (com defaults seguros)
 CORS_ALLOW_CREDENTIALS = os.environ.get('CORS_ALLOW_CREDENTIALS', 'true').lower() == 'true'
 CORS_ALLOW_METHODS = os.environ.get('CORS_ALLOW_METHODS', 'GET,POST,PUT,DELETE,OPTIONS,PATCH').split(',')
-CORS_ALLOW_HEADERS = os.environ.get('CORS_ALLOW_HEADERS', 'Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role,X-Company-Id').split(',')
+
+# CORS_ALLOW_HEADERS: Garantir que os headers custom do frontend estão sempre presentes.
+# CORREÇÃO (2025): O Render Dashboard pode ter um valor personalizado para CORS_ALLOW_HEADERS
+# que NÃO inclui X-Company-Id, causando erro "Disallowed CORS headers" nos pedidos preflight.
+# Estes headers são obrigatórios porque o frontend envia-os em TODOS os pedidos API:
+# - X-Active-Role: ContextSwitcher (multi-role)
+# - X-Company-Id: ContextSwitcher (multi-empresa)
+_REQUIRED_CORS_HEADERS = {'X-Active-Role', 'X-Company-Id'}
+_raw_allow_headers = os.environ.get('CORS_ALLOW_HEADERS', 'Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role,X-Company-Id')
+CORS_ALLOW_HEADERS = [h.strip() for h in _raw_allow_headers.split(',')]
+# Garantir que os headers obrigatórios estão presentes (mesmo que o env var os omita)
+_headers_set = set(CORS_ALLOW_HEADERS)
+for _req_header in _REQUIRED_CORS_HEADERS:
+    if _req_header not in _headers_set:
+        print(f"⚠️  CORS_ALLOW_HEADERS: Header obrigatório '{_req_header}' em falta! A adicionar automaticamente.", file=sys.stderr)
+        CORS_ALLOW_HEADERS.append(_req_header)
+
 CORS_MAX_AGE = int(os.environ.get('CORS_MAX_AGE', '600'))
 
 # Log de resumo CORS
 print(f"✅ CORS resumo: {len(CORS_ORIGINS)} origens explícitas, "
       f"regex={'ativo' if CORS_ORIGIN_REGEX else 'inativo'}, "
       f"credentials={CORS_ALLOW_CREDENTIALS}, "
+      f"allow_headers={CORS_ALLOW_HEADERS}, "
       f"max_age={CORS_MAX_AGE}", file=sys.stderr)
 
 

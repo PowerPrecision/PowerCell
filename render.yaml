@@ -63,6 +63,13 @@ services:
       # Permitir qualquer subdomínio .vercel.app (previews de branch/PR)
       - key: ALLOW_VERCEL_PREVIEWS
         value: "true"
+      # Headers permitidos em pedidos CORS (inclui headers custom do frontend)
+      # IMPORTANTE: X-Company-Id e X-Active-Role são enviados pelo ContextSwitcher
+      - key: CORS_ALLOW_HEADERS
+        value: Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role,X-Company-Id
+      # Métodos HTTP permitidos em pedidos CORS
+      - key: CORS_ALLOW_METHODS
+        value: GET,POST,PUT,DELETE,OPTIONS,PATCH
 
       # ── AWS S3 (SECRETS) ──
       - key: AWS_ACCESS_KEY_ID
