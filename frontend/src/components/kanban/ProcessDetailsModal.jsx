@@ -48,7 +48,7 @@ import { safeString } from '../../utils/safeString';
 import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits } from '../../services/api';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
-import { safeDateStr } from '../../lib/utils';
+import { safeDateStr, formatDate, formatDateTime } from '../../lib/utils';
 
 // ── Helpers ────────────────────────────────────────────────────────
 const formatCurrency = (value) => {
@@ -882,12 +882,12 @@ const ProcessDetailsModal = memo(({
                 {process.created_at && (
                   <span className="flex items-center gap-1">
                     <Calendar className="h-3 w-3" />
-                    Criado: {new Date(safeDateStr(process.created_at)).toLocaleDateString('pt-PT')}
+                    Criado: {formatDate(process.created_at)}
                   </span>
                 )}
                 {process.updated_at && (
                   <span>
-                    Atualizado: {new Date(safeDateStr(process.updated_at)).toLocaleDateString('pt-PT')}
+                    Atualizado: {formatDate(process.updated_at)}
                   </span>
                 )}
               </div>
@@ -984,7 +984,7 @@ const ProcessDetailsModal = memo(({
                           {visit.scheduled_date && (
                             <span className="text-[11px] text-muted-foreground">
                               <Calendar className="h-3 w-3 inline mr-0.5" />
-                              {new Date(safeDateStr(visit.scheduled_date)).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              {formatDateTime(visit.scheduled_date)}
                             </span>
                           )}
                           {visit.consultor_name && (
@@ -1130,7 +1130,7 @@ const ProcessDetailsModal = memo(({
                   {sv.scheduled_date && (
                     <div>
                       <p className="text-muted-foreground text-xs">Data Agendada</p>
-                      <p className="font-medium flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{new Date(safeDateStr(sv.scheduled_date)).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                      <p className="font-medium flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{formatDateTime(sv.scheduled_date)}</p>
                     </div>
                   )}
                   {sv.source === 'portal_client' && (

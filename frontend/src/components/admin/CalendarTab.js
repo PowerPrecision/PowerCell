@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Calendar } from "../ui/calendar";
 import { Plus, Trash2, Eye, CalendarDays, Users } from "lucide-react";
 import { hasAnyRole, excludeRoles } from "../../utils/roleUtils";
-import { safeDateStr } from "../../lib/utils";
+import { safeDateStr, formatDate } from "../../lib/utils";
 
 const priorityOrder = { high: 1, medium: 2, low: 3 };
 const priorityLabels = { high: "Alta", medium: "Média", low: "Baixa" };
@@ -255,7 +255,7 @@ const CalendarTab = ({
                             {deadlineDate.getDate()}
                           </div>
                           <div className="text-xs text-muted-foreground uppercase">
-                            {deadlineDate.toLocaleDateString('pt-PT', { month: 'short' })}
+                            {formatDate(deadline.due_date)}
                           </div>
                           <Badge 
                             variant="outline" 

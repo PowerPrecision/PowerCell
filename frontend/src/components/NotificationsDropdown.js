@@ -378,7 +378,9 @@ const NotificationsDropdown = () => {
   };
 
   const formatDate = (dateStr) => {
+    if (!dateStr) return "-";
     const date = new Date(safeDateStr(dateStr));
+    if (isNaN(date.getTime())) return "-";
     const now = new Date();
     const diff = now - date;
     

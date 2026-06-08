@@ -68,7 +68,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../services/api";
-import { safeDateStr } from "../lib/utils";
+import { formatDate, formatDateTime } from "../lib/utils";
 import { safeString } from "../utils/safeString";
 
 // Mapeamento de nomes de campos para português
@@ -352,16 +352,10 @@ const AIDataReviewPage = () => {
   }, [loadPendingReviews, loadWeeklyReport, loadReportConfig]);
 
   // Formatar data
-  const formatDate = (dateStr) => {
+  const formatDateLocal = (dateStr) => {
     if (!dateStr) return "-";
     try {
-      return new Date(safeDateStr(dateStr)).toLocaleDateString("pt-PT", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      return formatDateTime(dateStr);
     } catch {
       return dateStr;
     }
@@ -563,7 +557,7 @@ const AIDataReviewPage = () => {
                             <TableCell>
                               <div className="flex items-center gap-1 text-muted-foreground text-sm">
                                 <Clock className="h-3 w-3" />
-                                {formatDate(process.oldest_pending)}
+                                {formatDateLocal(process.oldest_pending)}
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
@@ -690,7 +684,7 @@ const AIDataReviewPage = () => {
                     <CardContent>
                       <p className="text-sm font-medium">Últimos 7 dias</p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {new Date(safeDateStr(weeklyReport.period.start)).toLocaleDateString("pt-PT")} - {new Date(safeDateStr(weeklyReport.period.end)).toLocaleDateString("pt-PT")}
+                        {formatDate(weeklyReport.period.start)} - {formatDate(weeklyReport.period.end)}
                       </p>
                     </CardContent>
                   </Card>
@@ -904,7 +898,7 @@ const AIDataReviewPage = () => {
                                   </p>
                                   {(comparison.pending_value || comparison.latest_date) && (
                                     <p className="text-xs text-amber-600 mt-1">
-                                      {formatDate(comparison.latest_date)}
+                                      {formatDateLocal(comparison.latest_date)}
                                     </p>
                                   )}
                                 </div>

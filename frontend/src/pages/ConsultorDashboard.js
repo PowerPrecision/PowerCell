@@ -497,7 +497,7 @@ const ConsultorDashboard = () => {
                             </div>
                             <div className="text-right ml-3 shrink-0">
                               <p className="text-sm font-medium">
-                                {dueDate.toLocaleDateString('pt-PT')}
+                                {formatDate(deadline.due_date)}
                               </p>
                               <p className={`text-xs ${daysLeft < 0 ? "text-red-600" : daysLeft <= 3 ? "text-orange-600" : "text-muted-foreground"}`}>
                                 {daysLeft < 0 ? `${Math.abs(daysLeft)}d atrasado` : daysLeft === 0 ? "Hoje" : `em ${daysLeft}d`}

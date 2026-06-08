@@ -51,7 +51,7 @@ import {
 } from "lucide-react";
 import { getAuditTrail, getAuditStats, exportAuditTrail, cleanupAuditTrail } from "../services/api";
 import { toast } from "../hooks/use-toast";
-import { safeDateStr } from "../lib/utils";
+import { formatDateTime } from "../lib/utils";
 
 // Mapeamento de cores para badges de origem
 const sourceConfig = {
@@ -61,23 +61,7 @@ const sourceConfig = {
   email: { label: "Email", className: "bg-green-100 text-green-800 border-green-200" },
 };
 
-// Formatar data ISO para formato legível
-function formatDateTime(isoString) {
-  if (!isoString) return "-";
-  try {
-    const d = new Date(safeDateStr(isoString));
-    return d.toLocaleString("pt-PT", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  } catch {
-    return isoString;
-  }
-}
+// (formatDateTime is now imported from lib/utils)
 
 // Truncar texto longo
 function truncate(str, maxLen = 60) {

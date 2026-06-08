@@ -49,7 +49,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { hasRole } from "../utils/roleUtils";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
-import { safeDateStr } from "../lib/utils";
+import { formatDateTime } from "../lib/utils";
 import DashboardLayout from "../layouts/DashboardLayout";
 import EmailConfigForm from "../components/EmailConfigForm";
 import RichTextEditor from "../components/ui/RichTextEditor";
@@ -477,17 +477,7 @@ const ProfilePage = () => {
     }
   };
 
-  // Formatar data
-  const formatDate = (dateString) => {
-    if (!dateString) return "-";
-    return new Date(safeDateStr(dateString)).toLocaleString("pt-PT", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+  // (formatDateTime imported from lib/utils)
 
   // Traduzir força da password
   const getStrengthLabel = (strength) => {
@@ -632,7 +622,7 @@ const ProfilePage = () => {
                 </Badge>
               )}
               <span className="text-sm text-muted-foreground">
-                Membro desde {formatDate(user?.created_at)}
+                Membro desde {formatDateTime(user?.created_at)}
               </span>
             </div>
             <Button onClick={handleSaveProfile} disabled={saving} className="gap-2">
@@ -846,7 +836,7 @@ const ProfilePage = () => {
                           </span>
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {formatDate(session.created_at)}
+                            {formatDateTime(session.created_at)}
                           </span>
                         </div>
                       </div>
