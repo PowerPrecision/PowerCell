@@ -877,7 +877,7 @@ async def list_clients(
              "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
              "assigned_consultor_id": 1, "assigned_mediador_id": 1,
              "consultor_name": 1, "mediador_name": 1, "is_active": 1, "created_at": 1,
-             "prioridade": 1, "priority": 1}
+             "updated_at": 1, "prioridade": 1, "priority": 1}
         ).sort("client_name", 1).to_list(length=None)
         
         # Agrupar por cliente
@@ -904,6 +904,7 @@ async def list_clients(
                     "active_processes_count": 0,
                     "processes": [],  # Lista de processos com fase
                     "created_at": proc.get("created_at"),  # For sorting by date
+                    "updated_at": proc.get("updated_at"),  # Last update date
                     "prioridade": proc_priority,  # Prioridade mais alta dos processos
                     "is_active": True,  # Valor por defeito; será ajustado abaixo com base nos processos
                 }
@@ -912,6 +913,11 @@ async def list_clients(
             proc_date = proc.get("created_at")
             if proc_date and (not clients_map[key].get("created_at") or proc_date < clients_map[key]["created_at"]):
                 clients_map[key]["created_at"] = proc_date
+            
+            # Update updated_at to latest date
+            proc_updated = proc.get("updated_at")
+            if proc_updated and (not clients_map[key].get("updated_at") or proc_updated > clients_map[key]["updated_at"]):
+                clients_map[key]["updated_at"] = proc_updated
             
             # Adicionar informação do processo
             status_info = status_map.get(proc.get("status"), {})
@@ -1163,6 +1169,13 @@ async def get_client(
     
     # Desencriptar dados sensíveis
     client = decrypt_client_data(client)
+    
+    # Safeguard: garantir que created_at e updated_at são sempre válidos
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not client.get("created_at"):
+        client["created_at"] = now_iso
+    if not client.get("updated_at"):
+        client["updated_at"] = now_iso
     
     return client
 

@@ -168,8 +168,15 @@ const MyClientsPage = () => {
         bVal = (b.status_label || b.status || "").toLowerCase();
       } else {
         // Data fields: updated_at, created_at, etc.
-        aVal = new Date(a[sortField] || 0).getTime();
-        bVal = new Date(b[sortField] || 0).getTime();
+        // Use Infinity/-Infinity for null dates to sort them to the end, avoiding 01/01/1970 epoch
+        const getDateVal = (item, field) => {
+          const val = item[field];
+          if (!val) return sortOrder === "asc" ? Infinity : -Infinity;
+          const parsed = new Date(val);
+          return isNaN(parsed.getTime()) ? (sortOrder === "asc" ? Infinity : -Infinity) : parsed.getTime();
+        };
+        aVal = getDateVal(a, sortField);
+        bVal = getDateVal(b, sortField);
       }
 
       if (sortOrder === "asc") {

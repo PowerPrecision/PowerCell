@@ -257,7 +257,10 @@ export default function ClientsPage() {
       // Campo genérico (ex: created_at, updated_at)
       const val = c[sortField];
       if (sortField === "created_at" || sortField === "updated_at") {
-        return val ? new Date(safeDateStr(val)).getTime() : 0;
+        // Use Infinity for null dates to sort them to the end, avoiding 01/01/1970 epoch
+        if (!val) return sortOrder === "asc" ? Infinity : -Infinity;
+        const parsed = new Date(safeDateStr(val));
+        return isNaN(parsed.getTime()) ? (sortOrder === "asc" ? Infinity : -Infinity) : parsed.getTime();
       }
       return typeof val === "string" ? val.toLowerCase() : val;
     };
