@@ -100,7 +100,7 @@ const ConsultorDashboard = () => {
   // Fetch webmail stats, deadlines and communications feed on mount
   useEffect(() => {
     getWebmailStats("personal")
-      .then(res => setWebmailStats(res.data))
+      .then(res => setWebmailStats(res.data || { unread_count: 0, sent_today_count: 0, drafts_count: 0 }))
       .catch(() => {});
 
     getCalendarDeadlines()
@@ -108,7 +108,7 @@ const ConsultorDashboard = () => {
       .catch(() => {});
 
     getCommunicationsFeed()
-      .then(res => setCommsFeed(res.data || {}))
+      .then(res => setCommsFeed(res.data || { portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 }))
       .catch(() => {});
   }, []);
 

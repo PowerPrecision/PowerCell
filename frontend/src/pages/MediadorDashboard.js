@@ -101,7 +101,7 @@ const MediadorDashboard = () => {
   // Fetch webmail stats and deadlines on mount
   useEffect(() => {
     getWebmailStats("personal")
-      .then(res => setWebmailStats(res.data))
+      .then(res => setWebmailStats(res.data || { unread_count: 0, sent_today_count: 0, drafts_count: 0 }))
       .catch(() => {});
 
     getCalendarDeadlines()

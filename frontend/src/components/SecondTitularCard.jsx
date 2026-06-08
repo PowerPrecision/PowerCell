@@ -10,7 +10,9 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { searchClients, updateProcess } from "../services/api";
+import { queryKeys } from "../lib/queryClient";
 import { Card, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
@@ -23,6 +25,7 @@ import { toast } from "sonner";
 
 const SecondTitularCard = ({ process: processData, onUpdate }) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [isSearching, setIsSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -87,6 +90,9 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
       setIsSearching(false);
       setQuery("");
       setResults([]);
+      // Invalidar cache React Query para forçar re-fetch dos dados do processo
+      queryClient.invalidateQueries({ queryKey: queryKeys.processes.detail(processData.id) });
+      // Chamar callback do componente pai (fetchData) para atualizar o estado local
       if (onUpdate) onUpdate();
     } catch (err) {
       console.error("Detalhe do Erro API [linkSecondClient]:", err);
@@ -104,6 +110,9 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
         second_client_id: "",  // String vazia = remover
       });
       toast.success("2º Titular desligado do processo");
+      // Invalidar cache React Query para forçar re-fetch dos dados do processo
+      queryClient.invalidateQueries({ queryKey: queryKeys.processes.detail(processData.id) });
+      // Chamar callback do componente pai (fetchData) para atualizar o estado local
       if (onUpdate) onUpdate();
     } catch (err) {
       console.error("Detalhe do Erro API [unlinkSecondClient]:", err);

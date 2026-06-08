@@ -152,11 +152,11 @@ const StaffDashboard = () => {
         getCalendarDeadlines().catch(() => ({ data: [] })),
         getWebmailStats("personal").catch(() => ({ data: { unread_count: 0, sent_today_count: 0, drafts_count: 0 } })),
       ]);
-      setStats(statsRes.data);
-      setUsers(usersRes.data);
-      setExpiries(expiriesRes.data);
-      setDeadlines(deadlinesRes.data);
-      setWebmailStats(webmailRes.data);
+      setStats(statsRes.data || {});
+      setUsers(Array.isArray(usersRes?.data) ? usersRes.data : []);
+      setExpiries(Array.isArray(expiriesRes?.data) ? expiriesRes.data : []);
+      setDeadlines(Array.isArray(deadlinesRes?.data) ? deadlinesRes.data : []);
+      setWebmailStats(webmailRes.data || { unread_count: 0, sent_today_count: 0, drafts_count: 0 });
     } catch (error) {
       console.error("Error fetching data:", error);
       toast.error("Erro ao carregar dados");
@@ -476,7 +476,7 @@ const StaffDashboard = () => {
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {dstiAlerts.processes.slice(0, 6).map((p) => (
+                {dstiAlerts?.processes?.slice(0, 6).map((p) => (
                   <button
                     key={p.process_id}
                     onClick={() => navigate(`/processo/${p.process_id}`)}

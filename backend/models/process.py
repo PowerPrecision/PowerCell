@@ -186,8 +186,15 @@ class ProcessUpdate(BaseModel):
     is_indexed: Optional[bool] = None  # Marcação de conclusão da indexação documental  
 
 class ProcessResponse(BaseModel):
-    """Modelo de resposta para dados de processo."""
-    model_config = ConfigDict(extra="ignore")
+    """Modelo de resposta para dados de processo.
+    
+    NOTA: extra="allow" é necessário porque populate_client_data() injeta
+    campos dinâmicos (second_client_data, personal_data, titular2_data,
+    financial_data, client_name, client_email, etc.) que o Frontend espera.
+    Com extra="ignore", estes campos eram removidos na serialização, causando
+    bugs como o 2º Titular não aparecer após associação (Bloco B).
+    """
+    model_config = ConfigDict(extra="allow")
     id: str
     process_number: Optional[int] = None  
     client_id: Optional[str] = Field(None, description="Referência para a pessoa fiscal (pode estar em falta em processos antigos)")

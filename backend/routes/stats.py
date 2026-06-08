@@ -330,7 +330,7 @@ async def get_communications_feed(user: dict = Depends(get_current_user)):
 
     # Clientes não têm acesso ao feed de comunicações internas
     if role == UserRole.CLIENTE:
-        return {"portal_messages": [], "unread_emails": []}
+        return {"portal_messages": [], "unread_emails": [], "portal_unread_count": 0, "email_unread_count": 0}
 
     # ── Determinar process_ids do utilizador (para filtragem por role) ──
     process_ids = None  # None = sem filtro (vê tudo)
