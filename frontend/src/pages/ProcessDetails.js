@@ -1797,12 +1797,16 @@ const ProcessDetails = () => {
 
   // Função para eliminar o cliente/processo
   const handleDeleteClient = async () => {
+    if (!clientId) {
+      toast.error("Não foi possível identificar o cliente associado a este processo.");
+      return;
+    }
     if (!window.confirm(`Tem a certeza que deseja eliminar o cliente "${process?.client_name}"?\n\nEsta ação é irreversível.`)) {
       return;
     }
     
     try {
-      await deleteClient(id);
+      await deleteClient(clientId);
       toast.success("Cliente eliminado com sucesso");
       navigate("/clientes");
     } catch (error) {

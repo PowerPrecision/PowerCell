@@ -768,8 +768,10 @@ async def preview_documentation_email(
     config = await get_system_config()
     doc_config = config.document_recipients
     
-    if not doc_config.enabled:
-        raise HTTPException(status_code=400, detail="Envio de documentação não está activado")
+    # NOTA: O preview deve funcionar mesmo que o envio de documentação esteja
+    # desactivado. O utilizador precisa de visualizar o template antes de
+    # activar a funcionalidade. A restrição `enabled` só se aplica ao envio
+    # (endpoint /send-documentation).
     
     # Obter documentos do processo para incluir na lista
     documents = await db.document_metadata.find(

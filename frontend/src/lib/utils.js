@@ -44,14 +44,37 @@ export const safeDateStr = (dateString) => {
 
 /**
  * Faz parseISO de forma segura — retorna null em vez de crashar com
- * "Invalid time value" quando safeDateStr retorna null ou a data é inválida.
+ * "Invalid time value" quando a data é inválida.
+ *
+ * NOTA: NÃO usa safeDateStr() antes de parseISO, porque safeDateStr
+ * converte traços em barras (para compatibilidade Safari/new Date),
+ * mas parseISO do date-fns exige formato ISO 8601 com traços.
+ * A conversão de barras fazia com que parseISO retornasse Invalid Date,
+ * causando "Data inválida" no chat e noutros componentes.
+ *
+ * Estratégia:
+ * 1. Tenta parseISO directamente (funciona com ISO 8601: 2025-03-15T14:30:00+00:00)
+ * 2. Se falhar, tenta new Date(safeDateStr()) como fallback para Safari
  */
 export const safeParseISO = (dateString) => {
+  if (!dateString) return null;
+  if (dateString instanceof Date) {
+    return isNaN(dateString.getTime()) ? null : dateString;
+  }
+  if (typeof dateString !== "string") return null;
   try {
+    // Tentar parseISO directamente com a string original (formato ISO 8601)
+    const parsed = parseISO(dateString);
+    if (!isNaN(parsed.getTime())) return parsed;
+  } catch {
+    // parseISO falhou, tentar fallback
+  }
+  try {
+    // Fallback: normalizar para Safari e usar new Date()
     const normalized = safeDateStr(dateString);
     if (!normalized) return null;
-    const parsed = parseISO(normalized);
-    return isNaN(parsed.getTime()) ? null : parsed;
+    const d = new Date(normalized);
+    return isNaN(d.getTime()) ? null : d;
   } catch {
     return null;
   }

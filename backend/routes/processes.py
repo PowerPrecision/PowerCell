@@ -705,9 +705,29 @@ async def send_magic_link_email(
 
     client_email = process.get("client_email", "")
     client_name = process.get("client_name", "Cliente")
+    client_id = process.get("client_id", "")
 
     if not client_email:
         raise HTTPException(status_code=400, detail="Cliente não tem email associado")
+
+    # Buscar portal_access_code do cliente para incluir no email
+    portal_access_code = None
+    if client_id:
+        client_doc = await db.clients.find_one(
+            {"id": client_id},
+            {"_id": 0, "portal_access_code": 1}
+        )
+        if client_doc:
+            portal_access_code = client_doc.get("portal_access_code")
+    
+    # Se não tem access code, gerar um e guardar no cliente
+    if not portal_access_code and client_id:
+        from models.client import generate_portal_access_code
+        portal_access_code = generate_portal_access_code()
+        await db.clients.update_one(
+            {"id": client_id},
+            {"$set": {"portal_access_code": portal_access_code}}
+        )
 
     # Gerar magic link JWT
     token = create_client_magic_token(process_id)
@@ -739,6 +759,27 @@ async def send_magic_link_email(
     magic_link = f"{frontend_url}/portal/{short_id}"
 
     # Enviar email ao cliente
+    # Bloco opcional com credenciais de acesso ao portal
+    portal_credentials_html = ""
+    portal_credentials_text = ""
+    if portal_access_code:
+        portal_credentials_html = f"""
+            <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <h3 style="color: #0f766e; margin: 0 0 12px 0; font-size: 15px;">As suas credenciais de acesso</h3>
+                <p style="margin: 5px 0; color: #1e293b;"><strong>Email:</strong> {client_email}</p>
+                <p style="margin: 5px 0; color: #1e293b;"><strong>Código de Acesso:</strong> <span style="font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold; color: #0f766e; letter-spacing: 3px;">{portal_access_code}</span></p>
+                <p style="font-size: 12px; color: #64748b; margin-top: 10px;">Guarde este código em segurança. Precisará dele para aceder ao portal sempre que quiser consultar o seu processo.</p>
+            </div>
+        """
+        portal_credentials_text = f"""
+
+As suas credenciais de acesso ao Portal:
+- Email: {client_email}
+- Código de Acesso: {portal_access_code}
+
+Guarde este código em segurança. Precisará dele para aceder ao portal sempre que quiser consultar o seu processo.
+"""
+
     html_body = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
@@ -758,6 +799,7 @@ async def send_magic_link_email(
                 Ou copie este link no seu navegador:<br>
                 <span style="color: #64748b;">{magic_link}</span>
             </p>
+            {portal_credentials_html}
             <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
                 Este link é válido por 90 dias. Se precisar de um novo link, contacte o seu consultor.
             </p>
@@ -768,7 +810,8 @@ async def send_magic_link_email(
     text_body = (
         f"Olá {client_name},\n\n"
         f"O seu consultor preparou o seu portal pessoal para acompanhar o seu processo de crédito habitação.\n\n"
-        f"Aceda ao portal através deste link:\n{magic_link}\n\n"
+        f"Aceda ao portal através deste link:\n{magic_link}\n"
+        f"{portal_credentials_text}\n"
         f"Este link é válido por 90 dias.\n"
         f"Se precisar de um novo link, contacte o seu consultor.\n\n"
         f"Power Precision · Crédito Habitação"
@@ -782,6 +825,7 @@ async def send_magic_link_email(
             body=text_body,
             body_html=html_body,
             force_system=True,
+            system_purpose="NOTIFICATIONS",
         )
     except Exception as e:
         logger.error(f"Erro ao enviar magic link email: {e}")

@@ -275,9 +275,13 @@ const SendDocumentationModal = ({
           setEmailHtml(data.html);
           setEmailSubject(data.subject);
         }
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.detail || "Erro ao carregar preview do email");
       }
     } catch (error) {
       console.error("Erro ao carregar preview:", error);
+      toast.error("Erro ao carregar preview do email");
     } finally {
       setPreviewLoading(false);
     }

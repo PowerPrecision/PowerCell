@@ -23,6 +23,7 @@ import {
   Trophy, CalendarDays, RefreshCw, Activity, BarChart3,
   Target, UserCheck, ClipboardList,
 } from "lucide-react";
+import DashboardLayout from "../layouts/DashboardLayout";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, Cell,
@@ -234,6 +235,7 @@ const TeamPerformanceDashboard = () => {
     : "";
 
   return (
+    <DashboardLayout title="Desempenho da Equipa">
     <div className="space-y-6 p-1">
       {/* ══ CABEÇALHO ══════════════════════════════════════ */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -617,6 +619,7 @@ const TeamPerformanceDashboard = () => {
         </CardContent>
       </Card>
     </div>
+    </DashboardLayout>
   );
 };
 

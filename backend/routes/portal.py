@@ -2928,6 +2928,7 @@ async def _send_portal_fetch_email(
             body=body_text,
             body_html=html_content,
             force_system=True,
+            system_purpose="NOTIFICATIONS",
             attachments=attachments if status == "success" and attachments else None,
         )
         att_info = f" com {len(attachments)} anexo(s)" if attachments and status == "success" else ""
